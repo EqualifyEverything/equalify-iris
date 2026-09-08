@@ -165,6 +165,50 @@ in this same count. Meanwhile `notes` narrowing from the working-out to one line
 shorter, which relieves the mid-object pressure above. A flat `pages_unjudged` across this change is
 therefore two effects cancelling rather than neither happening.
 
+**The verify call is deliberately uncapped, and that is a measurement rather than an omission.**
+#365 asked for an output ceiling on the checker "copying the corrector's", and the corrector's shape
+does not transfer, because a ceiling cuts the end of a reply and on this agent the end is the
+verdict. Over every verify and recheck call the Feedback Agent made in every bench round directory on
+disk — 3,908 attempted, 3,902 returned a reply, 3,897 of those readable, five models; a wider corpus
+than the 1,342 counted further down this page, and named here because a ceiling has to be priced
+against every reply it would have cut — the pooled median is **637 output tokens** and p99 is
+**5,623**, but the largest
+returned reply is **30,267** and three calls hit the 32,000 deployment ceiling outright. In all
+**19 replies of 8,000 output tokens or more** the JSON envelope's own text begins at **86.3%–99.8%**
+of the reply (median 94.2%), and every one of the 19 parsed to a usable verdict, **95 problems**
+between them. The narration comes first and the answer last, so a cap does not trim the narration:
+it removes the answer and bills for the narration anyway, since output is billed per token emitted
+and not per token allowed. `correctPage` caps for the opposite reason — its output *is* the payload,
+so a cut tail leaves a usable head, which is what `correctionCeiling` bounds.
+Priced on the 2,511 replies whose page's own first pass is in the same log, so that a
+page-proportional rule and a flat one are scored on the same members, a flat ceiling is the better of
+the two shapes on **verdicts kept and dollars saved**, which is where the decision sits, and it is
+beaten on **problems named** at one of the two matched points — so this is not dominance and the
+exception is worth carrying:
+
+| rule | verdicts lost | problems lost | saved per 100 verify calls |
+|---|---|---|---|
+| flat 8,000 | 17 | 91 | $0.0711 |
+| `max(4000, 2x page tokens)` | 17 | 83 | $0.0565 |
+| flat 12,000 | 8 | 58 | $0.0419 |
+| `max(4000, 3x page tokens)` | 12 | 67 | $0.0293 |
+
+At 17 verdicts lost the flat rule saves 26% more and names eight fewer problems; at the looser point
+it wins on all three columns. A runaway is not a big page;
+the longest reply is 4.6x its own page's output tokens and the two correlate at r = 0.42, so scaling
+by the page is loosest where the pages are largest and tightest where the narration is. **No rule
+that keeps verdict loss under 1% saves more than about 7 cents per 100 verify calls**, against the
+$4.50 #365 measured for checking 100 pages; going past that buys money with verdicts rather than with
+narration — a flat 4,000 saves the most of any rule measured, 14 cents, and loses 53 of 2,511
+verdicts. The narration itself is $1.99 per 100 pages, and the only mechanism that reaches text
+billed per token emitted is not writing it. The tail is model-specific and its two halves rank differently: the largest returned
+reply is Sonnet's and every other arm's is under 4,300 tokens, yet two of the three ceiling
+truncations are Qwen3-VL's, 2 of its 127 calls against 1 of Sonnet's 3,120. What none of this
+measures is the distribution *after* the clause above, since every reply counted was written without
+it; if it works the tail shrinks and a cap has even less to cut. `test/correction-ceiling.test.ts`
+pins the absence on the call itself, and the figures are re-derivable for free from the `model_call`
+and `agent_call` events Iris already writes.
+
 Inviting prose also invites a reply that quotes the contract back, and `extractJson` returns the LAST
 readable object in a reply. So an unescaped `{ "faithful": true, "problems": [] }` inside `notes` ends
 the reply with a second object that carries the decision flag, and reading it turns a page the
@@ -185,10 +229,21 @@ content — a code listing, template syntax, a math brace — rebalances the aba
 Discarding the reading costs nothing: it answers with the walk's result, which is the answer before any
 of this. And because a fenced reply is beyond any one-pass reader,
 `verifyAgentOutput` now refuses to read anything carrying fewer than both boolean flags as a verdict:
-1,342 of 1,342 readable verify replies in those logs carry both, so the check costs nothing measurable
-and converts a silent pass into a counted `unjudged` page. What it does cost is the opposite shape — a
-`faithful: false` reply that omits `accessible` no longer buys a correction — and that page is counted
-rather than corrected, which is the trade made knowingly.
+1,342 of 1,342 readable verify replies in those logs carry both, and it converts a silent pass into a
+counted `unjudged` page. **That count is one round set's, and the reason to keep the check is not that
+the shape never occurs — at a wider width it does.** Across every verify and recheck call in every
+round directory — 3,897 readable replies, the corpus the ceiling paragraph above measures — **eight do
+not carry both flags, and in all eight both flags are in the reply text**, inside the first sixty bytes
+of the envelope. What breaks is further right: an unescaped `"` where the checker quotes the page's own
+row-group label (3 replies, all Sonnet), decode garbage appended after a closed envelope (4, all Luna),
+a raw newline inside a string (1, Qwen3-VL). **Those eight cost this check nothing**, and being exact
+about that matters: an object carrying neither flag read `ok = undefined !== false && undefined !==
+false`, which is `true`, with an empty `problems` — so before the check they were silent passes buying
+no correction, and after it they are `unjudged` pages, also passing and also buying none. The page ships
+uncorrected either way and only the counter changes, to the better one. #426 carries the eight, and what
+is lost there is the problems those replies named, never this check. The direction that *does* cost
+something is the opposite shape — a `faithful: false` reply that omits `accessible` no longer buys a
+correction — and that page is counted rather than corrected, which is the trade made knowingly.
 
 A whole class of decoy defeats both, and it is named here at its real width because it is the class the
 new field most invites: **a quoted decoy containing any string value at all**. Every reading here treats

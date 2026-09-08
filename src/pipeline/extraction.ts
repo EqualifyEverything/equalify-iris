@@ -2468,6 +2468,16 @@ interface PageRender {
 // deployment's config (providers/bedrock.ts, `truncationRemedy`). What it does NOT claim is that
 // the correction would then have succeeded: nothing measured here can say that, and a cap is a
 // bound on a failure's cost, not a fix for it.
+//
+// NOT PORTABLE TO THE FIDELITY CHECK, which is what #365 directive 2 asked for. This shape works
+// here because the correction's output IS the page, so a cut tail leaves a usable head and the
+// scaling term has a page to scale by. The checker's output is a list of problems and its verdict
+// sits at the very end of the reply — in all 19 bench replies of 8,000 output tokens or more the
+// envelope begins past 86% of the reply — so the same cap removes the answer and keeps the
+// narration. It is also the worse shape there on the two columns the decision turns on, verdicts
+// kept and dollars saved — though not on every column, and `verifyAgentOutput` carries the row where
+// it wins — for a reason visible from here: a runaway there is not a big page, so scaling by the page
+// is tightest where the narration is. That function has the measurement and the prices.
 export const CORRECTION_CEILING_MULTIPLE = 2;
 export const CORRECTION_CEILING_FLOOR = 4000;
 // One object and one number rather than three numbers: `outputTokens`, `chars` and

@@ -330,6 +330,56 @@ export async function verifyAgentOutput(
       : "") +
     `Compare the output against the attached source image.`;
 
+  // NO `maxOutputTokens`, and #365 directive 2 asked for one "copying the corrector's". The
+  // corrector's shape does not transfer, and what stops it is a property of the reply rather than a
+  // preference: a ceiling cuts the END of a reply, and on this agent the end is the verdict.
+  // Across every verify and recheck call the Feedback Agent made in every bench round directory on
+  // disk — 3,908 attempted, 3,902 returned a reply, 3,897 of those readable, five models, a WIDER
+  // corpus than the 1,342 the both-flags comment below counts — the 19 replies of 8,000 output
+  // tokens or more ALL parsed to a usable
+  // verdict, naming 95 problems between them, and the envelope's own text begins at 86.3%–99.8% of
+  // the reply (median 94.2%). The narration comes first and the answer last. So a cap here does not
+  // trim the narration the issue is about: it removes the answer and bills for the narration anyway,
+  // because output is billed per token emitted and not per token allowed (`DEFAULT_MAX_TOKENS`'s own
+  // comment says so). `correctPage` caps for the opposite reason — its output IS the payload, so a
+  // cut tail leaves a usable head — which is what `correctionCeiling` bounds and why it is coherent
+  // there and not here.
+  //
+  // Priced on the 2,511 replies whose page's own first pass is in the same log, so a
+  // page-proportional rule and a flat one are scored on the same members, in verdicts lost /
+  // problems lost / dollars saved per 100 verify calls:
+  //
+  //     flat 8,000                17    91    $0.0711
+  //     max(4000, 2x page)        17    83    $0.0565
+  //     flat 12,000                8    58    $0.0419
+  //     max(4000, 3x page)        12    67    $0.0293
+  //
+  // The flat rule is the better shape on verdicts and dollars, which is where the decision sits, and
+  // it is NOT dominant: at the tighter point it names eight more problems lost than `max(4000, 2x)`
+  // for the same 17 verdicts. It wins on all three columns at the looser point. Either way the shapes
+  // differ because a runaway is not a big page: the longest reply in the corpus is 4.6x its own
+  // page's output tokens and the two quantities correlate at r = 0.42, so scaling by the page is
+  // loosest where the pages are largest and tightest where the narration is. No rule that keeps
+  // verdict loss under 1% saves more than about 7 cents per 100 verify calls against the $4.50 #365
+  // §1 measured for checking 100 pages — a flat 4,000 saves the most of any rule measured, 14 cents,
+  // and loses 53 of 2,511 verdicts, which is buying money with verdicts rather than with narration.
+  // The narration itself is $1.99 per 100 pages, and the only mechanism that reaches text billed per
+  // token emitted is not writing it, which is what #424 put beside the verify schema.
+  //
+  // The checker is not unbounded, which the issue's opening paragraph implies and its own caveats
+  // correct: `DEFAULT_MAX_TOKENS` is 32,000, both adapters take the smaller of that and a caller's
+  // cap, and it has fired three times in this history — one Sonnet reply of 93,072 characters and
+  // two Qwen3-VL replies of 137,465 and 145,384, each billed in full and each returning no verdict.
+  // That bound already exists on this call; every value below it trades verdicts for cents. The tail
+  // is also model-specific and the ranking inverts between the two halves of it: Sonnet's largest
+  // returned reply is 30,267 tokens and every other arm's is under 4,300, yet two of the three
+  // ceiling truncations are Qwen3-VL's — 2 of its 127 calls against 1 of Sonnet's 3,120.
+  //
+  // What none of this says is what the distribution looks like AFTER #424, since every reply counted
+  // above was written without that clause. If it works the tail shrinks and a cap has even less to
+  // cut; if it does not, these figures stand. Either way they are re-derivable for free from the
+  // `model_call` and `agent_call` events Iris already writes, which is where they came from — this
+  // needed no new instrument, so a later attempt at the same question does not need a paid round.
   const res = await ctx.router.complete(
     FEEDBACK_AGENT,
     "vision",
@@ -342,9 +392,24 @@ export async function verifyAgentOutput(
   ctx.log.agentCall({ agent: fb, phase: "extraction", image: img.name, output: res.text });
 
   const parsed = extractJson<VerifyOutput>(res.text);
-  // Both flags, as booleans, or this is not a verdict. The contract asks for both and every one of
-  // the 1,342 readable verify replies in the bench logs answers both — so the check costs nothing
-  // measurable, and what it buys is the failure mode #339's `notes` field opens. `extractJson`
+  // Both flags, as booleans, or this is not a verdict. The contract asks for both and all 1,342
+  // readable verify replies in one round set answer both — but the reason to keep the check is not
+  // that the shape never occurs, because at a wider width it does. Across every verify and recheck
+  // call in every round directory (3,897 readable, the corpus the ceiling comment above measures)
+  // EIGHT do not carry both flags, and in all eight both flags are IN THE REPLY TEXT, inside the
+  // first sixty bytes of the envelope: what breaks is further right — an unescaped `"` where the
+  // checker quotes the page's own row-group label (3 replies, all Sonnet, the model the reference
+  // deployment runs this agent on), decode garbage after a closed envelope (4, all Luna), a raw
+  // newline inside a string (1, Qwen3-VL). **Those eight still cost nothing here**, which is worth
+  // being exact about: an object carrying neither flag read `ok = undefined !== false && undefined
+  // !== false` — true — with `readProblems(undefined)` empty, so before this check they were silent
+  // passes buying no correction and after it they are `unjudgedVerdict()`, also `ok: true` and also
+  // empty. The page ships uncorrected either way and only the counter changes, to the better one.
+  // What the eight revise is the REASON, not the price. The direction that does cost something is
+  // still `faithful: false` without `accessible`, at 0 observed replies, which is what the test
+  // below means by "not free in one direction". #426 carries the eight and what each class would
+  // take to recover — and the loss there is the problems those replies named, never this check.
+  // What it buys besides is the failure mode #339's `notes` field opens. `extractJson`
   // returns the LAST readable object in a reply, and a `notes` string that quotes the contract back
   // ends with one: an unescaped `{ "faithful": true, "problems": [] }` inside the prose, which read
   // as a confident PASS on a page the verifier had just rejected for a missing table row — `ok`
