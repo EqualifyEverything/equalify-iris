@@ -175,9 +175,25 @@ test("a fragment whose only text is soft hyphens is a page with nothing on it", 
 
     assert.deepEqual(failedPages, [1]);
     assert.match(fragments[0].innerHtml, /@page-failed 1:/, "and the document says the page is missing");
+    // ONE, on two draws. A reply of nothing but soft hyphens claims nothing about the page, so it is
+    // redrawn once (#365 directive 5) and this fixture answers the same way twice — which is the
+    // invariant that matters here: `page_no_output` counts pages given up on, not draws discarded, so
+    // every count taken off this line still means what it meant before the redraw existed.
     assert.equal(ev(rec, "page_no_output").length, 1);
-    // Counted before it was discarded, so a page lost this way is still attributable.
-    assert.deepEqual(ev(rec, "page_soft_hyphens").map((e) => e.data.removed), [2]);
+    assert.deepEqual(ev(rec, "page_redrawn").map((e) => e.data.shape), ["empty_html"]);
+    // Counted before it was discarded, so a page lost this way is still attributable — once per draw,
+    // because the strip runs on each reply and the second one carried the same two hyphens. `redrawn`
+    // is what keeps that pair readable: `where` attributes a count to the call it was billed under, a
+    // redraw makes two `extract` calls for one page, and a per-occurrence census (#334's is offline and
+    // by hand) would otherwise read four hyphens off one page's markup. Absent on the first draw, so a
+    // run with no redraw has exactly the lines it had before.
+    assert.deepEqual(
+      ev(rec, "page_soft_hyphens").map((e) => [e.data.removed, e.data.redrawn]),
+      [
+        [2, undefined],
+        [2, true],
+      ],
+    );
   });
 });
 

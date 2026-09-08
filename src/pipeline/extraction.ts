@@ -2601,8 +2601,19 @@ function pageSystem(agent: AgentSpec, lessons: string): string {
 // render, and the correction pass runs after the fidelity verdict.
 type RepairSeam = "extract" | "correct" | "specialist" | "specialist_merge";
 
-function repaired(ctx: PipelineContext, where: RepairSeam, img: InputImage, html: string): string {
-  const at = { image: img.name, page: img.order, where };
+function repaired(
+  ctx: PipelineContext,
+  where: RepairSeam,
+  img: InputImage,
+  html: string,
+  // The reply this ran on was a second draw of the page, and its counts are counts of markup Iris
+  // DISCARDED (#365 directive 5, `page_redrawn`). Without it two `extract` lines for one page read as
+  // one page's markup counted twice: `where` makes a count attributable to the call it was billed
+  // under, and a redraw makes two calls at the same seam. An offline census like #334's is what this
+  // is for — nothing in `src/` reads these lines — so it discounts rather than filters.
+  redrawn = false,
+): string {
+  const at = { image: img.name, page: img.order, where, ...(redrawn ? { redrawn: true } : {}) };
   const { html: noShy, removed } = stripSoftHyphens(html);
   // Only when it fired, so the line means "this page had them" and a run with none of these lines
   // is a run where no reply carried one. `where` is the step name the call was billed under, which
@@ -2644,16 +2655,29 @@ async function renderPage(
   // the agent corrects what the feedback names and carries everything else over,
   // rather than re-deriving the page from scratch and drifting elsewhere.
   previous?: string,
+  // This call IS the second draw, so it does not get another (#365 directive 5, and the
+  // paragraph at `page_redrawn` has the measurement). One extra call and never two: the
+  // failure a redraw is for is a draw the model can lose, and a page that loses two draws
+  // in a row is not that page. Private to this function — `extractPage` is the only caller
+  // and passes nothing, so a first pass is always a first draw.
+  redrawn = false,
 ): Promise<PageRender> {
   const priorSection = previous
     ? `\n\n## Your previous output for this page\n\`\`\`html\n${previous}\n\`\`\`\n` +
       `Apply the user feedback above to this page. Keep everything the feedback does NOT ` +
       `concern exactly as it was, and re-check the affected content against the source image.\n`
     : "";
-  // The page's own link targets, which the image cannot show (pipeline/links.ts).
+  // The page's own link targets, which the image cannot show (pipeline/links.ts). `redrawn` for the
+  // same reason the repair lines carry it: this is the same page's links offered a second time, and a
+  // count of pages whose links were shown would otherwise count this page twice.
   const links = pageLinkContext(img.links);
   if (links.shown.length) {
-    ctx.log.event("page_links", { image: img.name, links: links.shown.length, dropped: links.dropped });
+    ctx.log.event("page_links", {
+      image: img.name,
+      links: links.shown.length,
+      dropped: links.dropped,
+      ...(redrawn ? { redrawn: true } : {}),
+    });
   }
   const user =
     `Convert this document page image (filename: ${img.name}, page ${img.order} of ${ctx.images.length}) ` +
@@ -2682,7 +2706,7 @@ async function renderPage(
   // fragment whose only text is soft hyphens carries nothing, and should be treated as the page with
   // nothing on it that it is rather than as characters. `blankDeclaration` re-derives that same
   // reading from the reply, so it is handed this fragment too — see the call.
-  const html = raw == null ? raw : repaired(ctx, "extract", img, raw);
+  const html = raw == null ? raw : repaired(ctx, "extract", img, raw, redrawn);
   // Nothing for a reader in this reply. Throwing hands the page to `failedPage`, which is what
   // every other unusable answer in this file already does: the page is lost, and the run
   // SAYS the page is lost (`page_extraction_failed`, `pages_failed`, a @page-failed
@@ -2793,6 +2817,85 @@ async function renderPage(
       };
     }
     const shape = replyShape(res.text, parsed);
+    // One more draw of the same page, for a reply that claimed nothing about it (#365 directive 5).
+    //
+    // The gate is `asserted` and not a length, and the difference is the whole change. Directive 5
+    // asks for a re-extraction "when the reply is under some floor of HTML", and a floor cannot
+    // separate the cases: it reads what the PARSE produced, and a reply Iris refused whole is 0
+    // characters of HTML however much page it was carrying. Over every extraction call in every bench
+    // round directory on disk — 7,843 calls, 3,807 distinct (round, log, image) triples — 20 replies
+    // reach this branch, 0.255%, and replaying all 20 through today's parser leaves FIVE: the other
+    // 15 are blank pages whose declaration `blankDeclaration` now honours, so they never get here and
+    // a floor would have redrawn every one of them. The five, and what each one wanted:
+    //
+    //   - two are blank pages whose declaration a guard REFUSED, and `asserted` is true on both: one
+    //     vetoed on the word "noise" for a log reading "blank apart from minor scanning artifacts
+    //     (specks and compression noise)", one refused as self-contradicting for a log that named the
+    //     IMAGE FILENAME ("image filename indicates this is page 14 of 25"). Both pages ARE blank, and
+    //     not on one log's word: every extraction reply on disk for those two images declares the page
+    //     blank — 14 replies on one, 8 on the other from three different models — and none of the 22
+    //     carries content. So a redraw buys a second copy of the same sentence at a full page's price.
+    //     `asserted` refuses them here, and what they want is a wording fix in the guard.
+    //   - one is a 47-character reply, `<h1><cite role="doc-bibliography"></cite></h1>`, on a page the
+    //     same model rendered as 7.6-9.8 KB in three independent redraws and delivered in another
+    //     round. That is a draw the model can lose, which is what this exists for.
+    //   - one is a complete envelope one `}` short, holding a 3,437-character table of contents that
+    //     closes cleanly on `</ol></nav>`; the page delivered fine in 11 other rounds. A redraw
+    //     recovers it, and a parse that closed the brace would recover it for nothing — so this one is
+    //     a page the redraw is the SECOND-cheapest answer for, and #426 carries the parse.
+    //   - one is a reply that transcribed the page, wrote a fenced ``I need to restart and produce a
+    //     clean, correct rendering.``, and transcribed it again. `stripFences` returns the last
+    //     complete fenced block, which is that sentence, so `bareHtml` refuses 10,755 characters that
+    //     are a rejected draft, a self-correction and a good page with no reliable boundary between
+    //     them. Refusing it is right — the delivered document's contract is that every word in it is a
+    //     word on the page — and the model asked for the redraw in as many words.
+    //
+    // So `asserted` is correct on 5 of 5 where a character floor is correct on 3, and the two it
+    // saves are the two where the model answered the question and a guard disbelieved it.
+    //
+    // What it does NOT cover, in two spellings, because the corpus contains neither: a blank page
+    // whose declaration `blankDeclaration` cannot see. One is markup-only — `<!-- blank page -->` is
+    // #219's own spelling, and with no envelope there is no `blank` or `log` to read. The other is an
+    // envelope whose `html` is not a STRING: `asserted` requires `typeof parsed.html === "string"`, so
+    // `{"html": null, "log": "This page is blank.", "blank": true}` answers the question and is
+    // redrawn anyway. Both cost one call and change no outcome — the second draw declares the page
+    // blank the same way and the page is refused as it is today — and neither is a share of the rate:
+    // 1 of the 20 replies carried any markup at all (the 47-character one, which is not a
+    // declaration), and every one of the 15 honoured declarations sent `html` as a string. Believing a
+    // declaration whose `html` is null is a change to the BLANK routing, not to this branch: it would
+    // deliver such a page instead of refusing it, which is #219's argument to reopen and not this
+    // one's to settle.
+    //
+    // A provider failure never reaches here — a throttle, a stall and a refusal all throw out of
+    // `router.complete` above — which is the line this change deliberately does not cross. The
+    // paragraph at `correctPage`'s error containment is why: a correction that truncated because the
+    // PAGE is large will truncate again, and a redraw would buy a second full ceiling to prove it.
+    //
+    // A reply the model itself cut short DOES reach here, as `truncated_envelope`, and it is redrawn
+    // with that argument read the other way round. What makes a correction's truncation not worth a
+    // second call is that the page SURVIVES it: the pre-correction render is kept and the document
+    // still has the page. A first render that truncated leaves nothing, so the choice is not "one call
+    // or two" but "one more call or a hole in the document" — and the one instance on disk is not a
+    // ceiling at all but an envelope one `}` short of a 3,437-character page. A page that genuinely
+    // exceeds the ceiling loses this draw too, which is the ceiling's own remedy (#365 directive 3
+    // declined to raise it) and costs the second call to find out.
+    if (!declaration.asserted && !redrawn) {
+      // The losing draw, on its own line rather than on `page_no_output`. Two reasons, and the
+      // second is the one that matters: a page this recovers is a page NOTHING would otherwise
+      // record, and `page_no_output` keeps meaning "this page was given up on" — so every count
+      // taken off that line, in diagnostics and in the tests, still counts pages lost and not draws
+      // discarded. `shape` and `dropped` are the same fields the give-up line carries, because the
+      // triage question does not change: the draw that lost is the one worth reading.
+      ctx.log.event("page_redrawn", {
+        image: img.name,
+        page: img.order,
+        chars: res.text.length,
+        shape,
+        ...dropped,
+        ...(previous ? { reextract: true } : {}),
+      });
+      return renderPage(ctx, agent, img, lessons, previous, true);
+    }
     // A declaration the veto refused is recorded as the refusal it is, with the words that did it:
     // the failure line alone reads as "the model answered with no page", which is the opposite of
     // what happened, and every page issue #190 recovered had to be traced back to a word by hand.
