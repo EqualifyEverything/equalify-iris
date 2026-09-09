@@ -17,6 +17,7 @@ import assert from "node:assert/strict";
 import {
   CONTINUED_CAPTION,
   MAX_TABLE_JOINS,
+  TABLE_JOIN_SYSTEM,
   continuationPairs,
   headerSignatures,
   joinContinuedTables,
@@ -817,11 +818,27 @@ test("a first half with no caption of its own has no title caption to be strict 
   assert.equal(verifyJoin(pair, both), "note_shipped_twice");
   const kept = `<table><caption>Table 7.—Grants ${note}</caption>${HEAD}<tbody>${dataRow("Alabama")}${dataRow("Vermont")}</tbody></table>`;
   assert.equal(verifyJoin(pair, kept), null);
-  // Which the free path cannot produce here — it imports the second half's caption WITH the note and
-  // keeps the first half's row — so this pair is the editor's, and rule 6 is what it will be asked.
+  // And the free path produces it, which is the point: both placements here are the census's measured
+  // ones — the note in a caption on 56 arm-pages, as a row on 12 — so this pair must stay free. It
+  // imports the second half's caption WITH the note, so the first half's row is the repeat rule 6 drops,
+  // and the join emits the note once. It cost a round to see: this asserted `note_shipped_twice` when
+  // written, which was the merge buying an editor call for a doubling the merge itself had made.
   const coded = joinInCode(pair);
   assert.ok("html" in coded, JSON.stringify(coded));
-  assert.equal(verifyJoin(pair, coded.html), "note_shipped_twice");
+  assert.equal(verifyJoin(pair, coded.html), null);
+  assert.ok(coded.html.includes(`<caption>Table 7.—Grants ${note}</caption>`), coded.html);
+  assert.equal([...coded.html.matchAll(/In millions/g)].length, 1, coded.html);
+
+  // An id inside that row has nowhere to go — the id checks read the second half's ids against the
+  // finished table and never the first's, because this is the only first-half row a free join drops.
+  const withId = `<table>${HEAD}<tbody><tr><td colspan="3" id="p7-units">${note}</td></tr>${dataRow("Alabama")}</tbody></table>`;
+  assert.deepEqual(joinInCode(onePair(withId + second)), { reason: "id_would_be_lost" });
+
+  // And past rule 6's licence of ONE dropped repeat the free path declines here rather than handing
+  // `verifyJoin` a table it would refuse as `rows_lost` — a reason about rows for a note the caption
+  // still holds. Reachable only where a half prints the note twice itself, which nothing has measured.
+  const twice = `<table><caption>Table 7.—Grants ${note}—Continued</caption>${HEAD}<tbody>${noteRow(note)}${dataRow("Vermont")}</tbody></table>`;
+  assert.deepEqual(joinInCode(onePair(first + twice)), { reason: "note_repeats_exceed_licence" });
 });
 
 test("a note the joined table keeps in its caption and prints as a row as well is shipped twice", () => {
@@ -858,6 +875,22 @@ test("a note the joined table keeps in its caption and prints as a row as well i
   const coded = joinInCode(pair);
   assert.ok("html" in coded, JSON.stringify(coded));
   assert.equal(verifyJoin(pair, coded.html), null);
+});
+
+test("rule 6 names the caption the editor is writing, not the half that printed the note", () => {
+  // A refusal the prompt cannot avoid is a permanent decline, and this one nearly was. Rule 4 tells the
+  // editor to put the note in the joined caption where EITHER half's caption carries it — including a
+  // caption taken from the continued half because the first has none. Rule 6 used to license dropping the
+  // repeat row only "where the first half already carries that note in its caption", which is false of
+  // exactly that pair: the note is in the caption the editor is writing and in a row of the first half,
+  // and no sentence said to drop the row. The two rules together asked for the shape `note_shipped_twice`
+  // refuses. So rule 6's condition is the caption being WRITTEN, which covers both routes to it.
+  assert.match(TABLE_JOIN_SYSTEM, /wherever the caption you are writing under rule 4 carries that note/);
+  assert.match(TABLE_JOIN_SYSTEM, /because the caption you took from the continued half did/);
+  assert.doesNotMatch(TABLE_JOIN_SYSTEM, /in the caption if that is where the first half has it/);
+  // And the other direction stays forbidden, which is the clause the census's 12 outside-caption pages
+  // are about: the note does not travel the other way, out of a caption and into a row.
+  assert.match(TABLE_JOIN_SYSTEM, /does not become a row of the joined table/);
 });
 
 test("a fullwidth-bracketed note is a note in both readers, or it ships twice", () => {

@@ -3396,7 +3396,11 @@ continued page opens with a bracketed unit note the first half does not carry, s
 reprint rule 6 licenses dropping — "carry" reads the first half's note ROWS **and** its caption,
 because `page.md` asks for the note in the `<caption>` and the two halves need not agree on where
 they print it; the reverse is not a repeat, since a note only the continued half carries is a first
-appearance), `caption_unclear` / `no_caption_available` (the continuation
+appearance), `note_repeats_exceed_licence` (the join would have to drop **more than one** bracketed
+note row as a repeat, which is past what the row floor forgives — so it declines here rather than
+handing the verification a table it refuses as `rows_lost`, a reason about rows for a note the joined
+caption still carries; reachable only where a half prints the note twice itself, which the census has
+never seen), `caption_unclear` / `no_caption_available` (the continuation
 marker is not wholly inside one text node, so taking it off means rewriting markup; or neither
 half has a caption, which the verification requires), `content_outside_table` (a half's span
 parses to something beside its own table — the parser fosters a stray `<p>` out of a `<table>` and
@@ -3565,6 +3569,14 @@ clear exactly that. `joinInCode` never demotes, so the shape is the Copy Editor'
 once, at the top" can be read as licence for the row while rule 4 asks for the caption, and rule 6 now
 says so.
 
+Rule 6's condition for dropping the repeat row is the caption the editor is **writing**, not the half
+that printed the note. It used to read "where the first half already carries that note in its caption",
+which is false of the pair whose first half has no caption at all: rule 4 puts the note in the joined
+caption because the continued half's caption carried it, the first half's note row repeats it, and no
+sentence said to drop that row. Rules 4 and 6 together asked for the shape `note_shipped_twice` refuses
+— a refusal the prompt could not avoid, which is a permanent decline rather than a repair. Pinned in
+`test/table-continuation.test.ts`, both routes to the caption and the forbidden direction with them.
+
 The distinction is on the pair: each half records the bracketed note rows it printed — over every row
 and not over its labels, because a label list drops header rows and a note row printed inside
 `<thead>` is one, the `p068` shape the census counts — **and the block it printed each one in.** Both
@@ -3583,7 +3595,8 @@ and two a `<td>` row against two closing `<thead>`, so that is the likelier mixe
 
 The two shapes are mirror images and were being read as one. A note in the caption rule 4 **discards**
 goes with a duplicate caption being dropped whole, while the row stands in the half and the block that
-printed it: nothing moved, and that is the pair rule 6 joins for free. A note in the caption the join is
+printed it: nothing moved, and that is the pair rule 6 joins for free — for free whether or not the first
+half has a caption of its own, which took a round to make true. A note in the caption the join is
 **built on** is different — the surviving caption has been edited, text struck out of the one caption
 rule 4 says to copy, and the other half having printed the same note as a row does not make that a move
 of nothing. So a note in the title caption is owed the joined caption and nothing else will do, and only
@@ -3620,13 +3633,27 @@ it — a printed row is only ever an **excuse** for a note missing from the capt
 excusing nothing was never looked at. A reader moving by row still meets the units as a cell of data,
 which is the harm `page.md` names, with the caption merely also correct. No half's printing excuses it:
 the check is on the delivered table, because one note once is what both rule 6 and `page.md` ask for and
-a doubled note is the phantom row whichever page printed it. That last reason can refuse a **free**
-join, on a shape nothing has measured — a half that printed the note in its caption and as a row of its
-own, which `joinInCode` carries through because it drops only the second half's repeat. The pair then
-goes to the editor, whose rule 6 asks for exactly the table this wants, so the refusal is satisfiable
-rather than a dead end. Left unexempted on purpose: an exemption for "the page printed it twice" is a
-distinction drawn on no measured pair, since the census has the note in a caption on 56 arm-pages and
-outside one on 12, and never both on one page.
+a doubled note is the phantom row whichever page printed it.
+
+That last reason can refuse a **free** join, and what it may refuse there had to be narrowed to one
+shape nothing has measured: a half that printed the note in its caption **and** as a row of its own,
+which `joinInCode` carries through because it drops repeats and not a first appearance printed twice.
+That pair goes to the editor, whose rule 6 asks for exactly the table this wants, so the refusal is
+satisfiable rather than a dead end, and it is left unexempted on purpose — an exemption for "the page
+printed it twice" is a distinction drawn on no measured pair, since the census has the note in a caption
+on 56 arm-pages and outside one on 12, and never both on one page.
+
+What it must **not** refuse for free is the doubling the merge itself makes, and at first it did. Where
+the first half has no caption, the code path imports the second half's **with** its note (rule 4's
+`no_caption_available` exception) and used to keep the first half's note row beside it — both placements
+the census's measured ones, so a pair whose page printed the note once bought an editor call and shipped
+split wherever that call declined or failed. Fixed where it is made rather than by an exemption here:
+the imported caption now names the units, so the first half's row saying the same thing is the repeat
+rule 6 licenses dropping, and it is dropped there. Two limits on that drop, both in the code path so the
+reason can name them — a row carrying an **id** declines as `id_would_be_lost`, since where a footnote
+anchor belongs on the surviving markup is rule 2's reading for the editor; and more than one dropped
+repeat in one join declines as `note_repeats_exceed_licence`, because past that the verification would
+answer `rows_lost` — a reason about rows for a note the caption still carries.
 
 What all of it compares is a note's text, the block it sits in, which caption owed it, and whether the
 delivered table holds it in two places at once — nothing finer. A note moved within one block is

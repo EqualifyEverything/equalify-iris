@@ -343,12 +343,13 @@ Rules, in order of importance:
 5. Keep <th scope="rowgroup"> group headers where either half has them, in place.
 6. A bracketed unit note that both halves repeat as a full-width row (e.g. "[In millions of
    dollars]") belongs once, at the top. Keep the first and drop the repeat. The two halves need not
-   print it in the same place: where the first half already carries that note in its caption and the
-   second prints it as a full-width row, the row is the repeat — drop it, and do not also copy it in
-   under rule 1. One note, once, and in the caption if that is where the first half has it. Never the
-   other way about: a note a half printed in its caption does not become a row of the joined table. A row
-   holding it invents a cell of data the page never printed, and "at the top" above means the top of the
-   table's own name and not a first row of data.
+   print it in the same place: wherever the caption you are writing under rule 4 carries that note —
+   because the first half's caption did, or because the caption you took from the continued half did —
+   any row repeating it is the repeat, so drop it and do not also copy it in under rule 1. One note,
+   once, and in the caption wherever rule 4 puts it there. Never the other way about: a note a half
+   printed in its caption does not become a row of the joined table. A row holding it invents a cell of
+   data the page never printed, and "at the top" above means the top of the table's own name and not a
+   first row of data.
 
 DECLINE if these are not two halves of one table — different columns that no single header block
 describes, or two different tables whose captions merely look alike. Declining costs nothing: the
@@ -553,11 +554,14 @@ export function verifyJoin(pair: ContinuationPair, merged: string): string | nul
   //     which are the two harms `page.md` names.
   //
   // So a note in the title caption is owed the joined CAPTION and nothing else will do, and only a note
-  // carried by the discarded caption may be answered by a row. Two reasons rather than one, because a
-  // decline is all a run log has: `caption_note_struck` is a note gone from the caption the join was
-  // told to copy, whether or not it turned up elsewhere, and `caption_note_lost` is a note in neither
-  // the joined caption nor a row some half printed. Both point at rule 4 and the repair is the same
-  // sentence, so this buys the log and not the model.
+  // carried by the discarded caption may be answered by a row. Three reasons rather than one, because a
+  // decline is all a run log has: `caption_note_lost` is a note in neither the joined caption nor a row
+  // some half printed, `caption_note_struck` is a note gone from the caption the join was told to copy
+  // but still in the table as a row a half printed, and `note_shipped_twice` is the joined table holding
+  // one note in both places. All three point at rule 4 or rule 6 and the repair is the same sentence, so
+  // this buys the log and not the model. Which of the three a pair gets is decided by the ORDER they are
+  // asked in, below, and not by these definitions — `caption_note_struck` says "still in the table" only
+  // because the lenient check has already answered every pair where it is not.
   //
   // The title caption is the first half's, or the second half's where the first has none. That is rule
   // 4, and it is NOT the same predicate `joinInCode` branches on: this reads the caption's normalized
@@ -591,12 +595,20 @@ export function verifyJoin(pair: ContinuationPair, merged: string): string | nul
   // printing excuses it: the check is on the delivered table, because "one note, once" is what both
   // rule 6 and `page.md` ask for and a doubled note is the phantom row whichever page printed it.
   //
-  // That last one can refuse a free join, on a shape nothing has measured: a half that printed the note
-  // in its caption AND as a row of its own. `joinInCode` drops only the SECOND half's repeat, so it
-  // would carry both through, and the pair would go to the editor — whose rule 6 asks for exactly the
-  // table this wants, so the refusal is satisfiable rather than a dead end. Left unexempted on purpose.
-  // An exemption for "the page printed it twice" is a distinction drawn on no measured pair: #374's
-  // census has the note in a caption on 56 arm-pages and outside one on 12, and never both on one.
+  // That last one can refuse a free join, and what it may refuse there had to be narrowed to one shape
+  // nothing has measured: a half that printed the note in its caption AND as a row of its own, which
+  // `joinInCode` carries through because it drops repeats and not a first appearance printed twice. That
+  // pair goes to the editor, whose rule 6 asks for exactly the table this wants, so the refusal is
+  // satisfiable rather than a dead end, and it is left unexempted on purpose — an exemption for "the page
+  // printed it twice" is a distinction drawn on no measured pair, since #374's census has the note in a
+  // caption on 56 arm-pages and outside one on 12 and never both on one page.
+  //
+  // What this check must NOT refuse for free is the doubling the merge itself makes, and it could: where
+  // the first half has no caption, `joinInCode` imports the second's WITH its note and used to keep the
+  // first half's note row beside it — both placements measured, so a pair the page printed once bought an
+  // editor call and shipped split if that call declined. That is fixed where it is made, by dropping the
+  // row the imported caption now repeats, and not by an exemption here; the same rule 6 licence, applied
+  // one step earlier, and a pair that would need more drops than the licence allows declines there too.
   //
   // What all of this compares is a note's text, the block it sits in, which caption owed it, and whether
   // the delivered table holds it in two places at once — nothing finer. A note moved within one block is
@@ -975,6 +987,9 @@ export function joinInCode(pair: ContinuationPair): { html: string } | { reason:
   // because the next pass would otherwise pair the joined table with the table BEFORE it, forever.
   const fcap = ftab.querySelector("caption");
   const scap = stab.querySelector("caption");
+  // How many bracketed note rows this join drops as repeats, counted across both halves and checked
+  // against rule 6's licence after the append below.
+  let notesDropped = 0;
   if (fcap !== null) {
     if (!stripMarker(fcap)) return { reason: "caption_unclear" };
   } else {
@@ -985,6 +1000,26 @@ export function joinInCode(pair: ContinuationPair): { html: string } | { reason:
     const made = fdoc.importNode(scap, true) as Element;
     if (!stripMarker(made) || normalizeCell(made.textContent ?? "") === "") return { reason: "caption_unclear" };
     ftab.insertBefore(made, ftab.firstChild);
+
+    // Rule 6 on the doubling this import CREATES rather than finds. The imported caption now names the
+    // units, so a note row the FIRST half printed saying the same thing is the repeat rule 6 licenses
+    // dropping, and dropping it here is what keeps this pair free. Both placements are the census's
+    // measured ones — the note in a caption on 56 arm-pages, as a row on 12 — so leaving the doubling for
+    // `verifyJoin` to refuse as `note_shipped_twice` would buy an editor call on a pair whose page printed
+    // the note once, and ship the halves SPLIT wherever that call declined or failed. Not read off
+    // `fNotes` below: that set is what may be dropped from the SECOND half, and this is the first half's
+    // own row against a caption it did not print.
+    const importedNotes = captionNotes(made.textContent ?? "");
+    for (const row of frows) {
+      if (!isUnitNoteRow(row) || !importedNotes.has(normalizeCell(row.textContent ?? ""))) continue;
+      // An id inside that row has nowhere to go, and nothing else would say so: the id checks at the end
+      // read the SECOND half's ids against the finished table, because this is the only place a FIRST
+      // half's row is dropped. Declined rather than moved — where a footnote anchor belongs on the
+      // surviving markup is a reading of the table, which is rule 2's case for the editor.
+      if (idsIn(row).length > 0) return { reason: "id_would_be_lost" };
+      row.remove();
+      notesDropped += 1;
+    }
   }
 
   // Rule 2, over the WHOLE half being dropped and not only its repeated header block, because the
@@ -1052,11 +1087,22 @@ export function joinInCode(pair: ContinuationPair): { html: string } | { reason:
       // Rule 6 licenses dropping a REPEAT. A bracketed note the first half does not carry says
       // something about the continued rows, and both keeping it mid-table and dropping it change how
       // the table reads.
-      if (fNotes.has(normalizeCell(row.textContent ?? ""))) continue;
+      if (fNotes.has(normalizeCell(row.textContent ?? ""))) {
+        notesDropped += 1;
+        continue;
+      }
       return { reason: "note_repeat_unclear" };
     }
     target.appendChild(fdoc.importNode(row, true));
   }
+
+  // Rule 6 licenses dropping A repeat, and `JOIN_DROPPABLE_ROWS` is the one row `verifyJoin`'s floor
+  // forgives for it. Past that, this path would hand its own verifier a table refused as `rows_lost` — a
+  // reason about rows, for a note the joined caption still carries — so the pair is declined here where
+  // the reason can say what it is. Two ways to reach it, neither measured: a half that prints the note
+  // twice itself, and a mixed pair whose first half prints it as a row while the second prints it in both
+  // places. Declining is the same answer `verifyJoin` would have given, one editor call earlier.
+  if (notesDropped > JOIN_DROPPABLE_ROWS) return { reason: "note_repeats_exceed_licence" };
 
   // Both id checks, off the FINISHED table, in one traversal.
   //
