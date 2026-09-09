@@ -1839,6 +1839,12 @@ const NEGATOR = new Set("no not nor neither none nothing".split(" "));
 // present" is in the corpus). That leaves `and printing detected` exempt, which is a stilted way to
 // say a page has printing on it — and the trade is the same one the file makes everywhere: the
 // alternative refuses a wording blank pages are actually written in.
+// A NEW member of this list that takes an object has to go in `TRANSITIVE_AFFIRM` as well, and nothing here
+// will fail if it does not. `deniedAfterVerb` reads an absence complement after a linking verb only, and it
+// tells the two apart by asking `TRANSITIVE_AFFIRM` — which is a separate list, holding `bear`, `show`, `has`
+// and `carries`, none of which is here. So adding one of those four to this list alone reopens the defect
+// round 1 of #446 found (`The heading shows empty rows.` reading as a denial and shipping the rows out
+// empty), silently and in a different file's worth of distance from the gate that was supposed to stop it.
 const AFFIRMING_VERB = new Set("is are was were appear appears remain remains contain contains hold holds".split(" "));
 const QUALIFIER = new Set(
   "meaningful legible readable printed typed visible discernible apparent recognizable recognisable clear other more".split(" "),
@@ -2258,14 +2264,13 @@ function modifierForm(word: string): boolean {
 // page as lost (#220). Nothing is missed by skipping it: "The heading is printed on the page" affirms
 // through `heading`, which is a subject the loop reads two words earlier and finds the same `is` for.
 //
-// WHAT IS NOT READ HERE is the other side of the copula: this asks what stands BEHIND `is` and nothing asks
-// what stands after it, so `The heading is empty.` affirms a heading and reports a blank page as a hole,
-// along with `is blank`, `is unmarked`, `is unfilled`, `is featureless` and `is void of content` — while
-// `is absent`, `is missing`, `is not present` and `is nowhere` are read as denials because the negator lists
-// hold those words. Six of ten wordings, on every subject that names text and on no subject that does not.
-// That is #442, with the grid and the corpus count (0 of 204 declarations affected, because a real log's
-// subject is the page rather than its heading); a fix belongs beside this function, which is already the one
-// place that reads a copula's other side.
+// WHAT IS NOT READ HERE is the other side of the copula: this asks what stands BEHIND `is`, and what stands
+// after it is `deniedAfterVerb`'s question, not this one. That is where `is empty`, `is blank`, `is unmarked`,
+// `is unfilled`, `is featureless` and `is void of content` are read (`ABSENCE_COMPLEMENT`, #442) beside the
+// `is absent`, `is missing`, `is not present` and `is nowhere` the negator lists already held. Before #442
+// this function's silence was the whole answer for those six, and `The heading is empty.` affirmed a heading
+// and reported a blank page as a hole; nothing about THIS guard changed, and the note stays because the
+// reason a subject walk cannot answer it is the reason the answer lives one function away.
 const COPULA = new Set("is are was were be been being isn't aren't wasn't weren't".split(" "));
 function participleAfterCopula(tokens: Word[], i: number): boolean {
   if (!modifierForm(tokens[i]!.word)) return false;
@@ -2646,6 +2651,46 @@ function affirmingReach(tokens: Word[]): number[] {
 // and #200's review put on record.
 const NEGATIVE_COMPLEMENT = new Set(["absent", "missing", "nowhere", "nonexistent", "lacking"]);
 
+// The other way a copula denies its subject, and #442: the complement says the subject HAS nothing
+// rather than that the subject is not there. `The heading is empty.` and `The printed form is empty.`
+// were read as affirmations of `heading` and `form` — a blank page reported as a hole, with the
+// complement that denied it quoted inside the evidence (`affirmed: "heading is empty"`).
+const ABSENCE_COMPLEMENT = new Set(["empty", "blank", "unmarked", "unfilled", "featureless"]);
+function absenceComplement(tokens: Word[], k: number): boolean {
+  const word = tokens[k]?.word;
+  if (word === undefined) return false;
+  if (ABSENCE_COMPLEMENT.has(word)) return true;
+  // `void` only with its preposition. A stamp that "is void" is a mark ON the paper — the word is
+  // printed across a cancelled form — so bare `void` is the one member of this vocabulary with a
+  // reading that says something IS there, and taking it would lose that page in silence.
+  return word === "void" && tokens[k + 1]?.word === "of";
+}
+
+// A CONTRACTED copula is `is not` with the negation fused into the token, and no list in this file reads
+// one as a verb: `AFFIRMING_VERB` holds no contraction on purpose, because `The heading isn't visible.`
+// denies its subject and a walk that took the token would have to un-take it. That left one spelling
+// split from its twin — `The heading is not empty.` says the heading HAS something in it and reports the
+// page (the double-negative branch of `deniedAfterVerb`), while `The heading isn't empty.` said the same
+// thing and delivered the page empty, so an apostrophe decided whether the page was lost. Read here, at
+// the one construction where the contraction's own negation is cancelled by the complement behind it.
+// WALKED and not read at the next token, because the subject of one of these is a noun PHRASE: `The printed
+// form isn't empty.` and `The typed entries weren't unfilled.` put the contraction two tokens past the word
+// the affirmation read is standing on, and a one-token check saw `form` and `entries` and stopped. That is
+// the same walk `affirmingReach` does for a plain verb, and it stops where that one stops: a real affirming
+// verb ahead means the ordinary path owns the sentence and has an answer for it already, and a negator ahead
+// denies the clause the contraction is in.
+// Returns the contraction's own position, the way `affirmingReach` returns a verb's, so the evidence line
+// can quote the subject through the complement and not a fixed three words.
+const CONTRACTED_COPULA = new Set(["isn't", "aren't", "wasn't", "weren't"]);
+function contractedDoubleNegative(tokens: Word[], from: number): number {
+  for (let k = from; k < tokens.length; k++) {
+    const { word } = tokens[k]!;
+    if (CONTRACTED_COPULA.has(word)) return absenceComplement(tokens, k + 1) ? k : -1;
+    if (AFFIRMING_VERB.has(word) || NEGATOR.has(word)) return -1;
+  }
+  return -1;
+}
+
 // The complements that say something IS there, for the coordination read: `absent from the top half
 // and PRESENT at the bottom`. Overlaps `QUALIFIER` on purpose rather than reusing it — a qualifier is
 // what may stand between a verb and its noun, and half of that list (`meaningful`, `other`, `more`)
@@ -2858,13 +2903,31 @@ function denialAffirmations(tokens: Word[]): { withSubject: number[]; plain: num
 function deniedAfterVerb(tokens: Word[], verb: number): boolean {
   const next = tokens[verb + 1];
   if (next === undefined) return false;
-  if (NEGATIVE_COMPLEMENT.has(next.word)) return true;
+  // An absence complement is read after a LINKING verb only, and that gate is the whole difference between
+  // this list and the older one. `deniedAfterVerb` is called with whatever verb the reach found, and half of
+  // `AFFIRMING_VERB` takes an OBJECT rather than a complement — where `empty`, `blank` and `unmarked` are
+  // the ordinary adjectives for a cell, a field or a row, so `The heading contains empty rows.` read as a
+  // denial and shipped a page of rows out empty (round 1 of #446). `absent`, `missing` and `nowhere` never
+  // needed the gate because none of them is attributive: nothing contains missing rows.
+  //
+  // Asking the OTHER list which verbs take an object is what couples the two, and the coupling is why
+  // `AFFIRMING_VERB` carries a warning at its own definition: this gate is complete only while every
+  // object-taker in that list is also in this one. Today that is `contain contains hold holds`, all four
+  // present here. A member added there and not here is a hole this function cannot see.
+  const linking = !TRANSITIVE_AFFIRM.has(tokens[verb]!.word);
+  if (NEGATIVE_COMPLEMENT.has(next.word) || (linking && absenceComplement(tokens, verb + 1))) return true;
   if (!NEGATOR.has(next.word) && next.word !== "never") return false;
   // A negator in front of a negative complement is two denials making an affirmation: "Handwriting is
   // not absent." is a page with writing on it, and reading it as a denial would ship that page empty
   // in silence. Contrived beside `is not present`, and it costs one lookup to not get wrong.
+  //
+  // Not contrived for an absence complement, which is why that list is read here as well as above:
+  // `The heading is not empty.` is the ordinary way to say a field was filled in, and on base it
+  // DECLARED — the `not` denied the clause and nothing looked at what it denied. That page shipped
+  // empty, so this half of #442 is the expensive direction and the grid pins it.
   const after = tokens[verb + 2];
-  return after === undefined || !NEGATIVE_COMPLEMENT.has(after.word);
+  if (after === undefined) return true;
+  return !(NEGATIVE_COMPLEMENT.has(after.word) || (linking && absenceComplement(tokens, verb + 2)));
 }
 
 // The noun a post-verb construction affirms — the object of `there is` or of a transitive verb — or
@@ -2931,9 +2994,10 @@ const FRAGMENT_CLOSER = new Set("only alone too also".split(" "));
 // `Devoid of text.`, `Lacking text.` and `Free of text.` are the cases that pays for — none of those
 // words is a `NEGATOR` or a `NEGATIVE_COMPLEMENT` the backward walk reads (`devoid` and `lacks` are
 // deliberately out of that list), and each is a blank page that would otherwise be reported lost.
-// What it costs is `Blank apart from a caption.`, where the exceptive read wants a denial it does not
-// have: that page ships empty today and still does, so the bound leaves a defect rather than buying
-// one.
+// What it cost is `Blank apart from a caption.`, where the exceptive read wanted a denial the fragment
+// did not have — so the bound left a defect rather than buying one, and #442 closed that half by making
+// the absence COMPLEMENT a denial to that scan. The locative half of the same shape (`A heading at the
+// top.`) is still open, and the two are pinned in opposite directions to keep the difference visible.
 //
 // Forward, a predicate ends it and so does the end of the statement, because a fragment whose whole
 // text is a name for text is an affirmation with nothing left to qualify it. Everything else refuses,
@@ -3121,6 +3185,18 @@ export function contentAffirmed(scope: string): string | null {
       // `printed page number`, `printed folio` — a name for text dressing the one thing on the paper
       // this pipeline never delivers (`folioAt`).
       if (modifierForm(word) && folioAt(tokens, i + 1)) continue;
+      // The contracted spelling of the double negative, read BEFORE the verb walk because the walk has no
+      // verb to find here — a contraction is in none of its lists, so `The heading isn't empty.` reached
+      // the fragment read with no verb and came out a blank page (#442). Same reading as `is not empty`,
+      // the same two words returned as the evidence, and it goes in one direction only: a statement of
+      // this shape says the subject HAS something, so the page gets reported rather than delivered empty.
+      const contracted = contractedDoubleNegative(tokens, i + 1);
+      if (contracted >= 0) {
+        return tokens
+          .slice(i, Math.min(contracted + 2, tokens.length))
+          .map((t) => t.word)
+          .join(" ");
+      }
       const verb = reach[i + 1]!;
       // No verb for this noun: the statement may still be a fragment that affirms it (#435). Read
       // before the `continue` rather than after the loop, because the guards above — the negator
@@ -3163,14 +3239,35 @@ export function contentAffirmed(scope: string): string | null {
     // Read from the denial rather than from a subject, so the contrast rule is off here — it needs a
     // subject to be a contrast about, and `no printed text, and handwriting is present` is pinned as
     // one denied list rather than as a denial and an affirmation.
-    const denial = tokens.findIndex(
-      (t) => NEGATOR.has(t.word) || t.word === "never" || NEGATIVE_COMPLEMENT.has(t.word),
-    );
-    if (denial >= 0) {
-      const named = affirmed.plain[denial + 1]!;
+    //
+    // An absence complement is a denial here too, and that is the second half of #442 rather than a
+    // free extra: `Blank apart from a caption.` is named a few hundred lines up as a page this file
+    // ships EMPTY because "the exceptive read wants a denial it does not have". It has one now. Six
+    // wordings move on that account and every one of them is a page with content going out empty —
+    // `blank apart from a stamp`, `except for a signature`, `empty apart from a caption`, `unmarked
+    // except for handwriting`, and the two bare fragments. No exception a blank page names moves with them:
+    // dust, specks, a printed page number, a folio and a watermark all stay declared, because the
+    // object walk was already the thing that decides what an exception is made OF (#439's folio rule,
+    // #193's marks). That is a claim about the OBJECTS only — what the widening did to sentences carrying
+    // both a complement and a negator is the paragraph below, and it was a regression, not a win.
+    //
+    // EVERY denial position, and not the first one, which is what the complement made necessary. A negator
+    // stands where the denial begins, so the first hit was always the right anchor while the vocabulary was
+    // negators alone — but a complement stands BEHIND its own denial's negator: in `The page is empty,
+    // nothing on it except handwriting.` a first-hit scan anchors on `empty`, and `denialAffirmations`'
+    // backward walk is stopped at the negator standing between that anchor and the object, so `plain` is
+    // -1 there and the handwriting was never reached. Eight wordings of that shape shipped a page with
+    // content on it as blank (round 1 of #446). Trying each position in order only ever ADDS an
+    // affirmation — the position base used is still among them — so it moves a page toward being reported
+    // and never toward being lost.
+    for (let k = 0; k < tokens.length; k++) {
+      const word = tokens[k]!.word;
+      if (!(NEGATOR.has(word) || word === "never" || NEGATIVE_COMPLEMENT.has(word) || absenceComplement(tokens, k)))
+        continue;
+      const named = affirmed.plain[k + 1]!;
       if (named >= 0) {
         return tokens
-          .slice(denial, named + 1)
+          .slice(k, named + 1)
           .map((t) => t.word)
           .join(" ");
       }

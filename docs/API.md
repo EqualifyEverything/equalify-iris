@@ -1630,13 +1630,76 @@ are pages whose HTML carries content — so none of them ever reaches the blank 
 3,747 verdicts move. That is an empty denominator rather than a measured zero: the evidence for the
 change is the 40 pairs, and the corpus evidence is only that it breaks nothing on record.
 
-What the reader still does not read is the **complement** of a copula. `Handwriting is absent.` is a
-denial and declares; `The heading is empty.` is read as a heading on the page and reports the blank one
-as a hole, and so are `is blank`, `is unmarked`, `is unfilled`, `is featureless` and `is void of content`
-— six of the ten absence wordings measured, on every subject that names text and on no subject that does
-not (`The sheet is empty.` declares). No log on record is affected: 135 of the 204 declarations write one
-of those wordings and all 135 declare, because the subject a real log uses is the page and not its
-heading. It is issue #442.
+A copula has **two ways of denying its subject**, and until #442 the reader knew one of them.
+`Handwriting is absent.` says the handwriting is not there and declares. `The heading is empty.` says the
+heading holds nothing, which is the same news about text — but nothing denied `heading`, so the sentence
+read as an affirmation and the blank page was reported as a hole, with the word that denied it quoted
+inside the evidence (`affirmed: "heading is empty"`). Six wordings do this: `is empty`, `is blank`,
+`is unmarked`, `is unfilled`, `is featureless` and `is void of content`. All six are read now, and the
+grid says the fix is about the complement and not the subject — 6 complements × 4 subjects that name text
+moved from 0 of 24 declared to 24 of 24, while the same complements against 4 subjects that name none
+were 24 of 24 before and are unchanged (`The sheet is empty.` always declared).
+
+`void` is taken only with its preposition. A stamp that "is void" is a mark **on** the paper — the word
+is printed across a cancelled form — so bare `void` is the one member of that vocabulary whose plain
+reading says something is there, and reading it would lose the page in silence. `is illegible` is out for
+a related reason and not by omission: marks that cannot be read are not an absence of marks, so an
+illegible heading is still a heading and the page is reported.
+
+Two page-**losing** defects came off the same fix. `The heading is not empty.` declared the page blank
+before it, because the `not` denied a clause and nothing read what it denied — a double negative arriving
+as an absence, on all 24 grid rows, and each one a page lost without a line. And the scan anchored on a
+denial now counts these complements as denials, which is what `Blank apart from a caption.` needed: that
+fragment had no negator in it and shipped empty, a caption lost, and this file named it as an open defect
+against itself. Six exceptive wordings come back with it. Which nouns survive an exceptive is decided
+where it was already decided rather than again here — each of the eight rows checked answers exactly as
+the negator wording saying the same thing answers, so `Blank apart from a watermark.` reports (a
+watermark is a name for marks) and `Blank apart from dust.` declares.
+
+The **contracted** spelling is read as well, and it was the losing side of the same sentence: a contraction
+is in none of this file's verb lists, on purpose — `The heading isn't visible.` denies its subject — so
+`The heading isn't empty.` found no verb at all and went out as a blank page while `is not empty` was
+reported. The apostrophe decided whether the page was lost. It is read at the one construction where the
+contraction's own negation is cancelled by the complement behind it, and the contraction is **walked to**
+rather than read at the next word, because the subject of one of these is a noun phrase: `The printed form
+isn't empty.` puts it two words along.
+
+The complement is read at the word **right after the verb**, and after a **linking** verb only. That first
+part is what the wordings a real form log writes need — `is empty; no handwritten entries.` past the
+statement boundary and `is empty and unused.` past the coordination both declare — and it is also the whole
+of the limit: anything standing between the verb and the word puts it out of reach, so `The heading is
+completely empty.` is still reported, and so is `is unused and empty.` where the same coordination runs the
+other way round. That is the same failure as before the fix and in the cheap direction — attention spent on
+an empty page, not a page lost — and closing it means walking those positions in the verb read, not adding
+to this vocabulary. The second part is why `The heading contains empty rows.` is not a denial: half of the
+affirming verbs take an object rather than a complement, and `empty`, `blank` and `unmarked` are the
+ordinary adjectives for a cell, a field or a row. `absent` and `missing` need no such gate, neither being
+attributive — nothing contains missing rows.
+
+The denial-anchored scan tries **every** denial position rather than the first. A negator stands where its
+denial begins, so first-hit was the right anchor while the vocabulary was negators alone; a complement
+stands *behind* the negator of its own sentence, and the backward walk that finds an exceptive object stops
+at a negator. So anchoring on `empty` in `The page is empty, nothing on it except handwriting.` put the
+stopped position between the anchor and the object, and eight wordings of that shape — the shape a real
+form log writes — shipped a page with content on it as blank. Trying each position in order can only add an
+affirmation, because the position first-hit used is still among them.
+
+One family of wordings **loses** a page to this, and it is the comma bound rather than the complement:
+`The heading is empty, handwriting only.` and seven siblings of it go out blank where they were reported
+before. A fragment cut off at its own comma is read as a member of the list a blank page writes, and the
+list is a list of what is *absent* — so a denial standing behind the noun reaches nothing, which is the
+defect `A signature, nothing else.` is pinned against. These eight only join it because `is empty` is now a
+denial. That is the pairing rule holding rather than breaking: `The heading is absent, handwriting only.`
+lost the same page before the fix and still does, so the two wordings say the same thing and answer the
+same way, and the repair belongs at the comma and not in the complement list. Base reported them by
+affirming `heading` off the very complement that denied it.
+
+No log on record moves. Of 3,747 page replies with a log, 153 write one of these complements and 135 of
+those sit inside a blank declaration, 0 in the negated form and 0 in the contracted one, and 0 verdicts
+move — because the subject a real log uses is the page and not its heading. The all-positions scan has a
+real population rather than an empty denominator, 1,583 of the 3,747 logs carrying more than one negator,
+and none of those moves either. So the corpus cannot separate reading the vocabulary at the verb alone from
+also reading it at the denial scan, and the wider read rests on the constructed rows above.
 
 Either form of the name also reaches a **clause with no verb in it**, which it did not until #435:
 `handwriting smudges only.`, `handwriting visible.`, `Only handwriting smudges.` and `A heading.` each
