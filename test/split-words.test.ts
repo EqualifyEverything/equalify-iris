@@ -29,7 +29,7 @@ import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { splitWordAudit, splitWordContradictions, splitWordProblem, joinBrokenWords } from "../src/pipeline/hyphens.ts";
-import { assembleBodyWithReport } from "../src/pipeline/assembly.ts";
+import { assembleBodyWithReport, runAssembly } from "../src/pipeline/assembly.ts";
 import type { Fragment } from "../src/pipeline/fragment.ts";
 import { runExtraction } from "../src/pipeline/extraction.ts";
 import type { PipelineContext } from "../src/pipeline/context.ts";
@@ -563,56 +563,90 @@ test("a break the rest of the document writes whole is closed up, keeping its ow
   // The evidence is on another page and the word is broken on this one, which is exactly the shape
   // `splitWordContradictions` cannot see: asked page by page, neither page contradicts itself.
   assert.deepEqual(splitWordContradictions(`<h2>Govern-ment</h2>`), []);
-  const out = joinBrokenWords(`<h2>Govern-ment</h2><p>State and local government receipts.</p>`);
-  assert.equal(out.html, `<h2>Government</h2><p>State and local government receipts.</p>`);
+  const out = joinBrokenWords([`<h2>Govern-ment</h2>`, `<p>State and local government receipts.</p>`]);
+  assert.deepEqual(out.pages, [`<h2>Government</h2>`, `<p>State and local government receipts.</p>`]);
   // `Government` and not `government`: deleting the line-break hyphen is the whole of the repair, and
   // adopting the corroborating occurrence's case would be a second change nothing licensed.
   assert.deepEqual(out.joined, [{ split: "Govern-ment", written: "Government", evidence: "government" }]);
 });
 
+test("a page that writes the word both ways is left to the model, whatever the rest of the document says", () => {
+  // The third condition, and the one that keeps this pass off part B's ground. Its subject has to be a
+  // word the TAIL condition would not have saved anyway, or the test passes for the wrong reason:
+  // `ment` is no word, so `Govern-ment` is joinable everywhere except here.
+  const page = `<p>Govern-ment receipts. Total government receipts.</p>`;
+  assert.deepEqual(
+    splitWordContradictions(page),
+    [{ split: "Govern-ment", joined: "government" }],
+    "part B raises it, and the page agent answers it holding the image",
+  );
+  const out = joinBrokenWords([page, `<p>More government receipts.</p>`]);
+  assert.deepEqual(out.pages, [page, `<p>More government receipts.</p>`], "and this pass changes nothing");
+  assert.deepEqual(out.joined, []);
+  // Per page and not per document: the same word, broken on a page that does NOT settle it, is joined —
+  // so the condition is about where the evidence is rather than about the word.
+  assert.deepEqual(joinBrokenWords([`<h2>Govern-ment</h2>`, page]).pages[0], `<h2>Government</h2>`);
+});
+
 test("a compound whose tail is a word the document uses is left for the model, corroboration or not", () => {
   // `inter-state` and `non-farm` are printings ACIR M-16 genuinely carries, and hyphens.ts records them
   // as pairs where the JOINED spelling is the defect. Closing them up would be the repair doing damage
-  // in the one direction the re-ask exists to avoid.
+  // in the one direction the re-ask exists to avoid. The evidence is put on a SECOND page so the page
+  // condition cannot be what saves them — the tail has to do it alone.
   for (const [word, whole] of [
     ["inter-state", "interstate"],
     ["non-tax", "nontax"],
     ["non-farm", "nonfarm"],
     ["Mid-east", "Mideast"],
   ]) {
-    const body = `<p>The ${word} figure. The ${whole} figure. A state, a tax, a farm, the east.</p>`;
-    assert.equal(joinBrokenWords(body).html, body, `${word} was rewritten`);
-    assert.deepEqual(joinBrokenWords(body).joined, []);
+    const pages = [`<p>The ${word} figure.</p>`, `<p>The ${whole} figure. A state, a tax, a farm, the east.</p>`];
+    assert.deepEqual(joinBrokenWords(pages).pages, pages, `${word} was rewritten`);
+    assert.deepEqual(joinBrokenWords(pages).joined, []);
   }
   // And it is genuinely the TAIL that saves them rather than their being on some list: the same word,
   // in a document that never prints a bare `state`, no longer meets the condition and is joined.
-  assert.equal(
-    joinBrokenWords(`<p>The inter-state figure. The interstate figure.</p>`).html,
-    `<p>The interstate figure. The interstate figure.</p>`,
-  );
+  assert.deepEqual(joinBrokenWords([`<p>The inter-state figure.</p>`, `<p>The interstate figure.</p>`]).pages, [
+    `<p>The interstate figure.</p>`,
+    `<p>The interstate figure.</p>`,
+  ]);
 });
 
 test("a break with no whole spelling anywhere is left alone, so a joined form from nowhere is impossible", () => {
   // `valorem` is no word and no document prints `advalorem`, so the tail condition ALONE would close
   // `ad-valorem` into a spelling no printing contains. Corroboration is what stops it, which is why
-  // both conditions are required rather than either.
-  const body = `<p>An ad-valorem levy on property.</p>`;
-  assert.equal(joinBrokenWords(body).html, body);
-  assert.deepEqual(joinBrokenWords(body).joined, []);
+  // all three conditions are required rather than any of them.
+  const pages = [`<p>An ad-valorem levy on property.</p>`, `<p>A second page of ordinary prose.</p>`];
+  assert.deepEqual(joinBrokenWords(pages).pages, pages);
+  assert.deepEqual(joinBrokenWords(pages).joined, []);
 });
 
 test("the rewrite happens in text and nowhere else", () => {
   // Attributes are the false-positive surface the reading side already refuses to look at, and on the
   // writing side the stakes are higher: a rewritten `href` is a broken link and a rewritten `id` is a
   // reference that lands nowhere. Both carry hyphens by convention.
-  const out = joinBrokenWords(
-    `<p><a href="/agri-culture" id="agri-culture" class="agri-culture">Agri-culture</a> and agriculture.</p>`,
-  );
+  const out = joinBrokenWords([
+    `<p><a href="/agri-culture" id="agri-culture" class="agri-culture">Agri-culture</a> receipts.</p>`,
+    `<p>Total agriculture receipts.</p>`,
+  ]);
   assert.equal(
-    out.html,
-    `<p><a href="/agri-culture" id="agri-culture" class="agri-culture">Agriculture</a> and agriculture.</p>`,
+    out.pages[0],
+    `<p><a href="/agri-culture" id="agri-culture" class="agri-culture">Agriculture</a> receipts.</p>`,
   );
   assert.deepEqual(out.joined, [{ split: "Agri-culture", written: "Agriculture", evidence: "agriculture" }]);
+});
+
+test("an unterminated attribute value stops the rewrite rather than being written into", () => {
+  // `MARKUP`'s two attribute alternatives both need a closing quote, so an unterminated one leaves its
+  // whole start tag unmatched and the text run reaching the NEXT tag would be rewritten as prose — with
+  // the repair landing inside the attribute the quote never closed. Stopping at the `<` is the only
+  // reading under which the test above is literally true, and it costs a join in prose carrying a bare
+  // `<`, which is the direction to lose in.
+  const broken = `<p><img src="a.png" alt="unclosed Multi-year and multiyear</p>`;
+  const out = joinBrokenWords([broken, `<p>Total multiyear figures.</p>`]);
+  assert.deepEqual(out.pages, [broken, `<p>Total multiyear figures.</p>`]);
+  assert.deepEqual(out.joined, []);
+  // An unescaped `<` in prose is the price, and it is a decline rather than damage.
+  assert.deepEqual(joinBrokenWords([`<p>a < b and Multi-year</p>`, `<p>multiyear</p>`]).joined, []);
 });
 
 test("a word joined in the body can keep its hyphen in an alt on the same page", () => {
@@ -622,43 +656,49 @@ test("a word joined in the body can keep its hyphen in an alt on the same page",
   // body text and five inside long `alt` descriptions, and only the three moved. Accepted, because the
   // alternative is a rewrite that reaches into attribute values, and unread downstream, because
   // `splitWordContradictions` does not examine attributes either.
-  const out = joinBrokenWords(
+  const out = joinBrokenWords([
     `<figure><img src="m.png" alt="A Cross-hatch fill marks the western states."><figcaption>` +
-      `<p>Cross-hatch fill marks the western states; crosshatch means above average.</p>` +
-      `</figcaption></figure>`,
-  );
+      `<p>Cross-hatch fill marks the western states.</p></figcaption></figure>`,
+    `<p>A crosshatch means above average.</p>`,
+  ]);
   assert.equal(
-    out.html,
+    out.pages[0],
     `<figure><img src="m.png" alt="A Cross-hatch fill marks the western states."><figcaption>` +
-      `<p>Crosshatch fill marks the western states; crosshatch means above average.</p>` +
-      `</figcaption></figure>`,
+      `<p>Crosshatch fill marks the western states.</p></figcaption></figure>`,
   );
   assert.deepEqual(out.joined, [{ split: "Cross-hatch", written: "Crosshatch", evidence: "crosshatch" }]);
   assert.deepEqual(
-    splitWordContradictions(out.html),
+    splitWordContradictions(out.pages.join("\n\n")),
     [],
     "and the leftover raises nothing: the reading side does not see the alt either",
   );
 });
 
-test("script and style content is not prose, and is not rewritten", () => {
-  const out = joinBrokenWords(`<p>Agri-culture and agriculture.</p><script>var x = "Agri-culture";</script>`);
-  assert.equal(out.html, `<p>Agriculture and agriculture.</p><script>var x = "Agri-culture";</script>`);
-  assert.deepEqual(
-    out.joined.map((w) => w.split),
-    ["Agri-culture"],
-    "one word, and it came from the prose",
-  );
+test("script, style, pre and code content is not prose, and is not rewritten", () => {
+  // A hyphen in a code listing is a flag or an identifier, and normalising it changes something a reader
+  // has to be able to copy. Latent — `agents/page.md` never asks for `pre` or `code` — but the `WORD`
+  // comment already treats an identifier that leaked out of a code span as a hazard to design against.
+  for (const opaque of [
+    `<script>var x = "Agri-culture";</script>`,
+    `<style>.agri-culture { color: red }</style>`,
+    `<pre><code>--agri-culture</code></pre>`,
+  ]) {
+    const out = joinBrokenWords([`<p>Agri-culture receipts.</p>${opaque}`, `<p>Total agriculture receipts.</p>`]);
+    assert.equal(out.pages[0], `<p>Agriculture receipts.</p>${opaque}`, opaque);
+    assert.deepEqual(
+      out.joined.map((w) => w.split),
+      ["Agri-culture"],
+      "one word, and it came from the prose",
+    );
+  }
 });
 
 test("every occurrence is rewritten and reported once, and a two-hyphen word is neither", () => {
-  const out = joinBrokenWords(
-    `<td>Govern-ment</td><td>Govern-ment</td><td>government</td><td>Trans-porta-tion</td><td>transportation</td>`,
-  );
-  assert.equal(
-    out.html,
-    `<td>Government</td><td>Government</td><td>government</td><td>Trans-porta-tion</td><td>transportation</td>`,
-  );
+  const out = joinBrokenWords([
+    `<td>Govern-ment</td><td>Govern-ment</td><td>Trans-porta-tion</td>`,
+    `<td>government</td><td>transportation</td>`,
+  ]);
+  assert.equal(out.pages[0], `<td>Government</td><td>Government</td><td>Trans-porta-tion</td>`);
   // One entry per word rather than per occurrence, on `splitWordAudit`'s reasoning: a document that
   // broke the word in four cells has one spelling settled. `Trans-porta-tion` is skipped in BOTH roles
   // by the limit `WORD` already documents — the same limit, not a new one.
@@ -669,9 +709,9 @@ test("an entity-spelled hyphen is a stated limit, and stays as written", () => {
   // `textOf` decodes entities so the READING side sees a break spelled `&#45;`, but the rewrite only
   // ever deletes a literal `-`. Pinned because it is under-detection in the direction this file already
   // accepts, and a later widening should have to change this line deliberately.
-  const body = `<p>Govern&#45;ment and government.</p>`;
-  assert.equal(joinBrokenWords(body).html, body);
-  assert.deepEqual(joinBrokenWords(body).joined, []);
+  const pages = [`<p>Govern&#45;ment receipts.</p>`, `<p>Total government receipts.</p>`];
+  assert.deepEqual(joinBrokenWords(pages).pages, pages);
+  assert.deepEqual(joinBrokenWords(pages).joined, []);
 });
 
 test("a garbled page can put the tail in the dictionary and switch the condition off", () => {
@@ -680,11 +720,11 @@ test("a garbled page can put the tail in the dictionary and switch the condition
   // dictionary is model output and not ground truth, and this is the conservative direction — the
   // failure it produces is a word left broken, never a word wrongly closed.
   assert.equal(
-    joinBrokenWords(`<p>Indi-vidual income. Individual income.</p>`).html,
-    `<p>Individual income. Individual income.</p>`,
+    joinBrokenWords([`<p>Indi-vidual income.</p>`, `<p>Individual income.</p>`]).pages[0],
+    `<p>Individual income.</p>`,
   );
-  const garbled = `<p>Indi-vidual income. Individual income. vidual</p>`;
-  assert.equal(joinBrokenWords(garbled).html, garbled, "one stray token is enough to stop the join");
+  const garbled = [`<p>Indi-vidual income.</p>`, `<p>Individual income. vidual</p>`];
+  assert.deepEqual(joinBrokenWords(garbled).pages, garbled, "one stray token is enough to stop the join");
 });
 
 // --- and where it runs, which is the whole of why it can see anything -----------------
@@ -723,11 +763,48 @@ test("a word broken across a PAGE is closed by the same pass, and only because i
   // This is that pass, and the ordering is the whole of its reach here: before the seam closes, `Simi-`
   // and `larly` are two whole words in two paragraphs, which is the shape hyphens.ts is blind to.
   const tail = `<hr role="doc-pagebreak" aria-label="Page 73" id="page-73">\n<p>the more populous States tax simi-</p>`;
-  const head = `<p>larly, and the rate varies. Similarly, receipts fall.</p>`;
-  assert.deepEqual(joinBrokenWords(`${tail}\n\n${head}`).joined, [], "unjoined, there is no such word to see");
+  const head = `<p>larly, and the rate varies.</p>`;
+  const later = `<p>Similarly, receipts fall.</p>`;
+  assert.deepEqual(joinBrokenWords([tail, head, later]).joined, [], "unjoined, there is no such word to see");
 
-  const { body, words, prose } = assembleBodyWithReport([fragment(73, tail), fragment(74, head)]);
+  const { body, words, prose } = assembleBodyWithReport([fragment(73, tail), fragment(74, head), fragment(75, later)]);
   assert.equal(prose.joined, 1, "the seam closed first");
   assert.match(body, /States tax similarly, and the rate/);
   assert.deepEqual(words, [{ split: "simi-larly", written: "similarly", evidence: "Similarly" }]);
+});
+
+test("the log line carries the whole count and a bounded list of the spellings", async () => {
+  // `count` is the figure and `words` is the evidence a reader spot-checks, so the list is capped and the
+  // count is not — a truncated list must never understate how much text changed. Same reading as
+  // `prose_joined`'s `MAX_EXAMPLES`, and an OCR-garbled submission is what the cap is for.
+  const stems = Array.from({ length: 25 }, (_, i) => `qa${String.fromCharCode(97 + i)}${String.fromCharCode(97 + i)}`);
+  const broken = stems.map((s) => `<p>The ${s}-ment figure.</p>`).join("");
+  const whole = stems.map((s) => `<p>Total ${s}ment.</p>`).join("");
+
+  const events: { type: string; data: Record<string, unknown> }[] = [];
+  const ctx = {
+    log: { event: (type: string, data: Record<string, unknown> = {}) => events.push({ type, data }) },
+  } as unknown as PipelineContext;
+  const out = await runAssembly(ctx, [fragment(1, broken), fragment(2, whole)]);
+
+  const lines = events.filter((e) => e.type === "assembly_words_joined");
+  assert.equal(lines.length, 1);
+  assert.equal(lines[0]!.data.count, 25, "the count is the whole of it");
+  assert.equal((lines[0]!.data.words as string[]).length, 20, "the list is bounded");
+  // And the document itself is not capped: every one of the 25 was rewritten.
+  assert.equal(out.body.match(/qa[a-z]{2}ment figure/g)?.length, 25);
+});
+
+test("a seam-made word is still judged against the page it lands on, which is over-conservative", () => {
+  // The fifth limit in hyphens.ts, pinned so a later reader meets it as a decision. The seam join puts
+  // the joined text on the HEAD page, so if that page also prints the word whole, the page condition
+  // declines — even though part B cannot have answered this one: before the seam, `WORD` saw `simi` and
+  // `larly` and neither was hyphenated. It leaves a hyphen rather than removing a real one, which is the
+  // direction to fail in, and closing it would mean threading seam provenance through the pass.
+  const tail = `<hr role="doc-pagebreak" aria-label="Page 73" id="page-73">\n<p>the more populous States tax simi-</p>`;
+  const head = `<p>larly, and the rate varies. Similarly, receipts fall.</p>`;
+  const { body, words, prose } = assembleBodyWithReport([fragment(73, tail), fragment(74, head)]);
+  assert.equal(prose.joined, 1, "the seam still closed");
+  assert.match(body, /States tax simi-larly, and the rate/);
+  assert.deepEqual(words, []);
 });

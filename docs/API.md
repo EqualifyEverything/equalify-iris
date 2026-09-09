@@ -4512,26 +4512,47 @@ which no other assembly line does. Read the third field first: it is the evidenc
 checking this line is asking whether the document really writes the whole spelling somewhere. If it
 does not, the join is wrong and the log is where that is visible.
 
-Two conditions have to hold together, and each stops a different mistake. The joined spelling must
-appear somewhere in the document — without that, `ad-valorem` would be closed into an `advalorem` no
-page prints. And the fragment **after** the hyphen must not be a word the document uses on its own —
-without that, every compound whose document also prints the closed form gets closed, which is why
-`inter-state`, `non-tax`, `non-farm`, `Mid-east` and `Non-property` are never touched here. Those stay
-with [`page_split_words`](#page_split_words), which asks the agent holding the image instead: a
-compound joins words, so a hyphen whose right-hand side is not a word cannot be a compound joint, and
-that is the whole of what makes this one decidable without the image.
+Three conditions have to hold together, and each stops a different mistake.
+
+1. **The joined spelling appears somewhere in the document.** Without it, `ad-valorem` would be closed
+   into an `advalorem` no page prints.
+2. **The fragment after the hyphen is not a word the document uses on its own.** Without it, every
+   compound whose document also prints the closed form gets closed, which is why `inter-state`,
+   `non-tax`, `non-farm`, `Mid-east` and `Non-property` are never touched here. A compound joins words,
+   so a hyphen whose right-hand side is not a word cannot be a compound joint — and that is the whole of
+   what makes this one decidable without the image.
+3. **The joined spelling is not on the page carrying the hyphen.** That page is
+   [`page_split_words`](#page_split_words)'s ground: it raises exactly this shape, the page agent answers
+   it holding the image, and it is explicitly allowed to answer "the page really does print both
+   spellings" and change nothing. Joining it here would revoke that answer from a pass that never saw
+   the page. Not theoretical — without this condition, 7 of the 36 joins measured over #334's corpus are
+   words the page step had already raised.
+
+The words this pass declines stay with `page_split_words` and its correction call. Nothing is asked
+twice, and nothing is answered twice.
 
 It runs after the page-break prose join, which is the only place it can: before that seam closes,
 `Simi-` and `larly` are two whole words in two paragraphs. So a word broken across a **page** and a
 word broken across a **line** are settled by the same pass, and the hyphen
 [`prose_joined`](#prose_joined)'s `word_splits` records as kept is the input to it.
 
-**Prose only, `alt` text included**, on the same reasoning `page_split_words` gives for not reading
-attributes: a repair that writes into attribute values is a repair that can reach an `href`. One line
-can therefore stand for a word closed in the body while the same word keeps its hyphen inside a long
-`alt` on the same page — measured, not hypothetical, on a map-heavy arm where `Cross-hatch` occurs
-eight times and only the three in body text move. Nothing downstream reads the leftover as a defect,
-because `page_split_words` does not examine attributes either.
+**Prose only**, on the same reasoning `page_split_words` gives for not reading attributes: a repair that
+writes into attribute values is a repair that can reach an `href`. `script`, `style`, `pre` and `code`
+are skipped for the neighbouring reason — a hyphen in a code listing is a flag, not a line break, and a
+reader has to be able to copy it. One line can therefore stand for a word closed in the body while the
+same word keeps its hyphen inside a long `alt` on the same page: measured, not hypothetical, on a
+map-heavy arm where `Cross-hatch` occurs eight times and only the three in body text move. Nothing
+downstream reads that leftover as a defect, because `page_split_words` does not examine attributes
+either — but one attribute makes it a WCAG failure rather than an inconsistency. A visible label joined
+beside an `aria-label` or `title` that keeps its hyphen no longer has its visible text contained in its
+accessible name (2.5.3), and no gate here catches it: axe's `label-content-name-mismatch` is
+experimental and outside the `runOnly` list. It is latent rather than live, because `agents/page.md`
+tells the page agent not to put printed text in an `aria-label` at all.
+
+**`words` is capped at 20 spellings; `count` is not.** Bounded on the same reasoning as
+[`prose_joined`](#prose_joined)'s examples — the count is the figure, the list is what a reader
+spot-checks, and an OCR-garbled submission is what a cap is for — so a truncated list never understates
+how much text changed.
 
 ### `deprecated_roles_stripped`
 

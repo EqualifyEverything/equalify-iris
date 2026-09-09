@@ -235,12 +235,19 @@ export interface JoinedWord {
   evidence: string;
 }
 
-// Comments, tags, and the contents of the two elements whose text is not prose. A rewrite has to know
+// Comments, tags, and the contents of the elements whose text is not prose. A rewrite has to know
 // where the markup is in a way a comparison does not: `textOf` can flatten a tag to a space because it
 // only reads, while this puts characters back and must not put them inside an `href` or a `<script>`.
+//
+// `pre` and `code` are here and not in `textOf`, which is the one asymmetry in this file. A hyphen in a
+// code listing is a flag or an identifier and normalising it changes something a reader has to be able
+// to copy, so the WRITE side must not enter one; the READ side is shared with
+// `splitWordContradictions`, and narrowing it would quietly change what that check has always
+// compared. The cost of the asymmetry is that a `foobar` inside a listing can still corroborate a
+// `foo-bar` in prose, which is the same reading the existing check already has.
 const MARKUP = /<!--[\s\S]*?(?:-->|$)|<(?:[^>"']|"[^"]*"|'[^']*')*>/g;
-const OPENS_OPAQUE = /^<(script|style)\b/i;
-const CLOSES_OPAQUE = /^<\/(script|style)\b/i;
+const OPENS_OPAQUE = /^<(script|style|pre|code)\b/i;
+const CLOSES_OPAQUE = /^<\/(script|style|pre|code)\b/i;
 
 // #334's remaining hyphen axis: a word the printing broke at a line end, carried into the markup with
 // its hyphen, where the page it landed on never writes the word whole. `splitWordContradictions` is
@@ -261,24 +268,34 @@ const CLOSES_OPAQUE = /^<\/(script|style)\b/i;
 // whatever the image shows. `ment`, `laneous`, `vidual` and `facturing` are not words. `state`,
 // `farm`, `tax`, `east` and `property` are — which is why `inter-state`, `non-farm`, `non-tax`,
 // `Mid-east` and `Non-property` are left exactly where part B leaves them, as questions for the model.
-// Run over those same files as assembly runs it — this function, on each submission's pages joined into
-// one body — it joins 36 cases (22 distinct words) across 10 of the 75 submissions, and leaves 37 cases
-// (6 distinct) hyphenated while a closed spelling of them sits somewhere in the same submission. Those
-// 37 are what the tail condition buys, and they include the two this file already records as printings
-// where the JOINED spelling is the defect. One word lands on both sides, for the second reason below and
-// only there.
 //
-// Both conditions are needed and each stops a different failure. Without corroboration, `ad-valorem`
-// is a break whose `valorem` is no word and whose `advalorem` no document prints, and it would be
-// joined into a spelling from nowhere. Without the tail condition, every legitimate compound whose
-// document also prints the closed form gets closed.
+// THREE conditions, not two, and the third is what keeps this pass off part B's ground: the closed
+// spelling must not be on the page that carries the hyphen. Where it is, part B raises it, the page
+// agent answers it holding the image, and `splitWordProblem` explicitly licenses the answer "the page
+// really does print both spellings" — so joining it here would reverse an answer made with the page in
+// view, from a pass that never saw it. That is not a theoretical collision. Without this condition, 7
+// of the 36 joins on the corpus below are words part B also raised on a page that carries them.
 //
-// Three known imperfections, all measured and all accepted, because the alternative to naming them is
-// finding them later:
+// Run over those same files as assembly runs it — this function, on each submission's pages — it joins
+// 29 cases (18 distinct words) across 8 of the 75 submissions, and leaves 44 cases (10 distinct)
+// hyphenated while a closed spelling of them sits somewhere in the same submission. Those 44 are what
+// the second and third conditions buy, and they include the two this file already records as printings
+// where the JOINED spelling is the defect. One word lands on both sides, for the second reason below
+// and only there.
+//
+// All three conditions are needed and each stops a different failure. Without corroboration,
+// `ad-valorem` is a break whose `valorem` is no word and whose `advalorem` no document prints, and it
+// would be joined into a spelling from nowhere. Without the tail condition, every legitimate compound
+// whose document also prints the closed form gets closed. Without the page condition, the pass
+// overrides the model on the one shape the model was already asked about.
+//
+// Five known imperfections, all accepted, because the alternative to naming them is finding them later.
+// The first three are measured on the corpus; the last two are reasoned and have zero instances in it,
+// which is a fact about the corpus and not about the rule:
 //
 //  * a spelling the MODEL wrote rather than the page. `Cross-hatch` beside `crosshatch` in a map
 //    description is one voice being inconsistent with itself, not a transcription defect, and no image
-//    settles it because neither spelling is printed. 3 of the 36 joins on those files are this, all in
+//    settles it because neither spelling is printed. 3 of the 29 joins on those files are this, all in
 //    map prose, and joining them changes a description's spelling and no claim about a page.
 //  * a garbled page can put the tail in the dictionary and switch the condition off. On the rotated
 //    arm, `vidual` appears as a standalone token, so `Indi-vidual` is left alone there while the same
@@ -290,48 +307,91 @@ const CLOSES_OPAQUE = /^<\/(script|style)\b/i;
 //    only the three move. The alternative is rewriting attribute values, which is how a repair reaches
 //    an `href`, so the mismatch is the price. Nothing downstream reads it as a new defect either —
 //    `textOf` drops attributes, so the contradiction check above cannot see the `alt` copy in the first
-//    place.
+//    place. One attribute makes that mismatch a WCAG failure rather than an inconsistency: a visible
+//    label joined beside an `aria-label` or `title` that keeps its hyphen no longer has its visible text
+//    contained in its accessible name (2.5.3), and no gate here catches it, because axe's
+//    `label-content-name-mismatch` is experimental and outside `runOnly` (lint.ts). It is latent rather
+//    than live: `agents/page.md` tells the model not to put printed text in an `aria-label` at all.
+//  * the tail condition does not reach a PREFIX compound whose stem the document never uses alone.
+//    `pre-empt` beside `preempt`, `co-ordination` beside `coordination`, `non-existent` beside
+//    `nonexistent`: `empt`, `ordination` and `existent` are the stems, a printing may hyphenate all
+//    three by house style, and the argument above — a compound joins words — is what stops holding,
+//    because a prefix is not a word. Where both spellings are on one page the page condition catches it;
+//    across pages, an inconsistently hyphenated document loses the hyphen. Zero instances in the 1,221
+//    files: every word joined there is a broken word and every prefix compound in them (`inter-state`,
+//    `non-farm`, `non-tax`, `Mid-east`, `Non-property`) has a stem the document does print alone. A
+//    closed prefix list was the obvious remedy and is refused: `con-`, `dis-`, `trans-` and `cross-`
+//    would be on it, and `con-struction`, `dis-tributed`, `trans-portation` and `cross-hatch` are real
+//    breaks it would lose.
+//  * a word the PROSE JOIN made whole across a page seam is judged against the page it landed on. Before
+//    that join it was `Simi-` and `larly` in two pages and `WORD` matched neither as hyphenated, so part
+//    B never saw it and cannot have answered it — yet if the landing page also prints the word whole,
+//    the page condition declines anyway. Over-conservative for that one shape, and it leaves a hyphen
+//    rather than removing a real one.
 //
 // Order-independent, which is what makes it belong at assembly rather than in the page loop:
 // `runExtraction` documents pages as fully independent and forbids relying on completion order, so a
 // dictionary built from the pages that happen to have finished would give a different document run to
 // run. This one is built from the whole assembled body.
-export function joinBrokenWords(html: string): { html: string; joined: JoinedWord[] } {
-  const whole = wholeWords(textOf(html));
+export function joinBrokenWords(pages: string[]): { pages: string[]; joined: JoinedWord[] } {
+  const whole = wholeWords(textOf(pages.join("\n\n")));
   const joined: JoinedWord[] = [];
   const seen = new Set<string>();
   // A word spelled with an entity hyphen (`Govern&#45;ment`) is not a `WORD` match at all, so it is
   // read as evidence by nobody and rewritten by nobody. Under-detection, in the direction the rest of
   // this file already takes: the repair below only ever deletes a literal `-`.
-  const rewrite = (text: string): string =>
-    text.replace(WORD, (word) => {
-      if (word.split("-").length - 1 !== 1) return word;
-      const tail = word.slice(word.indexOf("-") + 1);
-      const evidence = whole.get(word.replace("-", "").toLowerCase());
-      if (evidence === undefined) return word;
-      if (whole.has(tail.toLowerCase())) return word;
-      const written = word.replace("-", "");
-      // One entry per word, not per occurrence, on `splitWordAudit`'s reasoning: a document that broke
-      // `Compos-ite` in four cells had one spelling settled, and all four are rewritten either way.
-      if (!seen.has(word.toLowerCase())) {
-        seen.add(word.toLowerCase());
-        joined.push({ split: word, written, evidence });
-      }
-      return written;
-    });
+  const rewriter =
+    (own: Map<string, string>) =>
+    (text: string): string =>
+      text.replace(WORD, (word) => {
+        if (word.split("-").length - 1 !== 1) return word;
+        const tail = word.slice(word.indexOf("-") + 1);
+        const closed = word.replace("-", "").toLowerCase();
+        // The page settles it itself, so it is part B's and not this pass's. Declining here is the whole
+        // of what keeps the two from colliding: `splitWordContradictions` raises exactly this shape, the
+        // page agent answers it holding the image, and `splitWordProblem` gives it an explicit licence
+        // to answer "the page really does print both spellings" and change nothing. Joining it here
+        // would reverse that answer from a pass that never saw the page.
+        if (own.has(closed)) return word;
+        const evidence = whole.get(closed);
+        if (evidence === undefined) return word;
+        if (whole.has(tail.toLowerCase())) return word;
+        const written = word.replace("-", "");
+        // One entry per word, not per occurrence, on `splitWordAudit`'s reasoning: a document that broke
+        // `Compos-ite` in four cells had one spelling settled, and all four are rewritten either way.
+        // Per DOCUMENT rather than per page, so a word joined on one page and declined on another —
+        // which the rule above makes possible — reports the join and says nothing about the decline.
+        if (!seen.has(word.toLowerCase())) {
+          seen.add(word.toLowerCase());
+          joined.push({ split: word, written, evidence });
+        }
+        return written;
+      });
 
-  let out = "";
-  let at = 0;
-  let opaque = 0;
-  for (const m of html.matchAll(MARKUP)) {
-    const before = html.slice(at, m.index);
-    out += opaque > 0 ? before : rewrite(before);
-    out += m[0];
-    at = m.index + m[0].length;
-    if (OPENS_OPAQUE.test(m[0])) opaque += 1;
-    else if (CLOSES_OPAQUE.test(m[0]) && opaque > 0) opaque -= 1;
-  }
-  const tail = html.slice(at);
-  out += opaque > 0 ? tail : rewrite(tail);
-  return { html: out, joined };
+  const walk = (html: string, rewrite: (text: string) => string): string => {
+    // A text run up to the first `<` that began no tag. `MARKUP`'s attribute alternatives both need a
+    // closing quote, so an unterminated one leaves its whole start tag unmatched and the run reaching
+    // the NEXT tag would otherwise be rewritten as prose — putting the repair inside the attribute the
+    // quote never closed. Stopping at the `<` costs a join in prose containing a bare `<`, which is the
+    // direction to lose in and the only reading under which "in text and nowhere else" is true.
+    const prose = (text: string): string => {
+      const cut = text.indexOf("<");
+      return cut === -1 ? rewrite(text) : rewrite(text.slice(0, cut)) + text.slice(cut);
+    };
+    let out = "";
+    let at = 0;
+    let opaque = 0;
+    for (const m of html.matchAll(MARKUP)) {
+      const before = html.slice(at, m.index);
+      out += opaque > 0 ? before : prose(before);
+      out += m[0];
+      at = m.index + m[0].length;
+      if (OPENS_OPAQUE.test(m[0])) opaque += 1;
+      else if (CLOSES_OPAQUE.test(m[0]) && opaque > 0) opaque -= 1;
+    }
+    const tail = html.slice(at);
+    return out + (opaque > 0 ? tail : prose(tail));
+  };
+
+  return { pages: pages.map((page) => walk(page, rewriter(wholeWords(textOf(page))))), joined };
 }

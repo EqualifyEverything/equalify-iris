@@ -16,6 +16,11 @@ export interface AssemblyResult {
   lint: LintResult;
 }
 
+// How many joined words `assembly_words_joined` spells out. Larger than `prose.ts`'s five because these
+// are single words rather than sentence fragments and a whole-document pass has more of them to show,
+// and bounded for the same reason: the list is text out of the user's document going into a log.
+const MAX_JOINED_LOGGED = 20;
+
 // Join page fragments in order into clean body content — no provenance comments
 // in the delivered HTML. Per-page provenance is preserved in fragments.json.
 //
@@ -113,8 +118,17 @@ export function assembleBodyWithReport(fragments: Fragment[]): {
   // Before the role strips and after the marker strip, and the ordering is immaterial in both
   // directions rather than merely untested: those passes read and write attribute tokens, this one
   // rewrites text between tags, and neither can see the other's characters.
-  const words = joinBrokenWords(prose.pages.join("\n\n"));
-  const joined = stripDeprecatedRoles(words.html);
+  //
+  // It takes the pages APART rather than joined, because two of its three conditions need the page
+  // boundary: the evidence has to come from the document and not from the page carrying the hyphen,
+  // which is what keeps it off the ground `splitWordContradictions` already covers with the image in
+  // hand. Joining first would erase exactly that distinction.
+  //
+  // A page being delivered byte for byte (`skipped_pages`) is edited here too, on the marker strip's
+  // reasoning above rather than the prose join's: this rewrites text between tags and reserializes
+  // nothing, so it cannot depend on the parse the page's bytes disagree with.
+  const words = joinBrokenWords(prose.pages);
+  const joined = stripDeprecatedRoles(words.pages.join("\n\n"));
   // And a role that is not a role at all, on the same argument one step further (roles.ts, #345).
   // After the deprecated pass rather than before it only for reading order: the two look at
   // disjoint sets of tokens — every role ARIA deprecates is still a valid role — so neither pass
@@ -578,10 +592,13 @@ export async function runAssembly(
   // what replaced it, and the occurrence elsewhere that licensed it — the third field is the one that
   // makes the line checkable rather than merely informative, since a reader is asking whether the
   // document really contains the whole spelling somewhere.
+  // Bounded on `prose_joined`'s reasoning eleven lines down (`MAX_EXAMPLES`, prose.ts): the count is the
+  // figure, the list is the evidence a reader spot-checks, and an OCR-garbled submission is what a cap
+  // is for. `count` is always the whole of it, so a truncated list never understates the change.
   if (words.length) {
     ctx.log.event("assembly_words_joined", {
       count: words.length,
-      words: words.map((w) => `${w.split} -> ${w.written} (document writes ${w.evidence})`),
+      words: words.slice(0, MAX_JOINED_LOGGED).map((w) => `${w.split} -> ${w.written} (document writes ${w.evidence})`),
     });
   }
   // A table the source printed across a page break arrives here as two tables, and this is the

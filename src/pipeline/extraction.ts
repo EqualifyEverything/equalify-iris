@@ -5036,8 +5036,14 @@ async function extractPage(
   // True of what is decidable HERE, on one page, and no longer true of the document: `joinBrokenWords`
   // closes a break up at assembly where the rest of the document writes the word whole and the
   // fragment after the hyphen is no word at all. It cannot help this call site — the dictionary it
-  // needs is the whole body, and pages are extracted concurrently — so the two do not overlap and a
-  // word this page settles is never reached by it.
+  // needs is the whole body, and pages are extracted concurrently.
+  //
+  // The two do not overlap, and that is a condition IN that pass rather than a property of the two
+  // shapes: it declines any word whose closed spelling is on the page carrying the hyphen, which is
+  // exactly the population raised here. Without that condition they would collide on 7 of the 36 joins
+  // measured over the corpus — every one of them a word this call site had already sent to the model,
+  // whose licence to answer "the page really does print both spellings" a later join would silently
+  // revoke. So a word this page settles is not reached by it, by construction.
   //
   // After the soft-hyphen strip, and load-bearing that it is. #334 measured the interaction on the
   // page this rule is written from: `Govern<U+00AD>ment` has contiguous letters, so a page carrying
