@@ -1779,6 +1779,16 @@ test("a name for text affirms in either part of speech, and the position was nev
     // second comma there) and is pinned so the two paths are held apart.
     "Page is blank. No printed words, and lines, characters are visible.",
     "Page is blank. No printed words, lines, characters, marks are visible.",
+    // THE COST OF READING IT THAT WAY, pinned as a cost rather than a win, and it is the fatal direction: a
+    // noun that heads an AFFIRMED list has the same shape as a member of a denied one, so if these logs meant
+    // the stamps to be visible the page is delivered empty. #434's bound refused 24 of 24 rows like these on
+    // the vocabulary of the modifier alone — with `printed` for `stamped` it declared them too — so one
+    // reading now covers both wordings instead of two mechanisms disagreeing (round 3 of #436's review). 0 of
+    // the 3,747 replies on record write it.
+    "Page is blank. No clear text, stamped words, stamps are visible.",
+    "Page is blank. Nothing legible, scrawled content, drawings are present.",
+    "Page is blank. No printed text, and stamped words, marks are visible.",
+    "Page is blank. No clear text, printed words, stamps are visible.",
     // No finite verb behind the joint: a fragment, so the noun is still a member. Whether a fragment
     // affirms at all is #435's question and `verblessAffirmation`'s answer, not this one's.
     "Page is blank. No printed text, and handwriting.",

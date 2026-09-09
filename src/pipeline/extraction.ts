@@ -2341,6 +2341,16 @@ function negatedInList(tokens: Word[], i: number, reach: number[]): boolean {
 // this section chooses everywhere: that page is reported FAILED and redrawn, where the mistake in the other
 // direction ships a sheet of handwriting empty with nothing recorded (#190, #371). A determiner, an `only`,
 // a `but` or a full stop still refuse without any of this, as before.
+//
+// THE COST ON THE OTHER SIDE, stated for the same reason, and it is the fatal direction: because a
+// coordination that continues across the named noun is read as a denial still listing, a noun that heads an
+// AFFIRMED list is read as a member and its page is delivered empty — `No clear text, stamped words, stamps
+// are visible.`, `No printed text, and stamped words, marks are visible.`, whichever joint they use. It is
+// taken because the two readings are one sentence: `No printed words, and lines, characters are visible.` has
+// that shape and denies three things. #434's bound refused 24 of 24 such rows over its own grid where this
+// declares them, but on the vocabulary of the modifier alone — with `printed` in place of `stamped` it
+// declared them too — so what changes is that one reading now covers both, not that a control was removed.
+// 0 of the 3,747 replies on record write it (round 3 of this change's review, which measured it).
 function secondClauseJoint(tokens: Word[], negator: number, i: number, reach: number[]): boolean {
   const verb = reach[i + 1]!;
   if (verb < 0) return false;

@@ -1749,14 +1749,26 @@ the sheet. A denial keeps all of its escape routes: three or more members (`No p
 characters are visible.`), a final `or` joint (`No text, images, or other content is visible.`), a joiner
 behind its last member (`No writing, figures or stamps are present.`), a comma on the named noun itself
 even where the list has no joiner anywhere (`No printed words, lines, characters are visible.`), or no
-verb behind the comma at all (`No printed text, and handwriting.`). The one shape this reads wrongly, stated because nothing in the
-sentence distinguishes it: a **two-member** denial written `No text, and images are visible.` or
+verb behind the comma at all (`No printed text, and handwriting.`).
+
+Two shapes this reads wrongly, stated because nothing in the sentence distinguishes them. A **two-member**
+denial written `No text, and images are visible.` or
 `No text or images, document headings are visible.` is read as a clause and the blank page is reported.
 That direction is a glance; the other is a sheet of handwriting delivered empty. The second of those was
 documented here as a declaration until #436 — `document` and `body` are read as modifiers, and the
 sentence was delivered — and it is refused now, because the identical sentence with `scrawled` in place
 of `document` was refused already and leaving the two apart is the vocabulary deciding which pages
 survive.
+
+The other runs the fatal way, and is the price of reading a continuing coordination as a list: a named
+noun that heads an **affirmed** list is read as a member of the denied one, so `No clear text, stamped
+words, stamps are visible.` and `No printed text, and stamped words, marks are visible.` are delivered
+empty. The two readings are one sentence — `No printed words, and lines, characters are visible.` has that
+shape and denies three things — and the rule this replaced refused 24 of 24 such wordings on the **form of
+the modifier** alone, declaring the same sentence with `printed` in place of `stamped`, so what changes is
+that one reading covers both rather than two mechanisms disagreeing. None of the 3,747 replies on record
+writes it, and all of the wordings above are pinned in `test/envelope-as-content.test.ts` so the class
+cannot widen unobserved.
 
 This replaced a rule that read the FORM of the word — a comma ended the walk only once it had crossed
 one of the participles #431 added — under which `and stamped words` was refused while `and printed
