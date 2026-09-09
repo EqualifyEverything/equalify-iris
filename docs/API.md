@@ -974,8 +974,8 @@ The events worth grepping for have a section each below, and the index is a link
 the index when you have a `type` off a log line and want to know what it means; read a section when
 you want to know what the field it names is for and what it costs.
 
-**The index is the whole log.** `src/` emits **116** event types and every one of them has a section
-below — **111** sections, because a few cover a pair of events that are only read together. So a
+**The index is the whole log.** `src/` emits **117** event types and every one of them has a section
+below — **112** sections, because a few cover a pair of events that are only read together. So a
 `type` you cannot find here is not one the index skipped: it is a misread line, or a name `src/` no
 longer emits.
 
@@ -1053,6 +1053,7 @@ emits fails it too.
 | [`delivered_structure`](#delivered_structure) | Four structural defects **no rule in the gate reports** |
 | [`delivered_alt`](#delivered_alt) | A placeholder where a description belongs, in the file the caller receives |
 | [`editor_markers_changed`](#editor_markers_changed) | A `[not legible]` marker count changed across one correction round |
+| [`editor_list_markers_split`](#editor_list_markers_split) | Half of the one list conversion the editor is licensed to make |
 | [`editor_truncated`](#editor_truncated) | A correction round's response hit the model's output ceiling |
 | [`editor_salvaged`](#editor_salvaged) | The truncated reply was read as far as it got |
 | [`editor_salvage_declined`](#editor_salvage_declined) | The reply could not be read as a prefix, and why |
@@ -3403,6 +3404,35 @@ the flattened view strips bracketed tokens before comparing words.
 
 `more` is a placeholder written over words the extractor did read, which no instruction in the
 loop allows.
+
+### `editor_list_markers_split`
+
+Half of the one list conversion the Copy Editor is licensed to make (`iteration`, `shape`, plus
+`before` and `after`, each `{ items, lettered, printed }`).
+
+The licence: a bare `<ol>` whose every item's text opens with one sequence's marker — `(a)`, `(b)`,
+`(c)` — is a list whose marker was transcribed into its items instead of set on the list, and the
+editor may set the `type` those markers show **and** strip them from the text. That is one change,
+and each half of it alone is a defect:
+
+* `shape: "text_markers_gone"` — the markers left the items and the list did not gain them, so a list
+  the page printed `(a)`, `(b)`, `(c)` now prints 1, 2, 3 and **no copy of the letters is left in the
+  document**. This is the loss.
+* `shape: "marker_announced_twice"` — the list gained its letters and the items kept theirs, so a
+  reader hears "a" and then "(a)". The same defect an extraction can produce, arriving from the
+  review loop instead.
+
+`lettered` counts items whose **announced** marker is not a digit; `printed` counts items whose own
+text opens with a marker. Both are read off the flattened view, because that is where a `type` and a
+transcribed marker are visible at once. A complete conversion moves the two together and logs
+nothing.
+
+Silent where the round changed `items`: a deleted item takes its printed marker out of the count with
+it, and removing content the document printed twice is what the loop is for.
+
+This is also the line that says which kind of shrink a `refusal_with_loss` was looking at. The
+licensed strip removes visible text, so the block lands in `shrunk` exactly as a real loss does, and
+neither that report nor the flattened coverage comparison can tell the two apart on its own.
 
 ### `editor_truncated`
 

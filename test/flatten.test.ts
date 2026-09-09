@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
 import { flatten } from "../src/pipeline/flatten.ts";
 import { contentCoverage, MIN_CONTENT_COVERAGE } from "../src/pipeline/feedback.ts";
-import { EDITOR_SYSTEM, READER_SYSTEM } from "../src/pipeline/review.ts";
+import { EDITOR_SYSTEM, READER_SYSTEM, listMarkerHalfEdit, listMarkers } from "../src/pipeline/review.ts";
 
 // `flatten` has one invariant: it may reorganize text, but it may not LOSE any.
 // Both of its consumers fail silently when it does.
@@ -706,6 +706,39 @@ test("every attribute flatten reads a marker from is one the editor is told to c
     /That is ONE change, not two/.test(EDITOR_SYSTEM),
     "the editor's list conversion does not say that setting the type and stripping the text are one change",
   );
+});
+
+test("half of the licensed list conversion is reported and the whole of it is not", () => {
+  // The prompt is the only thing standing between a licensed strip and a deleted marker, so the two
+  // halves get the check `droppedHrefs` gets: read off the same view a reader hears, because that is
+  // where `type="a"` and the item's own "(a)" are both visible at once.
+  const printed = `<ol><li>(a) Direct federal outlays</li><li>(b) Reimbursed state administration</li></ol>`;
+  const converted = `<ol type="a"><li>Direct federal outlays</li><li>Reimbursed state administration</li></ol>`;
+  const stripped = `<ol><li>Direct federal outlays</li><li>Reimbursed state administration</li></ol>`;
+  const doubled = `<ol type="a"><li>(a) Direct federal outlays</li><li>(b) Reimbursed state administration</li></ol>`;
+  // The whole conversion: the letters leave the text and the list announces them, so the two counts
+  // move together and nothing is reported.
+  assert.equal(listMarkerHalfEdit(printed, converted), null);
+  assert.equal(listMarkerHalfEdit(printed, printed), null);
+  // Each half, which is each of the two defects the prompt names.
+  assert.equal(listMarkerHalfEdit(printed, stripped), "text_markers_gone");
+  assert.equal(listMarkerHalfEdit(printed, doubled), "marker_announced_twice");
+  // The counts behind those verdicts, because a verdict read off a count nobody checked is a claim
+  // about arithmetic rather than about the document.
+  assert.deepEqual(listMarkers(printed), { items: 2, lettered: 0, printed: 2 });
+  assert.deepEqual(listMarkers(converted), { items: 2, lettered: 2, printed: 0 });
+  assert.deepEqual(listMarkers(stripped), { items: 2, lettered: 0, printed: 0 });
+  assert.deepEqual(listMarkers(doubled), { items: 2, lettered: 2, printed: 2 });
+  // A round that RESIZED a list is not read at all: a deleted item takes its printed marker with it,
+  // and removing content the document printed twice is what this loop is for. Both directions,
+  // because a list that grew moves the same two counts the other way.
+  assert.equal(listMarkerHalfEdit(printed, `<ol><li>(a) Direct federal outlays</li></ol>`), null);
+  assert.equal(listMarkerHalfEdit(converted, `${converted}${converted}`), null);
+  // And an unordered list has no marker to lose either way.
+  assert.equal(listMarkerHalfEdit(`<ul><li>(a) Alpha</li></ul>`, `<ul><li>Alpha</li></ul>`), null);
+  // "(see)" is three letters closed by a bracket and is not a marker; "(iii)" is.
+  assert.equal(listMarkers(`<ol><li>(see) Alpha</li></ol>`).printed, 0);
+  assert.equal(listMarkers(`<ol><li>(iii) Alpha</li></ol>`).printed, 1);
 });
 
 test("a page too deep for the recursive walk keeps its text instead of throwing", () => {

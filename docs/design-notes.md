@@ -1094,8 +1094,9 @@ Places where a decision was left open, and where v1 intentionally stops:
   The Reader's side of the same asymmetry is that a double marker has two resolutions and only one is
   right. `[List item a] (a) Estimating` clears if the text drops its copy, and it also clears if the
   `<ol>` loses its `type` — which leaves a list printing 1, 2, 3 where the page printed letters, and
-  no gate can see that either. `READER_SYSTEM` therefore says which copy goes (the text's) rather
-  than reporting the duplication and leaving the direction to whoever fixes it.
+  no gate can see that either. `READER_SYSTEM` therefore says which copy goes — **the text's, where the
+  two markers agree in kind**, which is the condition the next paragraph is about, and never the
+  duplication reported with the direction left to whoever fixes it.
 
   **And the direction reverses on the shape that actually occurs.** Counting the corpus by whether a
   list's marker is on the list or in its items: of the 1,075 replies with an `<ol>`, **7 have a bare
@@ -1120,6 +1121,29 @@ Places where a decision was left open, and where v1 intentionally stops:
   deletion the paragraph above exists to prevent. A broken sequence, an unmarked item, or markers that
   do not start where the list does all fall back to reporting it, because a list converted on a guess
   announces a marker no page printed while one left alone still reads its letters out.
+
+  **A licensed removal of visible text needs its own check, because the two halves of it are defects
+  and the prose gate cannot see either.** `listMarkerHalfEdit` (`review.ts`) reads the announced
+  marker and the item's own printed marker off `flatten` — the view where `type="a"` and a transcribed
+  `(a)` are visible at once — and reports the two states the licence forbids: `text_markers_gone`,
+  markers leaving the items with the list not gaining them, which is the page's letters deleted
+  outright; and `marker_announced_twice`, the list gaining them with the items keeping theirs, which is
+  #334's defect arriving from the review loop instead of from an extraction. A complete conversion
+  moves both counts together and is silent, which is why this compares two counts instead of watching
+  the prose shorten. It sits beside `droppedHrefs` and `markerCounts` in the correction round, the
+  other two records of something a round took away that no gate sees. It is **silent where the round
+  changed the number of items**: a deleted item takes its printed marker out of the count with it, and
+  a signal that fires on the loop's own licensed deletions is one nobody reads.
+
+  That check is also what makes the licensed strip legible where it collides with the loss machinery,
+  which it does and is left doing. `proseShortened` is a comparison of visible text, so the strip is a
+  `shrunk` block like any other: a reply that converts a list **and** carries a refusal is refused
+  whole as `refusal_with_loss`, and on a truncated round `lostAt` stops the claim at the converted
+  block. Both cost a round rather than shipping wrong markup, and the overlap is not new — a licensed
+  link-text rewrite shortens prose too. An exemption would have to live inside `gaveContentUp`, the gate
+  whose whole job is refusing silent content loss, to spare one corpus list's worth of conversions; the
+  thing that was actually missing was a maintainer's ability to tell a sanctioned strip from a real one
+  in the log, and that is a line rather than a change to the gate.
 
   And every annotation that explains *correct* markup — `[spans N columns]`,
   `[spans N rows]`, `[decorative, alt empty]` — exists because the prompt tells the Reader that an

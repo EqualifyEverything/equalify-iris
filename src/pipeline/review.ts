@@ -711,6 +711,75 @@ Respond with ONLY JSON: { "html": "<corrected section>" }`;
 // positional `BODY_MARKERS[1]` would be the wrong way to say which is meant.
 export { BODY_MARKERS, MARKER_NOT_LEGIBLE, MARKER_PAGE_INCOMPLETE, markerCounts };
 
+// An ordered item as a reader meets it: the marker the list announces, and the marker the item's own
+// text prints. Read off `flatten` rather than off the markup, because what a reader hears is the whole
+// question here and the view is where the answer already is — `type="a"` and `value="5"` together
+// announce "e", and no attribute read on its own says that.
+//
+// The head of the item's text only, and a marker's shape rather than any bracketed thing: a single
+// letter, a run of roman letters, or up to three digits, closed by ")" or "." or "]". "(see)" is three
+// letters and no roman numeral, so it does not count; "(a)" and "(iii)" and "(12)" do.
+const ANNOUNCED_ITEM = /\[List item ([^\]]+)\]([^[]*)/g;
+const PRINTED_MARKER = /^\s*[([]?\s*(?:[a-z]|[ivxlcdm]{2,5}|\d{1,3})\s*[).\]]/i;
+
+interface ListMarkers {
+  // Every announced ordered item, which is what makes the two counts below comparable across a
+  // round: see `listMarkerHalfEdit` for why a round that changed this number is not read at all.
+  items: number;
+  // Items whose ANNOUNCED marker is not a digit, which is a list carrying its letters in `type`.
+  lettered: number;
+  // Items whose own text opens with a marker, announced or not — the shape a page's letters take
+  // when they were transcribed into the item instead of set on the list.
+  printed: number;
+}
+
+export function listMarkers(html: string): ListMarkers {
+  let items = 0;
+  let lettered = 0;
+  let printed = 0;
+  for (const m of flatten(html).matchAll(ANNOUNCED_ITEM)) {
+    items++;
+    if (!/^\d+$/.test(m[1])) lettered++;
+    if (PRINTED_MARKER.test(m[2])) printed++;
+  }
+  return { items, lettered, printed };
+}
+
+// The two halves of the conversion EDITOR_SYSTEM licenses, each of which is a defect on its own. That
+// licence is the one edit in the prompt that asks for visible text to be REMOVED as its whole point —
+// the letters move out of the items and onto the list — so the two states to watch for are the ones
+// where only half of it happened, and nothing else in the pipeline can see either:
+// `contentCoverage` strips [...] before comparing words so the announced marker is invisible to it,
+// `markerCounts` watches BODY_MARKERS only, and the item count `navigation_lost` reads does not move
+// when a marker changes shape.
+//
+// `text_markers_gone` is the loss: markers left the items and the list did not gain them, so a list
+// the page printed (a), (b), (c) now prints 1, 2, 3 and no copy of the letters is left anywhere in the
+// document. `marker_announced_twice` is the other half: the list gained its letters and the items kept
+// theirs, which is #334's own defect arriving from this loop instead of from an extraction.
+//
+// A COMPLETE conversion fires neither, and that is the point of comparing both counts rather than
+// watching the prose shorten: the letters leaving the text is exactly balanced by the list announcing
+// them.
+//
+// Silent where the ROUND CHANGED THE NUMBER OF ITEMS, and that limit is stated rather than
+// approximated: an item the editor deleted takes its printed marker out of the count with it, and
+// removing content the document printed twice is this loop's job. A fall in `printed` that is one
+// deleted item and a fall that is a stripped marker are the same two numbers, so a round that
+// resized a list is not read here at all. The cost is a half-edit made in the same round as a
+// deletion, which this cannot see; the alternative is a line that calls the loop's own licensed
+// deletions a lost marker, and a signal that fires on correct work is one nobody reads.
+export type ListMarkerHalfEdit = "text_markers_gone" | "marker_announced_twice";
+
+export function listMarkerHalfEdit(before: string, after: string): ListMarkerHalfEdit | null {
+  const was = listMarkers(before);
+  const now = listMarkers(after);
+  if (now.items !== was.items) return null;
+  if (now.printed < was.printed && now.lettered <= was.lettered) return "text_markers_gone";
+  if (now.lettered > was.lettered && now.printed >= was.printed) return "marker_announced_twice";
+  return null;
+}
+
 const CHUNK_BUDGET = 24000;
 const CHUNK_OVERLAP = 2000;
 
@@ -3194,6 +3263,20 @@ export async function runReview(
         ...(more.length ? { more } : {}),
         before: was,
         after: now,
+      });
+    }
+    // See `listMarkerHalfEdit`: half of the one conversion this prompt licenses, in either direction.
+    // Beside the two checks above because it is the same kind of fact — something a round took away
+    // that no gate can see — and it is the line that tells a reader of `refusal_with_loss` which
+    // shrink they are looking at, since the licensed strip lands in `shrunk` exactly as a real loss
+    // does and the report cannot tell them apart on its own.
+    const halfEdit = listMarkerHalfEdit(before, body);
+    if (halfEdit) {
+      ctx.log.event("editor_list_markers_split", {
+        iteration: iterations,
+        shape: halfEdit,
+        before: listMarkers(before),
+        after: listMarkers(body),
       });
     }
     // Last, so a round that was answered a section at a time is measured like any other — its
