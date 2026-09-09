@@ -618,6 +618,30 @@ test("a note only the continued half's caption carries is not the free path's to
   );
 });
 
+test("a note the merge kept as a row is not a note the merge lost", () => {
+  // The mirror of the pair rule 6 joins for free: the note is a ROW on the first half and in the
+  // CAPTION on the second. `joinInCode` keeps the first half's caption and its note row, so the note is
+  // in the delivered table and nothing went — but a kept-check reading the caption alone called that a
+  // loss and refused a join with nothing wrong with it. Both placements are reachable (#374's census:
+  // 56 arm-pages with the note inside the caption, 12 outside), so a pair whose halves disagree about
+  // which is a shape to expect.
+  const first = `<table><caption>Table 5.—Debt</caption>${HEAD}<tbody>${noteRow("[In millions of dollars]")}${dataRow("Alabama")}</tbody></table>`;
+  const second = `<table><caption>Table 5.—Debt [In millions of dollars]—Continued</caption>${HEAD}<tbody>${dataRow("Vermont")}</tbody></table>`;
+  const pair = onePair(first + second);
+
+  const coded = joinInCode(pair);
+  assert.ok("html" in coded, JSON.stringify(coded));
+  assert.ok(coded.html.includes("[In millions of dollars]"), "the fixture is not the case being tested");
+  assert.equal(verifyJoin(pair, coded.html), null);
+
+  // And it is still refused when the merge keeps it in neither place — as `labels_lost` rather than as
+  // `caption_note_lost`, because on THIS pair the note is also a row, its bracketed text is that row's
+  // label, and the label check runs first. Both name the same single loss; the order is the one chosen
+  // deliberately, so the reason a pair reports is the dearest thing it lost.
+  const neither = `<table><caption>Table 5.—Debt</caption>${HEAD}<tbody>${dataRow("Alabama")}${dataRow("Vermont")}</tbody></table>`;
+  assert.equal(verifyJoin(pair, neither), "labels_lost:1");
+});
+
 test("a fullwidth-bracketed note is a note in both readers, or it ships twice", () => {
   // One arm writes ［Percentage distribution］ with fullwidth brackets — 1 of the 68 delimited notes in
   // #374's corpus. It is read because the cost is a character class, and because the two readers have

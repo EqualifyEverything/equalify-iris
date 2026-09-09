@@ -3540,12 +3540,30 @@ keeps the first half's caption and discards the second's — and `p049`/`p050` a
 that shape. A refusal costs one editor call rather than the table: the pair goes on to the Copy
 Editor, whose rule 4 asks for the note either half's caption carries.
 
+A note counts as kept where a reader meets it as the table's own: in the joined caption, or as a
+surviving note row. Reading the caption alone refused the mirror of the pair rule 6 joins for free —
+the note a ROW on the first half and a caption note on the second, where the row survives the merge
+and nothing is lost.
+
 Both bracket widths are read, ASCII and fullwidth, and the parenthesised spelling is not — a check
 demanding every parenthesised run survive would demand the survival of `(continued`, which rule 4
 requires dropped. So a parenthesised note (6 of the 68 delimited notes in the reference corpus) and
 a note printed with no delimiter at all (3 arm-pages) can still go missing without this seeing it.
-Delimiters are compared as printed, so a merge that reprinted an ASCII note in fullwidth brackets is
-refused — the one way this check can cost a join that lost nothing.
+
+The rest is stated as a property rather than a list of cases, because the list was written twice and
+was short both times: **a note the merge kept in any form this cannot see reads as a note lost.** It
+matches a run's exact characters and looks only in a caption or a note row, so a rewritten
+delimiter, a reworded note or a note moved elsewhere in the table all refuse. Each refusal is safe —
+the pair declines and both halves ship — and each costs a join that lost nothing, which is the
+reason the match is not loosened instead: a looser one would forgive the drops this exists to catch.
+
+It is a shape test and not a reading, so what it owes is every bracketed run in either caption and
+not only a note of measure. A caption carrying `[Sheet 2 of 3]` is owed too, and two captions
+carrying different runs — `[In millions of dollars]` against `[In thousands]` — can be satisfied by
+no joined caption that does not invent, so that pair declines for good and reports the loss rather
+than the units disagreement that actually happened. Left that way on purpose: every caption bracket
+in the reference corpus is a note of measure, so a reason for the disagreement would be a
+distinction drawn on no measured pair.
 
 The order is only which reason a failed pair reports, since every one of them refuses the join, and
 `caption_note_lost` is last on purpose: a merge that dropped the note *and* lost rows should say

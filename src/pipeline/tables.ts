@@ -491,7 +491,18 @@ export function verifyJoin(pair: ContinuationPair, merged: string): string | nul
   // its decline and the pair goes on to the Copy Editor, whose rule 4 asks for the note either half's
   // caption carries — so the check is one the prompt can satisfy, which is what makes refusing the
   // right answer rather than a dead end.
-  const kept = captionNotes(joined.caption);
+  //
+  // What counts as KEPT is the note anywhere in the joined table that a reader meets it as the table's
+  // own — its caption, or a surviving note row. Reading the caption alone refused the mirror of the pair
+  // rule 6 now joins for free: the first half printing the note as a ROW and the second in its caption
+  // leaves the row in the merged table, nothing lost, and a caption-only reading called that a loss.
+  // Both placements are reachable — #374's census has the note inside the caption on 56 arm-pages and
+  // outside it on 12 — so the pair whose halves disagree about which is a shape to expect and not one to
+  // construct.
+  const rowNotes = [...tables[0].querySelectorAll("tr")]
+    .filter(isUnitNoteRow)
+    .map((r) => normalizeCell(r.textContent ?? ""));
+  const kept = new Set([...captionNotes(joined.caption), ...rowNotes]);
   const owed = new Set([...captionNotes(pair.first.caption), ...captionNotes(pair.second.caption)]);
   if ([...owed].some((n) => !kept.has(n))) return "caption_note_lost";
   return null;
@@ -560,9 +571,23 @@ function isUnitNoteRow(row: Element): boolean {
 //
 // The delimiters are compared as printed, not folded together: `normalizeCell` takes out soft hyphens
 // and collapses whitespace and does nothing to bracket width, so a merge that reprinted an ASCII note
-// in fullwidth brackets reads as a note dropped and one added, and is refused. That is the safe
-// direction — the pair declines and both halves ship — but it is a refusal for a delimiter and not for
-// a loss, and it is the one way this check can cost a join that lost nothing.
+// in fullwidth brackets reads as a note dropped and one added.
+//
+// Stated as the property rather than as a list of cases, because the list was written twice here and
+// was short both times: a note the merge kept in any form this cannot see reads as a note lost. It
+// matches on the run's exact characters and finds it only in a caption or a note row, so a rewritten
+// delimiter, a reworded note, or a note moved somewhere else in the table all refuse. Every one of
+// those refusals is safe — the pair declines and both halves ship — but every one costs a join that
+// lost nothing, and the cost is the reason the match is not loosened instead: a looser one would start
+// forgiving the drops this exists to catch.
+//
+// It is also a SHAPE test and not a reading, so what it owes is every bracketed run in either caption
+// and not only a note of measure. A caption carrying `[Sheet 2 of 3]` is owed that too, and two
+// captions carrying different runs — `[In millions of dollars]` against `[In thousands]` — can be
+// satisfied by no joined caption that does not invent, so the pair declines for good and reports the
+// loss rather than the disagreement, which is the thing that actually happened and which nothing here
+// can name. Left as it is on purpose: every caption bracket in the reference corpus is a note of
+// measure, so a reason for the disagreement would be a distinction drawn on no measured pair.
 function captionNotes(caption: string): Set<string> {
   return new Set((caption.match(/[[［][^\]］]+[\]］]/g) ?? []).map((n) => normalizeCell(n)));
 }
