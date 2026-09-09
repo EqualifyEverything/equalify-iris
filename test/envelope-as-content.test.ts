@@ -1677,10 +1677,11 @@ test("a name for text affirms in either part of speech, and the position was nev
   // The other direction, which is the one that costs pages: a blank page's log denies these nouns as
   // readily as a full page's affirms them, and widening what affirms without widening the walk that finds
   // the negator would hand the last member of a denial the verb of its own clause. That is #190's defect
-  // arriving by the back door, and these two rows are the ones that fail when the walk is left narrow —
+  // arriving by the back door, and the first two rows are the ones that fail when the walk is left narrow —
   // measured by reverting that one call and re-running, not assumed.
   for (const log of [
     "Page is blank. No typed or stamped characters are present.",
+    "Page is blank. No stamped or signed marks are present.",
     "Page is blank. No footnotes or annotations appear.",
     "Page is blank. No handwritten notes are visible.",
     "Page is blank. Nothing handwritten or cursive is visible.",
@@ -1698,24 +1699,73 @@ test("a name for text affirms in either part of speech, and the position was nev
     assert.equal(declaredBlank({ html: "", log }), true, log);
   }
 
-  // The one word the wider vocabulary shares with `QUALIFIER` is `typed`, and the two guards written for
-  // `printed` cover it without an entry of their own, because both test `QUALIFIER` membership rather than
-  // a name list: the copula guard (#220's blank page, a denial whose participle would otherwise take the
+  // What that same widening must NOT buy, and the review of this change is what found it: the walk that
+  // steps over a coordination's members steps into a SECOND clause just as readily, so a page whose log
+  // says it carries handwriting was delivered empty — #431's own failure inverted, and the silent
+  // direction. `negatedInList` bounds its new crossings at a comma, and these are the rows that bound
+  // moves: 50 of the 60 (word, frame) pairs in that grid declare blank without it. Both frames, because
+  // the negator's own member is a noun in one and a bare qualifier in the other, and only one of those
+  // leaves an `AFFIRMED_NOUN` in the walk's way.
+  for (const word of "stamped scrawled inscribed cursive watermarked footnotes annotations barcodes".split(" ")) {
+    for (const frame of [
+      `No clear text, and ${word} words are visible.`,
+      `Nothing legible, and ${word} content is present.`,
+    ]) {
+      assert.equal(declaredBlank({ html: "", log: `Page is blank. ${frame}` }), false, frame);
+    }
+  }
+  // And the reading that bound must not touch, which is this branch's documented one rather than an
+  // accident of the vocabulary: a second clause whose modifier base already holds still declares blank, so
+  // the bound is scoped to the crossings #431 added and not to the walk. Base answers both of these the
+  // same way, which is what makes them the control here.
+  for (const log of [
+    "Page is blank. No clear text, and printed words are visible.",
+    "Page is blank. Nothing legible, and handwritten content is present.",
+    "Page is blank. No printed text, and handwriting is present.",
+    "Page is blank. No printed words, lines, or characters are visible.",
+  ]) {
+    assert.equal(declaredBlank({ html: "", log }), true, log);
+  }
+  // The discriminators that branch names — a determiner, an `only`, a verb in the second clause, a `but` —
+  // all still end the walk, so the bound is not carrying them.
+  for (const log of [
+    "Page is blank. No clear text, and the scrawled words are visible.",
+    "Page is blank. No clear text, and only scrawled words are visible.",
+    "Page is blank. No clear text is visible, and scrawled words are visible.",
+    "Page is blank. No clear text, but scrawled words are visible.",
+  ]) {
+    assert.equal(declaredBlank({ html: "", log }), false, log);
+  }
+
+  // The wider vocabulary overlaps `QUALIFIER` in `typed` alone, and the two guards written for `printed`
+  // therefore do NOT cover it by testing `QUALIFIER` membership — which is what this file claimed until the
+  // review of #431's fix measured it, and the claim was wrong for 13 of the 13 participles it tried. Both
+  // guards ask `modifierForm` instead, the union of the qualifier list with the names for text in their
+  // adjective form: the copula guard (#220's blank page, a denial whose participle would otherwise take the
   // verb ten words along) and the folio guard (#222's page, which prints nothing but its own number). So
-  // the pairs have to agree, and what they agree on is the answer `printed` already gave.
-  for (const [typed, printed] of [
-    ["Page is blank. The typed page number is visible.", "Page is blank. The printed page number is visible."],
-    [
-      "Page is blank. No page number is typed on the page itself, but the file metadata indicates this is page 4 of 25.",
-      "Page is blank. No page number is printed on the page itself, but the file metadata indicates this is page 4 of 25.",
-    ],
-    ["Page is blank. The heading is typed on the page.", "Page is blank. The heading is printed on the page."],
-  ] as [string, string][]) {
-    assert.equal(declaredBlank({ html: "", log: typed }), declaredBlank({ html: "", log: printed }), typed);
+  // every one of these pairs has to agree, and what they agree on is the answer `printed` already gave.
+  for (const word of "typed stamped signed embossed watermarked annotated engraved scrawled inscribed".split(" ")) {
+    for (const [wide, printed] of [
+      [`Page is blank. The ${word} page number is visible.`, "Page is blank. The printed page number is visible."],
+      [
+        `Page is blank. No page number is ${word} on the page itself, but the file metadata indicates this is page 4 of 25.`,
+        "Page is blank. No page number is printed on the page itself, but the file metadata indicates this is page 4 of 25.",
+      ],
+    ] as [string, string][]) {
+      assert.equal(declaredBlank({ html: "", log: wide }), declaredBlank({ html: "", log: printed }), wide);
+    }
   }
   // Stated both ways round, because a pair that agrees proves nothing about which answer it agrees on.
   assert.equal(declaredBlank({ html: "", log: "Page is blank. The typed page number is visible." }), true);
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. The stamped page number is visible." }), true);
   assert.equal(declaredBlank({ html: "", log: "Page is blank. The heading is typed on the page." }), false);
+  // What the folio guard skips is the SUBJECT and not the sentence, for the wider vocabulary exactly as for
+  // `printed`: a second noun still affirms, so only a log whose sole named subject is the folio is let
+  // through.
+  assert.equal(
+    blankDeclaration({ html: "", log: "Page is blank. The stamped page number and a heading are visible." }).affirmed,
+    "heading are visible",
+  );
 });
 
 // The one caller that reads the second list on different terms, and why it has to. The object of a

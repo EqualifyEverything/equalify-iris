@@ -1513,7 +1513,10 @@ const NAMES_TEXT = new RegExp(String.raw`\b(?:${TEXT_NOUN})\b`, "i");
 // same claim in the noun form was refused (#431). The two uses want the same words for the same reason —
 // these are names for text — and the second one is why a word added here now costs more than base's
 // verdict: it can also refuse a page, so the policy below is read with `NEGATED` and `negatedInList` in
-// mind rather than as a free list.
+// mind rather than as a free list. `negatedInList` is the sharp case and the review of #431's fix found it:
+// a word here is crossed by the walk that looks for a negator, which is what keeps an attributive DENIAL
+// denied, and the same crossing reaches into a second clause unless the walk is bounded there. Read that
+// function's bound before adding a word.
 //
 // WHAT THE FIGURES HERE USED TO SAY, corrected because they were the reasoning behind #431 and they were
 // confounded. This paragraph read: the contradiction check fires on 14 of 14 wordings that put a name for
@@ -1968,11 +1971,13 @@ const AFFIRMED_NOUN = new RegExp(`^(?:${TEXT_NOUN})$`, "i");
 // about the modifier slot, and a rule about that slot would still have delivered "cursive is visible"
 // empty.
 //
-// Read by four of the five callers that ask `AFFIRMED_NOUN`, and by the fifth on its own terms: the
-// object of a denial's preposition is where the file's note on `printed` says the error runs toward a
-// false failure notice rather than toward a glance, so there the second list is read only where the
-// object phrase ends at the word. Which caller reads what is decided at each one, because each asks a
-// different question of the word, and the reasons are at the call sites.
+// Read plainly by three of the five callers that ask `AFFIRMED_NOUN`, and on its own terms by the other
+// two, which is the part worth reading before changing any of them. The object of a denial's preposition
+// is where the file's note on `printed` says the error runs toward a false failure notice rather than
+// toward a glance, so there the second list is read only where the object phrase ends at the word. The
+// negator walk reads it under a bound of its own, because there the wider vocabulary crosses a second
+// clause as readily as a coordination member. Which caller reads what is decided at each one, because each
+// asks a different question of the word, and the reasons are at the call sites.
 //
 // `NAMES_TEXT_FORM` is boundary-tested rather than anchored so that a hyphenated compound of a word it
 // carries is read (`hand-written`, `rubber-stamped`), and that is what is wanted here too: these
@@ -2043,11 +2048,22 @@ function definiteBefore(tokens: Word[], i: number): boolean {
   return k >= 0 && DEFINITE.has(tokens[k]!.word);
 }
 
+// A word that names text and can also stand in front of a noun as its adjective, which is the class both
+// this guard and `folioAt`'s caller need. `QUALIFIER`'s thirteen words are not that class: `NAMES_TEXT_FORM`
+// is ~60 participles in none of them, and when the affirmation reader started reading that list (#431) it
+// gained ~60 subjects these two guards could not see. Asking `QUALIFIER` covered `printed` and `typed` and
+// nothing else, so #220's shape returned for `stamped signed embossed watermarked annotated labelled
+// engraved scrawled numbered captioned inscribed underlined highlighted` — 13 of 13 measured, each of them
+// a blank page refused and lost. `QUALIFIER` is still read because `printed` is in it and in `TEXT_NOUN`,
+// not in `NAMES_TEXT_FORM`; the union is what the guards are about.
+function modifierForm(word: string): boolean {
+  return QUALIFIER.has(word) || NAMES_TEXT_FORM.test(word);
+}
+
 // A word that is both a name for text and something a page can BE is a participle behind a copula, and
-// there are exactly two of those: `printed`, in `TEXT_NOUN` and in `QUALIFIER` both, and `typed`, in
-// `QUALIFIER` and in `NAMES_TEXT_FORM` — which became one of these when the affirmation reader started
-// reading that list (#431), and this guard covered it with no entry of its own, because what it tests is
-// `QUALIFIER` membership rather than either name list. Same overlap `exceptiveOrLocativeObject` settles
+// the list of them is `modifierForm` above — `printed` from `QUALIFIER`, `typed` from both, and every
+// participle `NAMES_TEXT_FORM` carries, which is why this guard reads the union and not `QUALIFIER`
+// alone. Same overlap `exceptiveOrLocativeObject` settles
 // for the object of a denial, on both of its branches. "No page number IS PRINTED on the
 // page itself, but the file metadata indicates this is page 4 of 25" is a denial of the page number,
 // and taking `printed` for a subject of its own handed it the next affirming verb in the sentence —
@@ -2056,7 +2072,7 @@ function definiteBefore(tokens: Word[], i: number): boolean {
 // through `heading`, which is a subject the loop reads two words earlier and finds the same `is` for.
 const COPULA = new Set("is are was were be been being isn't aren't wasn't weren't".split(" "));
 function participleAfterCopula(tokens: Word[], i: number): boolean {
-  if (!QUALIFIER.has(tokens[i]!.word)) return false;
+  if (!modifierForm(tokens[i]!.word)) return false;
   const before = tokens[i - 1];
   return before !== undefined && COPULA.has(before.word);
 }
@@ -2073,11 +2089,14 @@ function participleAfterCopula(tokens: Word[], i: number): boolean {
 //
 // The refusal came from `printed` every time. It is in `TEXT_NOUN` for the noun sense ("printing is
 // visible") and here it is an adjective on the number, the same overlap `participleAfterCopula`
-// settles for the copula shape; the intersection of `QUALIFIER` with what affirms text is that word and
-// `typed` (#431), so reading the qualifier list is a way of asking whether this subject could be an
-// adjective at all. `typed page number` needs no row of its own here for the reason `numerals` needs
-// none: the guard is `folioAt` on the words AFTER the qualifier, and which qualifier stands in front of
-// them does not change what they are.
+// settles for the copula shape. What the caller asks is `modifierForm` — whether this subject could be an
+// adjective at all — and that is the union of `QUALIFIER` with `NAMES_TEXT_FORM` rather than the qualifier
+// list alone, because `The stamped page number is visible.` is the same folio and the archival case for it
+// is stronger than `printed`'s: a rubber-stamped folio or Bates number is how a blank sheet in a legal or
+// archival scan reports itself, and asking `QUALIFIER` refused 13 of the 13 participles measured (#431's
+// review, round 1). `typed page number` and `stamped page number` need no row of their own for the reason
+// `numerals` needs none: the guard is `folioAt` on the words AFTER the modifier, and which modifier stands
+// in front of them does not change what they are.
 //
 // What is skipped is the SUBJECT, not the statement: the loop keeps reading, so "The printed page
 // number and a heading are visible." still affirms through `heading` two words later, and only a log
@@ -2222,18 +2241,57 @@ const NEGATOR_CHAIN_MAX = 16;
 // — which is the same asymmetry `TEXT_NOUN` encodes everywhere else in this section. So a negator
 // whose own next word is a conjunction is not one this noun sits in a list with.
 function negatedInList(tokens: Word[], i: number): boolean {
+  // Whether the walk has crossed a word it only knows through the #431 vocabulary, which is what the
+  // comma bound below is scoped to. Base's own crossings never arm it.
+  let crossedNewForm = false;
   for (let k = i - 1; k >= 0 && i - k <= NEGATOR_CHAIN_MAX; k--) {
-    const { word } = tokens[k]!;
+    const token = tokens[k]!;
+    const { word } = token;
     if (NEGATOR.has(word) || word === "without") {
       return !(k + 1 < tokens.length && CONJUNCTION.has(tokens[k + 1]!.word));
     }
-    // Both parts of speech, and this is the caller that has to widen FIRST: the walk steps over the
-    // other members of a coordination to reach the negator that governs them all, so a list written in
-    // the attributive form — "Nothing handwritten or cursive is visible", "no typed or stamped
-    // characters" — only stays denied if this step knows those words are members too. Widening what
-    // affirms without widening this would hand the last member of a denial the verb of its own clause,
-    // which is #190's defect arriving by the back door.
-    if (QUALIFIER.has(word) || CHAIN_LINK.has(word) || affirmsText(word)) continue;
+    // THIS CALLER HAD TO WIDEN, AND THE WIDENING HAD TO BE BOUNDED, and both halves were measured against
+    // base rather than argued. The walk steps over the other members of a coordination to reach the
+    // negator that governs them all, so a denial written in the attributive form — "No typed or stamped
+    // characters are present", "No footnotes or annotations appear" — only stays denied if this step knows
+    // those words are members too. Leaving the step narrow while the affirmation reader widens hands the
+    // last member of a denial the verb of its own clause, which is #190's defect arriving by the back
+    // door, and it is not hypothetical: reverting this call alone turns two of the denials pinned in
+    // test/envelope-as-content.test.ts into refused declarations, both of them blank pages base declares.
+    //
+    // What the wider vocabulary also buys, and must not: the same step crossing the participle of a
+    // SECOND clause. "No clear text, and scrawled words are visible." reaches the `No` through
+    // `scrawled`, and a page whose log says it carries handwriting is then delivered empty — the silent
+    // direction, and #431's own failure inverted (#434's review, round 1).
+    //
+    // The bound is a comma, and it is scoped to the crossings this change added rather than to the walk,
+    // which is why it can be one at all. A bare comma cannot end this walk for everyone: the paragraph
+    // above records that doing so refuses four of the blank pages pinned in that file, `No printed words,
+    // lines, or characters are visible.` among them, because the members of a denial are separated
+    // exactly as two clauses are. But a denial's own members are reached over `or`, `and` and the nouns
+    // base already crosses, so those commas are all crossed BEFORE any participle is — the flag below is
+    // still false there and the bound never arms. It arms only where the new vocabulary is what carried
+    // the walk across, and that is the case the second clause needs.
+    //
+    // What it moves, over 30 words of the new vocabulary in the two second-clause frames: 50 of those 60
+    // rows declare blank without the bound and refuse with it, which is the whole of what round 1 found.
+    //
+    // Order-dependent by construction, and the limit is stated rather than smoothed. A denial whose
+    // participle member comes before a comma of its own — "No footnotes, annotations, or stamps are
+    // present." — arms the bound and refuses, which gives up 30 of the 150 rescues the same grid offers.
+    // Every one of those 30 is a wording base refuses as well, for the different reason that the walk
+    // stopped at the participle, so the bound costs no verdict base gets right. A second clause whose
+    // modifier is a word base already holds ("and printed words", "and handwritten content") is not
+    // reached by this bound at all — base delivers those empty today, and narrowing them reopens the trade
+    // #200 chose, which is #436 rather than a change here — and #436 is also where the asymmetry this
+    // bound leaves behind belongs, because `and scrawled words` refuses while `and printed words` does
+    // not, which is the form of the word deciding again in the one shape #431 could not reach.
+    if (crossedNewForm && token.comma) return false;
+    if (QUALIFIER.has(word) || CHAIN_LINK.has(word) || AFFIRMED_NOUN.test(word)) continue;
+    if (NAMES_TEXT_FORM.test(word)) {
+      crossedNewForm = true;
+      continue;
+    }
     return false;
   }
   return false;
@@ -2580,7 +2638,7 @@ export function contentAffirmed(scope: string): string | null {
       if (LOCATIVE_SUBSTRATE.has(word) && (definiteBefore(tokens, i) || fileNameAt(tokens, i))) continue;
       // `printed page number`, `printed folio` — a name for text dressing the one thing on the paper
       // this pipeline never delivers (`folioAt`).
-      if (QUALIFIER.has(word) && folioAt(tokens, i + 1)) continue;
+      if (modifierForm(word) && folioAt(tokens, i + 1)) continue;
       const verb = reach[i + 1]!;
       if (verb < 0) continue;
       if (!deniedAfterVerb(tokens, verb)) {

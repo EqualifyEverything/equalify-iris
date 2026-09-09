@@ -1577,11 +1577,25 @@ contradicts a declaration exactly as `Only handwriting smudges are visible` does
 visible` as `writing is visible` — the reader holds the same vocabulary in both parts of speech, so
 which form of a name the model happened to write does not decide whether the page survives (issue
 #431). Before that it did: the noun forms were read and the participles and adjectives were not, and a
-log that named writing with one of those was a page delivered empty and reported to nobody. The one
-place the two forms are still read differently is the object of a denial's preposition, where a
-participle with a noun behind it is an adjective on that noun: `nowhere except a barcode at the top`
-refuses the declaration, `nothing legible within the stamped border` is a blank page describing its
-own pre-printed form and declares.
+log that named writing with one of those was a page delivered empty and reported to nobody.
+
+Two places read the two forms differently, and both are deliberate. The first is the object of a
+denial's preposition, where a participle with a noun behind it is an adjective on that noun:
+`nowhere except a barcode at the top` refuses the declaration, `nothing legible within the stamped
+border` is a blank page describing its own pre-printed form and declares. The second is the walk back
+from an affirming name looking for the negator that denies it. That walk crosses the participles, so
+`No stamped or signed marks are present.` is one denied list rather than an affirmation of marks —
+but once it has crossed one of them it stops at the next comma, because the same widening let it
+reach across a sentence's second clause and read `No clear text, and stamped words are visible` as a
+denial of everything, delivering a page with writing on it empty and reporting nothing. Reaching a
+denial's own members needs no participle crossed, so their commas are crossed before the bound arms.
+The cost is stated where the bound is: a denial whose participle member carries a comma of its own is
+refused rather than declared, which is a redraw and not a silent loss.
+
+Everywhere else the two forms are one class. The copula reading that turns `Nothing is stamped
+anywhere on the sheet` into a denial, and the folio exemption that lets `The rubber-stamped page
+number is visible` stay blank, both test that class and not the shorter list of qualifiers they were
+written against.
 
 What no form of the name reaches is a **clause with no verb in it**. `handwriting smudges only.`
 declares the page blank, and so does `cursive smudges only.`, while `handwriting smudges are present.`
@@ -1672,12 +1686,19 @@ a declaration while `only document headings are visible` and `the document headi
 contradictions — a determiner, an `only` or a verb in front of the noun ends the walk before it
 reaches the negator.
 
-What does **not** end it is a comma: a denial with no verb of its own reaches across one, so
-`No text or images, document headings are visible.` is read as one denied list and delivered as a
-declaration, with nothing on this line naming the heading. That is the reading issue #200's review
-chose for `No printed text, and handwriting is present.` — refusing it loses a blank page whose
-log denied twice — and the punctuation cannot separate the two cases, because the members of a
-denial are divided by bare commas exactly as the clauses are.
+A comma ends it in one case and not the other, and which case you are in depends on the words the
+walk crossed to get there. For the nouns — the vocabulary the walk has always crossed — a comma does
+**not** end it: a denial with no verb of its own reaches across one, so `No text or images, document
+headings are visible.` is read as one denied list and delivered as a declaration, with nothing on this
+line naming the heading. That is the reading issue #200's review chose for `No printed text, and
+handwriting is present.` — refusing it loses a blank page whose log denied twice — and punctuation
+alone cannot separate the two cases, because the members of a denial are divided by bare commas
+exactly as the clauses are. For the participles and adjectives the walk gained with #431 a comma does
+end it, because the same reach that keeps `No stamped or signed marks are present.` denied would
+otherwise read `No clear text, and stamped words are visible.` the same way, and that sentence names
+writing on the page. So `and stamped words` is refused where `and printed words` is still declared,
+which is a form of a word deciding again in the one shape #431 could not reach without reopening
+#200's trade; the measured wordings and what would settle it are issue #436.
 
 It is not the only way a page with content on it is delivered empty leaving no field to act on — a
 confident wrong declaration about a page whose file says nothing is described the same way below —
