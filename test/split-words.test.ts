@@ -656,14 +656,28 @@ test("a quoted word in a comment refuses a join, and bare comment prose does not
   // measurement. Smoothing this edge means widening the guard further, also on no measurement.
   const quoted = [`<p>The inter-state figure.</p><!-- @source "state" -->`, `<p>interstate</p>`];
   assert.deepEqual(joinBrokenWords(quoted).pages, quoted, "a quoted word in a comment did not reach the guard");
-  const bare = [`<p>The inter-state figure.</p><!-- @source state -->`, `<p>interstate</p>`];
-  assert.deepEqual(joinBrokenWords(bare).joined, [
-    { split: "inter-state", written: "interstate", evidence: "interstate" },
-  ]);
-  // Not scoped to `@` markers and not to quoted spans: any comment, and a `name=value` run inside one.
-  // Pinned because the docs sentence a maintainer reads to know what can suppress a join said `@` and
-  // `quoted`, and both were narrower than this.
-  for (const comment of [`<!-- see "state" here -->`, `<!-- @source page=state -->`, `<!-- x='state' -->`]) {
+  // Outside the width: prose with no quote PAIR and no `=`. One apostrophe is not a pair.
+  for (const comment of [`<!-- @source state -->`, `<!-- the state's name -->`]) {
+    const pages = [`<p>The inter-state figure.</p>${comment}`, `<p>interstate</p>`];
+    assert.deepEqual(
+      joinBrokenWords(pages).joined,
+      [{ split: "inter-state", written: "interstate", evidence: "interstate" }],
+      comment,
+    );
+  }
+  // Not scoped to `@` markers and not to quoted spans: any comment, a `name=value` run inside one, and a
+  // quote PAIR in ordinary prose — two apostrophes are a pair. Iris's own `@page-failed` fragment is the
+  // live instance of this: it is the whole body of a fragment `assembleBodyWithReport` keeps, and it
+  // carries up to 300 characters of provider error text, so no model has to misbehave for a comment to
+  // reach the guard. Each shape is pinned because the prose describing the width has been narrower than
+  // the code twice.
+  for (const comment of [
+    `<!-- see "state" here -->`,
+    `<!-- @source page=state -->`,
+    `<!-- x='state' -->`,
+    `<!-- don't write the state's name -->`,
+    `<!-- @page-failed 2: bedrock: ValidationException for input {"tool": "state"} -->`,
+  ]) {
     const pages = [`<p>The inter-state figure.</p>${comment}`, `<p>interstate</p>`];
     assert.deepEqual(joinBrokenWords(pages).pages, pages, comment);
   }

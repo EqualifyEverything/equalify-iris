@@ -276,20 +276,26 @@ const NOT_SHOWN = /<(script|style)\b[\s\S]*?(?:<\/\1\s*>|$)/gi;
 // characters HTML5 forbids in a bare value, so it cannot run past its own attribute or into the `>`.
 //
 // COMMENTS are in this width too, which the name of this function does not suggest and is deliberate.
-// `MARKUP` matches `<!--…-->` as well as a tag, so a quoted span or a `name=value` run inside a comment
-// lands in the guard — `<!-- @source "state" -->` refuses `inter-state`, where the same word as bare
-// comment prose does not, since the unquoted alternative needs its `=`. Kept rather than tidied, on two
-// grounds, and neither is that the input is dead: the `@` markers a delivered document carries are
-// appended by `wrapDocument` AFTER this pass, so the only comment that reaches the guard is one a model
-// wrote into a page fragment, which no prompt asks for and nothing strips. Rare, not impossible.
+// `MARKUP` matches `<!--…-->` as well as a tag, so a QUOTE PAIR or a `name=value` run inside a comment
+// lands in the guard. A pair and not a quoted span, which is the accurate way to say it: two apostrophes
+// in ordinary prose are a pair, so `<!-- don't write the state's name -->` refuses `inter-state` while a
+// single apostrophe does not. What is outside the width is comment prose with no pair and no `=` — a
+// narrow exemption, and the ragged edge is pinned by a test rather than smoothed, because smoothing it
+// means widening the guard further on no evidence.
+//
+// Kept rather than tidied, on two grounds, and neither is that the input is dead. Two comment classes
+// reach it. The `@` markers a delivered document carries are NOT among them — `wrapDocument` appends those
+// after this pass — but `@page-failed` is Iris's own and arrives as the entire `innerHtml` of a fragment
+// that `assembleBodyWithReport` deliberately keeps in the body, carrying up to 300 characters of provider
+// error text. So a `ValidationException for input {"tool": "state"}` puts `state` in the guard with no
+// model misbehaving at all. The second class is a comment a model wrote into a page fragment, which no
+// prompt asks for and nothing strips.
 //
 // The founding decision at the top of this file is that a model's `@` marker quotes the page's
 // words freely, and a word it quotes may well be one the printing uses alone, so seeing it is the
 // conservative reading — and the guard's only failure is not seeing a word. And it is free: excluding
 // comments from this scan moves nothing on the 1,221-file corpus, 29 joins and 18 distinct words either
-// way, so the tidier version would be a behaviour change bought with no measurement. The ragged edge
-// (quoted yes, bare no) is therefore pinned by a test rather than smoothed, because smoothing it means
-// widening the guard further on no evidence.
+// way, so the tidier version would be a behaviour change bought with no measurement.
 //
 // Entity-decoded by the CALLER, not here, and the difference matters in one direction: an `alt` reading
 // `st&#97;te` has to put `state` in the guard, or a numerically spelled tail word is a hole in exactly the

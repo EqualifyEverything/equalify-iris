@@ -4532,12 +4532,15 @@ Three conditions have to hold together, and each stops a different mistake.
 so it is the narrow one — the text a reader is shown, with `script` and `style` content dropped, because a
 `.crosshatch` selector is author metadata and the third field of this line has to name a spelling somebody
 can find on the page. Condition 2 *refuses* one, so it is the wide one — prose plus every attribute
-value, quoted or bare and with entities decoded, plus any quoted span or `name=value` run **anywhere in the
-markup, comments included**, because a bare `state` that lives only in an `alt` is still the document using
-the word, and a guard that cannot see it closes up `inter-state`. Only bare prose inside a comment is
-outside it. A comment can therefore suppress a join and never license one, which is the direction to fail
-in — but a model-written comment is the only kind that reaches this pass, since the `@` markers in a
-delivered document are appended by `wrapDocument` after it has run. A word missing
+value, quoted or bare and with entities decoded, plus any **quote pair** or `name=value` run **anywhere in
+the markup, comments included**, because a bare `state` that lives only in an `alt` is still the document
+using the word, and a guard that cannot see it closes up `inter-state`. A pair rather than a quoted span,
+because two apostrophes in ordinary prose are a pair: only comment prose with neither a pair nor an `=` is
+outside the width. A comment can suppress a join and never license one, which is the direction to fail in,
+and two classes of comment reach this pass — a model-written one inside a page fragment, and Iris's own
+`@page-failed` comment (see [`page_extraction_failed`](#page_extraction_failed)), which is the whole body of
+its fragment and carries up to 300 characters of provider error text. The `@` markers of a delivered
+document are not among them: `wrapDocument` appends those after this pass has run. A word missing
 from the first index leaves a hyphen; a word missing from the second closes a compound the printing owns.
 Widening the second costs zero joins across #334's 1,221 page files, measured.
 
