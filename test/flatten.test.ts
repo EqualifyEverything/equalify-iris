@@ -834,6 +834,22 @@ test("half of the licensed list conversion is reported and the whole of it is no
   assert.equal(listMarkers(`<ol><li>i. Alpha</li><li>ii. Beta</li><li>iii. Gamma</li></ol>`).printed, 2);
   assert.equal(listMarkers(`<ol><li>(i) Alpha</li><li>(ii) Beta</li></ol>`).printed, 2);
   assert.equal(listMarkers(`<ol><li>(xl) Alpha</li><li>(xli) Beta</li></ol>`).printed, 0);
+  // A lettered marker is ONE letter, so a list past its twenty-sixth item is invisible to BOTH branches
+  // and not only to the doubling one. Pinned with the ceiling above because both are the same trade: a
+  // wider class would have to tell a two-letter marker from any two-letter word at the head of an item.
+  assert.deepEqual(
+    listMarkers(`<ol type="a" start="27"><li>(aa) Alpha item</li><li>(ab) Beta item</li></ol>`),
+    { items: 2, lettered: 2, printed: 0, printed_lettered: 0, doubled: 0 },
+  );
+  // A `reversed` list announces 3, 2, 1, and an item printing "(3)" under the first of them is the
+  // doubling like any other — the announced marker is whatever `flatten` resolved, not the item's index.
+  assert.equal(
+    listMarkerHalfEdit(
+      `<ol reversed><li>Alpha item</li><li>Beta item</li><li>Gamma item</li></ol>`,
+      `<ol reversed><li>(3) Alpha item</li><li>(2) Beta item</li><li>(1) Gamma item</li></ol>`,
+    ),
+    "marker_announced_twice",
+  );
   // The other silence, pinned so it stays a stated limit and not a surprise: every count here is a
   // BLOCK total, so one list's correct conversion pays for another's destruction. `lettered` risen and
   // `printed_lettered` fallen is what a single correct conversion looks like, and the second list's

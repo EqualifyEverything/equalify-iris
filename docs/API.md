@@ -3474,8 +3474,10 @@ recasting either sentence is ordinary work and must not log a lost marker, so an
 does not qualify a single letter. Two or more roman letters keep the looser closer, and the asymmetry is
 the ambiguity itself: `ii.` cannot be an initial, `i.` can. The roman alphabet is `i`, `v`, `x` only,
 which caps a roman marker at `xxxix` — admitting `l`, `c`, `d` and `m` is what made `cm.` and `ml.`
-matches in the first place. The cost of all of it is a marker genuinely printed `a.` or `i.` with no
-bracket, which this does not see.
+matches in the first place. A lettered marker is one letter, so a list past its twenty-sixth item —
+announcing `aa` with an item printing `(aa)` — is invisible to **both** branches and not only to the
+doubling one. The cost of all of it is a marker genuinely printed `a.` or `i.` with no bracket, or `(aa)`
+on a list that long, which this does not see.
 
 This is also the line that says which kind of shrink a `refusal_with_loss` was looking at. The
 licensed strip removes visible text, so the block lands in `shrunk` exactly as a real loss does, and

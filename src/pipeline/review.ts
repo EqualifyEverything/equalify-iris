@@ -726,6 +726,11 @@ export { BODY_MARKERS, MARKER_NOT_LEGIBLE, MARKER_PAGE_INCOMPLETE, markerCounts 
 //   * The roman alphabet here is "i", "v", "x" only, which puts a ceiling of xxxix = 39 on a roman
 //     marker. Admitting "l", "c", "d" and "m" is exactly what made "cm." and "ml." matches, and a list
 //     that reaches its fortieth roman item is a shape no page in the corpus prints.
+//   * A LETTERED marker is one letter, so a list past its twenty-sixth item — announcing "aa" with an
+//     item printing "(aa)" — is invisible to BOTH branches and not just to the doubling one. Same
+//     reasoning as the ceiling above, and stated for the same reason: every narrowing here names what it
+//     gives up, and a two-letter run is the shape a wider class would have to distinguish from any
+//     ordinary two-letter word at the head of an item.
 //   * A single letter must be CLOSED by ")" or "]" — an opening bracket is not enough, because
 //     "(e.g. the totals)" and "(i.e. …)" are a bracketed abbreviation and not a marker, and
 //     "J. Smith chaired the committee" is an initial. A copy-edit round recasting either of those is
@@ -823,8 +828,8 @@ export function listMarkers(html: string): ListMarkers {
 // `<ol>` announces 1, 2, 3 by itself, so nothing is lost and calling it a loss would put the wrong
 // label on the branch the Reader fires on first.
 //
-// `marker_announced_twice` is the other half: an item that holds both markers at once and in the same
-// kind, which is #334's own defect arriving from this loop instead of from an extraction. It reads
+// `marker_announced_twice` is the other half: an item that prints THE MARKER THE LIST ANNOUNCES, which
+// is #334's own defect arriving from this loop instead of from an extraction. It reads
 // `doubled`, a per-ITEM count, because the halfway state the totals cannot see is a round that sets the
 // `type` and strips SOME of the items — the list gains its letters, `printed` falls rather than holding,
 // and the item still carrying its own marker is announced "b" and then reads "(b)" out.

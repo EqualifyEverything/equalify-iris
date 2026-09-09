@@ -1158,10 +1158,10 @@ Places where a decision was left open, and where v1 intentionally stops:
   lesson.** The kind narrowing went one way only: a digit leaving an item's text stopped counting as a
   loss, but a digit *arriving* still counted as a doubling under a lettered list, where `(a) 12.
   Payments…` is a statute's clause number and a reader hears one marker and a number — while the digit
-  doubling that does occur, `(1)` put back into a bare `<ol>`, moved nothing the check read. `doubled` is
-  now the two markers matching **in kind**, which reproduces the Reader prompt's own AGREE/DISAGREE split
-  rather than a third rule: kinds agree and the text's copy is redundant, kinds differ and the text's copy
-  is the only record. And the punctuation narrowing stopped at the bare initial, leaving `(e.g. the
+  doubling that does occur, `(1)` put back into a bare `<ol>`, moved nothing the check read. Both went
+  away at once when `doubled` began matching the two markers **in kind** — one rule instead of two
+  exceptions, though see the paragraph below for why kind was not the end of it either. And the
+  punctuation narrowing stopped at the bare initial, leaving `(e.g. the
   totals)` — the same initial with an opening bracket — a printed lettered marker, so a single letter now
   needs the CLOSER and not merely a bracket. Two rounds, one shape of error each time: **a rule that
   splits on a property has to be checked on every value of that property, including the one the failing
@@ -1172,10 +1172,15 @@ Places where a decision was left open, and where v1 intentionally stops:
   match called it a doubling — and a bare `<ol>` whose item prints `12.` announces "1" and reads "12",
   both digits: the same clause number in the other alphabet, on the side the kind test did not look at.
   `doubled` now compares the announced marker's own VALUE against the printed token, case-insensitively,
-  which is what the rule always meant — an item repeating the marker it is announced with — and is the
-  definition `docs/API.md` had already written down while the code approximated it. Three rounds on one
-  predicate, and each round's approximation was defensible until the next value showed up: **when a check
-  can be stated as "the same thing twice", compare the thing and not a property of it.**
+  which is what the rule always meant — an item repeating the marker it is announced with. It is also what
+  `READER_SYSTEM`'s own AGREE branch says, and reading that closely is what settles it: its examples are
+  `[List item a] (a)` and `[List item 1] (1)`, which agree in **value**, so the kind test was never the
+  prompt's split but a looser thing that admitted it. `docs/API.md` had the same shape of error in the
+  other direction — it defined the field by kind and *illustrated* it by value, so the examples were more
+  precise than the definition above them. Three rounds on one predicate, each approximation defensible
+  until the next value showed up: **when a check can be stated as "the same thing twice", compare the
+  thing and not a property of it** — and when a rule already exists in a prompt or a doc, read its
+  examples, because they are the specification and the sentence over them may be an approximation.
 
   That check is also what makes the licensed strip legible where it collides with the loss machinery,
   which it does and is left doing. `proseShortened` is a comparison of visible text, so the strip is a
