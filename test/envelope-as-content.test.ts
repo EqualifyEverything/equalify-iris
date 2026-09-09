@@ -2408,6 +2408,15 @@ test("a blank page's own fragments are not affirmations (#435)", () => {
   // move them.
   assert.equal(declaredBlank({ html: "", log: "Page is blank. Print artifacts. text" }), false);
   assert.equal(declaredBlank({ html: "", log: "Page is blank. Smudges. text" }), false);
+  // A run of lone names does not have to be on separate lines: `;` is a boundary too, so a semicolon list of
+  // labels is the same shape and reports, exactly as it did before any of this. Pinned beside the row it is
+  // one token away from — `Page is blank; images; nothing present.` declares because `nothing present` is TWO
+  // tokens and so is a sentence rather than a sibling — because that pair is the whole of what the sequence
+  // clause turns on, and a rule that moved either of them would be a different rule. Raised by the review on
+  // PR #444.
+  assert.equal(declaredBlank({ html: "", log: "Page is blank; text; images" }), false);
+  assert.equal(declaredBlank({ html: "", log: "Page is blank; handwriting; signature" }), false);
+  assert.equal(declaredBlank({ html: "", log: "Page is blank; images; nothing present." }), true);
   // And the rule reaches no further than the boundary behind the name: a lone name whose preceding
   // statement is a SENTENCE still declares, which is the whole of what #440 asked for and the row the fix
   // above must not take with it.
