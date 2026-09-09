@@ -658,6 +658,21 @@ test("every marker the Reader prompt advertises is one flatten emits", () => {
     /the repair is the other way round/.test(READER_SYSTEM),
     "the report treats a digit announced beside a printed letter as the same defect as a repeat",
   );
+  // And the two branches are not complementary, so the prompt has to name the THIRD case outright.
+  // Announced "1" beside a printed "12." is the same kind and a different marker — a statute's clause
+  // number under the list's own count — and it falls outside both: it is not the same content twice and
+  // the list is not missing a `type`. Reading the second branch as everything the first is not is what
+  // made the log detector a kind test for two commits, so the case is stated rather than left to the
+  // prohibition that already covered it.
+  assert.match(flatten(`<ol><li>12. Payments to the state</li></ol>`), /\[List item 1\] 12\. Payments/);
+  assert.ok(
+    /a marker that is NEITHER of those/.test(READER_SYSTEM),
+    "the prompt states its two marker branches as if they were complementary",
+  );
+  assert.ok(
+    /leave the list and the text exactly as they are/.test(READER_SYSTEM),
+    "the prompt names the third marker case without saying what to do about it",
+  );
   // Options are still content, and are separated so they cannot run together.
   assertNoTextLost(`<select><option>Platform</option><option>Design</option></select>`, "select options");
 });

@@ -1175,7 +1175,13 @@ Places where a decision was left open, and where v1 intentionally stops:
   which is what the rule always meant — an item repeating the marker it is announced with. It is also what
   `READER_SYSTEM`'s own AGREE branch says, and reading that closely is what settles it: its examples are
   `[List item a] (a)` and `[List item 1] (1)`, which agree in **value**, so the kind test was never the
-  prompt's split but a looser thing that admitted it. `docs/API.md` had the same shape of error in the
+  prompt's split but a looser thing that admitted it. The prompt's two named branches are not
+  complementary either, which is the reason a kind test looked like a fit: announced `1` with `12.`
+  printed is the same *kind* and a different marker, so it falls outside both, and only the prompt's
+  catch-all covered it. It is now a third case in `READER_SYSTEM` in as many words — a marker and then a
+  number, not the same content twice, leave both alone — because the Reader was reaching the right answer
+  through a prohibition rather than through a rule, and a rule stated as two branches invites reading the
+  second as everything the first is not. `docs/API.md` had the same shape of error in the
   other direction — it defined the field by kind and *illustrated* it by value, so the examples were more
   precise than the definition above them. Three rounds on one predicate, each approximation defensible
   until the next value showed up: **when a check can be stated as "the same thing twice", compare the

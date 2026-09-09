@@ -3438,7 +3438,12 @@ announces `1` and reads `12`: those are the same clause number in each alphabet,
 kind. A bare `<ol>` whose item prints `(1)` **is** the doubling, and it is the kind the corpus holds.
 Where the two disagree the other way — announced `1`, text reads `(a)` — nothing is doubled either: that
 list is missing the `type` that would announce its letters, and the Reader prompt says the text's copy
-must **stay** until it has one. Same split as the prompt's two branches. `type`, `start` and `value` all
+must **stay** until it has one. Those are the Reader prompt's two named branches, and the code's third
+state is the prompt's third case: an item whose text opens with a marker that is **neither** the announced
+one nor a different kind — announced `1`, text reads `12.` — is a clause number under the list's own
+count, which the prompt tells the Reader to leave alone and which `doubled` does not count. So the split
+here is three ways and not two, and it was worth saying, because reading the prompt as two complementary
+branches is what made `doubled` a kind test for two commits. `type`, `start` and `value` all
 feed the announced marker, so `<ol type="a" start="3">` with an item printing `(c)` counts.
 
 An item printing a marker that **contradicts** the announced one — `(b)` on an `<ol type="a">`'s first

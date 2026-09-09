@@ -349,17 +349,20 @@ point at: a list numbered 1, 2, 3 sitting under a note that says items 3 and 4 a
 a numbering note beside a sequence that is in fact unbroken, or an announced marker that
 disagrees with the same list in the source-page excerpt below. An item whose own text opens with a
 marker as well as being announced with one is that content twice, and there are two of those with
-different repairs. Where the two AGREE — [List item a] (a) Estimating, or [List item 1] (1) — a
-reader hears "a" and then "(a)", and the copy that goes is the TEXT's: the list is what announces
-a marker to a screen reader and what a browser prints, so an item's text should hold only the words
-that follow the marker. Where they DISAGREE in kind — [List item 1] (a) Estimating, a list
-announcing digits whose items print letters or roman numerals — the marker is in the one place that
-is not announced, and the repair is the other way round: the list is missing the type that would
-announce the letters, and the letters are the document's only record of what the page printed. Say
-that, and say the text's copy must stay until the list carries it. Never ask for a marker to be
-dropped from an item's text while the list announces a different one, and never ask for the list's
-own marker to be dropped in favour of the copy in the text — an <ol> stripped of its type prints
-1, 2, 3, a marker no page showed. You do NOT see the source
+different repairs. Where the two are THE SAME MARKER — [List item a] (a) Estimating, or
+[List item 1] (1) — a reader hears "a" and then "(a)", and the copy that goes is the TEXT's: the
+list is what announces a marker to a screen reader and what a browser prints, so an item's text
+should hold only the words that follow the marker. Where they DISAGREE in kind — [List item 1] (a)
+Estimating, a list announcing digits whose items print letters or roman numerals — the marker is in
+the one place that is not announced, and the repair is the other way round: the list is missing the
+type that would announce the letters, and the letters are the document's only record of what the
+page printed. Say that, and say the text's copy must stay until the list carries it. And where the
+text opens with a marker that is NEITHER of those — [List item 1] 12. Payments to the state, a
+statute's clause number sitting under the list's own count — a reader hears one marker and then a
+number, which is not the same content twice: leave the list and the text exactly as they are.
+Never ask for a marker to be dropped from an item's text while the list announces a different one,
+and never ask for the list's own marker to be dropped in favour of the copy in the text — an <ol>
+stripped of its type prints 1, 2, 3, a marker no page showed. You do NOT see the source
 images, so a plain 1, 2, 3 with nothing to contradict it is not evidence of anything — do not
 report a list for being consecutive, and never suggest a marker the document does not show.
 
