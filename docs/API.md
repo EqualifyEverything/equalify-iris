@@ -3408,27 +3408,44 @@ loop allows.
 ### `editor_list_markers_split`
 
 Half of the one list conversion the Copy Editor is licensed to make (`iteration`, `shape`, plus
-`before` and `after`, each `{ items, lettered, printed }`).
+`before` and `after`, each `{ items, lettered, printed, printed_lettered, doubled }`).
 
 The licence: a bare `<ol>` whose every item's text opens with one sequence's marker — `(a)`, `(b)`,
 `(c)` — is a list whose marker was transcribed into its items instead of set on the list, and the
 editor may set the `type` those markers show **and** strip them from the text. That is one change,
 and each half of it alone is a defect:
 
-* `shape: "text_markers_gone"` — the markers left the items and the list did not gain them, so a list
-  the page printed `(a)`, `(b)`, `(c)` now prints 1, 2, 3 and **no copy of the letters is left in the
-  document**. This is the loss.
-* `shape: "marker_announced_twice"` — the list gained its letters and the items kept theirs, so a
-  reader hears "a" and then "(a)". The same defect an extraction can produce, arriving from the
-  review loop instead.
+* `shape: "marker_announced_twice"` — an item holds both markers at once, so a reader hears "a" and
+  then "(a)". The same defect an extraction can produce, arriving from the review loop instead. Read
+  off `doubled`, which is counted **per item**, so a round that sets the `type` and strips only some of
+  the items is caught: the item that kept its own marker is the one a reader meets.
+* `shape: "text_markers_gone"` — **lettered** markers left the items and the list did not gain them, so
+  a list the page printed `(a)`, `(b)`, `(c)` now prints 1, 2, 3 and **no copy of the letters is left in
+  the document**. This is the loss.
 
-`lettered` counts items whose **announced** marker is not a digit; `printed` counts items whose own
-text opens with a marker. Both are read off the flattened view, because that is where a `type` and a
-transcribed marker are visible at once. A complete conversion moves the two together and logs
-nothing.
+The counts, all read off the flattened view because that is where a `type` and a transcribed marker are
+visible at once: `lettered` is items whose **announced** marker is not a digit; `printed` is items whose
+own text opens with a marker of any shape; `printed_lettered` is those of them whose marker is not a
+digit; `doubled` is items that are both announced with a letter and print one.
+
+`text_markers_gone` reads `printed_lettered` and not `printed`, because **a digit leaving an item's text
+is a repair and not a loss**: an `<ol>` announces 1, 2, 3 by itself, so a digit the text repeats is a
+second copy of what the list already says, and the review prompt asks for that copy to go. That is the
+more common of the two shapes in the corpus, so reading `printed` would have put "the loss" on the
+branch a reviewer fires on first.
+
+A complete conversion logs nothing: the lettered markers leaving the text are exactly balanced by the
+list announcing them, and no item ends up holding both.
 
 Silent where the round changed `items`: a deleted item takes its printed marker out of the count with
 it, and removing content the document printed twice is what the loop is for.
+
+A printed marker is up to three digits, a roman **number**, or a single letter that is bracketed or
+closed by `)` or `]`. The narrowings are each a false positive this had: `cm.` and `ml.` are runs of
+roman letters that are not numerals, `(see)` is three letters and no numeral, and `J. Smith chaired the
+committee` is an initial — a copy-edit round recasting that sentence is ordinary work and must not log a
+lost marker. The cost of the last one is a marker genuinely printed as `a.` with no bracket, which this
+does not see.
 
 This is also the line that says which kind of shrink a `refusal_with_loss` was looking at. The
 licensed strip removes visible text, so the block lands in `shrunk` exactly as a real loss does, and

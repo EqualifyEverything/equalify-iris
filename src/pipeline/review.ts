@@ -716,33 +716,69 @@ export { BODY_MARKERS, MARKER_NOT_LEGIBLE, MARKER_PAGE_INCOMPLETE, markerCounts 
 // question here and the view is where the answer already is — `type="a"` and `value="5"` together
 // announce "e", and no attribute read on its own says that.
 //
-// The head of the item's text only, and a marker's shape rather than any bracketed thing: a single
-// letter, a run of roman letters, or up to three digits, closed by ")" or "." or "]". "(see)" is three
-// letters and no roman numeral, so it does not count; "(a)" and "(iii)" and "(12)" do.
+// The head of the item's text only, and a marker's SHAPE rather than any bracketed thing: up to three
+// digits, a run of roman numerals, or a single letter, closed by ")", "." or "]". Three narrowings,
+// each of them a false positive this had:
+//
+//   * The roman run must be a roman NUMBER, not a run of roman letters — "cm." and "ml." are both
+//     letters from that alphabet and neither is a numeral anything counts with.
+//   * A single letter must be bracketed or closed by ")" or "]", because "J. Smith chaired the
+//     committee" is an initial and not a marker, and a copy-edit round recasting that sentence is
+//     ordinary work for this pass. A page's own marker keeps the punctuation it was printed with.
+//   * "(see)" is three letters that are not a numeral, and does not count. "(a)", "(iii)" and "(12)"
+//     do.
 const ANNOUNCED_ITEM = /\[List item ([^\]]+)\]([^[]*)/g;
-const PRINTED_MARKER = /^\s*[([]?\s*(?:[a-z]|[ivxlcdm]{2,5}|\d{1,3})\s*[).\]]/i;
+const PRINTED_MARKER = /^\s*(\(|\[)?\s*([a-z]|[ivx]{2,5}|\d{1,3})\s*(\)|\]|\.)/i;
+const ROMAN_NUMBER = /^x{0,3}(?:ix|iv|v?i{0,3})$/i;
+
+// Whether the head of an item's own text is a printed marker, and if so whether it is a DIGIT. The
+// two are separate questions because the repair for each is the opposite of the other's: a digit
+// transcribed into an item is a copy of what the list already announces and the text's copy is the
+// one that goes, while a letter transcribed into an item is the only record of what the page printed.
+function printedMarker(text: string): { marker: boolean; digit: boolean } {
+  const m = PRINTED_MARKER.exec(text);
+  if (!m) return { marker: false, digit: false };
+  const token = m[2];
+  if (/^\d+$/.test(token)) return { marker: true, digit: true };
+  if (token.length > 1) return { marker: ROMAN_NUMBER.test(token), digit: false };
+  return { marker: Boolean(m[1]) || m[3] !== ".", digit: false };
+}
 
 interface ListMarkers {
-  // Every announced ordered item, which is what makes the two counts below comparable across a
+  // Every announced ordered item, which is what makes the counts below comparable across a
   // round: see `listMarkerHalfEdit` for why a round that changed this number is not read at all.
   items: number;
   // Items whose ANNOUNCED marker is not a digit, which is a list carrying its letters in `type`.
   lettered: number;
-  // Items whose own text opens with a marker, announced or not — the shape a page's letters take
-  // when they were transcribed into the item instead of set on the list.
+  // Items whose own text opens with a marker of any shape, announced or not.
   printed: number;
+  // Items whose own text opens with a marker that is NOT a digit — the shape a page's letters take
+  // when they were transcribed into the item instead of set on the list, and the only shape whose
+  // deletion loses something: a digit the text repeats is a copy of what an `<ol>` announces by
+  // itself, so stripping it is the repair `READER_SYSTEM` asks for rather than a loss.
+  printed_lettered: number;
+  // Items that hold BOTH at once: a lettered marker announced by the list and a marker printed in the
+  // item's text. Counted per item rather than inferred from the two totals, because the state this
+  // names is a property of one item and a round can create it on some items and not others.
+  doubled: number;
 }
 
 export function listMarkers(html: string): ListMarkers {
   let items = 0;
   let lettered = 0;
   let printed = 0;
+  let printedLettered = 0;
+  let doubled = 0;
   for (const m of flatten(html).matchAll(ANNOUNCED_ITEM)) {
     items++;
-    if (!/^\d+$/.test(m[1])) lettered++;
-    if (PRINTED_MARKER.test(m[2])) printed++;
+    const announcedLettered = !/^\d+$/.test(m[1]);
+    const printedHead = printedMarker(m[2]);
+    if (announcedLettered) lettered++;
+    if (printedHead.marker) printed++;
+    if (printedHead.marker && !printedHead.digit) printedLettered++;
+    if (announcedLettered && printedHead.marker) doubled++;
   }
-  return { items, lettered, printed };
+  return { items, lettered, printed, printed_lettered: printedLettered, doubled };
 }
 
 // The two halves of the conversion EDITOR_SYSTEM licenses, each of which is a defect on its own. That
@@ -753,30 +789,40 @@ export function listMarkers(html: string): ListMarkers {
 // `markerCounts` watches BODY_MARKERS only, and the item count `navigation_lost` reads does not move
 // when a marker changes shape.
 //
-// `text_markers_gone` is the loss: markers left the items and the list did not gain them, so a list
-// the page printed (a), (b), (c) now prints 1, 2, 3 and no copy of the letters is left anywhere in the
-// document. `marker_announced_twice` is the other half: the list gained its letters and the items kept
-// theirs, which is #334's own defect arriving from this loop instead of from an extraction.
+// `text_markers_gone` is the loss: LETTERED markers left the items and the list did not gain them, so
+// a list the page printed (a), (b), (c) now prints 1, 2, 3 and no copy of the letters is left anywhere
+// in the document. It reads `printed_lettered` and not `printed`, because a DIGIT leaving an item's
+// text is the repair `READER_SYSTEM` asks for on the one list in #334 whose rule already existed — an
+// `<ol>` announces 1, 2, 3 by itself, so nothing is lost and calling it a loss would put the wrong
+// label on the branch the Reader fires on first.
 //
-// A COMPLETE conversion fires neither, and that is the point of comparing both counts rather than
-// watching the prose shorten: the letters leaving the text is exactly balanced by the list announcing
-// them.
+// `marker_announced_twice` is the other half: an item that holds both markers at once, which is #334's
+// own defect arriving from this loop instead of from an extraction. It reads `doubled`, a per-ITEM
+// count, because the halfway state the totals cannot see is a round that sets the `type` and strips
+// SOME of the items — the list gains its letters, `printed` falls rather than holding, and the item
+// still carrying its own marker is announced "b" and then reads "(b)" out.
+//
+// A COMPLETE conversion fires neither, which is the point of counting these four things instead of
+// watching the prose shorten: the lettered markers leaving the text are exactly balanced by the list
+// announcing them, and no item ends up holding both.
 //
 // Silent where the ROUND CHANGED THE NUMBER OF ITEMS, and that limit is stated rather than
 // approximated: an item the editor deleted takes its printed marker out of the count with it, and
-// removing content the document printed twice is this loop's job. A fall in `printed` that is one
-// deleted item and a fall that is a stripped marker are the same two numbers, so a round that
-// resized a list is not read here at all. The cost is a half-edit made in the same round as a
-// deletion, which this cannot see; the alternative is a line that calls the loop's own licensed
-// deletions a lost marker, and a signal that fires on correct work is one nobody reads.
+// removing content the document printed twice is this loop's job. A fall that is one deleted item and
+// a fall that is a stripped marker are the same two numbers, so a round that resized a list is not
+// read here at all. The cost is a half-edit made in the same round as a deletion, which this cannot
+// see; the alternative is a line that calls the loop's own licensed deletions a lost marker, and a
+// signal that fires on correct work is one nobody reads.
 export type ListMarkerHalfEdit = "text_markers_gone" | "marker_announced_twice";
 
 export function listMarkerHalfEdit(before: string, after: string): ListMarkerHalfEdit | null {
   const was = listMarkers(before);
   const now = listMarkers(after);
   if (now.items !== was.items) return null;
-  if (now.printed < was.printed && now.lettered <= was.lettered) return "text_markers_gone";
-  if (now.lettered > was.lettered && now.printed >= was.printed) return "marker_announced_twice";
+  // The double marker first, because a round can produce both readings at once — strip two items and
+  // leave a third — and of the two states that is the one a reader meets in the delivered document.
+  if (now.doubled > was.doubled) return "marker_announced_twice";
+  if (now.printed_lettered < was.printed_lettered && now.lettered <= was.lettered) return "text_markers_gone";
   return null;
 }
 

@@ -725,10 +725,24 @@ test("half of the licensed list conversion is reported and the whole of it is no
   assert.equal(listMarkerHalfEdit(printed, doubled), "marker_announced_twice");
   // The counts behind those verdicts, because a verdict read off a count nobody checked is a claim
   // about arithmetic rather than about the document.
-  assert.deepEqual(listMarkers(printed), { items: 2, lettered: 0, printed: 2 });
-  assert.deepEqual(listMarkers(converted), { items: 2, lettered: 2, printed: 0 });
-  assert.deepEqual(listMarkers(stripped), { items: 2, lettered: 0, printed: 0 });
-  assert.deepEqual(listMarkers(doubled), { items: 2, lettered: 2, printed: 2 });
+  assert.deepEqual(listMarkers(printed), { items: 2, lettered: 0, printed: 2, printed_lettered: 2, doubled: 0 });
+  assert.deepEqual(listMarkers(converted), { items: 2, lettered: 2, printed: 0, printed_lettered: 0, doubled: 0 });
+  assert.deepEqual(listMarkers(stripped), { items: 2, lettered: 0, printed: 0, printed_lettered: 0, doubled: 0 });
+  assert.deepEqual(listMarkers(doubled), { items: 2, lettered: 2, printed: 2, printed_lettered: 2, doubled: 2 });
+  // A DIGIT leaving an item's text is the repair `READER_SYSTEM` asks for, not a loss: an <ol>
+  // announces 1, 2, 3 by itself, so the text's copy was the redundant one. This is the branch the
+  // Reader fires on first — #334's `(1)` list, whose rule already existed on main — and reading
+  // `printed` instead of `printed_lettered` labelled it as the loss.
+  const digitsPrinted = `<ol><li>(1) Direct federal outlays</li><li>(2) Reimbursed state administration</li></ol>`;
+  assert.equal(listMarkers(digitsPrinted).printed, 2);
+  assert.equal(listMarkers(digitsPrinted).printed_lettered, 0);
+  assert.equal(listMarkerHalfEdit(digitsPrinted, stripped), null);
+  // A conversion that is partial in BOTH directions is the state the totals cannot see: the list
+  // gains its letters, the text loses SOME of its markers, and the item that kept its own is
+  // announced "b" and then reads "(b)" out. `doubled` is per item, so it sees exactly that item.
+  const half = `<ol type="a"><li>Direct federal outlays</li><li>(b) Reimbursed state administration</li></ol>`;
+  assert.equal(listMarkers(half).doubled, 1);
+  assert.equal(listMarkerHalfEdit(printed, half), "marker_announced_twice");
   // A round that RESIZED a list is not read at all: a deleted item takes its printed marker with it,
   // and removing content the document printed twice is what this loop is for. Both directions,
   // because a list that grew moves the same two counts the other way.
@@ -736,9 +750,24 @@ test("half of the licensed list conversion is reported and the whole of it is no
   assert.equal(listMarkerHalfEdit(converted, `${converted}${converted}`), null);
   // And an unordered list has no marker to lose either way.
   assert.equal(listMarkerHalfEdit(`<ul><li>(a) Alpha</li></ul>`, `<ul><li>Alpha</li></ul>`), null);
-  // "(see)" is three letters closed by a bracket and is not a marker; "(iii)" is.
+  // What is and is not a printed marker, each case a false positive this had. "(see)" is three
+  // letters and no numeral. "cm." and "ml." are runs of roman LETTERS and not roman numbers. An
+  // initial — "J. Smith chaired the committee" — is a single letter closed by a full stop, and a
+  // round that recasts that sentence is ordinary work for this pass, so it must not log a lost
+  // marker. The same letter closed by a bracket is a marker.
   assert.equal(listMarkers(`<ol><li>(see) Alpha</li></ol>`).printed, 0);
   assert.equal(listMarkers(`<ol><li>(iii) Alpha</li></ol>`).printed, 1);
+  assert.equal(listMarkers(`<ol><li>cm. Alpha</li><li>ml. Beta</li></ol>`).printed, 0);
+  assert.equal(listMarkers(`<ol><li>J. Smith chaired the committee</li></ol>`).printed, 0);
+  assert.equal(listMarkers(`<ol><li>a) Alpha</li></ol>`).printed, 1);
+  assert.equal(listMarkers(`<ol><li>(a) Alpha</li></ol>`).printed, 1);
+  assert.equal(
+    listMarkerHalfEdit(
+      `<ol><li>J. Smith chaired the committee</li><li>Reimbursed state administration</li></ol>`,
+      `<ol><li>The committee was chaired by J. Smith</li><li>Reimbursed state administration</li></ol>`,
+    ),
+    null,
+  );
 });
 
 test("a page too deep for the recursive walk keeps its text instead of throwing", () => {

@@ -1125,15 +1125,30 @@ Places where a decision was left open, and where v1 intentionally stops:
   **A licensed removal of visible text needs its own check, because the two halves of it are defects
   and the prose gate cannot see either.** `listMarkerHalfEdit` (`review.ts`) reads the announced
   marker and the item's own printed marker off `flatten` — the view where `type="a"` and a transcribed
-  `(a)` are visible at once — and reports the two states the licence forbids: `text_markers_gone`,
-  markers leaving the items with the list not gaining them, which is the page's letters deleted
-  outright; and `marker_announced_twice`, the list gaining them with the items keeping theirs, which is
-  #334's defect arriving from the review loop instead of from an extraction. A complete conversion
-  moves both counts together and is silent, which is why this compares two counts instead of watching
-  the prose shorten. It sits beside `droppedHrefs` and `markerCounts` in the correction round, the
-  other two records of something a round took away that no gate sees. It is **silent where the round
-  changed the number of items**: a deleted item takes its printed marker out of the count with it, and
-  a signal that fires on the loop's own licensed deletions is one nobody reads.
+  `(a)` are visible at once — and reports the two states the licence forbids: `marker_announced_twice`,
+  an item holding both markers at once, which is #334's defect arriving from the review loop instead of
+  from an extraction; and `text_markers_gone`, lettered markers leaving the items with the list not
+  gaining them, which is the page's letters deleted outright. A complete conversion moves both counts
+  together and is silent, which is why this compares two counts instead of watching the prose shorten.
+  It sits beside `droppedHrefs` and `markerCounts` in the correction round, the other two records of
+  something a round took away that no gate sees. It is **silent where the round changed the number of
+  items**: a deleted item takes its printed marker out of the count with it, and a signal that fires on
+  the loop's own licensed deletions is one nobody reads.
+
+  **A check on a licensed edit has to be counted at the grain the edit is made at, and the loss branch
+  has to exclude the marker the list supplies itself.** The first version of this compared per-list
+  totals and counted every printed marker alike, and all three of its defects followed from that.
+  Counting a **digit** leaving an item's text as a loss put "the page's letters deleted" on the branch a
+  reviewer meets first — an `<ol>` prints 1, 2, 3 by itself, so a digit the text repeats is the second
+  copy the prompt asks for, and #334's own list is the digit shape. The loss branch therefore reads a
+  lettered-only count. Comparing totals also made a **partial** strip — the `type` set and only some
+  items stripped — satisfy neither condition and log nothing, which is exactly the half-edit the check
+  exists for; counting `doubled` **per item** catches it, because the item that kept its own marker is
+  the one a reader meets whatever the totals say. And a marker shape wide enough to match any letter
+  followed by a stop matched an **initial**, so recasting "J. Smith chaired the committee" logged a lost
+  marker: a printed marker is now three digits at most, a roman *number* (which `cm.` and `ml.` are not),
+  or a single letter bracketed or closed by `)`. The stated cost is a marker genuinely printed `a.` with
+  no bracket, which this misses — the trade for not calling an ordinary sentence a deletion.
 
   That check is also what makes the licensed strip legible where it collides with the loss machinery,
   which it does and is left doing. `proseShortened` is a comparison of visible text, so the strip is a
