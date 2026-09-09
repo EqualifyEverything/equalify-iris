@@ -5033,6 +5033,12 @@ async function extractPage(
   // can say which spelling the printing carries, so the problem names the contradiction and asks —
   // and a page that genuinely prints both is a legitimate decline rather than a defect.
   //
+  // True of what is decidable HERE, on one page, and no longer true of the document: `joinBrokenWords`
+  // closes a break up at assembly where the rest of the document writes the word whole and the
+  // fragment after the hyphen is no word at all. It cannot help this call site — the dictionary it
+  // needs is the whole body, and pages are extracted concurrently — so the two do not overlap and a
+  // word this page settles is never reached by it.
+  //
   // After the soft-hyphen strip, and load-bearing that it is. #334 measured the interaction on the
   // page this rule is written from: `Govern<U+00AD>ment` has contiguous letters, so a page carrying
   // the invisible break writes the word "whole" as far as any text comparison is concerned and the

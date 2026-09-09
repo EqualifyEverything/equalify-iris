@@ -974,8 +974,8 @@ The events worth grepping for have a section each below, and the index is a link
 the index when you have a `type` off a log line and want to know what it means; read a section when
 you want to know what the field it names is for and what it costs.
 
-**The index is the whole log.** `src/` emits **117** event types and every one of them has a section
-below — **112** sections, because a few cover a pair of events that are only read together. So a
+**The index is the whole log.** `src/` emits **118** event types and every one of them has a section
+below — **113** sections, because a few cover a pair of events that are only read together. So a
 `type` you cannot find here is not one the index skipped: it is a misread line, or a name `src/` no
 longer emits.
 
@@ -1073,6 +1073,7 @@ emits fails it too.
 | [`editor_navigation`](#editor_navigation) | The structures a reader navigates by, on a reply that was **adopted** |
 | [`assembly`](#assembly) | The pages were joined into one body, and the first lint of it |
 | [`assembly_anchors`](#assembly_anchors) | What namespacing the pages' `id`s cost |
+| [`assembly_words_joined`](#assembly_words_joined) | A word broken at a line end was closed up, and what licensed it |
 | [`deprecated_roles_stripped`](#deprecated_roles_stripped) | A deprecated ARIA role was removed from an element that already said it |
 | [`invalid_roles_stripped`](#invalid_roles_stripped) | A `role` naming something that is **not an ARIA role at all** was removed |
 | [`page_main_stripped`](#page_main_stripped) | A `<main>` a page emitted for its own content was taken out of the body |
@@ -4498,6 +4499,39 @@ other pages renamed away from.
 
 Whether a reference lands in the bytes that ship is measured on the delivered document
 ([`internal_links`](#internal_links)), not here.
+
+### `assembly_words_joined`
+
+A word the printing broke at a line end, carried into the markup with its hyphen, **rewritten without
+it** — written only when something was rewritten, so an ordinary run adds no line. Each entry reads
+`Govern-ment -> Government (document writes government)`: the spelling that stood, what replaced it,
+and the unhyphenated occurrence elsewhere in the document that licensed the change.
+
+**This line is the only trace, and it reports a change to delivered TEXT** rather than to markup,
+which no other assembly line does. Read the third field first: it is the evidence, and a reader
+checking this line is asking whether the document really writes the whole spelling somewhere. If it
+does not, the join is wrong and the log is where that is visible.
+
+Two conditions have to hold together, and each stops a different mistake. The joined spelling must
+appear somewhere in the document — without that, `ad-valorem` would be closed into an `advalorem` no
+page prints. And the fragment **after** the hyphen must not be a word the document uses on its own —
+without that, every compound whose document also prints the closed form gets closed, which is why
+`inter-state`, `non-tax`, `non-farm`, `Mid-east` and `Non-property` are never touched here. Those stay
+with [`page_split_words`](#page_split_words), which asks the agent holding the image instead: a
+compound joins words, so a hyphen whose right-hand side is not a word cannot be a compound joint, and
+that is the whole of what makes this one decidable without the image.
+
+It runs after the page-break prose join, which is the only place it can: before that seam closes,
+`Simi-` and `larly` are two whole words in two paragraphs. So a word broken across a **page** and a
+word broken across a **line** are settled by the same pass, and the hyphen
+[`prose_joined`](#prose_joined)'s `word_splits` records as kept is the input to it.
+
+**Prose only, `alt` text included**, on the same reasoning `page_split_words` gives for not reading
+attributes: a repair that writes into attribute values is a repair that can reach an `href`. One line
+can therefore stand for a word closed in the body while the same word keeps its hyphen inside a long
+`alt` on the same page — measured, not hypothetical, on a map-heavy arm where `Cross-hatch` occurs
+eight times and only the three in body text move. Nothing downstream reads the leftover as a defect,
+because `page_split_words` does not examine attributes either.
 
 ### `deprecated_roles_stripped`
 

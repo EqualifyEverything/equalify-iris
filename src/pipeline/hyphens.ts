@@ -34,6 +34,11 @@ import { decodeEntities } from "../util/html.ts";
 // agent holding the image does. So this raises a problem and lets the correction pass settle it
 // against the source, on the same terms as a missing link or a placeholder alt — and, like those,
 // it costs a call only on a page that had no other reason to buy one.
+//
+// With one exception, added later and argued where it lives: `joinBrokenWords` at the foot of this
+// file DOES repair, in the one case where the document settles the question without the image. The
+// sentence above stays as written because it is the rule — a bare contradiction is not decidable here
+// — and the exception is what it takes to earn a repair.
 
 // Comments first, and stripped rather than read, for the reason alt.ts and links.ts strip them from
 // the same bytes: a delivered document carries `@unresolved` and the other `@` markers, which are
@@ -127,17 +132,31 @@ function textOf(html: string): string {
 // page that broke `Compos-ite` twice has one thing to fix. That is the opposite of `genericAlts`,
 // which keeps duplicates — two images described `"image"` are two descriptions to write, while two
 // copies of one broken word are one spelling to settle.
+// The unhyphenated spellings a text uses, first-written form kept, keyed case-folded so `Composite`
+// at the start of a sentence answers for `composite`.
+//
+// Only unhyphenated words are evidence, so a page writing `Commu-nications` and
+// `communications-related` and never the bare word finds nothing here. That is the under-reporting
+// direction, and it is the one to take: the alternative is to read the parts of hyphenated words
+// as whole words, which makes every compound its own corroboration and turns `non-property` —
+// printed with the hyphen on all three of #334's arms — into a contradiction with itself.
+//
+// Its own function because `joinBrokenWords` consults exactly this index and consults it for a second
+// thing — whether the fragment after a hyphen is a word at all — and two copies of it would be two
+// sets of limits to keep in step.
+function wholeWords(text: string): Map<string, string> {
+  const whole = new Map<string, string>();
+  for (const [word] of text.matchAll(WORD)) {
+    if (word.includes("-")) continue;
+    const key = word.toLowerCase();
+    if (!whole.has(key)) whole.set(key, word);
+  }
+  return whole;
+}
+
 export function splitWordAudit(html: string): { words: number; split: SplitWord[] } {
   const text = textOf(html);
-  // The unhyphenated spellings this page uses, first-written form kept, keyed case-folded so
-  // `Composite` at the start of a sentence answers for `composite`.
-  //
-  // Only unhyphenated words are evidence, so a page writing `Commu-nications` and
-  // `communications-related` and never the bare word finds nothing here. That is the under-reporting
-  // direction, and it is the one to take: the alternative is to read the parts of hyphenated words
-  // as whole words, which makes every compound its own corroboration and turns `non-property` —
-  // printed with the hyphen on all three of #334's arms — into a contradiction with itself.
-  const whole = new Map<string, string>();
+  const whole = wholeWords(text);
   const splits: string[] = [];
   let words = 0;
   for (const [word] of text.matchAll(WORD)) {
@@ -147,12 +166,7 @@ export function splitWordAudit(html: string): { words: number; split: SplitWord[
     // and a reader looking for where a two-hyphen word goes should find it here.
     const hyphens = word.split("-").length - 1;
     if (hyphens > 1) continue;
-    if (hyphens === 1) {
-      splits.push(word);
-      continue;
-    }
-    const key = word.toLowerCase();
-    if (!whole.has(key)) whole.set(key, word);
+    if (hyphens === 1) splits.push(word);
   }
   const split: SplitWord[] = [];
   const seen = new Set<string>();
@@ -204,4 +218,120 @@ export function splitWordProblem(w: SplitWord): string {
     `word itself owns one, drop it if it was only there to break the line. If the page really does ` +
     `print both spellings, say so and change nothing. Change nothing else about the page.`
   );
+}
+
+// One word joined in code, and the two things that licensed it.
+export interface JoinedWord {
+  // The broken spelling as it stood, hyphen included, so a reader can find it in `fragments.json`.
+  split: string;
+  // What replaced it: the same string with the hyphen deleted, ITS OWN case kept. Not the evidence
+  // spelling — `Govern-ment` heading a table column becomes `Government` and not the `government`
+  // that corroborated it, because deleting a line-break hyphen is the whole of the repair and
+  // adopting the other occurrence's case would be a second, unlicensed change.
+  written: string;
+  // The unhyphenated occurrence elsewhere in the document that made this decidable, as that place
+  // writes it. This is the auditable half: a reader checking the log is asking whether the document
+  // really contains it.
+  evidence: string;
+}
+
+// Comments, tags, and the contents of the two elements whose text is not prose. A rewrite has to know
+// where the markup is in a way a comparison does not: `textOf` can flatten a tag to a space because it
+// only reads, while this puts characters back and must not put them inside an `href` or a `<script>`.
+const MARKUP = /<!--[\s\S]*?(?:-->|$)|<(?:[^>"']|"[^"]*"|'[^']*')*>/g;
+const OPENS_OPAQUE = /^<(script|style)\b/i;
+const CLOSES_OPAQUE = /^<\/(script|style)\b/i;
+
+// #334's remaining hyphen axis: a word the printing broke at a line end, carried into the markup with
+// its hyphen, where the page it landed on never writes the word whole. `splitWordContradictions` is
+// blind to it by construction — its evidence is one page's own two spellings — and the comment at the
+// top of this file dismisses the alternative it considered, another ARM's output, as unavailable at run
+// time with one arm running. It never considered another PAGE of the same submission, which IS
+// available, and where the whole spelling usually is: measured over the 1,221 page files on disk,
+// 42 (word, submission) cases — 20 distinct words — have their joined form on a different page of
+// their own submission and nowhere on the page that broke them. Hand-reading all 42 puts 26 at a line
+// break, 13 at a compound joint the printing owns, and 3 in the model's own map prose. The 42 is the
+// mechanical count and the 26 is a reading of it; neither substitutes for the other.
+//
+// So this is a REPAIR where part B is a re-ask, which overturns a decision this file argues for above
+// — that Iris cannot know which of two spellings the page carries, and only the agent holding the
+// image can. That argument is right about a bare contradiction and wrong about the case below, and the
+// difference is one condition. A hyphen the word owns is a COMPOUND JOINT, and a compound joins words;
+// so a hyphen whose right-hand fragment is not a word the document prints on its own cannot be one,
+// whatever the image shows. `ment`, `laneous`, `vidual` and `facturing` are not words. `state`,
+// `farm`, `tax`, `east` and `property` are — which is why `inter-state`, `non-farm`, `non-tax`,
+// `Mid-east` and `Non-property` are left exactly where part B leaves them, as questions for the model.
+// Run over those same files as assembly runs it — this function, on each submission's pages joined into
+// one body — it joins 36 cases (22 distinct words) across 10 of the 75 submissions, and leaves 37 cases
+// (6 distinct) hyphenated while a closed spelling of them sits somewhere in the same submission. Those
+// 37 are what the tail condition buys, and they include the two this file already records as printings
+// where the JOINED spelling is the defect. One word lands on both sides, for the second reason below and
+// only there.
+//
+// Both conditions are needed and each stops a different failure. Without corroboration, `ad-valorem`
+// is a break whose `valorem` is no word and whose `advalorem` no document prints, and it would be
+// joined into a spelling from nowhere. Without the tail condition, every legitimate compound whose
+// document also prints the closed form gets closed.
+//
+// Three known imperfections, all measured and all accepted, because the alternative to naming them is
+// finding them later:
+//
+//  * a spelling the MODEL wrote rather than the page. `Cross-hatch` beside `crosshatch` in a map
+//    description is one voice being inconsistent with itself, not a transcription defect, and no image
+//    settles it because neither spelling is printed. 3 of the 36 joins on those files are this, all in
+//    map prose, and joining them changes a description's spelling and no claim about a page.
+//  * a garbled page can put the tail in the dictionary and switch the condition off. On the rotated
+//    arm, `vidual` appears as a standalone token, so `Indi-vidual` is left alone there while the same
+//    word is joined on every straight arm. That is the conservative direction, and it is the
+//    direction to fail in.
+//  * skipping markup means a word can end up joined in prose and still hyphenated in an `alt`, because
+//    the rewrite below only walks the text between tags. That is not hypothetical: on one measured arm
+//    `Cross-hatch` occurs eight times, three in body text and five inside long `alt` descriptions, and
+//    only the three move. The alternative is rewriting attribute values, which is how a repair reaches
+//    an `href`, so the mismatch is the price. Nothing downstream reads it as a new defect either —
+//    `textOf` drops attributes, so the contradiction check above cannot see the `alt` copy in the first
+//    place.
+//
+// Order-independent, which is what makes it belong at assembly rather than in the page loop:
+// `runExtraction` documents pages as fully independent and forbids relying on completion order, so a
+// dictionary built from the pages that happen to have finished would give a different document run to
+// run. This one is built from the whole assembled body.
+export function joinBrokenWords(html: string): { html: string; joined: JoinedWord[] } {
+  const whole = wholeWords(textOf(html));
+  const joined: JoinedWord[] = [];
+  const seen = new Set<string>();
+  // A word spelled with an entity hyphen (`Govern&#45;ment`) is not a `WORD` match at all, so it is
+  // read as evidence by nobody and rewritten by nobody. Under-detection, in the direction the rest of
+  // this file already takes: the repair below only ever deletes a literal `-`.
+  const rewrite = (text: string): string =>
+    text.replace(WORD, (word) => {
+      if (word.split("-").length - 1 !== 1) return word;
+      const tail = word.slice(word.indexOf("-") + 1);
+      const evidence = whole.get(word.replace("-", "").toLowerCase());
+      if (evidence === undefined) return word;
+      if (whole.has(tail.toLowerCase())) return word;
+      const written = word.replace("-", "");
+      // One entry per word, not per occurrence, on `splitWordAudit`'s reasoning: a document that broke
+      // `Compos-ite` in four cells had one spelling settled, and all four are rewritten either way.
+      if (!seen.has(word.toLowerCase())) {
+        seen.add(word.toLowerCase());
+        joined.push({ split: word, written, evidence });
+      }
+      return written;
+    });
+
+  let out = "";
+  let at = 0;
+  let opaque = 0;
+  for (const m of html.matchAll(MARKUP)) {
+    const before = html.slice(at, m.index);
+    out += opaque > 0 ? before : rewrite(before);
+    out += m[0];
+    at = m.index + m[0].length;
+    if (OPENS_OPAQUE.test(m[0])) opaque += 1;
+    else if (CLOSES_OPAQUE.test(m[0]) && opaque > 0) opaque -= 1;
+  }
+  const tail = html.slice(at);
+  out += opaque > 0 ? tail : rewrite(tail);
+  return { html: out, joined };
 }
