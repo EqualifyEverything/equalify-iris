@@ -1608,11 +1608,47 @@ are visible.` is right to refuse the declaration and `The pre-typed form is empt
 wrongly refused. Two of the 3,746 replies on record write such a compound at all and neither is a blank
 declaration, so nothing observed turns on it; it is issue #437.
 
-What no form of the name reaches is a **clause with no verb in it**. `handwriting smudges only.`
-declares the page blank, and so does `cursive smudges only.`, while `handwriting smudges are present.`
-refuses — the affirmation is found by handing a name for text the verb that predicates over it, and a
-verbless fragment has none to hand it. It is a second gap on the same sentence and it is not closed
-here.
+Either form of the name also reaches a **clause with no verb in it**, which it did not until #435:
+`handwriting smudges only.`, `handwriting visible.`, `Only handwriting smudges.` and `A heading.` each
+declared the page blank, because the affirmation is found by handing a name for text the verb that
+predicates over it and a fragment has none to hand it. A fragment is now read on its own — a predicate
+after the noun (`visible`, `present`, `apparent`, `discernible`, the four words the denial reads already
+use for the same dropped copula) or the end of the statement, optionally past a closer — `only`,
+`alone`, `too` or `also`, read at the end of the statement and nowhere else, so that the `only` in
+`handwriting only in the margin.` is not mistaken for one.
+
+The risk there runs the other way from everything above, because a blank page's own log is written in
+fragments as often as not — 94 of the 204 blank declarations on record have a verbless statement in
+them, and every one of those is a denial. So the noun phrase must **open** its statement, with nothing
+in front of it but a determiner, a count, a qualifier, an opener (`only`, `just`, `merely`, `simply`,
+`solely` — `Only handwriting smudges.` is #435's own title), or another name for text or marks.
+That is what keeps `Devoid of text.`, `Lacking text.` and `Free of text.` blank: none of those words is
+in the negator lists this section reads, and each is a page that would otherwise be reported lost. A
+comma is a boundary on both sides of the noun, for a reason the corpus supplies rather than a
+hypothetical one: the doubt-word scope has the marks and the `not legible text` phrase stripped out of
+it, so `A few specks, not legible text, figures, captions visible.` arrives at this read as
+`A few figures, captions visible` with the words that denied those nouns already gone.
+
+What the commas cost is a fragment whose denial stands **behind** its noun: `A signature, nothing
+else.` is a page with a signature on it, delivered empty. The read that would catch it is the one
+anchored on the denial, and that one only looks forward from the negator. Unchanged by #435 and stated
+rather than left to be re-measured.
+
+A statement that is a name for text and **nothing else** still affirms, so `Blank page; text`,
+`Blank page. Content`, `Page is blank; images; nothing present.`, `Page is blank. No printed text.
+Images.` and `Page is blank. Any text? None found.` are blank pages reported as holes. Statements here
+end at a `.`, `!`, `?`, `;` or a line break alike, and in three of those the denial is in a neighbouring
+statement — ahead of the label in one, behind it in another — which this read cannot reach either way,
+the boundaries being what limit how far a subject may look for its verb. The near misses say how narrow
+the hole is: `Text: none.`, `Text (none).`, `Text/handwriting: none detected.` and `Page is blank; no
+text; no images.` all still declare the page blank. A guard
+for that (refuse when the noun is the only token) was written and taken back out, because after the
+marks strip **one token is not one word**: `Handwriting smudges.` and `Cursive smudges.` reach this read
+as a single token, their head noun having been removed upstream, and that phrase
+is the one #435 is about — six of its seven wordings are it with a predicate on the end. So the guard
+would trade three blank pages reported as holes, none of them written on disk, for a page of handwriting
+delivered empty. Both halves are pinned in `envelope-as-content.test.ts`; what separates them is what the
+strip removed, which is not something this read can still see.
 
 They are two findings with two remedies — a doubt word means the page could not be read and wants
 a better scan, a contradiction means the agent answered with no page for a page it says has
