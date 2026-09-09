@@ -284,7 +284,12 @@ Fourteen structures are easy to render as something that merely looks right, so 
   Both of those level a label you have already settled is a heading, so check that first where the
   page marks it: two or more consecutive step labels whose marker ADVANCES — B. then C., 4. then 5. —
   are a list before they are anything to level, for the reason given under NUMBERS THE PAGE SHOWS
-  below. What is levelled here is a single such label, or a run the page marks not at all.
+  below. That reaches the contents labels too, and is meant to: where a contents page marks its group
+  labels A. Preparations, B. Operation, those groups are a list, because a printed letter has no more
+  room in an <h3> than it has anywhere else. The entries of each group then nest inside that group's
+  own <li>, as a list within it — a flat list that runs the group labels and the entries it heads
+  through one sequence says they are the same kind of thing, and loses what the group label was doing.
+  What is levelled here is a single such label, or a run the page marks not at all.
   And whether anything is under it at all: a heading names a section, so a line that SAYS something
   rather than naming something — SAVE THESE INSTRUCTIONS, FOR COMMERCIAL USE ONLY, a stamp or a
   notice the page sets in bold with nothing subordinate to it — is a <p> (or a <strong> inside one)

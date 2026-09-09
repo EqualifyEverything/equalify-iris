@@ -479,6 +479,18 @@ test("the page agent's heading rules keep the clauses that place a section's par
     // pinning only the place it is decided is what let this branch be missed in the first draft.
     ["a marked run of step labels is a list before it is a heading to level",
       /Both of those level a label you have already settled is a heading.*two or more consecutive step labels whose marker ADVANCES — B\. then C\., 4\. then 5\. — are a list before they are anything to level/],
+    // Round 2 of #447 caught that "Both of those" reaches the TOC group-label clause as well, so a
+    // contents page printing "A. Preparations" changed answer too. Taken deliberately rather than scoped
+    // away: the rule's whole reason is that a printed letter has nowhere to live in a heading, and an <h3>
+    // is not an exception to that. But it needs the nesting said out loud, because the failure mode here
+    // is worse than the headings it replaces — one flat list carrying the group labels AND the entries
+    // they head asserts the two are peers, which is a claim the heading version at least did not make.
+    // Unmeasured on purpose: no draw in the corpus reaches a MARKED contents label, so this is a
+    // consequence of the rule being stated correctly, not a fix for anything observed.
+    ["the contents group labels are inside the reach, said rather than left to be inferred",
+      /That reaches the contents labels too, and is meant to: where a contents page marks its group labels A\. Preparations, B\. Operation, those groups are a list/],
+    ["and each group's entries nest inside its item rather than running flat beside it",
+      /The entries of each group then nest inside that group's own <li>, as a list within it — a flat list that runs the group labels and the entries it heads through one sequence says they are the same kind of thing/],
     ["and what is left to level is the single label, or a run the page never marked",
       /What is levelled here is a single such label, or a run the page marks not at all/],
     // #128: SAVE THESE INSTRUCTIONS and FOR COMMERCIAL USE ONLY were promoted to <h2>
