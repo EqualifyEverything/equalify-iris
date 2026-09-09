@@ -1825,9 +1825,11 @@ test("a name for text affirms in either part of speech, and the position was nev
     "Page is blank. There is no barcode.",
     "Page is blank. No watermark is present.",
     "Page is blank. Nothing is stamped or signed.",
-    // `The pre-printed form is empty; no handwritten entries.` was pinned here and is pinned as a refusal at
-    // the end of this test now, beside its bare stem and the reason (#437, #442): the stem was always
-    // refused, so this row recorded a hyphen escaping a token-exact list, not a decision about blank forms.
+    // `The pre-printed form is empty; no handwritten entries.` was pinned here, moved to the end of this test
+    // as a refusal by #437, and is pinned at the end as a DECLARATION again by #442 — beside its bare stem
+    // and the reason, which is why it stays down there rather than coming back here: the stem was refused
+    // too, so #437's row recorded a hyphen escaping a token-exact list and not a decision about blank forms,
+    // and what decides both is the complement `empty`.
     // And the sentences a blank page is actually written in on the corpus, which name the marks and deny
     // the text. Unchanged, and the reason they are unchanged is that neither list has the marks
     // vocabulary in it (#193).
@@ -2033,17 +2035,14 @@ test("a name for text affirms in either part of speech, and the position was nev
   assert.equal(declaredBlank({ html: "", log: "Page is blank. No content is present in the pre-typed." }), true);
   assert.equal(declaredBlank({ html: "", log: "Page is blank. The machine-printed notes are visible." }), false);
   assert.equal(declaredBlank({ html: "", log: "Page is blank. The machine-printed page number is visible." }), true);
-  // THE ROW THIS COST, pinned as a refusal where it used to be pinned as a declaration, because it is a
-  // blank page reported and that is a real loss. It was never a decision about blank forms: the same
-  // sentence with the bare stem in it is refused here and was refused before #431 too, so what made the
-  // hyphenated wording a declaration was the hyphen — `printed` read as a name for text only when
-  // token-exact — and the pin recorded the escape rather than an answer. The word that ought to decide both
-  // is `empty`, and no read in this file looks at it: `absent`, `missing` and `not present` are read as
-  // denials of the noun in front of them, `empty`, `blank` and `unmarked` are not, so `The heading is
-  // empty.` and `The stamped area is blank.` are refused on base as well. That is #442, filed with the grid
-  // that measured it (6 of 10 absence complements unread, on 8 of 8 text-naming subjects, and 0 of the 204
-  // corpus declarations affected), and fixing it fixes this row in both wordings at once rather than in the
-  // one that happened to have a hyphen in it.
+  // THE ROWS #431 COST, pinned as DECLARATIONS now, which is where they should have been all along. #431
+  // pinned them as refusals and named the loss: a blank page reported is a real one. It was never a decision
+  // about blank forms — the same sentence with the bare stem in it was refused here and before #431 too, so
+  // what made the hyphenated wording a declaration was the hyphen (`printed` read as a name for text only
+  // when token-exact), and the pin recorded that escape rather than an answer. The word that ought to decide
+  // all five is `empty`, and #442 is where that got fixed: `ABSENCE_COMPLEMENT` reads the complement, so both
+  // wordings move together now instead of only the one that happened to have a hyphen in it. The grid for
+  // all six words is pinned further down.
   for (const log of [
     "Page is blank. The pre-printed form is empty; no handwritten entries.",
     "Page is blank. The printed form is empty; no handwritten entries.",
@@ -2051,7 +2050,7 @@ test("a name for text affirms in either part of speech, and the position was nev
     "Page is blank. The heading is empty.",
     "Page is blank. The stamped area is blank.",
   ]) {
-    assert.equal(declaredBlank({ html: "", log }), false, log);
+    assert.equal(declaredBlank({ html: "", log }), true, log);
   }
   // And the complements that ARE read, so the pairing above is a statement about `empty` and not about a
   // denial behind a copula generally.
@@ -2289,10 +2288,12 @@ test("a blank page's own fragments are not affirmations (#435)", () => {
   assert.equal(declaredBlank({ html: "", log: "Page is blank. Handwritten marks are visible." }), false);
   // The locative tail, not read here and not free to read: `A heading at the top.` is pinned as delivered
   // above with two more of its shape, and the paragraph there says a widening must defend both halves of
-  // each pair. `Blank apart from a caption.` is the same kind of gap from the exceptive side — the
-  // exceptive read needs a denial and this fragment has none. Base delivers both empty and so does this.
+  // each pair. `Blank apart from a caption.` was the same kind of gap from the exceptive side — the
+  // exceptive read needed a denial and this fragment had none. It HAS one now (#442: `blank` is a denial to
+  // the scan that reads exceptives), so that half is closed and the locative half is not, which is why the
+  // two are pinned in opposite directions on adjacent lines.
   assert.equal(declaredBlank({ html: "", log: "Page is blank. handwriting only in the margin." }), true);
-  assert.equal(declaredBlank({ html: "", log: "Page is blank. Blank apart from a caption." }), true);
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. Blank apart from a caption." }), false);
   // What the comma bounds cost, pinned as the gap it is rather than left to be re-measured: a fragment cut
   // off at its own noun is a list member, and the list a blank page writes is a list of what is ABSENT
   // with the denial at either end. So a noun with a comma on it is not read, and the price is a fragment
@@ -3490,4 +3491,110 @@ test("a page that loses two draws in a row is given up on, in that order", async
     assert.deepEqual(of(events, "page_no_output").map((e) => e.shape), ["truncated_envelope"]);
     assert.match(fragments.find((f) => f.order === 2)!.innerHtml, /@page-failed 2:/);
   });
+});
+
+test("a complement saying the subject holds nothing is a denial, as the negator meaning it is (#442)", () => {
+  // A copula has two ways of denying its subject and `NEGATIVE_COMPLEMENT` only knew one of them. `The
+  // heading is absent.` says the heading is not there; `The heading is empty.` says the heading holds
+  // nothing — which is the same news about text and the opposite reading to the one the walk took, because
+  // `heading` names text and nothing denied it, so the sentence came out as an affirmation with the word
+  // that denied it quoted inside the evidence (`affirmed: "heading is empty"`). Every such page was a
+  // blank page reported as a hole. THE GRID, both axes, because the fix is a claim about the complement and
+  // not about the subject: 6 complements x 4 subjects that name text, 0 of 24 declared on base and 24 of 24
+  // here, against 4 subjects that name none, 24 of 24 on base and unchanged — so the rows that move are
+  // exactly the rows where the subject is what made the sentence read as an affirmation.
+  const COMPLEMENTS = ["empty", "blank", "unmarked", "unfilled", "featureless", "void of content"];
+  for (const complement of COMPLEMENTS) {
+    for (const subject of ["The heading is", "The printed form is", "The typed entry is", "The caption is"]) {
+      assert.equal(declaredBlank({ html: "", log: `Page is blank. ${subject} ${complement}.` }), true, complement);
+    }
+    for (const subject of ["The page is", "The sheet is", "The reverse is", "The area is"]) {
+      assert.equal(declaredBlank({ html: "", log: `Page is blank. ${subject} ${complement}.` }), true, complement);
+    }
+    // THE EXPENSIVE HALF, and the one worth the fix: base declared all 24 of these blank and every one of
+    // them says text IS there, so each was a page lost in silence. `not` denied the clause and nothing read
+    // what it denied, so the denial cancelled a reading the walk had never taken — the double negative came
+    // out as an absence. 24 of 24 on base, 0 of 24 here.
+    for (const subject of ["The heading is", "The printed form is", "The typed entry is", "The caption is"]) {
+      assert.equal(declaredBlank({ html: "", log: `Page is blank. ${subject} not ${complement}.` }), false, complement);
+    }
+  }
+  // `void` only with its preposition, which is why the list member is `void of` and not `void`. A stamp
+  // that "is void" is a mark ON the paper — the word is printed across a cancelled form — so bare `void` is
+  // the one member of this vocabulary whose plain reading says something IS there. Unchanged in both
+  // directions: the stamp page was reported before this and is reported now, for the same reason.
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. The stamp is void." }), false);
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. The form is void of content." }), true);
+  // Out of scope on purpose, and pinned so that a later widening has to argue with it: marks that cannot be
+  // read are not an absence of marks. An illegible heading is a heading, and the page is reported so the
+  // text gets another look, which is the whole point of reporting it.
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. The heading is illegible." }), false);
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. The page is illegible." }), false);
+  // WHAT THIS DOES NOT REACH, pinned as the cost rather than left to be re-found: the complement is read at
+  // the word right after the verb, so an adverb between them puts it out of reach and the blank page is
+  // reported again. Same failure as before the fix, in the cheap direction — attention spent on a page that
+  // had nothing on it, not a page lost — and closing it means walking the qualifiers, which is a change to
+  // the verb read and not to this vocabulary.
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. The heading is completely empty." }), false);
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. The heading is entirely blank." }), false);
+  // The two reaches #442 asked for by name, because they are the wordings a real form log writes: past a
+  // `;`, where the statement boundary does the work, and past a coordination, where the complement is still
+  // the word right after the verb and the rest of the clause is somebody else's business.
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. The heading is empty; no handwritten entries." }), true);
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. The printed form is empty and unused." }), true);
+  assert.equal(
+    declaredBlank({ html: "", log: "Page is blank. The heading is empty, and no entries were made." }),
+    true,
+  );
+  // And the same limit from the other end: a coordination whose absence word comes SECOND puts it out of
+  // reach, exactly as an adverb does, so `is unused and empty` reports where `is empty and unused` declares.
+  // One rule, one position, and both of its blind spots cost a glance rather than a page.
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. The heading is unused and empty." }), false);
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. The printed form is unused and blank." }), false);
+  // Not a blind spot but the right answer: `present` says the heading IS there, so a page whose log says
+  // that is a page to look at, and the complement read does not overrule the rest of the clause.
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. The heading is empty but present." }), false);
+  // The other read that had to see this vocabulary, and the check that says what the widening buys. The scan
+  // that reads exceptives starts at a denial, so `Blank apart from a caption.` had none and shipped empty on
+  // base — a caption lost. Rather than assert a hand-picked answer for each noun, each is paired with the
+  // NEGATOR wording that says the same thing, whose answer base already gives and which this change leaves
+  // untouched (8 of 8): the complement wording now answers the way the negator wording does, and the nouns
+  // themselves are decided where they were already decided. That is why `watermark` reports and `dust` does
+  // not — `watermark` is a `TEXT_NOUN` and always was. All 8 complement rows shipped empty on base.
+  for (const [negator, complement] of [
+    ["No text apart from a caption.", "Blank apart from a caption."],
+    ["No text except for handwriting.", "unmarked except for handwriting"],
+    ["No text except for a signature.", "Unfilled except for a signature."],
+    ["No text apart from a watermark.", "Blank apart from a watermark."],
+    ["No text apart from dust.", "Blank apart from dust."],
+    ["No text apart from specks.", "Empty except for specks."],
+    ["No text except for the folio.", "Empty except for the folio."],
+    ["No text except for a printed page number.", "Blank apart from a printed page number."],
+  ]) {
+    assert.equal(
+      declaredBlank({ html: "", log: `Page is blank. ${complement}` }),
+      declaredBlank({ html: "", log: `Page is blank. ${negator}` }),
+      complement,
+    );
+  }
+  // Where the same word is NOT a complement, because the scan opens at any of these words and whatever
+  // names text after it becomes the affirmation — which is how this read could invent a hole. `empty of
+  // text` is the complement's own prepositional form and declares; the rest are attributive (`blank form`,
+  // `empty rows`) or a second clause, and all of them were declarations on base and still are.
+  for (const log of [
+    "Page is blank. The heading is empty of text.",
+    "Page is blank. The margin is blank of handwriting.",
+    "Page is blank. The blank form carries no entries.",
+    "Page is blank. The blank areas surround no text.",
+    "Page is blank. The empty rows have no printing.",
+    "Page is blank. The unmarked field has nothing in it.",
+    "Page is blank. Nothing is printed; the form is blank.",
+    "Page is blank. The page is blank; the header is empty; nothing else.",
+  ]) {
+    assert.equal(declaredBlank({ html: "", log }), true, log);
+  }
+  // And the corpus, so the figures behind the choice are written down where the next change can find them:
+  // over 3,747 replies with a parseable log, 153 write one of these complements and 135 of those sit inside
+  // a blank declaration, 0 in the negated form — and NO verdict moves, on either read. The corpus cannot
+  // tell the two apart, so the wide read was chosen on the 8 rows above and not on a measured rate.
 });

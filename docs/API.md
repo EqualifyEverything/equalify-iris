@@ -1630,13 +1630,45 @@ are pages whose HTML carries content — so none of them ever reaches the blank 
 3,747 verdicts move. That is an empty denominator rather than a measured zero: the evidence for the
 change is the 40 pairs, and the corpus evidence is only that it breaks nothing on record.
 
-What the reader still does not read is the **complement** of a copula. `Handwriting is absent.` is a
-denial and declares; `The heading is empty.` is read as a heading on the page and reports the blank one
-as a hole, and so are `is blank`, `is unmarked`, `is unfilled`, `is featureless` and `is void of content`
-— six of the ten absence wordings measured, on every subject that names text and on no subject that does
-not (`The sheet is empty.` declares). No log on record is affected: 135 of the 204 declarations write one
-of those wordings and all 135 declare, because the subject a real log uses is the page and not its
-heading. It is issue #442.
+A copula has **two ways of denying its subject**, and until #442 the reader knew one of them.
+`Handwriting is absent.` says the handwriting is not there and declares. `The heading is empty.` says the
+heading holds nothing, which is the same news about text — but nothing denied `heading`, so the sentence
+read as an affirmation and the blank page was reported as a hole, with the word that denied it quoted
+inside the evidence (`affirmed: "heading is empty"`). Six wordings do this: `is empty`, `is blank`,
+`is unmarked`, `is unfilled`, `is featureless` and `is void of content`. All six are read now, and the
+grid says the fix is about the complement and not the subject — 6 complements × 4 subjects that name text
+moved from 0 of 24 declared to 24 of 24, while the same complements against 4 subjects that name none
+were 24 of 24 before and are unchanged (`The sheet is empty.` always declared).
+
+`void` is taken only with its preposition. A stamp that "is void" is a mark **on** the paper — the word
+is printed across a cancelled form — so bare `void` is the one member of that vocabulary whose plain
+reading says something is there, and reading it would lose the page in silence. `is illegible` is out for
+a related reason and not by omission: marks that cannot be read are not an absence of marks, so an
+illegible heading is still a heading and the page is reported.
+
+Two page-**losing** defects came off the same fix. `The heading is not empty.` declared the page blank
+before it, because the `not` denied a clause and nothing read what it denied — a double negative arriving
+as an absence, on all 24 grid rows, and each one a page lost without a line. And the scan anchored on a
+denial now counts these complements as denials, which is what `Blank apart from a caption.` needed: that
+fragment had no negator in it and shipped empty, a caption lost, and this file named it as an open defect
+against itself. Six exceptive wordings come back with it. Which nouns survive an exceptive is decided
+where it was already decided rather than again here — each of the eight rows checked answers exactly as
+the negator wording saying the same thing answers, so `Blank apart from a watermark.` reports (a
+watermark is a name for marks) and `Blank apart from dust.` declares.
+
+The complement is read at the word **right after the verb**, which is what the wordings a real form log
+writes need — `is empty; no handwritten entries.` past the statement boundary and `is empty and unused.`
+past the coordination both declare — and it is also the whole of the limit. Anything standing between the
+verb and the word puts it out of reach: `The heading is completely empty.` is still reported, and so is
+`is unused and empty.` where the same coordination runs the other way round. That is the same failure as
+before the fix and in the cheap direction — attention spent on an empty page, not a page lost — and
+closing it means walking those positions in the verb read, not adding to this vocabulary.
+
+No log on record moves, on either read. Of 3,747 page replies with a log, 153 write one of these
+complements and 135 of those sit inside a blank declaration, 0 in the negated form, and 0 verdicts move —
+because the subject a real log uses is the page and not its heading. So the corpus cannot separate the
+narrow fix from the wider one, and the wider read was chosen on the constructed rows above, all of which
+run in the direction of a lost page.
 
 Either form of the name also reaches a **clause with no verb in it**, which it did not until #435:
 `handwriting smudges only.`, `handwriting visible.`, `Only handwriting smudges.` and `A heading.` each
