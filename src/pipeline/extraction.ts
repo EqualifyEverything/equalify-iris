@@ -2232,17 +2232,20 @@ const NEGATOR_CHAIN_MAX = 16;
 // no verb of its own: `No printed text, and handwriting is present` is one clause of pure denial and one
 // affirmation, and nothing between them ends the walk, so the affirmed noun reads as the last member of
 // the list. That reading is the one #200's review weighed and chose — refusing it loses a blank page
-// whose log denied twice — and the discriminator is thin on purpose: a determiner, an `only` or a verb in
-// the second clause stops the walk and the same sentence affirms. #379's two words do not change that
-// branch, they make it reachable by more wordings, and both sides of it are pinned in
-// test/envelope-as-content.test.ts so which one a log falls on is a recorded answer rather than a
-// discovered one (#391's review).
+// whose log denied twice — and it stood on a determiner, an `only` or a verb in the second clause as the
+// only things that stopped the walk. #379's two words did not change that branch, they made it reachable
+// by more wordings, and both sides of it are pinned in test/envelope-as-content.test.ts so which one a log
+// falls on is a recorded answer rather than a discovered one (#391's review). `secondClauseJoint` below is
+// what splits that shape now, on the sentence's own structure rather than on those three tells, and #200's
+// reading is what it falls back to.
 //
 // The comma cannot be the discriminator, which is worth recording because it is the obvious narrowing:
 // ending the walk at a comma no conjunction follows refuses four of the blank pages pinned in that file —
 // `No printed words, lines, or characters are visible.` and #367's own log among them — because the
-// members of a denial are separated by bare commas exactly as the two clauses are. Whatever separates a
-// verbless denial from an affirmation behind it, it is not punctuation.
+// members of a denial are separated by bare commas exactly as the two clauses are. On the corpus that is
+// 38 of the 204 blank declarations on record, so it is a fifth of every blank page rather than four pinned
+// wordings (#436). Whatever separates a verbless denial from an affirmation behind it, it is not
+// punctuation alone.
 //
 // A negator distributes over a coordination only if it has a member of its own to distribute FROM,
 // and one case in this file can take that member away: the marks phrase is stripped before any of
@@ -2251,61 +2254,137 @@ const NEGATOR_CHAIN_MAX = 16;
 // hand `handwriting` a negator that never governed it, and denying the marks says nothing about text
 // — which is the same asymmetry `TEXT_NOUN` encodes everywhere else in this section. So a negator
 // whose own next word is a conjunction is not one this noun sits in a list with.
-function negatedInList(tokens: Word[], i: number): boolean {
-  // Whether the walk has crossed a word it only knows through the #431 vocabulary, which is what the
-  // comma bound below is scoped to. Base's own crossings never arm it.
-  let crossedNewForm = false;
+function negatedInList(tokens: Word[], i: number, reach: number[]): boolean {
   for (let k = i - 1; k >= 0 && i - k <= NEGATOR_CHAIN_MAX; k--) {
-    const token = tokens[k]!;
-    const { word } = token;
+    const { word } = tokens[k]!;
     if (NEGATOR.has(word) || word === "without") {
-      return !(k + 1 < tokens.length && CONJUNCTION.has(tokens[k + 1]!.word));
+      if (k + 1 < tokens.length && CONJUNCTION.has(tokens[k + 1]!.word)) return false;
+      return !secondClauseJoint(tokens, k, i, reach);
     }
-    // THIS CALLER HAD TO WIDEN, AND THE WIDENING HAD TO BE BOUNDED, and both halves were measured against
-    // base rather than argued. The walk steps over the other members of a coordination to reach the
-    // negator that governs them all, so a denial written in the attributive form — "No typed or stamped
-    // characters are present", "No footnotes or annotations appear" — only stays denied if this step knows
-    // those words are members too. Leaving the step narrow while the affirmation reader widens hands the
-    // last member of a denial the verb of its own clause, which is #190's defect arriving by the back
-    // door, and it is not hypothetical: reverting this call alone turns two of the denials pinned in
-    // test/envelope-as-content.test.ts into refused declarations, both of them blank pages base declares.
+    // THIS CALLER HAD TO WIDEN, and the widening was measured against base rather than argued. The walk
+    // steps over the other members of a coordination to reach the negator that governs them all, so a
+    // denial written in the attributive form — "No typed or stamped characters are present", "No footnotes
+    // or annotations appear" — only stays denied if this step knows those words are members too. Leaving
+    // the step narrow while the affirmation reader widens hands the last member of a denial the verb of
+    // its own clause, which is #190's defect arriving by the back door, and it is not hypothetical:
+    // reverting this call alone turns two of the denials pinned in test/envelope-as-content.test.ts into
+    // refused declarations, both of them blank pages base declares.
     //
     // What the wider vocabulary also buys, and must not: the same step crossing the participle of a
     // SECOND clause. "No clear text, and scrawled words are visible." reaches the `No` through
     // `scrawled`, and a page whose log says it carries handwriting is then delivered empty — the silent
     // direction, and #431's own failure inverted (#434's review, round 1).
     //
-    // The bound is a comma, and it is scoped to the crossings this change added rather than to the walk,
-    // which is why it can be one at all. A bare comma cannot end this walk for everyone: the paragraph
-    // above records that doing so refuses four of the blank pages pinned in that file, `No printed words,
-    // lines, or characters are visible.` among them, because the members of a denial are separated
-    // exactly as two clauses are. But a denial's own members are reached over `or`, `and` and the nouns
-    // base already crosses, so those commas are all crossed BEFORE any participle is — the flag below is
-    // still false there and the bound never arms. It arms only where the new vocabulary is what carried
-    // the walk across, and that is the case the second clause needs.
-    //
-    // What it moves, over 30 words of the new vocabulary in the two second-clause frames: 50 of those 60
-    // rows declare blank without the bound and refuse with it, which is the whole of what round 1 found.
-    //
-    // Order-dependent by construction, and the limit is stated rather than smoothed. A denial whose
-    // participle member comes before a comma of its own — "No footnotes, annotations, or stamps are
-    // present." — arms the bound and refuses, which gives up 30 of the 150 rescues the same grid offers.
-    // Every one of those 30 is a wording base refuses as well, for the different reason that the walk
-    // stopped at the participle, so the bound costs no verdict base gets right. A second clause whose
-    // modifier is a word base already holds ("and printed words", "and handwritten content") is not
-    // reached by this bound at all — base delivers those empty today, and narrowing them reopens the trade
-    // #200 chose, which is #436 rather than a change here — and #436 is also where the asymmetry this
-    // bound leaves behind belongs, because `and scrawled words` refuses while `and printed words` does
-    // not, which is the form of the word deciding again in the one shape #431 could not reach.
-    if (crossedNewForm && token.comma) return false;
+    // THAT CASE IS `secondClauseJoint`'S NOW, and the bound #434 put here for it is gone. It was a comma
+    // scoped to the crossings the widening added — a flag set when the walk stepped over a `NAMES_TEXT_FORM`
+    // word, and a return the next comma after it — and the two things wrong with it are the two things
+    // #436 is about. It read the FORM of the word rather than the shape of the sentence, so `and scrawled
+    // words` refused while `and printed words` declared, one sentence answered by two mechanisms. And it
+    // was order-dependent, which cost verdicts nobody chose: a denial whose participle member stands
+    // before a comma of its own armed it, so `No inscriptions, watermarks, or logos are visible.` and
+    // `No footnotes, annotations, or stamps are present.` — pure denials, nothing affirmed anywhere in
+    // them — were reported as holes. Dropping the bound honours them again (5 of 7 such wordings probed,
+    // 30 of 30 rows on the frame #434's own grid gave up), and it costs nothing where the bound was aimed:
+    // over that grid, 30 words of the vocabulary in the two second-clause frames, dropping it moves 0 of
+    // 60 rows, because `secondClauseJoint` refuses all 60 on the sentence's shape instead. Over the
+    // corpus — 3,747 replies with a log, 204 blank declarations — the discriminator moves 0 verdicts and
+    // dropping the bound moves 0 more.
     if (QUALIFIER.has(word) || CHAIN_LINK.has(word) || AFFIRMED_NOUN.test(word)) continue;
-    if (NAMES_TEXT_FORM.test(word)) {
-      crossedNewForm = true;
-      continue;
-    }
+    if (NAMES_TEXT_FORM.test(word)) continue;
     return false;
   }
   return false;
+}
+
+// #436's discriminator, and it is a CLAUSE BOUNDARY rather than the comma. Measured over every page reply
+// on disk at `4859480` — 3,747 replies with a parseable log, 204 blank declarations — the two classes the
+// issue asks to be split are 69 and 0: every declaration whose denial reaches over a comma and a
+// conjunction to a name for text is a list (`No text, images, or other content is visible.`), and the
+// second-clause class the issue is about appears nowhere in the corpus, in a declaration or out of one. So
+// the comma narrowing is refused with a number rather than an argument, as the block above records: read a
+// comma plus a conjunction as a boundary and 38 of those 204 declarations stop being honoured.
+//
+// What the corpus does not settle is the ASYMMETRY, which is a defect in this file rather than a decision
+// in the docs, and it is the pair of finite verbs the issue names:
+//
+//   `No printed words, lines, or characters are visible.`  one verb, shared by three nouns  -> a list
+//   `No printed text, and handwriting is present.`         a verb on each side of the joint -> a clause
+//
+// Four things have to hold, and each one is what keeps a real denial out. The denied half must be
+// VERBLESS, which `negatedInList` already guarantees — a verb is none of the words it steps over, so it
+// ends the walk before the negator is reached and this is never asked. The crossed span must hold EXACTLY
+// ONE comma, which is what separates two clauses from three or more members: every one of the 38 has two
+// commas or none. The noun must have a verb OF ITS OWN, read off the `reach` array the caller already
+// computed, so a fragment behind a denial (`No printed text, and handwriting.`) stays a member — whether
+// that fragment affirms is #435's question, answered in `verblessAffirmation` and not here. And the
+// COORDINATION MUST NOT CONTINUE across the noun: no second conjunction and no second comma between the
+// joint and that verb.
+//
+// The fourth is what the joint word cannot do on its own, and round 1 of this change's review is why it is
+// written down. Requiring `, and` looked like the discriminator — a denial's members are joined under
+// negation with `or` (`no text, images, or other content`) and a second clause is coordinated with `and` —
+// but a clause can be spliced on with a bare comma, `No clear text, scrawled words are visible.`, and
+// requiring the `and` shipped 16 of the 16 (word, frame) pairs in #434's grid empty that #434's bound had
+// refused. Dropping the requirement then took the LIST with it, because the second member of
+// `No printed words, lines, or characters are visible.` sits behind a single comma too. What separates
+// them is not the joint at all: the list has `or characters` still to come and the splice has nothing
+// between its noun and its verb. So `or` after the joint is refused as a joiner, `and` is allowed, a bare
+// comma decides nothing, and the coordination scan decides.
+//
+// THE LIMIT, stated rather than smoothed: a TWO-member denial with a plural verb — `No text, and images
+// are visible.`, `No text or images, document headings are visible.` — has this exact signature and is read
+// here as a clause, so a declaration whose log meant to deny both is refused. Nothing in the sentence
+// separates the two readings; the second of those was pinned as a declaration by #379 and is pinned as a
+// refusal now, because leaving it declared while `No clear text, scrawled words are visible.` is refused is
+// the vocabulary deciding again, which is the whole of what #436 asked to be closed. The corpus writes
+// neither shape — 0 of the 204 declarations move, whichever joint they use — and the direction is the one
+// this section chooses everywhere: that page is reported FAILED and redrawn, where the mistake in the other
+// direction ships a sheet of handwriting empty with nothing recorded (#190, #371). A determiner, an `only`,
+// a `but` or a full stop still refuse without any of this, as before.
+//
+// THE COST ON THE OTHER SIDE, stated for the same reason, and it is the fatal direction: because a
+// coordination that continues across the named noun is read as a denial still listing, a noun that heads an
+// AFFIRMED list is read as a member and its page is delivered empty — `No clear text, stamped words, stamps
+// are visible.`, `No printed text, and stamped words, marks are visible.`, whichever joint they use. It is
+// taken because the two readings are one sentence: `No printed words, and lines, characters are visible.` has
+// that shape and denies three things. #434's bound refused 24 of 24 such rows over its own grid where this
+// declares them, but on the vocabulary of the modifier alone — with `printed` in place of `stamped` it
+// declared them too — so what changes is that one reading now covers both, not that a control was removed.
+// 0 of the 3,747 replies on record write it (round 3 of this change's review, which measured it).
+function secondClauseJoint(tokens: Word[], negator: number, i: number, reach: number[]): boolean {
+  const verb = reach[i + 1]!;
+  if (verb < 0) return false;
+  // The noun's OWN comma, which is the one token neither scan below looks at: the first stops before `i` and
+  // the second starts after it, so an ASYNDETIC list — members divided by bare commas with no joiner before
+  // the last, `No printed words, lines, characters are visible.` — presented one comma behind the noun,
+  // nothing between it and the verb, and read as a clause. A comma ON the noun is the coordination
+  // continuing across it just as surely as a comma after it (round 2 of this change's review, which found
+  // five such wordings reported as holes). The `, and` form never reached this, because there
+  // `joint + 2 === i` and the scan below already sees the comma.
+  if (tokens[i]!.comma) return false;
+  let joint = -1;
+  for (let k = negator; k < i; k++) {
+    if (!tokens[k]!.comma) continue;
+    if (joint >= 0) return false; // two commas: members of a denial, not two halves of a sentence
+    joint = k;
+  }
+  if (joint < 0 || joint + 1 >= tokens.length) return false;
+  // `or` after the joint says the denial is still listing. `and` does not decide either way, and a bare
+  // comma decides nothing at all. `CONJUNCTION` holds only those two, so this line is about `or` alone:
+  // `No text, nor images are visible.` is already blank before this function is asked, because `nor` is a
+  // NEGATOR and the walk ends at it.
+  const after = tokens[joint + 1]!.word;
+  if (CONJUNCTION.has(after) && after !== "and") return false;
+  // Whether the coordination CONTINUES ACROSS this noun, which is what a list does and a clause does not:
+  // another comma or another conjunction anywhere between the joint and the verb the noun reaches for.
+  // Both sides of the noun, because a list's last member has its joiner behind it (`No writing, figures or
+  // stamps are present.`) and its first has one in front (`No text, and images or figures are visible.`),
+  // and either one is the denial still listing. The `and` at the joint itself is the one this skips: that is
+  // the coordinator of the clause, and it is the only word between the comma and the noun that can be one.
+  for (let k = joint + 2; k < verb; k++) {
+    if (tokens[k]!.comma || CONJUNCTION.has(tokens[k]!.word)) return false;
+  }
+  return true;
 }
 
 // Where the verb that affirms the noun at each position is, if there is one. The scan STOPS at a negator, because a
@@ -2752,7 +2831,8 @@ export function contentAffirmed(scope: string): string | null {
       // visible." empty on base, and the one the other three exist to keep honest. `QUALIFIER` holds
       // `typed` as well as `printed`, so the copula guard below covers the new vocabulary's one
       // overlap with it without an entry of its own.
-      if (!affirmsText(word) || negatedInList(tokens, i) || participleAfterCopula(tokens, i)) continue;
+      if (!affirmsText(word) || negatedInList(tokens, i, reach) || participleAfterCopula(tokens, i))
+        continue;
       if (LOCATIVE_SUBSTRATE.has(word) && (definiteBefore(tokens, i) || fileNameAt(tokens, i))) continue;
       // `printed page number`, `printed folio` — a name for text dressing the one thing on the paper
       // this pipeline never delivers (`folioAt`).

@@ -1433,14 +1433,15 @@ test("the affirmations a blank page's own log is made of are not contradictions"
     "The sheet is empty. Printed text is not present.",
     "Page is blank. Text and handwriting are not present.",
     "Page is blank. No text is present. Handwriting is not present either.",
-    // A negator that opens a coordination and a clause of its own after it: the walk back from
-    // `handwriting` finds the conjunction and the list's negator, so the whole line reads as one
-    // denied list rather than a denial followed by an affirmation. Pinned as the reading chosen, not
-    // as the only defensible one — the alternative refuses it, and #200's review raised it as the
-    // cost of `negatedInList` reaching across a comma. The neighbouring `No text is visible and
-    // handwriting is present.` (above) is refused, because there the walk stops at the first
-    // clause's own verb; the comma is the whole difference, which is why both are pinned.
-    "Page is blank. No printed text, and handwriting is present.",
+    // A negator that opens a coordination and a clause of its own after it used to be pinned here, as one
+    // denied list: `No printed text, and handwriting is present.` The alternative reading was always the
+    // other defensible one — #200's review raised it as the cost of `negatedInList` reaching across a comma
+    // — and #436 took the choice again with the corpus counted rather than argued: 204 blank declarations on
+    // disk, 69 of them reaching across a comma to a name for text, every one a list and not one of them
+    // this shape. So it is refused now, by `secondClauseJoint`, and pinned in the #431 test below beside
+    // the `scrawled` wording it used to disagree with. What still declares blank, and is the reason a bare
+    // comma cannot be the rule, is a denial's own members: `No printed words, lines, or characters are
+    // visible.` a few rows down, and 38 of those 204 declarations with it.
     // The same denial with no negator in it at all — a negative complement, which #200's review
     // measured as eight more reported-failed blank pages. `absent` and `missing` are as ordinary in a
     // page log as `not present`, and the boundary was again which word the model reached for:
@@ -1702,32 +1703,105 @@ test("a name for text affirms in either part of speech, and the position was nev
   // What that same widening must NOT buy, and the review of this change is what found it: the walk that
   // steps over a coordination's members steps into a SECOND clause just as readily, so a page whose log
   // says it carries handwriting was delivered empty — #431's own failure inverted, and the silent
-  // direction. `negatedInList` bounds its new crossings at a comma, and these are the rows that bound
-  // moves: 50 of the 60 (word, frame) pairs in that grid declare blank without it. Both frames, because
-  // the negator's own member is a noun in one and a bare qualifier in the other, and only one of those
-  // leaves an `AFFIRMED_NOUN` in the walk's way.
+  // direction. These sixty rows were the ones #434's comma bound moved; they are refused by
+  // `secondClauseJoint` now, on the shape of the sentence rather than on the vocabulary of the word, and
+  // the rows below are what that difference is worth. Both frames, because the negator's own member is a
+  // noun in one and a bare qualifier in the other, and only one of those leaves an `AFFIRMED_NOUN` in the
+  // walk's way.
+  // BOTH JOINTS, and the second one is round 1 of #436's review: a clause can be spliced on with a bare
+  // comma, and a rule that asked for `, and` shipped all 16 of the bare-comma rows empty — verdicts the
+  // bound had got right, in the direction this file calls fatal. The joint word is not the discriminator;
+  // the coordination continuing across the noun is.
   for (const word of "stamped scrawled inscribed cursive watermarked footnotes annotations barcodes".split(" ")) {
     for (const frame of [
       `No clear text, and ${word} words are visible.`,
       `Nothing legible, and ${word} content is present.`,
+      `No clear text, ${word} words are visible.`,
+      `Nothing legible, ${word} content is present.`,
     ]) {
       assert.equal(declaredBlank({ html: "", log: `Page is blank. ${frame}` }), false, frame);
     }
   }
-  // And the reading that bound must not touch, which is this branch's documented one rather than an
-  // accident of the vocabulary: a second clause whose modifier base already holds still declares blank, so
-  // the bound is scoped to the crossings #431 added and not to the walk. Base answers both of these the
-  // same way, which is what makes them the control here.
+  // THE ASYMMETRY #436 IS ABOUT, AND IT IS CLOSED HERE: the same sentence with a modifier the walk crossed
+  // long before #431 in it. These three declared blank until #436 — `and scrawled words` refused while `and
+  // printed words` shipped the page empty, one sentence answered by two mechanisms — and the deciding fact
+  // was the form of the word rather than anything about the page. They are refused now for the reason the
+  // rows above are: a verbless denial, one comma, an `and`, and a noun behind it with a finite verb of its
+  // own. The first of them is #436's own title; the third is the reading #200's review weighed and chose,
+  // and this is that choice being taken again with the corpus counted (0 of 204 declarations write it).
   for (const log of [
     "Page is blank. No clear text, and printed words are visible.",
     "Page is blank. Nothing legible, and handwritten content is present.",
     "Page is blank. No printed text, and handwriting is present.",
+    "Page is blank. Nothing legible, and printing is visible.",
+    // The same four with the joint spliced rather than coordinated, which is the class round 1 found: the
+    // `and` was never what made them clauses.
+    "Page is blank. No clear text, printed words are visible.",
+    "Page is blank. No clear text, handwritten content is present.",
+    "Page is blank. No printed text, handwriting is present.",
+    "Page is blank. Nothing legible, printing is visible.",
+    // The stated limit, pinned as the cost it is: a two-member denial with a plural verb has the same shape
+    // as a second clause and is read as one, so this blank page is reported. Nothing in the sentence
+    // separates them, the corpus writes neither, and a reported blank page is a glance where the other
+    // direction is a sheet of handwriting delivered empty (#190, #371).
+    "Page is blank. No text, and images are visible.",
+    "Page is blank. No text, images are visible.",
+  ]) {
+    assert.equal(declaredBlank({ html: "", log }), false, log);
+  }
+  // And what the discriminator must not reach, which is the whole of the #200 trade it is scoped inside: a
+  // denial's own members, separated by commas exactly as two clauses are. Three or more members, or a final
+  // `or` joint, or a comma on the noun itself, or no verb of its own behind the comma — any one of those and
+  // this is a list, and none of them is the joint word. The first
+  // four are corpus-verbatim (the last of them #367's log), and on the 3,747 replies with a log on disk
+  // this change moves none of the 204 declarations they come from.
+  for (const log of [
     "Page is blank. No printed words, lines, or characters are visible.",
+    "Page is blank. No text, images, or other content is visible.",
+    "Page is blank. no printed text, numbers, or content of any kind is present.",
+    "Page is blank. No legible text or content, and no writing is visible.",
+    // A list whose last member carries its joiner BEHIND it, which is the shape a bare-comma joint takes
+    // for a member rather than a clause: `figures` sits behind one comma with `or stamps` still to come,
+    // and `stamps` sits behind the same comma with the `or` in front of it. The coordination scan is what
+    // sees both, and this row is corpus-verbatim.
+    "Page is blank. A few specks. No writing, figures or stamps are present.",
+    // An ASYNDETIC list — members divided by bare commas with no joiner at all before the last — which is
+    // round 2 of #436's review, and the one shape whose deciding comma sits ON the affirmed noun rather than
+    // before or after it. The joint scan stops short of that comma and the coordination scan starts past it,
+    // so all five of these were reported as holes for a page with nothing on it. They are members, and a
+    // comma on the noun is now read as the coordination continuing across it.
+    "Page is blank. No printed words, lines, characters are visible.",
+    "Page is blank. No text, images, figures are visible.",
+    "Page is blank. No text, handwriting, drawings are present.",
+    "Page is blank. No writing, figures, stamps are present.",
+    "Page is blank. No printed text, images, handwriting is visible.",
+    // The same list with the first joint coordinated, which never reached the defect (the scan begins on the
+    // second comma there) and is pinned so the two paths are held apart.
+    "Page is blank. No printed words, and lines, characters are visible.",
+    "Page is blank. No printed words, lines, characters, marks are visible.",
+    // THE COST OF READING IT THAT WAY, pinned as a cost rather than a win, and it is the fatal direction: a
+    // noun that heads an AFFIRMED list has the same shape as a member of a denied one, so if these logs meant
+    // the stamps to be visible the page is delivered empty. #434's bound refused 24 of 24 rows like these on
+    // the vocabulary of the modifier alone — with `printed` for `stamped` it declared them too — so one
+    // reading now covers both wordings instead of two mechanisms disagreeing (round 3 of #436's review). 0 of
+    // the 3,747 replies on record write it.
+    "Page is blank. No clear text, stamped words, stamps are visible.",
+    "Page is blank. Nothing legible, scrawled content, drawings are present.",
+    "Page is blank. No printed text, and stamped words, marks are visible.",
+    "Page is blank. No clear text, printed words, stamps are visible.",
+    // No finite verb behind the joint: a fragment, so the noun is still a member. Whether a fragment
+    // affirms at all is #435's question and `verblessAffirmation`'s answer, not this one's.
+    "Page is blank. No printed text, and handwriting.",
+    "Page is blank. No printed text, and printed words.",
+    // And the marks strip's case, unchanged: a negator whose own next word is a conjunction never governed
+    // the noun, so it is not read as a list either way (the veto refuses this page for the marks phrase).
+    "Page is blank. No typed or stamped characters are present.",
+    "Page is blank. No footnotes or annotations appear.",
   ]) {
     assert.equal(declaredBlank({ html: "", log }), true, log);
   }
-  // The discriminators that branch names — a determiner, an `only`, a verb in the second clause, a `but` —
-  // all still end the walk, so the bound is not carrying them.
+  // The discriminators the #200 branch names — a determiner, an `only`, a verb in the second clause, a
+  // `but` — all still end the walk, and none of them needs the clause read to do it.
   for (const log of [
     "Page is blank. No clear text, and the scrawled words are visible.",
     "Page is blank. No clear text, and only scrawled words are visible.",
@@ -2076,18 +2150,33 @@ test("a denial reaches its noun through a noun-modifier, alone or inside a coord
   // its list — and the next clause's own `is visible` then belongs to a noun read as denied. The page
   // ships as an accepted declaration, which for a log that named a heading is the fatal direction.
   //
-  // It is the branch `No printed text, and handwriting is present.` is already pinned on, twenty lines up,
-  // as the reading chosen when #200's review raised exactly this cost. What `document` and `body` change
-  // is how often it is reached, not what it does: the identical sentences built from the modifiers that
-  // were already in the set are delivered on `main` too, and the third of these is one of them — pinned
-  // here so the shape cannot be read as something this change introduced.
+  // It is the branch `No printed text, and handwriting is present.` was pinned on until #436, as the
+  // reading chosen when #200's review raised exactly this cost. What `document` and `body` change is how
+  // often it is reached, not what it does: the identical sentences built from the modifiers that were
+  // already in the set are delivered on `main` too, and the second and third of these are — pinned here so
+  // the shape cannot be read as something this change introduced.
+  //
+  // #436 CHANGED THE FIRST TWO OF THESE, and the change is a contract change rather than a fix to this
+  // widening: a verbless denial, one comma, and a name for text behind it with a finite verb of its own is
+  // read as two clauses now, whether the joint is `, and` or a bare comma. So the log that names a heading
+  // is reported instead of delivered empty. What decided it was not the count but the alternative: the
+  // identical sentence with `scrawled` in place of `document` was refused already, so leaving these
+  // declared kept the vocabulary deciding which pages survive, which is the defect #436 is about. On the
+  // corpus neither reading moves anything — 0 of the 204 declarations on record are this shape.
+  //
+  // The third still declares, and it is the boundary of the change rather than an exception to it: `page`
+  // and `numbers` are modifiers and `page numbers` names no text this pipeline delivers, so there is no
+  // affirming noun for the clause read to reach.
   for (const log of [
     "Page is blank. No printed text or images, and body text is visible.",
     "Page is blank. No text or images, document headings are visible.",
-    "Page is blank. No text or images, page numbers are visible.",
   ]) {
-    assert.equal(declaredBlank({ html: "", log }), true, log);
+    assert.equal(declaredBlank({ html: "", log }), false, log);
   }
+  assert.equal(
+    declaredBlank({ html: "", log: "Page is blank. No text or images, page numbers are visible." }),
+    true,
+  );
   // And how narrow that line is, which is the other half of the same decision: one determiner, one `only`
   // or one verb in the second clause and the walk stops before the negator, as it does for every negative
   // above. The pair is what makes the branch legible — the words are the same, the reading is opposite.
