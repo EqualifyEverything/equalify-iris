@@ -471,6 +471,16 @@ test("the page agent's heading rules keep the clauses that place a section's par
     // paragraphs, so the one structure a reader navigates a manual with was unnavigable.
     ["a table of contents' group labels are headings under the contents heading",
       /the labels that divide a table of contents into runs of entries \(Preparations, Operation, Reference\) are headings for the same reason, one level under the contents heading/],
+    // #334, the third read-point of the same collision. The step-label clause above LEVELS a marked
+    // label — its example is literally "B." — which presupposes the label is a heading at all. Under the
+    // marker rule a B./C. run is a list, so a model that arrives here first levels a list into headings
+    // and never reaches the tie-break. The exception is pinned on all three branches that read the shape
+    // (this one, the sub-topic promotion rule, and NAMED ITEMS) because a rule binds where it is read;
+    // pinning only the place it is decided is what let this branch be missed in the first draft.
+    ["a marked run of step labels is a list before it is a heading to level",
+      /Both of those level a label you have already settled is a heading.*two or more consecutive step labels whose marker ADVANCES — B\. then C\., 4\. then 5\. — are a list before they are anything to level/],
+    ["and what is left to level is the single label, or a run the page never marked",
+      /What is levelled here is a single such label, or a run the page marks not at all/],
     // #128: SAVE THESE INSTRUCTIONS and FOR COMMERCIAL USE ONLY were promoted to <h2>
     // for being set in bold, putting two entries in the outline that head nothing.
     ["a line that says something rather than naming a section is not a heading",
@@ -967,11 +977,13 @@ test("the page agent's numbering and abbreviation rules keep the clauses that ma
     // #334, the next axis. Every clause above opens "a list the page marks…", so all of it presupposes
     // that list-hood is already settled — and on a run of run-in bold labels it is not, because THREE
     // rules reach that one printed shape: LISTS, NAMED ITEMS (a <dl>) and the run-in heading rule. On the
-    // replies on record, 56 of 68 draws over three printed runs settled the tie by emitting none of the
-    // three — a run of <p> elements opening in bold, the shape NAMED ITEMS already names and forbids —
-    // and only 12 put the run in a list at all. So the rule has to say what decides, and the marker is
-    // the only candidate that survives: a heading and a <dt> can hold the name but have nowhere to put
-    // the letter. One limit on that evidence: all 68 draws read a page.md predating the type clause
+    // replies on record, 68 draws over three printed runs split four ways: 12 put the run in a list, 36
+    // landed the label in a <p> (34 of those opening it in bold or italic — the shape NAMED ITEMS names
+    // verbatim and forbids), 14 emitted a heading run and 6 a <dl>. So the modal answer is the one none
+    // of the three rules allows, and the 20 draws that DID pick one of them picked two different ones.
+    // Either way the rule has to say what decides, and the marker is the only candidate that survives:
+    // a heading and a <dt> can hold the name but have nowhere to put the letter.
+    // One limit on that evidence: all 68 draws read a page.md predating the type clause
     // above, so it is the DIGIT run (16 of 27 outside a list, and `start` was already specified then)
     // that indicts the prompt as it stands. The two lettered runs are latent-or-fixed until a paid round
     // re-draws them.
@@ -998,6 +1010,16 @@ test("the page agent's numbering and abbreviation rules keep the clauses that ma
     ["a repeating marker is not a sequence", /A marker that repeats rather than advances is not a sequence/],
     ["a partly marked run is still one list, and the gap is logged",
       /A marker on only some of the labels does not break the run.*say in the "log" field which labels the page marked/],
+    // That remedy gets UNDER the ban ten lines above it: inside an <ol type="a"> every item is announced
+    // with a letter, including the ones the page printed no marker on, which is exactly the "letters the
+    // page does not show" that clause forbids. The other two trades in this section (the parentheses, the
+    // doubled marker) are both stated as trades; leaving this one unstated is what makes the two clauses
+    // read as a contradiction rather than a decision, so the cost and the reason for paying it are pinned
+    // together — a rule that hides its own exception is the shape a later edit resolves the wrong way.
+    ["the part-marked remedy names the marker it invents, and why it is still the right trade",
+      /it is the one place the ban just above on markers the page does not show gives way: a list announces a marker for every item it holds/],
+    ["and names what the alternatives lose instead",
+      /Splitting the run into a marked list beside loose paragraphs, or keeping all of it out of a list to protect the unmarked few, loses the sequence for every item rather than over-marking some/],
     // The corpus's own instance: a-to-d on acir-p059 and e-to-i on acir-p060. A model shown one page
     // cannot emit one list across both, so the second page's list has to carry start rather than
     // beginning again at a — which is the reading that says the page printed two sequences.
@@ -1657,9 +1679,12 @@ test("the page agent promotes a sub-topic the page names, and invents no outline
     // #334. This rule promotes a run-in bold label to a heading, and a marked run — a., b., c. — prints
     // the same ink while being a list. The tie-break lives under NUMBERS THE PAGE SHOWS, but a rule is
     // only bound where it is read: a model applying THIS clause never reaches that one, so the exception
-    // has to appear on this branch too rather than only at the place it is decided.
+    // has to appear on this branch too rather than only at the place it is decided. Both markers are in
+    // the example on purpose: the digit run is the subject that indicts the current prompt (16 of 27
+    // draws outside a list), so an exception illustrated with letters alone would be shown lettered
+    // evidence for a lettered case and leave the measured one to inference.
     ["a marked run is excepted here as well, not only where the tie-break is stated",
-      /One shape is outside this rule: where those names open with a printed marker that advances — a\., b\., c\. — the run is a list and not a set of headings/],
+      /One shape is outside this rule: where those names open with a printed marker that advances — a\., b\., c\. or 9\., 10\., 11\. — the run is a list and not a set of headings/],
     // #216, from a session on an appliance manual: the page printed a label over the two
     // cord-safety topics and another over the two grinding topics, and all of it came back
     // as a flat run of <h2>s. The promotion rule above makes the sub-topics headings; it
@@ -1734,9 +1759,11 @@ test("the page agent's definition-list rule keeps the clauses that make it a rul
     // Guard three, #334: a marked series is a list, decided under NUMBERS THE PAGE SHOWS. On acir-p059
     // the a-to-d run is named things with one paragraph each, so the two guards above both send it here
     // — and 3 of 19 draws duly emitted <dt>a. Locally assessed land…</dt>, letter and all, which is the
-    // one place the printed marker has no attribute to live in.
+    // one place the printed marker has no attribute to live in. (6 of the 68 draws across all three runs
+    // chose a <dl>, so this is the second-rarest of the four answers and still the most direct evidence:
+    // a <dt> carrying the letter as text is the collision printing itself.)
     ["a marked series of names is a list rather than a term list",
-      /Nor is it a series whose labels open with a printed marker that advances — a\., b\., c\. — which is a list/],
+      /Nor is it a series whose labels open with a printed marker that advances — a\., b\., c\. or 9\., 10\., 11\. — which is a list/],
     // The bound carries both conditions. Pinning only the explanation half would let a later edit drop
     // the marker half while this test still passed, which is how the case above comes back.
     ["and the <dl> is bounded to an unmarked item whose explanation is its own text",

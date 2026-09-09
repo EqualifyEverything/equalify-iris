@@ -317,6 +317,10 @@ Fourteen structures are easy to render as something that merely looks right, so 
   heading and never a peer of the section that contains it; and the labels that divide a table of
   contents into runs of entries (Preparations, Operation, Reference) are headings for the same
   reason, one level under the contents heading, because each of them heads the entries beneath it.
+  Both of those level a label you have already settled is a heading, so check that first where the
+  page marks it: two or more consecutive step labels whose marker ADVANCES — B. then C., 4. then 5. —
+  are a list before they are anything to level, for the reason given under NUMBERS THE PAGE SHOWS
+  below. What is levelled here is a single such label, or a run the page marks not at all.
   And whether anything is under it at all: a heading names a section, so a line that SAYS something
   rather than naming something — SAVE THESE INSTRUCTIONS, FOR COMMERCIAL USE ONLY, a stamp or a
   notice the page sets in bold with nothing subordinate to it — is a <p> (or a <strong> inside one)
@@ -331,8 +335,8 @@ Fourteen structures are easy to render as something that merely looks right, so 
   only visually has none of them in the outline. Use the name the page prints for each. Where the
   page names no sub-topics there is nothing to add and none is invented — this promotes a label the
   page gives, it does not supply an outline the page does not have. One shape is outside this rule: where
-  those names open with a printed marker that advances — a., b., c. — the run is a list and not a set of
-  headings, for the reason given under NUMBERS THE PAGE SHOWS below.
+  those names open with a printed marker that advances — a., b., c. or 9., 10., 11. — the run is a list and
+  not a set of headings, for the reason given under NUMBERS THE PAGE SHOWS below.
   A label the page prints over a cluster of those sub-topics is their parent and not their peer:
   where two or more of them sit under a title that names the group, that title is the heading and
   they each step one level down under it — a group label at <h2> makes them <h3>, not a run of four
@@ -578,8 +582,8 @@ Fourteen structures are easy to render as something that merely looks right, so 
   a capitalised phrase is a paragraph, and a <dl> is for a page that names items and explains them.
   And it is not the case where a named item has substantial content of its own — its own table, its
   own procedure, several paragraphs — which is a heading with that content under it by the heading
-  rule above. Nor is it a series whose labels open with a printed marker that advances — a., b., c. —
-  which is a list, for the reason given under NUMBERS THE PAGE SHOWS below. A <dl> is right where an
+  rule above. Nor is it a series whose labels open with a printed marker that advances — a., b., c. or
+  9., 10., 11. — which is a list, for the reason given under NUMBERS THE PAGE SHOWS below. A <dl> is right where an
   item's explanation is its own text and nothing more, and the page prints no marker on the names.
 - TABLE ROW GROUPS: where a table gathers its rows under printed group labels — regions with their
   states indented beneath them, a category with its items, a tax class with the taxes in it — that
@@ -665,7 +669,12 @@ Fourteen structures are easy to render as something that merely looks right, so 
   single (a) with no (b) after it stays whatever it would have been unmarked. A marker that repeats rather
   than advances is not a sequence — labels running 1., 1., 1. are numbers the page prints and this rule
   leaves them alone. A marker on only some of the labels does not break the run: emit the whole of it as one
-  list, carry the printed markers with value, and say in the "log" field which labels the page marked. And a
+  list, carry the printed markers with value, and say in the "log" field which labels the page marked. Be
+  clear what that costs, because it is the one place the ban just above on markers the page does not show
+  gives way: a list announces a marker for every item it holds, so the labels the page left unmarked acquire
+  one. Take that trade anyway. Splitting the run into a marked list beside loose paragraphs, or keeping all
+  of it out of a list to protect the unmarked few, loses the sequence for every item rather than over-marking
+  some, and the "log" field is what carries which labels the page actually marked. And a
   run continuing from a page you were not shown starts where this page starts it, with start on the <ol> — an
   a-to-d run on one page and an e-to-i run on the next are two lists, the second start="5", never one list
   beginning again at a.
