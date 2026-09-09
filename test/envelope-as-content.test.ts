@@ -1150,6 +1150,118 @@ test("a log describing the specks on an empty sheet is not a log doubting the sc
   );
 });
 
+// The strip above removes the marks noun and leaves what was DRESSING it standing in the scope, so a log
+// that calls the scan's own noise `print artifacts` hands the affirmation read the two words `print … are
+// visible` with the noun that held them together gone — a blank page reported as a hole (#439). What
+// decides it is the HEAD noun and not the dressing word: `print artifacts` is the scanner's and `print
+// smudges` is smudged printing, and the test below the moved rows is the pin that settles which.
+test("a name for text dressing a mark only the capture leaves goes with the mark (#439)", () => {
+  // #439's table, the rows that move. Each was `blank_contradicted` → `page_no_output` for a page with
+  // nothing on it, and the quote gave the defect away by being ungrammatical: `print are visible`.
+  for (const log of [
+    "Page is blank. Print artifacts are visible.",
+    "Page is blank. Printing debris is visible.",
+    "Page is blank. Image artifacts are visible.",
+    "Page is blank. Print artifacts only.",
+    "Page is blank. Printing debris visible.",
+    "Page is blank. Some print dust.",
+    "Page is blank. Image artifacts visible.",
+    // Both paths, which the issue asks for in as many words: the four rows above with a copula reach the
+    // defect through the verb read and predate the slot (a worktree at `8c9ef0b` behaves identically), the
+    // three without it through #438's fragment read. One rule moves both because both read the same scope.
+    "Page is blank. Print artifact visible.",
+    "Page is blank. Image dust only.",
+    "Page is blank. Line artifacts are visible.",
+    "Page is blank. Text debris is visible.",
+    // The joined spelling, which is how these logs write a pair of nouns. The unhyphenated form is the row
+    // above; the hyphenated one never reached the defect, base having matched the whole compound.
+    "Page is blank. Print/artifacts are visible.",
+    "Page is blank. Print-artifacts are visible.",
+    // A listed adjective in front of the dressing word: the stack, the slot and the head are three
+    // different positions, and only the last one is read here.
+    "Page is blank. Faint print artifacts are visible.",
+  ]) {
+    assert.equal(declaredBlank({ html: "", log }), true, log);
+  }
+
+  // The half that must not move, and the pin that chose the head noun over the dressing word. #431's grid
+  // asserts this exact sentence refuses, for eight names for text against eight more in the other part of
+  // speech — a rule keyed on `print` broke that cell. Keyed on the head, the same rule needs no exception
+  // for it: `smudges` is a mark on the paper and `artifacts` is not.
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. Only print smudges are visible." }), false);
+  // #435's own wordings, which are the reason `smudges`, `specks`, `dots`, `flecks`, `blemishes` and
+  // `marks` all stay where they are: writing that is smudged is a page with writing on it.
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. Handwriting smudges are visible." }), false);
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. Cursive smudges only." }), false);
+  // Three of #439's ten rows do not move, and each has a mechanism that is not this rule's:
+  //
+  // `NOT_CLAUSE_HEAD` withholds the slot behind a copula (#220), so the phrase matched here is the bare
+  // `dust` and `print` was never in the span this function is handed. The same sentence without `there is`
+  // moves, and is in the list above — the pair is what says which bound owns this row.
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. There is some print dust." }), false);
+  // ...and these two are #431's class, not #439's: their head is a mark a pen also leaves, so the dressing
+  // word is handed back exactly as `handwriting smudges` hands `handwriting` back. The issue tabled them
+  // together with the rows above; they are two findings, and only one of them is this one.
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. Print smudges apparent." }), false);
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. Typed specks visible." }), false);
+  // The corpus's other head noun, deliberately outside the list: 7 of the 81 occurrences on disk dress
+  // `dot(s)`, and a page can have real printed dots — `the table contains the printed dot leaders` is a
+  // corpus statement about typographic CONTENT. So this stays reported, the same trade #193 made for bare
+  // `marks`, and the row beside it is the one that pays for it.
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. Printed dots are visible." }), false);
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. The table contains the printed dot leaders." }), false);
+  // What this costs, pinned as a price and not left to be re-found. Both corpus SENTENCES that change
+  // reading are here: the first is a blank page now read as one, and the second is a page with content on
+  // it — a character the model repaired — that would now be declared empty if the same reply also claimed
+  // blankness. Neither reply does claim it, which is why 0 of the 204 declarations on disk move; the second
+  // is the shape a future one would have to come in.
+  assert.equal(
+    declaredBlank({
+      html: "",
+      log:
+        "Page is blank. Removed three stray dots (printing artifacts/dust specks in lower portion of page) " +
+        "that were incorrectly transcribed as five separate <p>.</p> elements.",
+    }),
+    true,
+  );
+  assert.equal(
+    declaredBlank({
+      html: "",
+      log:
+        "Page is blank. The 'We·t Virginia' printing artifact in the source image has been transcribed as " +
+        "'West Virginia' (the interpunct is a printing defect, not a character).",
+    }),
+    true,
+    "a page with content on it, declared empty: the cost of the widening, and base reported this",
+  );
+  // The one corpus reply that both writes the phrase and declares the page blank, verbatim: blank before
+  // this rule and blank after it, which is what "0 of the 204 declarations move" is made of.
+  assert.equal(
+    declaredBlank({
+      html: "",
+      log:
+        "Page is blank. Only a few scattered specks/dots are present, which appear to be image artifacts " +
+        "rather than content.",
+    }),
+    true,
+  );
+
+  // And the widening takes no veto with it, which is the claim `CAPTURE_ONLY_MARK`'s comment makes and
+  // this is the check for it: the three words added are in neither veto list, so a sentence that doubts
+  // the reading goes on refusing whether or not the phrase leaves with its head.
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. Print artifacts obscure the sheet." }), false);
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. Image debris makes the page illegible." }), false);
+  assert.equal(declaredBlank({ html: "", log: "The page is blank; the scan is noisy with artifacts, no text." }), false);
+  // A doubt word the SLOT captured is untouched, because this branch only reaches words base was already
+  // handing back: `smeared` goes back into the scope and `smear\w*` is a veto (#226), head noun or not.
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. Smeared artifacts are visible." }), false);
+  // Nothing is stripped at all where the log holds a doubt this section will not argue with, so the whole
+  // phrase stands and the read sees it entire — `text dust` quoted, rather than `text` alone.
+  const doubted = blankDeclaration({ html: "", log: "Page is blank. Text dust; the scan is too dark." });
+  assert.equal(doubted.blank, false);
+  assert.equal(doubted.affirmed, "text dust");
+});
+
 test("a refused blank declaration says which word refused it", () => {
   // What the log line owed whoever reads it. Every one of #190's four pages had to be traced from
   // `shape: "empty_html"` — which reads as "the model answered with no page", the opposite of what
@@ -2164,41 +2276,60 @@ test("a blank page's own fragments are not affirmations (#435)", () => {
   // cannot pick up either, because it only looks forward from the negator. Base delivers this page empty
   // too, so this is a defect left standing and not one bought.
   assert.equal(declaredBlank({ html: "", log: "Page is blank. A signature, nothing else." }), true);
-  // A statement that is the name and NOTHING else affirms, and these are blank pages reported as holes.
-  // Statements split on `;` and on line breaks as well as on `.`, so each of these is one word by the time
-  // the read sees it, and in the third the denial is in the next statement where nothing here can reach it.
-  // A `tokens.length === 1` guard for this was written and taken back out; the pair of pins below is why,
-  // and they are the two halves whatever replaces it has to defend at once.
-  assert.equal(declaredBlank({ html: "", log: "Blank page; text" }), false);
-  assert.equal(declaredBlank({ html: "", log: "Blank page. Content" }), false);
-  assert.equal(declaredBlank({ html: "", log: "Page is blank; images; nothing present." }), false);
+  // A statement that is the name and NOTHING else no longer affirms (#440). Statements split on `;` and on
+  // line breaks as well as on `.`, so each of these is one word by the time the read sees it, and in the
+  // third the denial is in the next statement where nothing here can reach it. A plain `tokens.length === 1`
+  // guard was written for this and taken back out in `c43dff9`, because it also delivered the pair at the
+  // bottom of this block empty; the two halves are pinned together here because the guard that ships has to
+  // hold both at once, and what tells them apart is not the token count.
+  assert.equal(declaredBlank({ html: "", log: "Blank page; text" }), true);
+  assert.equal(declaredBlank({ html: "", log: "Blank page. Content" }), true);
+  assert.equal(declaredBlank({ html: "", log: "Page is blank; images; nothing present." }), true);
   // Every boundary is one of these, `.` and `?` included, and the denial can be on either side of the
-  // label — behind it in the first, ahead of it in the second, in the answer to the question in the third.
-  assert.equal(declaredBlank({ html: "", log: "Page is blank. No printed text. Images." }), false);
-  assert.equal(declaredBlank({ html: "", log: "Page is blank. Images. No text." }), false);
+  // label — behind it in the first, ahead of it in the second.
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. No printed text. Images." }), true);
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. Images. No text." }), true);
+  // Not moved, and the row that says how narrow the guard is: `Any text` is TWO tokens, so a determiner in
+  // front of the label puts the statement back outside the guard and the page is reported again. The answer
+  // to the question is in the next statement, and nothing here reaches across a boundary to find it.
   assert.equal(declaredBlank({ html: "", log: "Page is blank. Any text? None found." }), false);
-  // How narrow that hole is, which is why the pins above are a gap and not an argument for the guard:
-  // a label with its denial in the SAME statement declares, whatever punctuation joins them.
+  // Already declared before the guard existed, and still declared: a label with its denial in the SAME
+  // statement is more than one token, whatever punctuation joins them. These are the rows that would break
+  // if the guard were written the other way round — refusing every statement whose only NOUN is a label.
   assert.equal(declaredBlank({ html: "", log: "Page is blank. Text: none." }), true);
   assert.equal(declaredBlank({ html: "", log: "Page is blank. Text (none)." }), true);
   assert.equal(declaredBlank({ html: "", log: "Page is blank. Text/handwriting: none detected." }), true);
   assert.equal(declaredBlank({ html: "", log: "Page is blank; no text; no images." }), true);
-  // The other half: after the marks strip, one token is not one word. These arrive as a single token
-  // because `vetoScope` removed the head noun, and the phrase is #435's own — six of the seven wordings
-  // in the issue are this phrase with a predicate on the end. So the guard that fixes the three rows
-  // above delivers these empty, which is the failure this whole read exists to stop. Refusing the
-  // declaration is the right answer here and the wrong one there, and `tokens.length` cannot tell them
-  // apart because the word that separates them is the one the strip took.
+  // The other half, and why the guard asks whether the strip CUT this statement rather than how long it is:
+  // after the marks strip these arrive as a single token too, because `vetoScope` removed the head noun —
+  // and the phrase is #435's own, six of the seven wordings in that issue being this phrase with a predicate
+  // on the end. Refusing the declaration is right here and wrong above, `tokens.length` is 1 in both, and
+  // the word that separates them is the one the strip took. So `vetoScope` leaves `PHRASE_GONE` where it
+  // cut, the statement carries the mark through to the guard, and these two stay reported.
   assert.equal(declaredBlank({ html: "", log: "Page is blank. Handwriting smudges." }), false);
   assert.equal(declaredBlank({ html: "", log: "Page is blank. Cursive smudges." }), false);
-  assert.equal(declaredBlank({ html: "", log: "Page is blank. handwriting." }), false);
+  // What the guard costs, pinned as a loss and not left to be found: a lone name for text with no strip
+  // behind it is exactly the shape the guard refuses, so a model that writes this to mean handwriting IS
+  // there is now read as declaring the page empty. One wording against the five above, and no reply in the
+  // 3,747-reply corpus writes either shape — the trade is between two unobserved sets, which is why the
+  // corpus could not pick the guard and the pair below it had to.
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. handwriting." }), true);
   // Not one of them, though it looks like one: `notes` is outside `TEXT_NOUN`, so this page ships empty
   // with the guard and without it, and no bound in this function is what decides it (#437's neighbourhood).
   assert.equal(declaredBlank({ html: "", log: "Page is blank. Handwritten notes." }), true);
-  // Nothing is stripped out of these two, so they are two tokens either way and neither guard reaches
+  // Nothing is stripped out of these two and they are two tokens either way, so the guard does not reach
   // them — pinned beside the rows above so a future one-token rule cannot be tested on them by mistake.
   assert.equal(declaredBlank({ html: "", log: "Page is blank. Typed lines." }), false);
   assert.equal(declaredBlank({ html: "", log: "Page is blank. Printed text." }), false);
+  // What the mark being a character in the text costs: a log could write one, and a forged one would hand
+  // the guard back the affirmation it takes away. It cannot — `vetoScope` deletes `\f` and `\v` from its
+  // input before inserting any — so a lone name for text with a form feed in front of it is read exactly
+  // as the lone name above. Both of these DO report with that cleaning removed, which is what the cleaning
+  // is buying and the reason it is a line of its own. `\v` is cleaned beside it though the guard reads only
+  // `\f`, so a marker respelled later cannot become forgeable by moving one character.
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. \ftext" }), true);
+  assert.equal(declaredBlank({ html: "", log: "Blank page;\ftext" }), true);
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. \vtext" }), true);
 });
 
 // --- blankness the reply STATES, rather than blankness read out of its prose (#371) ---------------
