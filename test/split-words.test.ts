@@ -660,6 +660,13 @@ test("a quoted word in a comment refuses a join, and bare comment prose does not
   assert.deepEqual(joinBrokenWords(bare).joined, [
     { split: "inter-state", written: "interstate", evidence: "interstate" },
   ]);
+  // Not scoped to `@` markers and not to quoted spans: any comment, and a `name=value` run inside one.
+  // Pinned because the docs sentence a maintainer reads to know what can suppress a join said `@` and
+  // `quoted`, and both were narrower than this.
+  for (const comment of [`<!-- see "state" here -->`, `<!-- @source page=state -->`, `<!-- x='state' -->`]) {
+    const pages = [`<p>The inter-state figure.</p>${comment}`, `<p>interstate</p>`];
+    assert.deepEqual(joinBrokenWords(pages).pages, pages, comment);
+  }
   // Nothing in a comment can LICENSE a join in either form: the evidence index is built from `textOf`,
   // which strips comments before it reads anything.
   const licence = [`<p>Agri-culture receipts.</p>`, `<!-- the page writes agriculture -->`];

@@ -279,7 +279,11 @@ const NOT_SHOWN = /<(script|style)\b[\s\S]*?(?:<\/\1\s*>|$)/gi;
 // `MARKUP` matches `<!--…-->` as well as a tag, so a quoted span or a `name=value` run inside a comment
 // lands in the guard — `<!-- @source "state" -->` refuses `inter-state`, where the same word as bare
 // comment prose does not, since the unquoted alternative needs its `=`. Kept rather than tidied, on two
-// grounds. The founding decision at the top of this file is that a model's `@` marker quotes the page's
+// grounds, and neither is that the input is dead: the `@` markers a delivered document carries are
+// appended by `wrapDocument` AFTER this pass, so the only comment that reaches the guard is one a model
+// wrote into a page fragment, which no prompt asks for and nothing strips. Rare, not impossible.
+//
+// The founding decision at the top of this file is that a model's `@` marker quotes the page's
 // words freely, and a word it quotes may well be one the printing uses alone, so seeing it is the
 // conservative reading — and the guard's only failure is not seeing a word. And it is free: excluding
 // comments from this scan moves nothing on the 1,221-file corpus, 29 joins and 18 distinct words either
