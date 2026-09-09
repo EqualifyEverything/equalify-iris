@@ -112,6 +112,11 @@ export interface TablePiece {
   // report a lost ROW as a lost header.
   headerRows: number;
   headerCells: number;
+  // The bracketed note rows this half printed, wherever it printed them — `<thead>` included, which is
+  // why this is not read off `labels`. It says what the half PRINTED as a row, which is what tells a
+  // note the merge kept in the place the page had it from a note the merge demoted into a row of its
+  // own invention.
+  noteRows: string[];
   // The first cell of every DATA row, normalized and non-empty: on these tables that is the row's
   // label — the state, the tax, the year — which is what a reader loses when a join drops rows,
   // and what `verifyJoin` requires to survive. Not the numbers: a label is a string worth looking
@@ -206,6 +211,12 @@ function read(table: Element, span?: { start: number; end: number }, html = ""):
       .filter((r) => !isHeaderRow(r))
       .map((r) => normalizeCell(r.children[0]?.textContent ?? ""))
       .filter(Boolean),
+    // Every row of this half that is a bracketed note, header block included. Read over ALL rows and
+    // not over `labels`, because `labels` drops header rows and a note row printed inside `<thead>` is
+    // one — that is the `p068` shape the corpus has, and reading this off `labels` made a note the
+    // pages did print as a row look like a note nobody printed. Rule 6's repeat set walks every `tr`
+    // for exactly the same reason, so these two are now the same fact read the same way.
+    noteRows: rows.filter(isUnitNoteRow).map((r) => normalizeCell(r.textContent ?? "")),
     start: span?.start ?? 0,
     end: span?.end ?? 0,
     html: span ? html.slice(span.start, span.end) : "",
@@ -511,10 +522,12 @@ export function verifyJoin(pair: ContinuationPair, merged: string): string | nul
   // top" can be read as licence for the row while rule 4 asks for the caption, and a model that
   // satisfies one and not the other must not clear this.
   //
-  // The distinction is already on the pair, because a note row's text is that row's label — which is why
-  // a merge dropping the note row reports `labels_lost` and not this. A note in no half's labels is a
-  // note no half printed as a data row.
-  const printedAsRow = new Set([...pair.first.labels, ...pair.second.labels]);
+  // The distinction is already on the pair: `noteRows` is every bracketed note row each half printed,
+  // header block included. Read off `labels` first, which was wrong in one direction — `labels` drops
+  // header rows, so a note row printed inside `<thead>` counted as printed by nobody and a merge that
+  // carried that row through untouched was refused. That is the `p068` shape the census counts, and
+  // rule 6's repeat set had been reading the same fact the other way, over every `tr`.
+  const printedAsRow = new Set([...pair.first.noteRows, ...pair.second.noteRows]);
   const rowNotes = [...tables[0].querySelectorAll("tr")]
     .filter(isUnitNoteRow)
     .map((r) => normalizeCell(r.textContent ?? ""))

@@ -671,6 +671,33 @@ test("a caption note the merge demoted into a row has not been kept", () => {
   assert.equal(verifyJoin(pair, `<table><caption>Table 5.—Debt ${note}</caption>${HEAD}<tbody>${rows}</tbody></table>`), null);
 });
 
+test("a note row a half printed inside <thead> was printed by somebody", () => {
+  // What a half PRINTED as a row is read over every row and not off its labels, because labels drop
+  // header rows and a note row closing <thead> is one — the p068 shape the census counts. Read off
+  // labels, that note was printed by nobody, so a merge carrying the row through untouched was refused
+  // for demoting a note it had not moved at all. Rule 6's repeat set had been reading the same fact the
+  // other way round, over every tr, so the two readers of one fact disagreed.
+  const note = "[In millions of dollars]";
+  const headNote = `<thead><tr><th scope="col">Col 1</th><th scope="col">Col 2</th><th scope="col">Col 3</th></tr>${noteRow(note)}</thead>`;
+  const first = `<table><caption>Table 5.—Debt</caption>${headNote}<tbody>${dataRow("Alabama")}</tbody></table>`;
+  const second = `<table><caption>Table 5.—Debt ${note}—Continued</caption>${headNote}<tbody>${dataRow("Vermont")}</tbody></table>`;
+  const pair = onePair(first + second);
+
+  assert.ok(!pair.first.labels.includes(note), "the fixture is not the case being tested");
+  assert.deepEqual(pair.first.noteRows, [note]);
+
+  const coded = joinInCode(pair);
+  assert.ok("html" in coded, JSON.stringify(coded));
+  assert.equal(verifyJoin(pair, coded.html), null);
+  // And the demotion is still refused, because neither half printed THIS note as a row.
+  const other = "[Percentage distribution]";
+  const promoted = `<table><caption>Table 6.—Shares ${other}</caption>${HEAD}<tbody>${dataRow("Alabama")}</tbody></table>`;
+  const plain = `<table><caption>Table 6.—Shares—Continued</caption>${HEAD}<tbody>${dataRow("Vermont")}</tbody></table>`;
+  const demotedPair = onePair(promoted + plain);
+  const demoted = `<table><caption>Table 6.—Shares</caption>${HEAD}<tbody>${noteRow(other)}${dataRow("Alabama")}${dataRow("Vermont")}</tbody></table>`;
+  assert.equal(verifyJoin(demotedPair, demoted), "caption_note_lost");
+});
+
 test("a fullwidth-bracketed note is a note in both readers, or it ships twice", () => {
   // One arm writes ［Percentage distribution］ with fullwidth brackets — 1 of the 68 delimited notes in
   // #374's corpus. It is read because the cost is a character class, and because the two readers have

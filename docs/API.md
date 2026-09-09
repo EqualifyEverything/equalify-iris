@@ -3547,8 +3547,10 @@ lost. Reading any note row in the answer is the opposite hole: a note that arriv
 left as a row has been demoted into the phantom row `page.md` forbids, `<thead>`-closing form
 included, and counting it as proof of keeping would clear exactly that. `joinInCode` never demotes,
 so the shape is the Copy Editor's — rule 6's "belongs once, at the top" can be read as licence for
-the row while rule 4 asks for the caption. The distinction is already on the pair: a note row's text
-is that row's label, so a note in no half's labels is a note no half printed as a row.
+the row while rule 4 asks for the caption, and rule 6 now says so. The distinction is already on the
+pair: each half records the bracketed note rows it printed, over every row and not over its labels,
+because a label list drops header rows and a note row printed inside `<thead>` is one — the `p068`
+shape the census counts. Rule 6's repeat set reads the same fact the same way.
 
 Both bracket widths are read, ASCII and fullwidth, and the parenthesised spelling is not — a check
 demanding every parenthesised run survive would demand the survival of `(continued`, which rule 4
