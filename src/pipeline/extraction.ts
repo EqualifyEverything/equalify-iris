@@ -1556,9 +1556,11 @@ const NAMES_TEXT = new RegExp(String.raw`\b(?:${TEXT_NOUN})\b`, "i");
 // compounds are unbounded while the words behind them are already here. `NAMES_TEXT` is `\b`-tested for
 // the same reason one line up, which is why `machine-printed` was caught and `pen-written` was not. `\b`
 // cannot match inside a word (`written` does not match in `rewritten`, `italic` not in `italicised`),
-// so what this admits is exactly the compound.
+// so what this admits is exactly the compound. Which is why `hand-?printed` stays in the list beside
+// `printed` and is not redundant with it: the hyphenated half of that entry is, but `handprinted` written
+// solid is a word no boundary test on `printed` can reach. Same for `hand-?written` beside `written`.
 const NAMES_TEXT_FORM =
-  /\b(?:hand-?written|handwrote|written|typed|typewritten|typeset|stamped|signed|initial(?:l)?ed|lettered|numbered|captioned|labell?ed|annotated|inscribed|embossed|engraved|watermarks?|watermarked|drawn|sketched|scrawled|scribbled|doodled|underlined|highlighted|illustrated|cursive|pencill?ed|penned|inked|hand-?printed|lettering|barcodes?|drawings?|sketch(?:es)?|doodles?|annotations?|inscriptions?|footnotes?|notations?|monograms?|letterheads?|logotypes?|punctuation|diacritics?|symbols?|italics?|boldface|typographic|textual|alphanumeric|numeric|numbering|stamping|signing|captioning|labell?ing|embossing|engraving|underlining|highlighting|scribbling|scrawling|watermarking|doodling|sketching|italici[sz](?:ed|ing))\b/i;
+  /\b(?:hand-?written|handwrote|written|typed|printed|typewritten|typeset|stamped|signed|initial(?:l)?ed|lettered|numbered|captioned|labell?ed|annotated|inscribed|embossed|engraved|watermarks?|watermarked|drawn|sketched|scrawled|scribbled|doodled|underlined|highlighted|illustrated|cursive|pencill?ed|penned|inked|hand-?printed|lettering|barcodes?|drawings?|sketch(?:es)?|doodles?|annotations?|inscriptions?|footnotes?|notations?|monograms?|letterheads?|logotypes?|punctuation|diacritics?|symbols?|italics?|boldface|typographic|textual|alphanumeric|numeric|numbering|stamping|signing|captioning|labell?ing|embossing|engraving|underlining|highlighting|scribbling|scrawling|watermarking|doodling|sketching|italici[sz](?:ed|ing))\b/i;
 // A name for text only affirms it where it is not NEGATED, which is the difference between "the
 // printed text does not resolve" and "no printed text". The prompt asks the agent for both halves of
 // the observation in one breath — name the marks, deny the text — so without this the more explicit
@@ -1733,6 +1735,22 @@ const AFFIRMING_VERB = new Set("is are was were appear appears remain remains co
 const QUALIFIER = new Set(
   "meaningful legible readable printed typed visible discernible apparent recognizable recognisable clear other more".split(" "),
 );
+// The same words as a hyphenated compound, which is what `qualifies` reads and this Set cannot: a log
+// writes `machine-printed`, `pre-typed`, `semi-legible` as readily as the bare word, and every list this
+// one is read beside is boundary-tested (`NAMES_TEXT`, `NAMES_TEXT_FORM`) for exactly that reason. Built
+// from the Set so the two can never drift. `\b` cannot match inside a word, so `printed` here is the
+// compound and not `imprinted`; a NEGATIVE prefix is admitted along with the rest (`un-printed` reads as
+// `printed`), which is the standing cost of boundary-testing this file already carries for
+// `NAMES_TEXT_FORM` (`un-written`) and runs toward a reported blank page rather than a lost one.
+const QUALIFIER_FORM = new RegExp(String.raw`\b(?:${[...QUALIFIER].join("|")})\b`, "i");
+// A qualifier in either form. Read where the question is whether a word is a MODIFIER — one the walk may
+// cross, or one that must not be taken for the noun it stands in front of — and not where the question is
+// whether it names text, which is `affirmsText`. `printed` and `typed` are in both classes, so the two
+// answers have to move together: #437 measured 24 of 40 (bare, compound) pairs answering differently from
+// their own stem, in both directions, because this list was token-exact where the text lists are not.
+function qualifies(word: string): boolean {
+  return QUALIFIER.has(word) || QUALIFIER_FORM.test(word);
+}
 // The words that affirm a noun with no verb between them: "heading visible" is "a heading is visible"
 // with the copula dropped, which is how a log written in fragments says a page has something on it.
 // `detected`, `seen` and `found` are left out for the reason `AFFIRMING_VERB` leaves them out — they are
@@ -1986,13 +2004,25 @@ const AFFIRMED_NOUN = new RegExp(`^(?:${TEXT_NOUN})$`, "i");
 // carries is read (`hand-written`, `rubber-stamped`), and that is what is wanted here too: these
 // callers hold one token, and the token a log writes is as often the compound.
 //
-// WHAT THAT COSTS, stated because the parity this file pins elsewhere does not survive it: the other two
-// lists are token-exact, so a compound is read only when its stem is in the boundary-tested one. `typed`
-// is, `printed` is not (it is in `TEXT_NOUN` and `QUALIFIER`), and `hand-?printed` is an entry of its own
-// — so `pre-typed` affirms where `pre-printed` does not, and `The machine-printed notes are visible.`
-// declares a page with notes on it blank. Which member of such a pair is right is decided by the noun
-// BEHIND the modifier and not by its prefix, so no exclusion of compounds fixes both halves. Measured at
-// 25 pairs and 2 of 3,746 corpus logs (both ineligible), and filed as #437 rather than patched here.
+// `printed` IS IN THIS LIST, and it is the one word here that is also in `TEXT_NOUN` and in `QUALIFIER`.
+// It is here for the compound alone: the bare token already affirmed through `AFFIRMED_NOUN`, so adding it
+// changes nothing a log spells `printed` and everything a log spells `machine-printed` (#437). Before that,
+// `typed` was in this list and `printed` was not, so `pre-typed` affirmed where `pre-printed` did not and
+// `The machine-printed notes are visible.` declared a page with notes on it blank — one sentence answered
+// by two mechanisms, on the spelling of the modifier. 24 of 40 (bare, compound) pairs disagreed with their
+// own stem across the five callers, in both directions; all 40 agree now.
+//
+// The parity that buys is parity with the STEM, not a claim that the stem's answer is right: whatever this
+// file decides about `printed <noun>` it now decides about `machine-printed <noun>`, and which member of
+// the pair a page needs is still decided by the noun BEHIND the modifier — by `AFFIRMED_NOUN` here and by
+// the object walk in `exceptiveOrLocativeObject`, which is where both halves of #437's fix live. A
+// compound whose prefix NEGATES is read as the word it negates (`un-printed`, `un-written`), which is
+// boundary-testing's standing cost in this list and runs toward a reported page rather than a lost one.
+//
+// THE CORPUS IS SILENT, and that is an empty denominator rather than a measured zero: of 3,747 page replies
+// with a log, 4 write a hyphenated compound of `printed` or `typed` at all, and all 4 are replies whose HTML
+// carries content — so not one of them reaches the blank read on either arm. Replayed, 0 of 3,747 verdicts
+// move. The 40 pairs are the evidence; the replay only says nothing on record breaks.
 function affirmsText(word: string): boolean {
   return AFFIRMED_NOUN.test(word) || NAMES_TEXT_FORM.test(word);
 }
@@ -2055,7 +2085,10 @@ function words(statement: string): Word[] {
 const DEFINITE = new Set("the this that these those its their".split(" "));
 function definiteBefore(tokens: Word[], i: number): boolean {
   let k = i - 1;
-  while (k >= 0 && QUALIFIER.has(tokens[k]!.word)) k--;
+  // `qualifies` and not `QUALIFIER`, because a compound stands where its stem stands: the article in front
+  // of `the machine-printed heading` is the one in front of `the printed heading`, and stopping at the
+  // compound lost the definiteness the caller is asking about.
+  while (k >= 0 && qualifies(tokens[k]!.word)) k--;
   return k >= 0 && DEFINITE.has(tokens[k]!.word);
 }
 
@@ -2065,8 +2098,19 @@ function definiteBefore(tokens: Word[], i: number): boolean {
 // gained ~60 subjects these two guards could not see. Asking `QUALIFIER` covered `printed` and `typed` and
 // nothing else, so #220's shape returned for `stamped signed embossed watermarked annotated labelled
 // engraved scrawled numbered captioned inscribed underlined highlighted` — 13 of 13 measured, each of them
-// a blank page refused and lost. `QUALIFIER` is still read because `printed` is in it and in `TEXT_NOUN`,
-// not in `NAMES_TEXT_FORM`; the union is what the guards are about.
+// a blank page refused and lost. `QUALIFIER` is still read for its OTHER twelve words — `legible`,
+// `meaningful`, `visible` and the rest, which name no text and are in no other list — and not for
+// `printed`, which #437 put into `NAMES_TEXT_FORM`; the union is what the guards are about.
+//
+// `QUALIFIER.has` and not `qualifies`, and the reason is structural rather than a count. What both guards do
+// is SKIP a subject the affirmation loop would otherwise read, so a word that is never read as a subject
+// cannot be affected by either of them — and the twelve other qualifiers are exactly that: `legible`,
+// `semi-legible`, `machine-readable` are in no name-for-text list, in either part of speech, so no read ever
+// arrives here holding one. The two that are, `printed` and `typed`, have their compounds covered by the
+// boundary-tested half of the union now. A sweep of all thirteen as compounds through both guards' frames
+// moves nothing, which is what that argument predicts and is not independent evidence for it: the frames
+// cannot separate a skipped subject from a word that was never a subject, because both leave the verdict
+// where it was.
 function modifierForm(word: string): boolean {
   return QUALIFIER.has(word) || NAMES_TEXT_FORM.test(word);
 }
@@ -2081,6 +2125,15 @@ function modifierForm(word: string): boolean {
 // ten words and a `but` away, in a clause about where the number came from — which reported a blank
 // page as lost (#220). Nothing is missed by skipping it: "The heading is printed on the page" affirms
 // through `heading`, which is a subject the loop reads two words earlier and finds the same `is` for.
+//
+// WHAT IS NOT READ HERE is the other side of the copula: this asks what stands BEHIND `is` and nothing asks
+// what stands after it, so `The heading is empty.` affirms a heading and reports a blank page as a hole,
+// along with `is blank`, `is unmarked`, `is unfilled`, `is featureless` and `is void of content` — while
+// `is absent`, `is missing`, `is not present` and `is nowhere` are read as denials because the negator lists
+// hold those words. Six of ten wordings, on every subject that names text and on no subject that does not.
+// That is #442, with the grid and the corpus count (0 of 204 declarations affected, because a real log's
+// subject is the page rather than its heading); a fix belongs beside this function, which is already the one
+// place that reads a copula's other side.
 const COPULA = new Set("is are was were be been being isn't aren't wasn't weren't".split(" "));
 function participleAfterCopula(tokens: Word[], i: number): boolean {
   if (!modifierForm(tokens[i]!.word)) return false;
@@ -2614,8 +2667,11 @@ function exceptiveOrLocativeObject(tokens: Word[], k: number): number | null {
     // which of the two overlapping words they use. Skipping it costs nothing for the reason above: the
     // real object is still ahead when there is one. The exclusion is token-exact and the list it guards
     // against is boundary-tested, so it settles the pair for the bare words and not for their compounds
-    // (`pre-typed` against `pre-printed`), which is #437 and not a narrowing to make here.
-    if (NAMES_TEXT_FORM.test(object) && !AFFIRMED_NOUN.test(object) && !QUALIFIER.has(object)) {
+    // (`pre-typed` against `pre-printed`). #437 closed that: the exclusion is `qualifies`, which reads the
+    // compound as its own stem, so `in the machine-printed` is skipped exactly as `in the printed` is. It
+    // has to be, because `printed` joining `NAMES_TEXT_FORM` in the same change made every compound of it
+    // reach this branch — the widening and this exclusion are one edit in two places.
+    if (NAMES_TEXT_FORM.test(object) && !AFFIRMED_NOUN.test(object) && !qualifies(object)) {
       const after = tokens[m + 1];
       if (after === undefined || tokens[m]!.comma || AFTER_COMPLEMENT.has(after.word)) {
         if (definiteOnly && !definiteBefore(tokens, m)) break;
@@ -2628,7 +2684,12 @@ function exceptiveOrLocativeObject(tokens: Word[], k: number): number | null {
       if (definiteOnly && !definiteBefore(tokens, m)) break;
       return m;
     }
-    if (!DETERMINER.has(object) && !QUALIFIER.has(object) && !QUANTIFIER.has(object) && !EXCEPTIVE_GAP.has(object)) {
+    // The gap the object walk may cross, and `qualifies` here is the other half of the same fix: with the
+    // exclusion above skipping a compound, the walk has to keep going past it to the noun behind it, or
+    // `from the machine-printed heading` breaks where `from the printed heading` affirms — a presupposed
+    // heading lost, which is the silent direction. 12 of #437's 24 disagreeing pairs were this line, and
+    // they disagreed for `typed` as well as `printed`, so this half was never about the widening.
+    if (!DETERMINER.has(object) && !qualifies(object) && !QUANTIFIER.has(object) && !EXCEPTIVE_GAP.has(object)) {
       break;
     }
   }
