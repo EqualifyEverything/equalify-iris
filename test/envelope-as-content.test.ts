@@ -1953,8 +1953,11 @@ test("a name for text affirms in either part of speech, and the position was nev
     }
   }
   // One row per direction with the answer written down, and the control that says the walk still stops at a
-  // compound it does not recognise. The 33 declaring rows are all one interaction and it is the deliberate
-  // one: a DEFINITE `image` is the scan rather than a thing on the page (`LOCATIVE_SUBSTRATE`), and the
+  // compound it does not recognise. 33 of the 36 declaring rows are one interaction and it is the deliberate
+  // one — the other 3 are `No content is present in the {semi,machine,barely}-typed.`, which declare through
+  // the terminal-object exclusion and are pinned with the rest of that frame below, and they are named apart
+  // because an aggregate covering two mechanisms hides one of them. The 33: a DEFINITE `image` is the scan
+  // rather than a thing on the page (`LOCATIVE_SUBSTRATE`), and the
   // qualifier walk in `definiteBefore` is what finds the article in front of it. `The legible image is
   // visible.` declares on base as it does here; what changed is that the compound now reaches the same
   // reading instead of stopping short of the article and affirming the scan.

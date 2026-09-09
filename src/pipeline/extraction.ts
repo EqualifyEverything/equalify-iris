@@ -1767,12 +1767,16 @@ const QUALIFIER_FORM = new RegExp(String.raw`\b(?:${[...QUALIFIER].join("|")})\b
 // moved TO the stem's answer. 36 of them toward a declaration and 39 toward a refusal, so there is no safe
 // side to this and it is not a widening: it is one rule answering a sentence where two used to.
 //
-// The 36 declaring cells are one interaction, and it is a decision this file already made: a DEFINITE
+// 33 of the 36 declaring cells are one interaction, and it is a decision this file already made: a DEFINITE
 // `image` is the scan and not a thing on the page (`LOCATIVE_SUBSTRATE`), and `definiteBefore` is what finds
 // the article in front of it past the modifiers. `The legible image is visible.` declares on base; what
 // moved is that `The semi-legible image is visible.` now reaches the same read instead of stopping short of
 // the article and affirming the scan. A compound the lists do not know still stops it (`The foo-bar image is
 // visible.` is refused), so what crosses is the vocabulary and not the hyphen.
+//
+// The other 3 are a different mechanism and are named separately because an aggregate that covers two
+// shapes hides one of them: `No content is present in the {semi,machine,barely}-typed.` declares through
+// the terminal-object exclusion in `exceptiveOrLocativeObject`, where the bare `typed` declares as well.
 function qualifies(word: string): boolean {
   return QUALIFIER.has(word) || QUALIFIER_FORM.test(word);
 }

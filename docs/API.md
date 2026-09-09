@@ -1610,11 +1610,13 @@ The same rule reads a compound of any of the thirteen qualifiers, not only of th
 names for text, and that is measured on the same terms: 13 words × 3 prefixes × the 4 frames the three
 readings own is 156 cells, the compound disagreed with its own bare word in 75 of them before this and in
 none after, and every one of the 75 moved to the bare word's answer. Thirty-six of the 75 moved toward a
-declaration and 39 toward a refusal, so there is no safe side to it. The 36 are one interaction and it is
-a decision made elsewhere: a **definite** `image` is the scan rather than a thing on the page, so `The
-legible image is visible.` declares — and `The semi-legible image is visible.` now reaches the same
-reading instead of stopping short of the article. A compound built on a word none of the lists holds
-still stops it: `The foo-bar image is visible.` is refused.
+declaration and 39 toward a refusal, so there is no safe side to it. Thirty-three of the 36 are one
+interaction, and it is a decision made elsewhere: a **definite** `image` is the scan rather than a thing
+on the page, so `The legible image is visible.` declares — and `The semi-legible image is visible.` now
+reaches the same reading instead of stopping short of the article. A compound built on a word none of the
+lists holds still stops it: `The foo-bar image is visible.` is refused. The other three are a different
+mechanism — `No content is present in the machine-typed.` and its two siblings, which declare because a
+denial's terminal object that is only a modifier is skipped, as the bare `typed` is.
 
 What that parity buys is parity with the bare word, not a claim that the bare word's answer is right —
 whether a page needs `The pre-printed notes are visible.` refused or `The pre-printed form is empty.`
