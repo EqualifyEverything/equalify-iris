@@ -112,11 +112,13 @@ export interface TablePiece {
   // report a lost ROW as a lost header.
   headerRows: number;
   headerCells: number;
-  // The bracketed note rows this half printed, wherever it printed them — `<thead>` included, which is
-  // why this is not read off `labels`. It says what the half PRINTED as a row, which is what tells a
-  // note the merge kept in the place the page had it from a note the merge demoted into a row of its
-  // own invention.
-  noteRows: string[];
+  // The bracketed note rows this half printed: for each, its text and whether the half printed it
+  // inside the header block. Not read off `labels`, which drops header rows — a note row closing
+  // `<thead>` is one, and the corpus has that shape. Both facts, because the check that uses this
+  // (`verifyJoin`) is asking whether the merge kept a note where the page had it or MOVED it, and the
+  // text alone cannot tell those apart: a note printed as a `<thead>` row and delivered as a `<tbody>`
+  // cell of data matches on text and is the relocation being refused.
+  noteRows: { text: string; header: boolean }[];
   // The first cell of every DATA row, normalized and non-empty: on these tables that is the row's
   // label — the state, the tax, the year — which is what a reader loses when a join drops rows,
   // and what `verifyJoin` requires to survive. Not the numbers: a label is a string worth looking
@@ -211,12 +213,13 @@ function read(table: Element, span?: { start: number; end: number }, html = ""):
       .filter((r) => !isHeaderRow(r))
       .map((r) => normalizeCell(r.children[0]?.textContent ?? ""))
       .filter(Boolean),
-    // Every row of this half that is a bracketed note, header block included. Read over ALL rows and
-    // not over `labels`, because `labels` drops header rows and a note row printed inside `<thead>` is
-    // one — that is the `p068` shape the corpus has, and reading this off `labels` made a note the
-    // pages did print as a row look like a note nobody printed. Rule 6's repeat set walks every `tr`
-    // for exactly the same reason, so these two are now the same fact read the same way.
-    noteRows: rows.filter(isUnitNoteRow).map((r) => normalizeCell(r.textContent ?? "")),
+    // Every row of this half that is a bracketed note, header block included, each with the block it
+    // was printed in. Read over ALL rows and not over `labels`, because `labels` drops header rows and
+    // a note row printed inside `<thead>` is one — that is the `p068` shape the corpus has, and reading
+    // this off `labels` made a note the pages did print as a row look like a note nobody printed.
+    noteRows: rows
+      .filter(isUnitNoteRow)
+      .map((r) => ({ text: normalizeCell(r.textContent ?? ""), header: isHeaderRow(r) })),
     start: span?.start ?? 0,
     end: span?.end ?? 0,
     html: span ? html.slice(span.start, span.end) : "",
@@ -506,7 +509,8 @@ export function verifyJoin(pair: ContinuationPair, merged: string): string | nul
   // caption carries — so the check is one the prompt can satisfy, which is what makes refusing the
   // right answer rather than a dead end.
   //
-  // What counts as KEPT is the joined caption, or a note row that some half PRINTED as a row. Reading
+  // What counts as KEPT is the joined caption, or a note row some half PRINTED as a row in that same
+  // part of the table — header block or body. Reading
   // the caption alone refused the mirror of the pair rule 6 now joins for free: the first half printing
   // the note as a ROW and the second in its caption leaves the row in the merged table, nothing lost,
   // and a caption-only reading called that a loss. Both placements are reachable — #374's census has the
@@ -523,15 +527,28 @@ export function verifyJoin(pair: ContinuationPair, merged: string): string | nul
   // satisfies one and not the other must not clear this.
   //
   // The distinction is already on the pair: `noteRows` is every bracketed note row each half printed,
-  // header block included. Read off `labels` first, which was wrong in one direction — `labels` drops
-  // header rows, so a note row printed inside `<thead>` counted as printed by nobody and a merge that
-  // carried that row through untouched was refused. That is the `p068` shape the census counts, and
-  // rule 6's repeat set had been reading the same fact the other way, over every `tr`.
-  const printedAsRow = new Set([...pair.first.noteRows, ...pair.second.noteRows]);
+  // header block included, WITH the block it was printed in. Read off `labels` first, which was wrong in
+  // one direction — `labels` drops header rows, so a note row printed inside `<thead>` counted as printed
+  // by nobody and a merge that carried that row through untouched was refused. That is the `p068` shape
+  // the census counts. Widening it to every `tr` and matching on the TEXT then failed the other way, and
+  // on the pair the census makes likeliest: the note in the first half's caption (56 arm-pages, the
+  // placement `agents/page.md` asks for) and printed as a `<thead>` row by the second (of the 12
+  // outside it). A merge that struck the caption note and delivered it as a `<tbody>` cell of data
+  // matched the second half's text and cleared — the exact demotion this check exists to refuse, with
+  // both harms `page.md` names in as many words. So the two facts are matched together (`noteKey`).
+  //
+  // What that compares is the note's text and the block it sits in, and nothing finer. A note moved
+  // within one block is invisible here, and so is a `<td>` note row delivered as a `<th>` one — page.md
+  // forbids both spellings of the row, but the note in them has not been lost, and `caption_note_lost`
+  // is the wrong reason to refuse a table over. A refusal of the EDITOR's answer ships both halves
+  // split, so a reason that names the wrong defect buys a split table and points the repair at the
+  // wrong rule.
+  const printedAsRow = new Set([...pair.first.noteRows, ...pair.second.noteRows].map(noteKey));
   const rowNotes = [...tables[0].querySelectorAll("tr")]
     .filter(isUnitNoteRow)
-    .map((r) => normalizeCell(r.textContent ?? ""))
-    .filter((n) => printedAsRow.has(n));
+    .map((r) => ({ text: normalizeCell(r.textContent ?? ""), header: isHeaderRow(r) }))
+    .filter((n) => printedAsRow.has(noteKey(n)))
+    .map((n) => n.text);
   const kept = new Set([...captionNotes(joined.caption), ...rowNotes]);
   const owed = new Set([...captionNotes(pair.first.caption), ...captionNotes(pair.second.caption)]);
   if ([...owed].some((n) => !kept.has(n))) return "caption_note_lost";
@@ -620,6 +637,19 @@ function isUnitNoteRow(row: Element): boolean {
 // measure, so a reason for the disagreement would be a distinction drawn on no measured pair.
 function captionNotes(caption: string): Set<string> {
   return new Set((caption.match(/[[［][^\]］]+[\]］]/g) ?? []).map((n) => normalizeCell(n)));
+}
+
+// A note row identified by both of the facts `verifyJoin` compares: its text, and whether it was
+// printed inside the header block. Keyed as one string so the two are matched together and neither
+// reader can match on one of them alone, which is the failure this replaced.
+//
+// The pair `fNotes` in `joinInCode` deliberately does NOT use this, and that is not the same
+// disagreement over one fact that the header-block reading was: it answers a different question. What
+// may be dropped as a REPEAT turns on whether the second half is printing the same note again, and it
+// is the same note wherever the printer set it. Whether a note was KEPT or MOVED turns on the place,
+// because the place is the harm.
+function noteKey(note: { text: string; header: boolean }): string {
+  return `${note.header ? "head" : "body"} ${note.text}`;
 }
 
 // The header block written as a string that changes whenever anything a reader would notice about it

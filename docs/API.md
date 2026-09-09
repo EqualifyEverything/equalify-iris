@@ -3540,17 +3540,36 @@ keeps the first half's caption and discards the second's — and `p049`/`p050` a
 that shape. A refusal costs one editor call rather than the table: the pair goes on to the Copy
 Editor, whose rule 4 asks for the note either half's caption carries.
 
-A note counts as kept in the joined caption, or as a note row that one of the halves **printed** as a
-row. Reading the caption alone refused the mirror of the pair rule 6 joins for free — the note a ROW
-on the first half and a caption note on the second, where the row survives the merge and nothing is
-lost. Reading any note row in the answer is the opposite hole: a note that arrived in a caption and
-left as a row has been demoted into the phantom row `page.md` forbids, `<thead>`-closing form
-included, and counting it as proof of keeping would clear exactly that. `joinInCode` never demotes,
-so the shape is the Copy Editor's — rule 6's "belongs once, at the top" can be read as licence for
-the row while rule 4 asks for the caption, and rule 6 now says so. The distinction is already on the
-pair: each half records the bracketed note rows it printed, over every row and not over its labels,
-because a label list drops header rows and a note row printed inside `<thead>` is one — the `p068`
-shape the census counts. Rule 6's repeat set reads the same fact the same way.
+Rule 6's repeat set also ignores the block, where `caption_note_lost` compares it, and that is the same
+distinction and not two readers disagreeing about one fact: whether the second half is printing the
+same note **again** turns on the note, which is the same note wherever the printer set it, while
+whether the merge **kept or moved** it turns on the place, because the place is the harm.
+
+A note counts as kept in the joined caption, or as a note row one of the halves **printed** as a row
+in that same part of the table — header block or body. Reading the caption alone refused the mirror of
+the pair rule 6 joins for free — the note a ROW on the first half and a caption note on the second,
+where the row survives the merge and nothing is lost. Reading any note row in the answer is the
+opposite hole: a note that arrived in a caption and left as a row has been demoted into the phantom
+row `page.md` forbids, `<thead>`-closing form included, and counting it as proof of keeping would
+clear exactly that. `joinInCode` never demotes, so the shape is the Copy Editor's — rule 6's "belongs
+once, at the top" can be read as licence for the row while rule 4 asks for the caption, and rule 6 now
+says so.
+
+The distinction is on the pair: each half records the bracketed note rows it printed — over every row
+and not over its labels, because a label list drops header rows and a note row printed inside
+`<thead>` is one, the `p068` shape the census counts — **and the block it printed each one in.** Both
+facts, because matching on the text alone failed the other way round, and on the pair the census makes
+likeliest: the note in the first half's caption (56 of the 77 arm-pages, the placement `page.md` asks
+for) and printed as a `<thead>` row by the second (1 of the 12 outside the caption). A merge that
+struck the caption note and delivered it as a `<tbody>` cell of data matched the second half's text
+and cleared — the same demotion, with the caption no longer naming the units and a reader moving by
+row meeting them as data.
+
+What that compares is the text and the block, and nothing finer. A note moved within one block is
+invisible here, and so is a `<td>` note row delivered as a `<th>` one: `page.md` forbids both
+spellings, but the note in them has not been lost and `caption_note_lost` is the wrong reason to
+refuse a table over. Refusing the **editor's** answer ships both halves split, so a reason naming the
+wrong defect buys a split table and points the repair at the wrong rule.
 
 Both bracket widths are read, ASCII and fullwidth, and the parenthesised spelling is not — a check
 demanding every parenthesised run survive would demand the survival of `(continued`, which rule 4

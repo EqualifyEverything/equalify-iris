@@ -684,7 +684,7 @@ test("a note row a half printed inside <thead> was printed by somebody", () => {
   const pair = onePair(first + second);
 
   assert.ok(!pair.first.labels.includes(note), "the fixture is not the case being tested");
-  assert.deepEqual(pair.first.noteRows, [note]);
+  assert.deepEqual(pair.first.noteRows, [{ text: note, header: true }]);
 
   const coded = joinInCode(pair);
   assert.ok("html" in coded, JSON.stringify(coded));
@@ -696,6 +696,56 @@ test("a note row a half printed inside <thead> was printed by somebody", () => {
   const demotedPair = onePair(promoted + plain);
   const demoted = `<table><caption>Table 6.—Shares</caption>${HEAD}<tbody>${noteRow(other)}${dataRow("Alabama")}${dataRow("Vermont")}</tbody></table>`;
   assert.equal(verifyJoin(demotedPair, demoted), "caption_note_lost");
+});
+
+test("a note row printed in the header block and delivered as a cell of data has been moved, not kept", () => {
+  // The pair the census makes likeliest, and the one a text-only reading of what a half "printed as a
+  // row" cleared: the note in the FIRST half's caption — 56 of the 77 arm-pages, and the placement
+  // page.md asks for — and printed as a <thead>-closing row by the second, which is 1 of the 12 outside
+  // the caption. A merge that strikes the caption note and delivers it as a <tbody> row matches the
+  // second half's text, and matching on text alone is what let that through: the delivered caption no
+  // longer names the units and a reader moving by row meets them as data. Both harms page.md names in
+  // as many words, so the block a half printed the note in is compared and not only the characters.
+  const note = "[In millions of dollars]";
+  const headNote = `<thead><tr><th scope="col">Col 1</th><th scope="col">Col 2</th><th scope="col">Col 3</th></tr>${noteRow(note)}</thead>`;
+  const first = `<table><caption>Table 5.—Debt ${note}</caption>${HEAD}<tbody>${dataRow("Alabama")}</tbody></table>`;
+  const second = `<table><caption>Table 5.—Debt—Continued</caption>${headNote}<tbody>${dataRow("Vermont")}</tbody></table>`;
+  const pair = onePair(first + second);
+  assert.deepEqual(pair.second.noteRows, [{ text: note, header: true }]);
+
+  const rows = `${dataRow("Alabama")}${dataRow("Vermont")}`;
+  const demoted = `<table><caption>Table 5.—Debt</caption>${HEAD}<tbody>${noteRow(note)}${rows}</tbody></table>`;
+  assert.equal(verifyJoin(pair, demoted), "caption_note_lost");
+  // The <th> spelling of the same invention — page.md names a column that does not exist for this one.
+  const asTh = `<table><caption>Table 5.—Debt</caption>${HEAD}<tbody><tr><th colspan="3">${note}</th></tr>${rows}</tbody></table>`;
+  assert.equal(verifyJoin(pair, asTh), "caption_note_lost");
+  // And the answer rule 4 asks for on this pair clears, so what is refused above is the placement and
+  // not the pair: a check no answer can satisfy would decline this shape for good.
+  const inCaption = `<table><caption>Table 5.—Debt ${note}</caption>${headNote}<tbody>${rows}</tbody></table>`;
+  assert.equal(verifyJoin(pair, inCaption), null);
+});
+
+test("a note row a half printed in the body is not kept by promoting it into the header block", () => {
+  // The same comparison read the other way. Neither caption is owed anything here until the second
+  // half's is — that is the mirror pair rule 6 joins for free, first half printing the note as a body
+  // row and second carrying it in its caption — so the joined caption may drop it only because the row
+  // still stands where the page had it. Moved into <thead>, the note is announced as a column heading
+  // for columns it does not head, and the row the page printed is gone.
+  const note = "[Percentage distribution]";
+  const first = `<table><caption>Table 6.—Shares</caption>${HEAD}<tbody>${noteRow(note)}${dataRow("Alabama")}</tbody></table>`;
+  const second = `<table><caption>Table 6.—Shares ${note}—Continued</caption>${HEAD}<tbody>${dataRow("Vermont")}</tbody></table>`;
+  const pair = onePair(first + second);
+  assert.deepEqual(pair.first.noteRows, [{ text: note, header: false }]);
+
+  const rows = `${dataRow("Alabama")}${dataRow("Vermont")}`;
+  const head = `<thead><tr><th scope="col">Col 1</th><th scope="col">Col 2</th><th scope="col">Col 3</th></tr>${noteRow(note)}</thead>`;
+  const promoted = `<table><caption>Table 6.—Shares</caption>${head}<tbody>${rows}</tbody></table>`;
+  assert.equal(verifyJoin(pair, promoted), "caption_note_lost");
+  // Left where the page had it, it clears — and the free path is what produces that, so this leg is
+  // the one that says the refusal above costs no join the code already makes.
+  const coded = joinInCode(pair);
+  assert.ok("html" in coded, JSON.stringify(coded));
+  assert.equal(verifyJoin(pair, coded.html), null);
 });
 
 test("a fullwidth-bracketed note is a note in both readers, or it ships twice", () => {
