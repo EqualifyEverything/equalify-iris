@@ -352,19 +352,23 @@ marker as well as being announced with one is that content twice, and there are 
 different repairs. Where the two are THE SAME MARKER — [List item a] (a) Estimating, or
 [List item 1] (1) — a reader hears "a" and then "(a)", and the copy that goes is the TEXT's: the
 list is what announces a marker to a screen reader and what a browser prints, so an item's text
-should hold only the words that follow the marker. Where they DISAGREE in kind — [List item 1] (a)
-Estimating, a list announcing digits whose items print letters or roman numerals — the marker is in
+should hold only the words that follow the marker. Where the list announces DIGITS and its items
+print letters or roman numerals — [List item 1] (a) Estimating — the marker is in
 the one place that is not announced, and the repair is the other way round: the list is missing the
 type that would announce the letters, and the letters are the document's only record of what the
 page printed. Say that, and say the text's copy must stay until the list carries it. And where the
 text opens with a marker that is NEITHER of those — [List item 1] 12. Payments to the state, or
 [List item a] 12. Payments — the two markers are not one marker printed twice, whatever else they
-are, so NEVER ask for either copy to be dropped. Which of the two shapes it is may itself be worth
-reporting. Items printing one run that is consecutive from wherever it starts — 12., 13., 14. under
-a list counting 1, 2, 3 — are a list missing the start that would announce those numbers, and that
-is the report: the numbering is the document's and only start can carry it. Markers that are not one
-run with the list's own count are the document's own numbering under the list's marker, a clause
-number rather than a second copy of anything, and they belong in the item's text where they are.
+are, so NEVER ask for either copy to be dropped. What is left to report is decided by what the list
+can be made to announce, and type carries a marker's KIND while start carries only its COUNT. Where
+the printed markers are the SAME KIND as the announced one and run consecutively from somewhere else
+— 12., 13., 14. under a list counting 1, 2, 3, or (c), (d) under a list announcing a, b — the list
+is missing the start that would announce those very markers, and that is the report: the numbering
+is the document's and only start can carry it. Where they are a different kind from the announced
+marker, or are not one consecutive run, no start announces them — start="12" on an <ol type="a">
+announces l., m., n. — so ask for no repair at all: say the two disagree, and leave the text's
+markers where they are, the document's own numbering under the list's marker, a clause number
+rather than a second copy of anything.
 Never ask for a marker to be dropped from an item's text while the list announces a different one,
 and never ask for the list's own marker to be dropped in favour of the copy in the text — an <ol>
 stripped of its type prints 1, 2, 3, a marker no page showed. You do NOT see the source
@@ -791,9 +795,11 @@ interface ListMarkers {
   // marker and a roman SUB-marker, both non-digits; and a bare `<ol>` whose item prints "12." announces
   // "1" and reads "12", both digits, which is the same clause number one alphabet over. Only the value
   // settles it, and it is also the definition the prompt gives — an item repeating the marker it is
-  // announced with. Where the two markers disagree in kind the other way — announced "1", text reads
-  // "(a)" — nothing is doubled either, which is `READER_SYSTEM`'s DISAGREE branch: that list is missing
-  // the `type` that would announce its letters, and the text's copy must STAY until it has one.
+  // announced with. Where a DIGIT-announced list's items print letters — announced "1", text reads
+  // "(a)" — nothing is doubled either, which is `READER_SYSTEM`'s second branch (named for that shape,
+  // and not "they disagree in kind", which also covers announced "a" beside a printed "12." — a shape
+  // whose repair cannot be a missing `type`, since the list already has one): that list is missing the
+  // `type` that would announce its letters, and the text's copy must STAY until it has one.
   //
   // An item printing a marker that CONTRADICTS the announced one — "(b)" under an `<ol type="a">`'s
   // first item — is not counted and is not this check's question. Neither half of the licensed

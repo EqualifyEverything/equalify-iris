@@ -658,6 +658,18 @@ test("every marker the Reader prompt advertises is one flatten emits", () => {
     /the repair is the other way round/.test(READER_SYSTEM),
     "the report treats a digit announced beside a printed letter as the same defect as a repeat",
   );
+  // That branch is named by the SHAPE it means — a digit-announced list printing letters — and not by
+  // "they disagree in kind", which literally covers `[List item a] 12.` as well and so claimed the third
+  // case's own example. Its repair reads as nonsense there: a list already carrying `type="a"` is not
+  // missing the type that would announce letters.
+  assert.ok(
+    /Where the list announces DIGITS and its items\s+print letters or roman numerals/.test(READER_SYSTEM),
+    "the second marker branch is not named by the shape its repair is true of",
+  );
+  assert.ok(
+    !/Where they DISAGREE in kind/.test(READER_SYSTEM),
+    "the second marker branch is named by a kind test that also covers the third case",
+  );
   // And the two branches are not complementary, so the prompt has to name the THIRD case outright.
   // Announced "1" beside a printed "12." is the same kind and a different marker — a statute's clause
   // number under the list's own count — and it falls outside both: it is not the same content twice and
@@ -681,12 +693,36 @@ test("every marker the Reader prompt advertises is one flatten emits", () => {
     "the third marker case does not forbid deleting the page's only copy of a marker",
   );
   assert.ok(
-    /missing the start that would announce those numbers/.test(READER_SYSTEM),
+    /missing the start that would announce those very markers/.test(READER_SYSTEM),
     "the Reader is told to leave a list that is missing `start`, which the editor is told to report",
   );
   assert.ok(
     !/leave the list and the text exactly as they are/.test(READER_SYSTEM),
     "the third marker case still forbids the report the editor's own precondition asks for",
+  );
+  // The `start` report is only true where `start` can announce the printed markers, and it cannot when
+  // they are a different KIND from the list's own: `type` carries the kind and `start` only the count, so
+  // `start="12"` on an `<ol type="a">` announces `l.`, `m.`, `n.` — a marker no page printed, which is
+  // the invention the same prompt forbids nine lines later. Stated for every list it was wrong on the
+  // second example the sentence itself gives, and the same-kind test is what makes the repair produce the
+  // markers the page showed.
+  assert.match(
+    flatten(`<ol type="a" start="12"><li>12. Payments to the state</li></ol>`),
+    /\[List item l\] 12\. Payments/,
+  );
+  assert.match(flatten(`<ol start="12"><li>12. Payments to the state</li></ol>`), /\[List item 12\] 12\. Payments/);
+  assert.match(flatten(`<ol type="a" start="3"><li>(c) Estimating</li></ol>`), /\[List item c\] \(c\) Estimating/);
+  assert.ok(
+    /the SAME KIND as the announced one and run consecutively/.test(READER_SYSTEM),
+    "the missing-`start` report is stated for lists whose printed markers no `start` can announce",
+  );
+  assert.ok(
+    /no start announces them/.test(READER_SYSTEM),
+    "the third case never says what to do where `start` cannot reach the printed markers",
+  );
+  assert.ok(
+    !/consecutive from wherever it starts/.test(READER_SYSTEM),
+    "the missing-`start` report is unscoped again and asks for `start` on a lettered list",
   );
   // And the reason clause has to cover every shape the branch does. "one marker and then a number" was
   // true of the digit example and false of `[List item a] (c)`, which is two letters, and a reason stated

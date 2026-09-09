@@ -1189,11 +1189,27 @@ Places where a decision was left open, and where v1 intentionally stops:
   input (*"where the markers do not begin where the list's own count does … report it instead"*) and the
   one the Reader is asked for a dozen lines earlier. And its reason — a reader hears "one marker and then a
   number" — was true of the digit example and false of `[List item a] (c)`, which the branch also covers
-  and where a reader hears two letters. So the case now splits on whether the printed markers are one run
-  from an offset, which is a list missing its `start` and reportable, or are not one run with the count at
-  all, which is the document's clause numbering and stays put. **A remedy for a rule stated at the wrong
+  and where a reader hears two letters. **A remedy for a rule stated at the wrong
   grain can be stated at the wrong grain itself, in both directions at once: too wide in what it forbids,
-  too narrow in what it justifies.** `docs/API.md` had the same shape of error in the
+  too narrow in what it justifies.**
+
+  The round after that found the replacement wrong on its own second example, which is the same lesson at
+  the next level down: the case split on whether the printed markers were "one run consecutive from
+  wherever it starts", a condition stated for **every** list, and the repair it then names does not exist
+  for half of them. `type` carries a marker's kind and `start` carries only its count, so `start="12"` on
+  an `<ol type="a">` announces `l.`, `m.`, `n.` — a marker no page printed, and the invention the same
+  prompt forbids nine lines later. The report is only true where the printed run is the **same kind** as
+  the announced marker, and then it is exactly true: `start="3"` on an `<ol type="a">` printing `(c)`,
+  `(d)` announces `c`, `d`. So the split is now on what `start` can announce — same kind and one
+  consecutive run is a missing `start`; a different kind, or no single run, is the document's own clause
+  numbering and stays in the text with no repair asked for at all. **A remedy that names a repair has to
+  be scoped to the inputs the repair exists for, and the example list under a rule is where that shows:
+  the sentence covered two examples and the mechanism it invoked reached one of them.** The same round
+  found the second branch still labelled "where they DISAGREE in kind", which literally covers the third
+  case's own new example (announced `a`, printed `12.`) and whose repair — "the list is missing the type
+  that would announce the letters" — is nonsense on a list already carrying `type="a"`. Naming a branch
+  by the shape its repair is true of, rather than by a property that shape happens to have, is what makes
+  "NEITHER of those" a condition and not a hope. `docs/API.md` had the same shape of error in the
   other direction — it defined the field by kind and *illustrated* it by value, so the examples were more
   precise than the definition above them. Three rounds on one predicate, each approximation defensible
   until the next value showed up: **when a check can be stated as "the same thing twice", compare the

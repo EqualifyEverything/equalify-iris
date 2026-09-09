@@ -3438,13 +3438,20 @@ announces `1` and reads `12`: those are the same clause number in each alphabet,
 kind. A bare `<ol>` whose item prints `(1)` **is** the doubling, and it is the kind the corpus holds.
 Where the two disagree the other way — announced `1`, text reads `(a)` — nothing is doubled either: that
 list is missing the `type` that would announce its letters, and the Reader prompt says the text's copy
-must **stay** until it has one. Those are the Reader prompt's two named branches, and the code's third
-state is the prompt's third case: an item whose text opens with a marker that is **neither** the announced
-one nor a different kind — announced `1`, text reads `12.` — is not one marker printed twice, so neither
-copy may be dropped and `doubled` does not count it. The prompt splits it further, because the code does
-not have to and a report does: printed markers forming **one run from an offset** are a list missing the
-`start` that would announce them and are worth reporting, while markers that are not one run with the
-list's count are the document's own clause numbering and stay in the text. So the split here is three ways
+must **stay** until it has one. Those are the Reader prompt's two named branches — the second named by the
+shape its repair is true of, a **digit-announced** list whose items print letters or roman numerals, and
+not by "they disagree in kind", which also covers announced `a` beside a printed `12.` and so claimed the
+third case's own example. The code's third state is the prompt's third case: an item whose text opens with
+a marker that is **not the one the list announces**, and is not a letter or roman numeral under a list
+announcing digits — announced `1`, text reads `12.`, or announced `a`, text reads `12.` — is not one marker
+printed twice, so neither copy may be dropped and `doubled` does not count it. The prompt splits it
+further, because the code does not have to and a report does, and it splits on **what `start` can
+announce**: `type` carries a marker's kind and `start` only its count, so printed markers of the **same
+kind** as the announced one running consecutively from somewhere else are a list missing the `start` that
+would announce those very markers, and that is the report. Markers of a different kind, or markers that are
+not one consecutive run, are the document's own clause numbering and stay in the text, because no `start`
+reaches them: `start="12"` on an `<ol type="a">` announces `l.`, `m.`, `n.`, a marker no page printed and
+the same invention the prompt forbids nine lines later. So the split here is three ways
 and not two, and it was worth saying, because reading the prompt as two complementary branches is what
 made `doubled` a kind test for two commits. `type`, `start` and `value` all
 feed the announced marker, so `<ol type="a" start="3">` with an item printing `(c)` counts.
