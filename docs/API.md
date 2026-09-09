@@ -1634,12 +1634,16 @@ else.` is a page with a signature on it, delivered empty. The read that would ca
 anchored on the denial, and that one only looks forward from the negator. Unchanged by #435 and stated
 rather than left to be re-measured.
 
-A statement that is a name for text and **nothing else** is a label, not a fragment, and does not
-affirm: `Blank page; text`, `Blank page. Content` and `Page is blank; images; nothing present.` all
-stay blank, the last one because its denial is in the next `;`-statement where this read cannot reach
-it. `A heading.` and `Two headings.` still refuse the declaration, the article and the count being part
-of the phrase. What that bound costs is a log whose whole statement is `Text.`, which ships empty; no
-page log on record writes one.
+A statement that is a name for text and **nothing else** still affirms, so `Blank page; text`,
+`Blank page. Content` and `Page is blank; images; nothing present.` are blank pages reported as holes —
+the last one because its denial is in the next `;`-statement, where this read cannot reach it. A guard
+for that (refuse when the noun is the only token) was written and taken back out, because after the
+marks strip **one token is not one word**: `Handwriting smudges.` and `Cursive smudges.` reach this read
+as a single token, their head noun having been removed upstream, and that phrase
+is the one #435 is about — six of its seven wordings are it with a predicate on the end. So the guard
+would trade three blank pages reported as holes, none of them written on disk, for a page of handwriting
+delivered empty. Both halves are pinned in `envelope-as-content.test.ts`; what separates them is what the
+strip removed, which is not something this read can still see.
 
 They are two findings with two remedies — a doubt word means the page could not be read and wants
 a better scan, a contradiction means the agent answered with no page for a page it says has

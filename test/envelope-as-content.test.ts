@@ -1935,17 +1935,30 @@ test("a blank page's own fragments are not affirmations (#435)", () => {
   // cannot pick up either, because it only looks forward from the negator. Base delivers this page empty
   // too, so this is a defect left standing and not one bought.
   assert.equal(declaredBlank({ html: "", log: "Page is blank. A signature, nothing else." }), true);
-  // A statement that is the name and nothing else is a label and affirms nothing. Statements split on `;`
-  // and on line breaks as well as on `.`, so these are one word each by the time the read sees them — and
-  // the third is the one that costs something, its denial sitting in the next statement where nothing here
-  // can reach it. Below them, the shapes that keep affirming: an article or a count is part of the phrase.
-  assert.equal(declaredBlank({ html: "", log: "Blank page; text" }), true);
-  assert.equal(declaredBlank({ html: "", log: "Blank page. Content" }), true);
-  assert.equal(declaredBlank({ html: "", log: "Blank page\nhandwriting" }), true);
-  assert.equal(declaredBlank({ html: "", log: "Page is blank; images; nothing present." }), true);
-  assert.equal(declaredBlank({ html: "", log: "Page is blank. A heading." }), false);
-  assert.equal(declaredBlank({ html: "", log: "Page is blank; two headings." }), false);
-  assert.equal(declaredBlank({ html: "", log: "Blank page; text visible" }), false);
+  // A statement that is the name and NOTHING else affirms, and these are blank pages reported as holes.
+  // Statements split on `;` and on line breaks as well as on `.`, so each of these is one word by the time
+  // the read sees it, and in the third the denial is in the next statement where nothing here can reach it.
+  // A `tokens.length === 1` guard for this was written and taken back out; the pair of pins below is why,
+  // and they are the two halves whatever replaces it has to defend at once.
+  assert.equal(declaredBlank({ html: "", log: "Blank page; text" }), false);
+  assert.equal(declaredBlank({ html: "", log: "Blank page. Content" }), false);
+  assert.equal(declaredBlank({ html: "", log: "Page is blank; images; nothing present." }), false);
+  // The other half: after the marks strip, one token is not one word. These arrive as a single token
+  // because `vetoScope` removed the head noun, and the phrase is #435's own — six of the seven wordings
+  // in the issue are this phrase with a predicate on the end. So the guard that fixes the three rows
+  // above delivers these empty, which is the failure this whole read exists to stop. Refusing the
+  // declaration is the right answer here and the wrong one there, and `tokens.length` cannot tell them
+  // apart because the word that separates them is the one the strip took.
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. Handwriting smudges." }), false);
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. Cursive smudges." }), false);
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. handwriting." }), false);
+  // Not one of them, though it looks like one: `notes` is outside `TEXT_NOUN`, so this page ships empty
+  // with the guard and without it, and no bound in this function is what decides it (#437's neighbourhood).
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. Handwritten notes." }), true);
+  // Nothing is stripped out of these two, so they are two tokens either way and neither guard reaches
+  // them — pinned beside the rows above so a future one-token rule cannot be tested on them by mistake.
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. Typed lines." }), false);
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. Printed text." }), false);
 });
 
 // --- blankness the reply STATES, rather than blankness read out of its prose (#371) ---------------
