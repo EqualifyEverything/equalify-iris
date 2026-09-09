@@ -717,16 +717,22 @@ export { BODY_MARKERS, MARKER_NOT_LEGIBLE, MARKER_PAGE_INCOMPLETE, markerCounts 
 // announce "e", and no attribute read on its own says that.
 //
 // The head of the item's text only, and a marker's SHAPE rather than any bracketed thing: up to three
-// digits, a run of roman numerals, or a single letter, closed by ")", "." or "]". Three narrowings,
-// each of them a false positive this had:
+// digits, a roman number, or a single letter CLOSED by ")" or "]". Each narrowing is a false positive
+// this had, and each one names what it gives up:
 //
 //   * The roman run must be a roman NUMBER, not a run of roman letters — "cm." and "ml." are both
-//     letters from that alphabet and neither is a numeral anything counts with.
-//   * A single letter must be bracketed or closed by ")" or "]", because "J. Smith chaired the
-//     committee" is an initial and not a marker, and a copy-edit round recasting that sentence is
-//     ordinary work for this pass. A page's own marker keeps the punctuation it was printed with.
-//   * "(see)" is three letters that are not a numeral, and does not count. "(a)", "(iii)" and "(12)"
-//     do.
+//     letters from that alphabet and neither is a numeral anything counts with, and "(see)" is three
+//     more. "(a)", "(iii)" and "(12)" do count.
+//   * The roman alphabet here is "i", "v", "x" only, which puts a ceiling of xxxix = 39 on a roman
+//     marker. Admitting "l", "c", "d" and "m" is exactly what made "cm." and "ml." matches, and a list
+//     that reaches its fortieth roman item is a shape no page in the corpus prints.
+//   * A single letter must be CLOSED by ")" or "]" — an opening bracket is not enough, because
+//     "(e.g. the totals)" and "(i.e. …)" are a bracketed abbreviation and not a marker, and
+//     "J. Smith chaired the committee" is an initial. A copy-edit round recasting either of those is
+//     ordinary work for this pass. Two or more roman letters keep the looser closer, and the asymmetry
+//     is the ambiguity itself rather than an inconsistency: "ii." cannot be an initial, "i." can, and
+//     what a single letter and a full stop mean is unreadable without the sentence. The stated cost is
+//     a marker genuinely printed "a." or "i." with no bracket, which this does not see.
 const ANNOUNCED_ITEM = /\[List item ([^\]]+)\]([^[]*)/g;
 const PRINTED_MARKER = /^\s*(\(|\[)?\s*([a-z]|[ivx]{2,5}|\d{1,3})\s*(\)|\]|\.)/i;
 const ROMAN_NUMBER = /^x{0,3}(?:ix|iv|v?i{0,3})$/i;
@@ -741,7 +747,7 @@ function printedMarker(text: string): { marker: boolean; digit: boolean } {
   const token = m[2];
   if (/^\d+$/.test(token)) return { marker: true, digit: true };
   if (token.length > 1) return { marker: ROMAN_NUMBER.test(token), digit: false };
-  return { marker: Boolean(m[1]) || m[3] !== ".", digit: false };
+  return { marker: m[3] !== ".", digit: false };
 }
 
 interface ListMarkers {
@@ -757,9 +763,19 @@ interface ListMarkers {
   // deletion loses something: a digit the text repeats is a copy of what an `<ol>` announces by
   // itself, so stripping it is the repair `READER_SYSTEM` asks for rather than a loss.
   printed_lettered: number;
-  // Items that hold BOTH at once: a lettered marker announced by the list and a marker printed in the
-  // item's text. Counted per item rather than inferred from the two totals, because the state this
-  // names is a property of one item and a round can create it on some items and not others.
+  // Items that hold both markers at once AND IN THE SAME KIND: announced "a" while the text reads
+  // "(a)", or announced "1" while the text reads "(1)". Counted per item rather than inferred from the
+  // two totals, because the state this names is a property of one item and a round can create it on
+  // some items and not others.
+  //
+  // The kinds have to match, and both directions of that mattered. A lettered list whose item prints
+  // "12." is a statute's clause number under its own marker — "(a) 12. Payments …" is an ordinary
+  // shape — and a reader hears "a" then "12", which is a marker and a number rather than one marker
+  // twice. And a bare `<ol>` whose item prints "(1)" IS the doubling, in the one kind the corpus
+  // actually holds; requiring a letter would have missed it. Where the kinds DISAGREE the other way —
+  // announced "1", text reads "(a)" — nothing is doubled either: that is a list missing the `type`
+  // that would announce its letters, and `READER_SYSTEM` says the text's copy must STAY until it has
+  // one. Same split as the prompt's two branches, which is why it is this predicate and not a total.
   doubled: number;
 }
 
@@ -776,7 +792,7 @@ export function listMarkers(html: string): ListMarkers {
     if (announcedLettered) lettered++;
     if (printedHead.marker) printed++;
     if (printedHead.marker && !printedHead.digit) printedLettered++;
-    if (announcedLettered && printedHead.marker) doubled++;
+    if (printedHead.marker && announcedLettered === !printedHead.digit) doubled++;
   }
   return { items, lettered, printed, printed_lettered: printedLettered, doubled };
 }
@@ -796,23 +812,34 @@ export function listMarkers(html: string): ListMarkers {
 // `<ol>` announces 1, 2, 3 by itself, so nothing is lost and calling it a loss would put the wrong
 // label on the branch the Reader fires on first.
 //
-// `marker_announced_twice` is the other half: an item that holds both markers at once, which is #334's
-// own defect arriving from this loop instead of from an extraction. It reads `doubled`, a per-ITEM
-// count, because the halfway state the totals cannot see is a round that sets the `type` and strips
-// SOME of the items — the list gains its letters, `printed` falls rather than holding, and the item
-// still carrying its own marker is announced "b" and then reads "(b)" out.
+// `marker_announced_twice` is the other half: an item that holds both markers at once and in the same
+// kind, which is #334's own defect arriving from this loop instead of from an extraction. It reads
+// `doubled`, a per-ITEM count, because the halfway state the totals cannot see is a round that sets the
+// `type` and strips SOME of the items — the list gains its letters, `printed` falls rather than holding,
+// and the item still carrying its own marker is announced "b" and then reads "(b)" out.
 //
 // A COMPLETE conversion fires neither, which is the point of counting these four things instead of
 // watching the prose shorten: the lettered markers leaving the text are exactly balanced by the list
 // announcing them, and no item ends up holding both.
 //
-// Silent where the ROUND CHANGED THE NUMBER OF ITEMS, and that limit is stated rather than
-// approximated: an item the editor deleted takes its printed marker out of the count with it, and
-// removing content the document printed twice is this loop's job. A fall that is one deleted item and
-// a fall that is a stripped marker are the same two numbers, so a round that resized a list is not
-// read here at all. The cost is a half-edit made in the same round as a deletion, which this cannot
-// see; the alternative is a line that calls the loop's own licensed deletions a lost marker, and a
-// signal that fires on correct work is one nobody reads.
+// TWO SILENCES, both stated rather than approximated:
+//
+// Silent where the ROUND CHANGED THE NUMBER OF ITEMS. An item the editor deleted takes its printed
+// marker out of the count with it, and removing content the document printed twice is this loop's job.
+// A fall that is one deleted item and a fall that is a stripped marker are the same two numbers, so a
+// round that resized a list is not read here at all. The cost is a half-edit made in the same round as
+// a deletion, which this cannot see; the alternative is a line that calls the loop's own licensed
+// deletions a lost marker, and a signal that fires on correct work is one nobody reads.
+//
+// Silent where ONE LIST'S CONVERSION PAYS FOR ANOTHER'S DESTRUCTION, because every count here is a
+// BLOCK total. A round that converts the first `<ol>` properly and strips the second one's letters
+// without giving it a `type` leaves `lettered` risen and `printed_lettered` fallen — the same two
+// numbers a correct single conversion produces — and logs nothing. Not narrowed, and not for want of
+// noticing: `flatten` announces items and never the list they belong to, so splitting these counts per
+// list means a second renderer of the announced marker beside `markerStyle`, and the cheap substitute
+// (a new list wherever the sequence restarts) is wrong on any list carrying `start`. The block is the
+// grain the rest of this file's loss accounting uses, and buying this one case with a duplicate
+// marker renderer is the worse trade.
 export type ListMarkerHalfEdit = "text_markers_gone" | "marker_announced_twice";
 
 export function listMarkerHalfEdit(before: string, after: string): ListMarkerHalfEdit | null {

@@ -3415,10 +3415,11 @@ The licence: a bare `<ol>` whose every item's text opens with one sequence's mar
 editor may set the `type` those markers show **and** strip them from the text. That is one change,
 and each half of it alone is a defect:
 
-* `shape: "marker_announced_twice"` — an item holds both markers at once, so a reader hears "a" and
-  then "(a)". The same defect an extraction can produce, arriving from the review loop instead. Read
-  off `doubled`, which is counted **per item**, so a round that sets the `type` and strips only some of
-  the items is caught: the item that kept its own marker is the one a reader meets.
+* `shape: "marker_announced_twice"` — an item holds both markers at once **and in the same kind**, so a
+  reader hears "a" and then "(a)", or "1" and then "(1)". The same defect an extraction can produce,
+  arriving from the review loop instead. Read off `doubled`, which is counted **per item**, so a round
+  that sets the `type` and strips only some of the items is caught: the item that kept its own marker is
+  the one a reader meets.
 * `shape: "text_markers_gone"` — **lettered** markers left the items and the list did not gain them, so
   a list the page printed `(a)`, `(b)`, `(c)` now prints 1, 2, 3 and **no copy of the letters is left in
   the document**. This is the loss.
@@ -3426,7 +3427,15 @@ and each half of it alone is a defect:
 The counts, all read off the flattened view because that is where a `type` and a transcribed marker are
 visible at once: `lettered` is items whose **announced** marker is not a digit; `printed` is items whose
 own text opens with a marker of any shape; `printed_lettered` is those of them whose marker is not a
-digit; `doubled` is items that are both announced with a letter and print one.
+digit; `doubled` is items whose announced and printed markers are **the same kind**.
+
+Both directions of that kind match matter. A lettered list whose item prints `12.` is a statute's clause
+number under its own marker — `(a) 12. Payments…` is an ordinary shape — so a reader hears "a" and then
+"12", one marker and a number rather than one marker twice, and restoring that number is not a doubling.
+A bare `<ol>` whose item prints `(1)` **is** the doubling, in the one kind the corpus actually holds.
+Where the kinds disagree the other way — announced `1`, text reads `(a)` — nothing is doubled either:
+that list is missing the `type` that would announce its letters, and the Reader prompt says the text's
+copy must **stay** until it has one. Same split as the prompt's two branches.
 
 `text_markers_gone` reads `printed_lettered` and not `printed`, because **a digit leaving an item's text
 is a repair and not a loss**: an `<ol>` announces 1, 2, 3 by itself, so a digit the text repeats is a
@@ -3437,15 +3446,27 @@ branch a reviewer fires on first.
 A complete conversion logs nothing: the lettered markers leaving the text are exactly balanced by the
 list announcing them, and no item ends up holding both.
 
-Silent where the round changed `items`: a deleted item takes its printed marker out of the count with
-it, and removing content the document printed twice is what the loop is for.
+Two silences, both stated so they are limits rather than surprises. **Silent where the round changed
+`items`**: a deleted item takes its printed marker out of the count with it, and removing content the
+document printed twice is what the loop is for. **Silent where one list's conversion pays for another's
+destruction**, because every count here is a block total — a round that converts the first `<ol>`
+properly and strips the second one's letters without giving it a `type` leaves `lettered` risen and
+`printed_lettered` fallen, which is what a single correct conversion looks like. `flatten` marks items
+and never the list they belong to, so splitting these counts per list means a second renderer of the
+announced marker beside `markerStyle`, and the cheap substitute (a new list wherever the sequence
+restarts) is wrong on any list carrying `start`. The block is the grain the rest of the review's loss
+accounting uses.
 
-A printed marker is up to three digits, a roman **number**, or a single letter that is bracketed or
-closed by `)` or `]`. The narrowings are each a false positive this had: `cm.` and `ml.` are runs of
-roman letters that are not numerals, `(see)` is three letters and no numeral, and `J. Smith chaired the
-committee` is an initial — a copy-edit round recasting that sentence is ordinary work and must not log a
-lost marker. The cost of the last one is a marker genuinely printed as `a.` with no bracket, which this
-does not see.
+A printed marker is up to three digits, a roman **number**, or a single letter **closed by** `)` or `]`.
+Each narrowing is a false positive this had: `cm.` and `ml.` are runs of roman letters that are not
+numerals, `(see)` is three letters and no numeral, `J. Smith chaired the committee` is an initial, and
+`(e.g. the totals)` is that same initial with an opening bracket in front of it — a copy-edit round
+recasting either sentence is ordinary work and must not log a lost marker, so an opening bracket alone
+does not qualify a single letter. Two or more roman letters keep the looser closer, and the asymmetry is
+the ambiguity itself: `ii.` cannot be an initial, `i.` can. The roman alphabet is `i`, `v`, `x` only,
+which caps a roman marker at `xxxix` — admitting `l`, `c`, `d` and `m` is what made `cm.` and `ml.`
+matches in the first place. The cost of all of it is a marker genuinely printed `a.` or `i.` with no
+bracket, which this does not see.
 
 This is also the line that says which kind of shrink a `refusal_with_loss` was looking at. The
 licensed strip removes visible text, so the block lands in `shrunk` exactly as a real loss does, and

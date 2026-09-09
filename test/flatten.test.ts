@@ -768,6 +768,56 @@ test("half of the licensed list conversion is reported and the whole of it is no
     ),
     null,
   );
+  // A bracketed abbreviation is the initial one bracket over, and the first narrowing let it through:
+  // an OPENING bracket satisfied nothing on its own, so "(e.g. the totals)" at the head of an item was
+  // a printed lettered marker and recasting the sentence logged the page's letters as deleted. A single
+  // letter now needs the CLOSER, which "(a." is not and "(a)" and "a)" are.
+  assert.equal(listMarkers(`<ol><li>(e.g. the totals) Alpha</li><li>(e.g. more) Beta</li></ol>`).printed, 0);
+  assert.equal(listMarkers(`<ol><li>(i.e. the totals) Alpha</li></ol>`).printed, 0);
+  assert.equal(listMarkers(`<ol><li>(a. Alpha</li></ol>`).printed, 0);
+  assert.equal(
+    listMarkerHalfEdit(
+      `<ol><li>(e.g. the totals) rose in 1998 across every state</li><li>Reimbursed state administration</li></ol>`,
+      `<ol><li>The totals rose, e.g. in 1998 across every state</li><li>Reimbursed state administration</li></ol>`,
+    ),
+    null,
+  );
+  // `doubled` matches the two markers by KIND, and both directions of that are a case of their own.
+  // A lettered list whose item prints "12." is a statute's clause number under its own marker — the
+  // reader hears "a" then "12", one marker and a number — so restoring that number is not a doubling.
+  const clauseNumber = `<ol type="a"><li>12. Payments to the state</li><li>Reimbursed state administration</li></ol>`;
+  assert.equal(listMarkers(clauseNumber).doubled, 0);
+  assert.equal(listMarkers(clauseNumber).printed, 1);
+  assert.equal(listMarkerHalfEdit(`<ol type="a"><li>Payments to the state</li><li>Reimbursed state administration</li></ol>`, clauseNumber), null);
+  // And a bare <ol> whose item prints "(1)" IS the doubling, in the kind the corpus actually holds:
+  // #334's own list. Requiring the announced marker to be a letter missed it entirely.
+  const digitsDoubled = `<ol><li>(1) Direct federal outlays</li><li>(2) Reimbursed state administration</li></ol>`;
+  assert.equal(listMarkers(digitsDoubled).doubled, 2);
+  assert.equal(listMarkerHalfEdit(stripped, digitsDoubled), "marker_announced_twice");
+  // Where the kinds DISAGREE the other way — announced "1", text reads "(a)" — nothing is doubled:
+  // that list is missing the `type` that would announce its letters, and the Reader prompt says the
+  // text's copy must STAY until it has one. Same split as the prompt's two branches.
+  assert.equal(listMarkers(printed).doubled, 0);
+  // Roman precision, stated because it is asymmetric on purpose: "ii." cannot be an initial and counts
+  // with a full stop, "i." can be one and does not. The alphabet is i/v/x only, which caps a roman
+  // marker at xxxix — admitting l, c, d and m is what made "cm." and "ml." matches in the first place.
+  assert.equal(listMarkers(`<ol><li>i. Alpha</li><li>ii. Beta</li><li>iii. Gamma</li></ol>`).printed, 2);
+  assert.equal(listMarkers(`<ol><li>(i) Alpha</li><li>(ii) Beta</li></ol>`).printed, 2);
+  assert.equal(listMarkers(`<ol><li>(xl) Alpha</li><li>(xli) Beta</li></ol>`).printed, 0);
+  // The other silence, pinned so it stays a stated limit and not a surprise: every count here is a
+  // BLOCK total, so one list's correct conversion pays for another's destruction. `lettered` risen and
+  // `printed_lettered` fallen is what a single correct conversion looks like, and the second list's
+  // letters are gone from the delivered document with nothing announcing them. `flatten` marks items and
+  // never the list they belong to, so splitting per list means a second renderer of the announced
+  // marker beside `markerStyle` — the worse trade, and the block is the grain the rest of the file's
+  // loss accounting uses.
+  assert.equal(
+    listMarkerHalfEdit(
+      `<ol><li>(a) Direct federal outlays</li><li>(b) Reimbursed state administration</li></ol><ol><li>(a) Estimating a liability</li><li>(b) Filing the return</li></ol>`,
+      `<ol type="a"><li>Direct federal outlays</li><li>Reimbursed state administration</li></ol><ol><li>Estimating a liability</li><li>Filing the return</li></ol>`,
+    ),
+    null,
+  );
 });
 
 test("a page too deep for the recursive walk keeps its text instead of throwing", () => {

@@ -1126,14 +1126,18 @@ Places where a decision was left open, and where v1 intentionally stops:
   and the prose gate cannot see either.** `listMarkerHalfEdit` (`review.ts`) reads the announced
   marker and the item's own printed marker off `flatten` — the view where `type="a"` and a transcribed
   `(a)` are visible at once — and reports the two states the licence forbids: `marker_announced_twice`,
-  an item holding both markers at once, which is #334's defect arriving from the review loop instead of
-  from an extraction; and `text_markers_gone`, lettered markers leaving the items with the list not
-  gaining them, which is the page's letters deleted outright. A complete conversion moves both counts
-  together and is silent, which is why this compares two counts instead of watching the prose shorten.
-  It sits beside `droppedHrefs` and `markerCounts` in the correction round, the other two records of
-  something a round took away that no gate sees. It is **silent where the round changed the number of
-  items**: a deleted item takes its printed marker out of the count with it, and a signal that fires on
-  the loop's own licensed deletions is one nobody reads.
+  an item holding both markers at once **in the same kind**, which is #334's defect arriving from the
+  review loop instead of from an extraction; and `text_markers_gone`, lettered markers leaving the items
+  with the list not gaining them, which is the page's letters deleted outright. A complete conversion
+  moves both counts together and is silent, which is why this compares two counts instead of watching
+  the prose shorten. It sits beside `droppedHrefs` and `markerCounts` in the correction round, the other
+  two records of something a round took away that no gate sees. It has **two stated silences**: a round
+  that changed the number of items is not read at all, because a deleted item takes its printed marker
+  with it and a signal that fires on the loop's own licensed deletions is one nobody reads; and every
+  count is a BLOCK total, so one list's correct conversion pays for another's destruction in the same
+  reply. The second is not narrowed because `flatten` marks items and never the list they belong to —
+  splitting per list means a second renderer of the announced marker beside `markerStyle`, and the cheap
+  substitute of starting a new list wherever the sequence restarts is wrong on any list carrying `start`.
 
   **A check on a licensed edit has to be counted at the grain the edit is made at, and the loss branch
   has to exclude the marker the list supplies itself.** The first version of this compared per-list
@@ -1147,8 +1151,21 @@ Places where a decision was left open, and where v1 intentionally stops:
   the one a reader meets whatever the totals say. And a marker shape wide enough to match any letter
   followed by a stop matched an **initial**, so recasting "J. Smith chaired the committee" logged a lost
   marker: a printed marker is now three digits at most, a roman *number* (which `cm.` and `ml.` are not),
-  or a single letter bracketed or closed by `)`. The stated cost is a marker genuinely printed `a.` with
-  no bracket, which this misses — the trade for not calling an ordinary sentence a deletion.
+  or a single letter closed by `)` or `]`. The stated cost is a marker genuinely printed `a.` with no
+  bracket, which this misses — the trade for not calling an ordinary sentence a deletion.
+
+  **Both of those repairs then had to be applied on the side I had not looked at, which is the actual
+  lesson.** The kind narrowing went one way only: a digit leaving an item's text stopped counting as a
+  loss, but a digit *arriving* still counted as a doubling under a lettered list, where `(a) 12.
+  Payments…` is a statute's clause number and a reader hears one marker and a number — while the digit
+  doubling that does occur, `(1)` put back into a bare `<ol>`, moved nothing the check read. `doubled` is
+  now the two markers matching **in kind**, which reproduces the Reader prompt's own AGREE/DISAGREE split
+  rather than a third rule: kinds agree and the text's copy is redundant, kinds differ and the text's copy
+  is the only record. And the punctuation narrowing stopped at the bare initial, leaving `(e.g. the
+  totals)` — the same initial with an opening bracket — a printed lettered marker, so a single letter now
+  needs the CLOSER and not merely a bracket. Two rounds, one shape of error each time: **a rule that
+  splits on a property has to be checked on every value of that property, including the one the failing
+  example did not have.**
 
   That check is also what makes the licensed strip legible where it collides with the loss machinery,
   which it does and is left doing. `proseShortened` is a comparison of visible text, so the strip is a
