@@ -1051,11 +1051,15 @@ test("the join tally splits free from paid, and counts the pairs that were bough
     { ts: T(0), type: "run_start" },
     { ts: T(1), type: "table_joined", by: "code", caption: "Table 1" },
     { ts: T(2), type: "table_join_code_declined", reason: "header_differs", caption: "Table 2—Continued",
+      halves: "logged", chars_first: 900, chars_second: 950,
       headers_identical: false, header_rows_first: 1, header_cells_first: 3,
       header_rows_second: 1, header_cells_second: 3,
       header_first: "TH:1:Col 1", header_second: "TH:1:Column 1" },
     { ts: T(3), type: "table_joined", by: "editor", caption: "Table 2" },
+    // One of the two declines is past the replay bound, so its bytes are not on the line. Both are
+    // declines and only one is re-scorable, which is the whole reason the second number is here.
     { ts: T(4), type: "table_join_code_declined", reason: "id_would_be_lost", caption: "Table 3—Continued",
+      halves: "too_large", chars_first: 40000, chars_second: 39000,
       headers_identical: true, header_rows_first: 2, header_cells_first: 8,
       header_rows_second: 2, header_cells_second: 8,
       header_first: "same", header_second: "same" },
@@ -1068,6 +1072,7 @@ test("the join tally splits free from paid, and counts the pairs that were bough
     joined_in_code: 1,
     joined_by_editor: 1,
     code_declined: 2,
+    code_declined_with_halves: 1,
     header_compared: 2,
     header_differs: 1,
     failed: 1,
@@ -1160,6 +1165,9 @@ test("a join line this build cannot read is counted in neither path, and an old 
   // comparison it carries nothing about is withheld rather than guessed.
   assert.equal(d.tables.code_declined, 1);
   assert.equal(d.tables.header_compared, 0);
+  // And a log written before the halves were logged reports none replayable, which is what it is: the
+  // bytes of those pairs are gone, so a rule scored on that round would be scored on nothing.
+  assert.equal(d.tables.code_declined_with_halves, 0);
 });
 
 test("a run with no continued tables reports zeros rather than an absent section", () => {
@@ -1170,6 +1178,7 @@ test("a run with no continued tables reports zeros rather than an absent section
     joined_in_code: 0,
     joined_by_editor: 0,
     code_declined: 0,
+    code_declined_with_halves: 0,
     header_compared: 0,
     header_differs: 0,
     failed: 0,

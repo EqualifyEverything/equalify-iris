@@ -598,6 +598,13 @@ export interface Diagnostics {
     // per-reason split stays in log.jsonl, because the reasons are an open set — `verify:<reason>`
     // among them — and a fixed list here would silently stop summing the day a rule is added.
     code_declined: number;
+    // Of those declines, the ones whose two halves' bytes are ON the line, so a looser rule can be
+    // scored against them without buying a round (#326). Expected to equal `code_declined` exactly —
+    // the bound that drops them is 2.5x the largest pair this corpus has produced — and it is here
+    // BECAUSE of that: a bound nothing reaches is a bound whose biting would otherwise be invisible,
+    // and the difference between these two numbers is the part of a re-score that has no evidence
+    // behind it. Old logs from before this field read as zero, which is what they are: not replayable.
+    code_declined_with_halves: number;
     // Of those declines, the ones where both halves actually declared a header block WITH CELLS IN IT,
     // and of THOSE the ones whose two signatures differ. Two numbers because the first is the
     // denominator and it is not `code_declined`: a continued page that reprinted no header has nothing
@@ -1268,6 +1275,7 @@ export function summarizeRun(
     joined_in_code: 0,
     joined_by_editor: 0,
     code_declined: 0,
+    code_declined_with_halves: 0,
     header_compared: 0,
     header_differs: 0,
     body_unreadable: 0,
@@ -1533,6 +1541,11 @@ export function summarizeRun(
       else if (e.by === "editor") tables.joined_by_editor += 1;
     } else if (e.type === "table_join_code_declined") {
       tables.code_declined += 1;
+      // Off the state field rather than off the bytes. A replay needs BOTH halves, so two presence
+      // tests would be two things that can disagree, and one word that the emitter always writes
+      // partitions every decline this build logged: `logged` here, `too_large` in the difference from
+      // `code_declined`, with the lines written before the field in there too.
+      if (e.halves === "logged") tables.code_declined_with_halves += 1;
       // The comparison is only counted where the log line says one was possible: `headers_identical`
       // is absent when a half held no `<table>` to read, and the counts are absent with it. Read
       // strictly as a boolean for the reason every flag here is, and gated on both halves having

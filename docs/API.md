@@ -3315,7 +3315,16 @@ ship as they arrived.
 Two halves were merged into one table: `by` (`"code"` or `"editor"`, which path produced the
 merge), the merged `caption`, `rows_first` / `rows_second` / `rows_joined`, `chars_before` /
 `chars_after` for the two halves against the one table, and — on the editor path only — that
-editor's own `editor_log`. The merge is not a plain concatenation, because the halves do not
+editor's own `editor_log`. On `by: "code"` only, the two halves' own bytes as well
+(`halves` / `chars_first` / `chars_second` / `html_first` / `html_second`, exactly as
+[`table_join_code_declined`](#table_join_code_declined) carries them and documented there): a
+candidate loosening of the free path has to be scored on the pairs it must not break as well as on the
+pairs it would newly take, and these are the first population. The presence rule is `by`, which is on
+every line, so the population is countable. A paid join does not repeat them because the decline that
+bought it is the same pair's bytes, on the line immediately before — and since a pair's identity in
+this loop IS those two strings, the two lines can be matched on the bytes rather than on their order.
+
+The merge is not a plain concatenation, because the halves do not
 always agree on what to concatenate: in the reference corpus two of 18 pairs declare a different
 column count from their own first half, 13 carry footnote-reference ids in the repeated header
 block that an endnote links back to, and a bracketed unit note ("[In millions of dollars]") is
@@ -3436,6 +3445,45 @@ which is not the same event as the verification *refusing* it — a refusal is r
 `<table>` but no header block is present too, with an empty signature and `0` for both of its
 counts. The per-round totals are folded into `tables` in the
 [diagnostics](#diagnostics-timing--hang-detection) payload.
+
+The halves' own bytes are on the line too, and they are what makes a decline **re-scorable for
+nothing** — the open half of #326, whose recommendation against loosening a guard rested on there being
+no artifact a looser rule could be run against. The signatures above explain a decline; these reproduce
+it. They are on **every** decline, including the two just described where the header fields are absent:
+those are the declines a parse threw on, and the bytes that threw are exactly what a fix has to run
+against, so absence of the header block does not travel with absence of the halves.
+
+- `html_first` / `html_second` — the two halves exactly as the source delivered them. Read back with
+  `pairFromHalves` (exported from `src/pipeline/tables.ts`) and the free path returns the verdict it
+  returned in the round, because that rebuilds the pair the round was holding: `joinInCode` reads only
+  these two strings, and the caption, row, column, header and label figures the verification reads are
+  derived from them. So a replay scores the guard **and** `verifyJoin`, which is the check that catches a
+  wrong loosening. Use that function rather than a fresh parse of the same markup — a re-score has to
+  read the bytes the way the pipeline read them, and a rebuilt half's `start` / `end` are offsets into
+  itself, so a merge produced from a replay must not be spliced into anything.
+- `halves` — `"logged"` when the bytes are on the line, `"too_large"` when they are not. Always present,
+  because presence alone cannot be counted: a re-score has to be able to say *N of M declines
+  replayable* from the log, and the bound is a constant in the code that a reader of an old log has no
+  way to know. A line written before this field is neither, and reads as not replayable, which is what
+  it is.
+- `chars_first` / `chars_second` — always present, so what an over-large pair dropped is measurable.
+
+The bound **refuses rather than truncates**, which is the one place this differs from the capped
+signatures above: a cut signature still compares cell by cell as far as it goes, while half a table's
+bytes parse to a *different* table — fewer rows, no closing markup — so a rule scored against them
+returns a verdict that is not the rule's. It is 64,000 characters for the pair, measured against every
+pair the reference corpus's 75 delivered submissions produce — 200 of them, 5,898–25,938 characters,
+median 11,026 — so it is 2.5x the largest and drops none of them, and it is not quietly choosing which of
+that corpus's declines are scorable. What it protects against is one pathological document: 12 declines
+at the bound is under 800 KB, against round logs that run 220–940 KB. What the 200 real pairs add is
+9–111 KB per submission, median 66 KB, and all 200 replay to the verdict their line recorded.
+
+Two things these bytes still cannot score, both upstream of this stage. A change to which tables are
+**paired** (the caption rule, the span match, adjacency — see `table_continuations`) reads the whole
+assembled body, and a pair that was never formed left no bytes behind: `unmatched_source` and
+`not_adjacent` are reported on [`table_join_failed`](#table_join_failed) with a caption and nothing
+else. And a change to the **extraction** that produced the halves is a different document, so replaying
+it means buying a round — which is where the instability described above lives.
 
 ### `table_join_failed`
 
@@ -5200,6 +5248,7 @@ curl -s -H "$AUTH" "$BASE/sessions/$SID/diagnostics" | jq
   },
   "tables": {
     "joined_in_code": 5, "joined_by_editor": 8, "code_declined": 11,
+    "code_declined_with_halves": 11,
     "header_compared": 9, "header_differs": 4,
     "failed": 3, "body_unreadable": 0, "capped_pending": 0
   },
@@ -5655,6 +5704,14 @@ feedback round that re-extracts three pages adds three more verifications.
 `joined_by_editor` the pairs a Copy Editor call was bought for; `code_declined` is every pair the free
 path stood down on, each of which bought that call. A decline is **not** a failure — the pair goes to
 the editor exactly as it did before the free path existed.
+
+`code_declined_with_halves` is how many of those declines carry the two halves' bytes, so a looser rule
+can be scored on them without buying a round (see
+[`table_join_code_declined`](#table_join_code_declined)). It is expected to **equal**
+`code_declined` — the bound that drops a pair is 2.5x the largest this corpus has produced — and it is
+published for that reason: a bound nothing reaches is a bound whose biting would otherwise be invisible,
+and the difference between the two numbers is the part of a re-score that would have no evidence behind
+it. A log written before the bytes were logged reads `0` here, which is what it is.
 
 Three separate counts say a reader met a table cut in two, and they are separate because their remedies
 are:
