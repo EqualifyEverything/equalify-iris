@@ -974,8 +974,8 @@ The events worth grepping for have a section each below, and the index is a link
 the index when you have a `type` off a log line and want to know what it means; read a section when
 you want to know what the field it names is for and what it costs.
 
-**The index is the whole log.** `src/` emits **116** event types and every one of them has a section
-below — **111** sections, because a few cover a pair of events that are only read together. So a
+**The index is the whole log.** `src/` emits **117** event types and every one of them has a section
+below — **112** sections, because a few cover a pair of events that are only read together. So a
 `type` you cannot find here is not one the index skipped: it is a misread line, or a name `src/` no
 longer emits.
 
@@ -1053,6 +1053,7 @@ emits fails it too.
 | [`delivered_structure`](#delivered_structure) | Four structural defects **no rule in the gate reports** |
 | [`delivered_alt`](#delivered_alt) | A placeholder where a description belongs, in the file the caller receives |
 | [`editor_markers_changed`](#editor_markers_changed) | A `[not legible]` marker count changed across one correction round |
+| [`editor_list_markers_split`](#editor_list_markers_split) | Half of the one list conversion the editor is licensed to make |
 | [`editor_truncated`](#editor_truncated) | A correction round's response hit the model's output ceiling |
 | [`editor_salvaged`](#editor_salvaged) | The truncated reply was read as far as it got |
 | [`editor_salvage_declined`](#editor_salvage_declined) | The reply could not be read as a prefix, and why |
@@ -3403,6 +3404,110 @@ the flattened view strips bracketed tokens before comparing words.
 
 `more` is a placeholder written over words the extractor did read, which no instruction in the
 loop allows.
+
+### `editor_list_markers_split`
+
+Half of the one list conversion the Copy Editor is licensed to make (`iteration`, `shape`, plus
+`before` and `after`, each `{ items, lettered, printed, printed_lettered, doubled }`).
+
+The licence: a bare `<ol>` whose every item's text opens with one sequence's marker — `(a)`, `(b)`,
+`(c)` — is a list whose marker was transcribed into its items instead of set on the list, and the
+editor may set the `type` those markers show **and** strip them from the text. That is one change,
+and each half of it alone is a defect:
+
+* `shape: "marker_announced_twice"` — an item prints **the marker the list announces**, so a reader hears
+  "a" and then "(a)", or "1" and then "(1)". The same defect an extraction can produce, arriving from the
+  review loop instead. Read off `doubled`, which is counted **per item**, so a round that sets the `type`
+  and strips only some of the items is caught: the item that kept its own marker is the one a reader
+  meets.
+* `shape: "text_markers_gone"` — **lettered** markers left the items and the list did not gain them, so
+  a list the page printed `(a)`, `(b)`, `(c)` now prints 1, 2, 3 and **no copy of the letters is left in
+  the document**. This is the loss.
+
+The counts, all read off the flattened view because that is where a `type` and a transcribed marker are
+visible at once: `lettered` is items whose **announced** marker is not a digit; `printed` is items whose
+own text opens with a marker of any shape; `printed_lettered` is those of them whose marker is not a
+digit; `doubled` is items that print **the marker the list announces**, token against token and
+case-insensitively.
+
+That comparison is by **value**, and every weaker version of it reported something a reader does not hear
+twice. A lettered list whose item prints `12.` is a statute's clause number under its own marker —
+`(a) 12. Payments…` is an ordinary shape — so a reader hears "a" and then "12", one marker and a number.
+`(a) (i) Payments` is a marker and a roman **sub**-marker, and a bare `<ol>` whose item prints `12.`
+announces `1` and reads `12`: those are the same clause number in each alphabet, and both are matches on
+kind. A bare `<ol>` whose item prints `(1)` **is** the doubling, and it is the kind the corpus holds.
+Where the two disagree the other way — announced `1`, text reads `(a)` — nothing is doubled either: that
+list is missing the `type` that would announce its letters, and the Reader prompt says the text's copy
+must **stay** until it has one. Those are the Reader prompt's two named branches — the second named by the
+shape its repair is true of, a **digit-announced** list whose items print letters or roman numerals, and
+not by "they disagree in kind", which also covers announced `a` beside a printed `12.` and so claimed the
+third case's own example. The code's third state is the prompt's third case: an item whose text opens with
+a marker that is **not the one the list announces**, and is not a letter or roman numeral under a list
+announcing digits — announced `1`, text reads `12.`, or announced `a`, text reads `12.` — is not one marker
+printed twice, so neither copy may be dropped and `doubled` does not count it. The prompt splits it
+further, because the code does not have to and a report does, and it splits on **what `start` can
+announce**: `type` carries a marker's kind and `start` only its count, so printed markers of the **same
+kind** as the announced one running consecutively from somewhere else are a list missing the `start` that
+would announce those very markers, and that is the report. Markers of a different kind, or markers that are
+not one consecutive run, are the document's own clause numbering and stay in the text, because no `start`
+reaches them: `start="12"` on an `<ol type="a">` announces `l.`, `m.`, `n.`, a marker no page printed and
+the same invention the prompt forbids nine lines later. So the split here is three ways
+and not two, and it was worth saying, because reading the prompt as two complementary branches is what
+made `doubled` a kind test for two commits. `type`, `start` and `value` all
+feed the announced marker, so `<ol type="a" start="3">` with an item printing `(c)` counts.
+
+An item printing a marker that **contradicts** the announced one — `(b)` on an `<ol type="a">`'s first
+item — is not counted, and is not this event's question. Neither half of the licensed conversion can
+produce it: the licence sets the `type` those very markers show, so its half-edits leave the two agreeing
+by construction, and a disagreeing pair is a mis-set `type` or `start` rather than half a conversion.
+
+`text_markers_gone` reads `printed_lettered` and not `printed`, because **a digit leaving an item's text
+is a repair and not a loss**: an `<ol>` announces 1, 2, 3 by itself, so a digit the text repeats is a
+second copy of what the list already says, and the review prompt asks for that copy to go. That is the
+more common of the two shapes in the corpus, so reading `printed` would have put "the loss" on the
+branch a reviewer fires on first.
+
+A complete conversion logs nothing: the lettered markers leaving the text are exactly balanced by the
+list announcing them, and no item ends up holding both.
+
+Two silences, both stated so they are limits rather than surprises. **Silent where the round changed
+`items`**: a deleted item takes its printed marker out of the count with it, and removing content the
+document printed twice is what the loop is for. **Silent where one list's conversion pays for another's
+destruction**, because every count here is a block total — a round that converts the first `<ol>`
+properly and strips the second one's letters without giving it a `type` leaves `lettered` risen and
+`printed_lettered` fallen, which is what a single correct conversion looks like. `flatten` marks items
+and never the list they belong to, so splitting these counts per list means a second renderer of the
+announced marker beside `markerStyle`, and the cheap substitute (a new list wherever the sequence
+restarts) is wrong on any list carrying `start`. The block is the grain the rest of the review's loss
+accounting uses.
+
+Both of those are silences about edits the editor may make. A third thing this cannot see is why
+`EDITOR_SYSTEM`'s conversion licence stays scoped to a sequence beginning where the list's own count
+does. The Reader reports a same-kind offset run — items printing `12.`, `13.` under a list counting 1, 2 —
+as a list missing its `start`, and the editor is told to report that shape rather than convert it, so no
+count here moves either way today. Were the licence widened to let it set `start` and strip the text, the
+destructive half of that change would be invisible on the **digit** half of the shape: markers stripped
+with no `start` set deletes the document's only record of its numbering, and it produces the same five
+counts as the whole change, because `printed_lettered` was already 0 and stays 0. The lettered half —
+`(c)`, `(d)` stripped from an `<ol type="a">` — is caught. That asymmetry is a silence to close before the
+licence moves, not after.
+
+A printed marker is up to three digits, a roman **number**, or a single letter **closed by** `)` or `]`.
+Each narrowing is a false positive this had: `cm.` and `ml.` are runs of roman letters that are not
+numerals, `(see)` is three letters and no numeral, `J. Smith chaired the committee` is an initial, and
+`(e.g. the totals)` is that same initial with an opening bracket in front of it — a copy-edit round
+recasting either sentence is ordinary work and must not log a lost marker, so an opening bracket alone
+does not qualify a single letter. Two or more roman letters keep the looser closer, and the asymmetry is
+the ambiguity itself: `ii.` cannot be an initial, `i.` can. The roman alphabet is `i`, `v`, `x` only,
+which caps a roman marker at `xxxix` — admitting `l`, `c`, `d` and `m` is what made `cm.` and `ml.`
+matches in the first place. A lettered marker is one letter, so a list past its twenty-sixth item —
+announcing `aa` with an item printing `(aa)` — is invisible to **both** branches and not only to the
+doubling one. The cost of all of it is a marker genuinely printed `a.` or `i.` with no bracket, or `(aa)`
+on a list that long, which this does not see.
+
+This is also the line that says which kind of shrink a `refusal_with_loss` was looking at. The
+licensed strip removes visible text, so the block lands in `shrunk` exactly as a real loss does, and
+neither that report nor the flattened coverage comparison can tell the two apart on its own.
 
 ### `editor_truncated`
 

@@ -336,16 +336,44 @@ followed by "[Abbr title] Stop" is a named control and correct markup, and only 
 nothing after it is unnamed. Do not ask for that name to be moved into the text — the words
 belong to the page and the attribute is where they are announced from.
 
-An item of an ORDERED list carries the number it is announced with — [List item 5] — and an
-item of an unordered or definition list carries none, because there is no number there. Those
-numbers are not in the items' text: an <ol> counts 1, 2, 3 by itself whatever the items
-contain, so a source's own numbering survives only in start on the <ol> and value on an <li>.
-Read them the way you read table cells that hold numbers, and report a contradiction you can
+An item of an ORDERED list carries the marker it is announced with — [List item 5] — and an
+item of an unordered or definition list carries none, because there is no marker there. That
+marker is not in the items' text: an <ol> marks its items by itself whatever they contain, so a
+source's own numbering survives only in start on the <ol> and value on an <li>. It need not be a
+number. A list the page prints (a), (b), (c) is an <ol type="a">, and you will see [List item a]
+— letters from type="a" or type="A", roman numerals from type="i" or type="I", and digits with no
+type at all. The count underneath is still a number in every case, so [List item e] is the fifth
+item of a lettered list and value="5" is how the document says so.
+Read markers the way you read table cells that hold numbers, and report a contradiction you can
 point at: a list numbered 1, 2, 3 sitting under a note that says items 3 and 4 are not listed,
-a numbering note beside a sequence that is in fact unbroken, or an announced number that
-disagrees with the same list in the source-page excerpt below. You do NOT see the source
+a numbering note beside a sequence that is in fact unbroken, or an announced marker that
+disagrees with the same list in the source-page excerpt below. An item whose own text opens with a
+marker as well as being announced with one is that content twice, and there are two of those with
+different repairs. Where the two are THE SAME MARKER — [List item a] (a) Estimating, or
+[List item 1] (1) — a reader hears "a" and then "(a)", and the copy that goes is the TEXT's: the
+list is what announces a marker to a screen reader and what a browser prints, so an item's text
+should hold only the words that follow the marker. Where the list announces DIGITS and its items
+print letters or roman numerals — [List item 1] (a) Estimating — the marker is in
+the one place that is not announced, and the repair is the other way round: the list is missing the
+type that would announce the letters, and the letters are the document's only record of what the
+page printed. Say that, and say the text's copy must stay until the list carries it. And where the
+text opens with a marker that is NEITHER of those — [List item 1] 12. Payments to the state, or
+[List item a] 12. Payments — the two markers are not one marker printed twice, whatever else they
+are, so NEVER ask for either copy to be dropped. What is left to report is decided by what the list
+can be made to announce, and type carries a marker's KIND while start carries only its COUNT. Where
+the printed markers are the SAME KIND as the announced one and run consecutively from somewhere else
+— 12., 13., 14. under a list counting 1, 2, 3, or (c), (d) under a list announcing a, b — the list
+is missing the start that would announce those very markers, and that is the report: the numbering
+is the document's and only start can carry it. Where they are a different kind from the announced
+marker, or are not one consecutive run, no start announces them — start="12" on an <ol type="a">
+announces l., m., n. — so ask for no repair at all: say the two disagree, and leave the text's
+markers where they are, the document's own numbering under the list's marker, a clause number
+rather than a second copy of anything.
+Never ask for a marker to be dropped from an item's text while the list announces a different one,
+and never ask for the list's own marker to be dropped in favour of the copy in the text — an <ol>
+stripped of its type prints 1, 2, 3, a marker no page showed. You do NOT see the source
 images, so a plain 1, 2, 3 with nothing to contradict it is not evidence of anything — do not
-report a list for being consecutive, and never suggest a number the document does not show.
+report a list for being consecutive, and never suggest a marker the document does not show.
 
 Headings are the document's outline, and two defects in it only the assembled document shows.
 The same words announced twice in a row at the same level — [Heading 2] Operation, then another
@@ -558,12 +586,36 @@ report rather than a record anyone acts on. The record already exists — the pa
 mid-sentence said so in its own log — and joining the halves belongs to a pass that holds both,
 because a plausible completion reaches the reader as what the page says.
 
-A link's target is content, and it is the one kind you cannot recover: an href came from the
+A link's target is content, and it is the one kind no later pass can recover: an href came from the
 source FILE, not from the page image, so a URL you drop or alter is gone and a URL you invent
 cannot be checked. Carry every href through exactly as written — including on content you
 restructure or move — and never add a link that is not already in the document. You may change
 the TEXT of a link when an issue calls for it (link text that does not describe its
 destination is a real 2.4.4 problem); keep its href.
+
+A list's marker is content too, and on an ordered list it is held in an ATTRIBUTE rather than in
+any text you can see. type="a" on an <ol> is the (a), (b), (c) the page printed, type="A", type="i"
+and type="I" are its capitals and its roman numerals, and start on an <ol>, value on an <li> and
+reversed on an <ol> are the numbers a sequence shows where it does not begin at one, does not run
+consecutively, or counts downwards. The extractor is told NOT to transcribe those markers into the
+items as well, so the attribute is the document's only record of them: an <ol type="a"> returned as
+a bare <ol> is marked 1, 2, 3 by the browser, and the letters the page printed are gone with
+nothing left in the text to recover them from. Carry type, start, value and reversed through
+exactly as written on any list you rewrite, whatever the issue you are rewriting it for. Never add
+one — a type you chose marks the list with letters the page does not show — and never move a marker
+into an item's text, which delivers it twice, since the browser prints the list's own marker
+whether the text repeats it or not.
+
+One shape is the exception, and it is the only one: a bare <ol> whose EVERY item's text opens with
+the marker of a single sequence — (a), (b), (c), or (i), (ii), (iii) — running consecutively from
+the ordinal that list starts counting at. There the marker was transcribed into the items instead of
+set on the list, so the letters are already in the document and you are not adding any: set the type
+those markers show AND remove the marker from every item's text. That is ONE change, not two — do
+both or neither. A type added with the text left alone delivers the marker twice, and text stripped
+without the type delivers 1, 2, 3 where the page printed letters. Where the sequence is broken,
+where any item's text carries no marker, or where the markers do not begin where the list's own
+count does, change none of it and report it instead: a list you convert on a guess announces a
+marker no page printed, and one you leave alone still reads the letters out.
 
 On a page whose image IS attached you may notice a fidelity problem nobody asked you about:
 content the page shows that the HTML does not have, a number or a name that disagrees with the
@@ -670,6 +722,177 @@ Respond with ONLY JSON: { "html": "<corrected section>" }`;
 // is the same asymmetry the paragraph above turns on, so the two are not interchangeable and a
 // positional `BODY_MARKERS[1]` would be the wrong way to say which is meant.
 export { BODY_MARKERS, MARKER_NOT_LEGIBLE, MARKER_PAGE_INCOMPLETE, markerCounts };
+
+// An ordered item as a reader meets it: the marker the list announces, and the marker the item's own
+// text prints. Read off `flatten` rather than off the markup, because what a reader hears is the whole
+// question here and the view is where the answer already is — `type="a"` and `value="5"` together
+// announce "e", and no attribute read on its own says that.
+//
+// The head of the item's text only, and a marker's SHAPE rather than any bracketed thing: up to three
+// digits, a roman number, or a single letter CLOSED by ")" or "]". Each narrowing is a false positive
+// this had, and each one names what it gives up:
+//
+//   * The roman run must be a roman NUMBER, not a run of roman letters — "cm." and "ml." are both
+//     letters from that alphabet and neither is a numeral anything counts with, and "(see)" is three
+//     more. "(a)", "(iii)" and "(12)" do count.
+//   * The roman alphabet here is "i", "v", "x" only, which puts a ceiling of xxxix = 39 on a roman
+//     marker. Admitting "l", "c", "d" and "m" is exactly what made "cm." and "ml." matches, and a list
+//     that reaches its fortieth roman item is a shape no page in the corpus prints.
+//   * A LETTERED marker is one letter, so a list past its twenty-sixth item — announcing "aa" with an
+//     item printing "(aa)" — is invisible to BOTH branches and not just to the doubling one. Same
+//     reasoning as the ceiling above, and stated for the same reason: every narrowing here names what it
+//     gives up, and a two-letter run is the shape a wider class would have to distinguish from any
+//     ordinary two-letter word at the head of an item.
+//   * A single letter must be CLOSED by ")" or "]" — an opening bracket is not enough, because
+//     "(e.g. the totals)" and "(i.e. …)" are a bracketed abbreviation and not a marker, and
+//     "J. Smith chaired the committee" is an initial. A copy-edit round recasting either of those is
+//     ordinary work for this pass. Two or more roman letters keep the looser closer, and the asymmetry
+//     is the ambiguity itself rather than an inconsistency: "ii." cannot be an initial, "i." can, and
+//     what a single letter and a full stop mean is unreadable without the sentence. The stated cost is
+//     a marker genuinely printed "a." or "i." with no bracket, which this does not see.
+const ANNOUNCED_ITEM = /\[List item ([^\]]+)\]([^[]*)/g;
+const PRINTED_MARKER = /^\s*(\(|\[)?\s*([a-z]|[ivx]{2,5}|\d{1,3})\s*(\)|\]|\.)/i;
+const ROMAN_NUMBER = /^x{0,3}(?:ix|iv|v?i{0,3})$/i;
+
+// Whether the head of an item's own text is a printed marker, whether it is a DIGIT, and the token
+// itself. The digit is a separate question because the repair for each is the opposite of the other's:
+// a digit transcribed into an item is a copy of what the list already announces and the text's copy is
+// the one that goes, while a letter transcribed into an item is the only record of what the page
+// printed. The token is returned because `doubled` compares it against the marker the list announces —
+// see `ListMarkers`.
+function printedMarker(text: string): { marker: boolean; digit: boolean; token: string } {
+  const m = PRINTED_MARKER.exec(text);
+  if (!m) return { marker: false, digit: false, token: "" };
+  const token = m[2];
+  if (/^\d+$/.test(token)) return { marker: true, digit: true, token };
+  if (token.length > 1) return { marker: ROMAN_NUMBER.test(token), digit: false, token };
+  return { marker: m[3] !== ".", digit: false, token };
+}
+
+interface ListMarkers {
+  // Every announced ordered item, which is what makes the counts below comparable across a
+  // round: see `listMarkerHalfEdit` for why a round that changed this number is not read at all.
+  items: number;
+  // Items whose ANNOUNCED marker is not a digit, which is a list carrying its letters in `type`.
+  lettered: number;
+  // Items whose own text opens with a marker of any shape, announced or not.
+  printed: number;
+  // Items whose own text opens with a marker that is NOT a digit — the shape a page's letters take
+  // when they were transcribed into the item instead of set on the list, and the only shape whose
+  // deletion loses something: a digit the text repeats is a copy of what an `<ol>` announces by
+  // itself, so stripping it is the repair `READER_SYSTEM` asks for rather than a loss.
+  printed_lettered: number;
+  // Items that print THE MARKER THE LIST ANNOUNCES, compared token against token and case-insensitively:
+  // announced "a" while the text reads "(a)", announced "1" while the text reads "(1)", announced "c"
+  // under `start="3"` while the text reads "(c)". Counted per item rather than inferred from the two
+  // totals, because the state this names is a property of one item and a round can create it on some
+  // items and not others.
+  //
+  // The comparison is the announced marker's own VALUE, and every weaker version of it reported
+  // something a reader does not hear twice. Matching nothing but "the list announces letters" called a
+  // statute's clause number a doubling — "(a) 12. Payments …" is an ordinary shape and the reader hears
+  // a marker and a number. Matching on KIND fixed that one and kept two more: "(a) (i) Payments" is a
+  // marker and a roman SUB-marker, both non-digits; and a bare `<ol>` whose item prints "12." announces
+  // "1" and reads "12", both digits, which is the same clause number one alphabet over. Only the value
+  // settles it, and it is also the definition the prompt gives — an item repeating the marker it is
+  // announced with. Where a DIGIT-announced list's items print letters — announced "1", text reads
+  // "(a)" — nothing is doubled either, which is `READER_SYSTEM`'s second branch (named for that shape,
+  // and not "they disagree in kind", which also covers announced "a" beside a printed "12." — a shape
+  // whose repair cannot be a missing `type`, since the list already has one): that list is missing the
+  // `type` that would announce its letters, and the text's copy must STAY until it has one.
+  //
+  // An item printing a marker that CONTRADICTS the announced one — "(b)" under an `<ol type="a">`'s
+  // first item — is not counted and is not this check's question. Neither half of the licensed
+  // conversion can produce it: the licence sets the `type` those very markers show, so its half-edits
+  // leave the two agreeing by construction, and a disagreeing pair is a mis-set `type` or `start`
+  // rather than half a conversion.
+  doubled: number;
+}
+
+export function listMarkers(html: string): ListMarkers {
+  let items = 0;
+  let lettered = 0;
+  let printed = 0;
+  let printedLettered = 0;
+  let doubled = 0;
+  for (const m of flatten(html).matchAll(ANNOUNCED_ITEM)) {
+    items++;
+    const announced = m[1].trim();
+    const printedHead = printedMarker(m[2]);
+    if (!/^\d+$/.test(announced)) lettered++;
+    if (printedHead.marker) printed++;
+    if (printedHead.marker && !printedHead.digit) printedLettered++;
+    if (printedHead.marker && printedHead.token.toLowerCase() === announced.toLowerCase()) doubled++;
+  }
+  return { items, lettered, printed, printed_lettered: printedLettered, doubled };
+}
+
+// The two halves of the conversion EDITOR_SYSTEM licenses, each of which is a defect on its own. That
+// licence is the one edit in the prompt that asks for visible text to be REMOVED as its whole point —
+// the letters move out of the items and onto the list — so the two states to watch for are the ones
+// where only half of it happened, and nothing else in the pipeline can see either:
+// `contentCoverage` strips [...] before comparing words so the announced marker is invisible to it,
+// `markerCounts` watches BODY_MARKERS only, and the item count `navigation_lost` reads does not move
+// when a marker changes shape.
+//
+// `text_markers_gone` is the loss: LETTERED markers left the items and the list did not gain them, so
+// a list the page printed (a), (b), (c) now prints 1, 2, 3 and no copy of the letters is left anywhere
+// in the document. It reads `printed_lettered` and not `printed`, because a DIGIT leaving an item's
+// text is the repair `READER_SYSTEM` asks for on the one list in #334 whose rule already existed — an
+// `<ol>` announces 1, 2, 3 by itself, so nothing is lost and calling it a loss would put the wrong
+// label on the branch the Reader fires on first.
+//
+// `marker_announced_twice` is the other half: an item that prints THE MARKER THE LIST ANNOUNCES, which
+// is #334's own defect arriving from this loop instead of from an extraction. It reads
+// `doubled`, a per-ITEM count, because the halfway state the totals cannot see is a round that sets the
+// `type` and strips SOME of the items — the list gains its letters, `printed` falls rather than holding,
+// and the item still carrying its own marker is announced "b" and then reads "(b)" out.
+//
+// A COMPLETE conversion fires neither, which is the point of counting these four things instead of
+// watching the prose shorten: the lettered markers leaving the text are exactly balanced by the list
+// announcing them, and no item ends up holding both.
+//
+// TWO SILENCES, both stated rather than approximated:
+//
+// Silent where the ROUND CHANGED THE NUMBER OF ITEMS. An item the editor deleted takes its printed
+// marker out of the count with it, and removing content the document printed twice is this loop's job.
+// A fall that is one deleted item and a fall that is a stripped marker are the same two numbers, so a
+// round that resized a list is not read here at all. The cost is a half-edit made in the same round as
+// a deletion, which this cannot see; the alternative is a line that calls the loop's own licensed
+// deletions a lost marker, and a signal that fires on correct work is one nobody reads.
+//
+// Silent where ONE LIST'S CONVERSION PAYS FOR ANOTHER'S DESTRUCTION, because every count here is a
+// BLOCK total. A round that converts the first `<ol>` properly and strips the second one's letters
+// without giving it a `type` leaves `lettered` risen and `printed_lettered` fallen — the same two
+// numbers a correct single conversion produces — and logs nothing. Not narrowed, and not for want of
+// noticing: `flatten` announces items and never the list they belong to, so splitting these counts per
+// list means a second renderer of the announced marker beside `markerStyle`, and the cheap substitute
+// (a new list wherever the sequence restarts) is wrong on any list carrying `start`. The block is the
+// grain the rest of this file's loss accounting uses, and buying this one case with a duplicate
+// marker renderer is the worse trade.
+//
+// Those two are silences about edits the editor may MAKE. There is a third thing this cannot see, and
+// it is the reason `EDITOR_SYSTEM`'s conversion licence stays scoped to a sequence that begins where
+// the list's own count does. `READER_SYSTEM` reports a same-kind offset run — items printing 12., 13.
+// under a list counting 1, 2 — as a list missing its `start`, and the editor is told to report that
+// shape rather than convert it, so nothing here moves either way today. Were the licence widened to
+// let it set `start` and strip the text, the DESTRUCTIVE half of that change would be invisible:
+// markers stripped with no `start` set deletes the document's only record of its numbering, and on the
+// DIGIT half of the shape it produces the same five counts as the whole change (`printed_lettered` was
+// already 0 and stays 0), so this cannot tell them apart. The lettered half of the same shape IS
+// caught. That asymmetry is a silence to close before the licence moves, not after.
+export type ListMarkerHalfEdit = "text_markers_gone" | "marker_announced_twice";
+
+export function listMarkerHalfEdit(before: string, after: string): ListMarkerHalfEdit | null {
+  const was = listMarkers(before);
+  const now = listMarkers(after);
+  if (now.items !== was.items) return null;
+  // The double marker first, because a round can produce both readings at once — strip two items and
+  // leave a third — and of the two states that is the one a reader meets in the delivered document.
+  if (now.doubled > was.doubled) return "marker_announced_twice";
+  if (now.printed_lettered < was.printed_lettered && now.lettered <= was.lettered) return "text_markers_gone";
+  return null;
+}
 
 const CHUNK_BUDGET = 24000;
 const CHUNK_OVERLAP = 2000;
@@ -3154,6 +3377,20 @@ export async function runReview(
         ...(more.length ? { more } : {}),
         before: was,
         after: now,
+      });
+    }
+    // See `listMarkerHalfEdit`: half of the one conversion this prompt licenses, in either direction.
+    // Beside the two checks above because it is the same kind of fact — something a round took away
+    // that no gate can see — and it is the line that tells a reader of `refusal_with_loss` which
+    // shrink they are looking at, since the licensed strip lands in `shrunk` exactly as a real loss
+    // does and the report cannot tell them apart on its own.
+    const halfEdit = listMarkerHalfEdit(before, body);
+    if (halfEdit) {
+      ctx.log.event("editor_list_markers_split", {
+        iteration: iterations,
+        shape: halfEdit,
+        before: listMarkers(before),
+        after: listMarkers(body),
       });
     }
     // Last, so a round that was answered a section at a time is measured like any other — its

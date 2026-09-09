@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
 import { flatten } from "../src/pipeline/flatten.ts";
 import { contentCoverage, MIN_CONTENT_COVERAGE } from "../src/pipeline/feedback.ts";
-import { READER_SYSTEM } from "../src/pipeline/review.ts";
+import { EDITOR_SYSTEM, READER_SYSTEM, listMarkerHalfEdit, listMarkers } from "../src/pipeline/review.ts";
 
 // `flatten` has one invariant: it may reorganize text, but it may not LOSE any.
 // Both of its consumers fail silently when it does.
@@ -537,6 +537,40 @@ test("an ordered list's items are announced with their numbers", () => {
   assert.ok(!/\[List item \d/.test(ul), `an unordered list was numbered:\n${ul}`);
 });
 
+test("a list marked with letters or roman numerals is announced with the marker it renders", () => {
+  // #334. The count is a number in every case, but the marker a reader HEARS is that number
+  // rendered in the list's own style, and reading only the number announced `<ol type="a">` as
+  // 1, 2, 3 — a marker the delivered document renders nowhere. 31 of the corpus's 3,591 parseable
+  // page replies carry `<ol type=…>`, and the page agent is now asked for it by name, so a view
+  // that cannot see the attribute is a view that cannot check the rule.
+  assert.match(flatten(`<ol type="a"><li>Alpha</li><li>Beta</li></ol>`), /\[List item a\] Alpha\n\[List item b\] Beta/);
+  assert.match(flatten(`<ol type="A"><li>Alpha</li></ol>`), /\[List item A\] Alpha/);
+  assert.match(flatten(`<ol type="i"><li>One</li><li>Two</li><li>Three</li><li>Four</li></ol>`),
+    /\[List item i\] One\n\[List item ii\] Two\n\[List item iii\] Three\n\[List item iv\] Four/);
+  assert.match(flatten(`<ol type="I"><li>One</li></ol>`), /\[List item I\] One/);
+  // `type` is the list's, so it decides how EVERY count under it is rendered — including one
+  // `value` sets. A browser marks this item "e", and announcing "5" would be the same defect
+  // pointing the other way: a marker no reader of that document hears.
+  assert.match(flatten(`<ol type="a"><li>First</li><li value="5">Fifth</li></ol>`),
+    /\[List item a\] First\n\[List item e\] Fifth/);
+  assert.match(flatten(`<ol type="i" start="4"><li>Fourth</li></ol>`), /\[List item iv\] Fourth/);
+  // Letters are bijective base-26, which is what CSS lower-alpha counts: z, then aa.
+  assert.match(flatten(`<ol type="a" start="26"><li>Z</li><li>AA</li></ol>`), /\[List item z\] Z\n\[List item aa\] AA/);
+  // A style that cannot represent the ordinal falls back to the decimal it was, as CSS does:
+  // neither letters nor roman numerals have a rendering for zero or a negative, and roman
+  // numerals stop at 3999. A `reversed` list counting past its start reaches the first case.
+  assert.match(flatten(`<ol type="a" reversed start="1"><li>One</li><li>Zero</li></ol>`),
+    /\[List item a\] One\n\[List item 0\] Zero/);
+  assert.match(flatten(`<ol type="i" start="4000"><li>Past</li></ol>`), /\[List item 4000\] Past/);
+  // An unknown type is ignored, the way the browser ignores it, rather than announced.
+  assert.match(flatten(`<ol type="x"><li>Alpha</li></ol>`), /\[List item 1\] Alpha/);
+  // `type` on a <ul> marks nothing here: an unordered list has no marker to lose, so the
+  // attribute must not turn one on.
+  const ul = flatten(`<ul type="a"><li>Alpha</li></ul>`);
+  assert.match(ul, /\[List item\] Alpha/);
+  assert.ok(!/\[List item \S/.test(ul), `an unordered list was marked:\n${ul}`);
+});
+
 test("a list item's number reaches it however the item is announced", () => {
   // The marker travels down to a block child (`<li><p>x</p></li>`) and combines with
   // that child's own marker, so the number has to survive both paths — a `[List item]`
@@ -588,8 +622,344 @@ test("every marker the Reader prompt advertises is one flatten emits", () => {
   // include this one.
   assert.match(flatten(`<ol><li>Alpha</li></ol>`), /\[List item 1\]/);
   assert.ok(READER_SYSTEM.includes("[List item N]"), "flatten emits a marker the prompt does not name");
+  // And the same mirror for #334's markers. A digit in that bracket is what the prompt used to
+  // promise exclusively — "the number it is announced with" — so a view that now emits a letter
+  // needs the prompt to have said a letter can appear, or the Reader reads `[List item a]` as a
+  // marker it was told is always a number and reports the document for it.
+  assert.match(flatten(`<ol type="a"><li>Alpha</li></ol>`), /\[List item a\]/);
+  assert.ok(READER_SYSTEM.includes("[List item a]"), "flatten emits a letter marker the prompt does not name");
+  assert.ok(/roman numerals from type="i"/.test(READER_SYSTEM), "the prompt does not name the roman markers flatten emits");
+  assert.match(flatten(`<ol type="i"><li>Alpha</li></ol>`), /\[List item i\]/);
+  // The prompt must not promise the number is the marker any more, since it is not.
+  assert.ok(
+    !/carries the number it is announced with/.test(READER_SYSTEM),
+    "the prompt still tells the Reader an ordered item's marker is a number",
+  );
+  // A report the Reader can act on has to say WHICH of the two copies goes, because both
+  // resolutions clear a double marker and one of them is wrong: deleting the list's `type` also
+  // clears `[List item a] (a)`, and leaves a list that prints 1, 2, 3 where the page printed
+  // letters — a loss no gate here can see, since the marker is inside brackets. Pinned on the
+  // direction rather than the sentence: reword it freely, but it must still name the text.
+  assert.match(flatten(`<ol type="a"><li>(a) Estimating</li></ol>`), /\[List item a\] \(a\) Estimating/);
+  assert.ok(
+    /the copy that goes is the TEXT's/.test(READER_SYSTEM),
+    "the double-marker report does not say which of the two copies goes",
+  );
+  assert.ok(
+    !/worth reporting whichever of the two the page printed/.test(READER_SYSTEM),
+    "the double-marker report still leaves the two copies interchangeable",
+  );
+  // And the direction REVERSES on the shape the corpus actually has. A bare `<ol>` whose items
+  // transcribed their letters flattens to a digit beside a letter — 7 replies, one distinct list,
+  // against 0 replies where a typed list's text repeats its own marker — and there the letters are
+  // the document's only copy, so deleting them is the one repair that loses the page's markers.
+  assert.match(flatten(`<ol><li>(a) Estimating</li></ol>`), /\[List item 1\] \(a\) Estimating/);
+  assert.ok(
+    /the repair is the other way round/.test(READER_SYSTEM),
+    "the report treats a digit announced beside a printed letter as the same defect as a repeat",
+  );
+  // That branch is named by the SHAPE it means — a digit-announced list printing letters — and not by
+  // "they disagree in kind", which literally covers `[List item a] 12.` as well and so claimed the third
+  // case's own example. Its repair reads as nonsense there: a list already carrying `type="a"` is not
+  // missing the type that would announce letters.
+  assert.ok(
+    /Where the list announces DIGITS and its items\s+print letters or roman numerals/.test(READER_SYSTEM),
+    "the second marker branch is not named by the shape its repair is true of",
+  );
+  assert.ok(
+    !/Where they DISAGREE in kind/.test(READER_SYSTEM),
+    "the second marker branch is named by a kind test that also covers the third case",
+  );
+  // And the two branches are not complementary, so the prompt has to name the THIRD case outright.
+  // Announced "1" beside a printed "12." is the same kind and a different marker — a statute's clause
+  // number under the list's own count — and it falls outside both: it is not the same content twice and
+  // the list is not missing a `type`. Reading the second branch as everything the first is not is what
+  // made the log detector a kind test for two commits, so the case is stated rather than left to the
+  // prohibition that already covered it.
+  assert.match(flatten(`<ol><li>12. Payments to the state</li></ol>`), /\[List item 1\] 12\. Payments/);
+  assert.ok(
+    /a marker that is NEITHER of those/.test(READER_SYSTEM),
+    "the prompt states its two marker branches as if they were complementary",
+  );
+  // The instruction on that case is what it must not do — drop either copy — and NOT "leave everything
+  // alone", which is the wider thing the first version said. `EDITOR_SYSTEM` sends the offset shape to a
+  // report ("where the markers do not begin where the list's own count does … report it instead"), and
+  // the Reader is asked twelve lines earlier for an announced marker that disagrees with the source
+  // page, so a blanket "change nothing and say nothing" contradicted both. The two shapes are split on
+  // whether the printed markers are one run from an offset — a missing `start` — or are not one run with
+  // the count at all, which is the document's own clause numbering.
+  assert.ok(
+    /NEVER ask for either copy to be dropped/.test(READER_SYSTEM),
+    "the third marker case does not forbid deleting the page's only copy of a marker",
+  );
+  assert.ok(
+    /missing the start that would announce those very markers/.test(READER_SYSTEM),
+    "the Reader is told to leave a list that is missing `start`, which the editor is told to report",
+  );
+  assert.ok(
+    !/leave the list and the text exactly as they are/.test(READER_SYSTEM),
+    "the third marker case still forbids the report the editor's own precondition asks for",
+  );
+  // The `start` report is only true where `start` can announce the printed markers, and it cannot when
+  // they are a different KIND from the list's own: `type` carries the kind and `start` only the count, so
+  // `start="12"` on an `<ol type="a">` announces `l.`, `m.`, `n.` — a marker no page printed, which is
+  // the invention the same prompt forbids nine lines later. Stated for every list it was wrong on the
+  // second example the sentence itself gives, and the same-kind test is what makes the repair produce the
+  // markers the page showed.
+  assert.match(
+    flatten(`<ol type="a" start="12"><li>12. Payments to the state</li></ol>`),
+    /\[List item l\] 12\. Payments/,
+  );
+  assert.match(flatten(`<ol start="12"><li>12. Payments to the state</li></ol>`), /\[List item 12\] 12\. Payments/);
+  assert.match(flatten(`<ol type="a" start="3"><li>(c) Estimating</li></ol>`), /\[List item c\] \(c\) Estimating/);
+  assert.ok(
+    /the SAME KIND as the announced one and run consecutively/.test(READER_SYSTEM),
+    "the missing-`start` report is stated for lists whose printed markers no `start` can announce",
+  );
+  assert.ok(
+    /no start announces them/.test(READER_SYSTEM),
+    "the third case never says what to do where `start` cannot reach the printed markers",
+  );
+  assert.ok(
+    !/consecutive from wherever it starts/.test(READER_SYSTEM),
+    "the missing-`start` report is unscoped again and asks for `start` on a lettered list",
+  );
+  // And the reason clause has to cover every shape the branch does. "one marker and then a number" was
+  // true of the digit example and false of `[List item a] (c)`, which is two letters, and a reason stated
+  // one grain narrower than its rule is what cost this check three rounds further down.
+  assert.ok(
+    !/a reader hears one marker and then a number/.test(READER_SYSTEM),
+    "the third case justifies itself with a digits-only reason it also applies to letters",
+  );
   // Options are still content, and are separated so they cannot run together.
   assertNoTextLost(`<select><option>Platform</option><option>Design</option></select>`, "select options");
+});
+
+test("every attribute flatten reads a marker from is one the editor is told to carry", () => {
+  // #432's review, note 1. Moving a lettered list's letters out of the item text and into
+  // `type` moved them out of the one place EDITOR_SYSTEM protects: it returns whole replacement
+  // blocks, and the only attribute it names is `href`. A copy-edit round that rewrites a block
+  // for an unrelated issue can hand back a bare <ol>, and there is nothing left in the text to
+  // recover the letters from.
+  //
+  // An attribute belongs in this list because dropping it CHANGES the marker a reader hears —
+  // which is what makes losing it a content loss rather than a tidy-up — and `reversed` is here
+  // although the review named three, because the mechanism has four and a list stated one member
+  // short reads as complete.
+  //
+  // The pairs carry a paragraph of real prose because `contentCoverage` returns null below
+  // MIN_COVERAGE_WORDS distinct words, and a null would make the coverage rows below vacuous
+  // rather than a measurement of the blindness they are here to show.
+  const lead = `<p>Estimating the annual cost of intergovernmental grant programs</p>`;
+  const items = `<li>Direct federal outlays</li><li>Reimbursed state administration</li>`;
+  const marking: ReadonlyArray<readonly [string, string, string]> = [
+    ["type", `${lead}<ol type="a">${items}</ol>`, `${lead}<ol>${items}</ol>`],
+    ["start", `${lead}<ol start="7">${items}</ol>`, `${lead}<ol>${items}</ol>`],
+    ["value", `${lead}<ol><li value="7">Direct federal outlays</li></ol>`, `${lead}<ol><li>Direct federal outlays</li></ol>`],
+    ["reversed", `${lead}<ol reversed>${items}</ol>`, `${lead}<ol>${items}</ol>`],
+  ];
+  for (const [attr, marked, bare] of marking) {
+    assert.notEqual(flatten(marked), flatten(bare), `dropping ${attr} leaves the announced marker unchanged`);
+    assert.ok(
+      new RegExp(`\\b${attr}\\b`).test(EDITOR_SYSTEM),
+      `flatten announces a marker from ${attr} and EDITOR_SYSTEM never names it`,
+    );
+    // And why the prompt has to carry it: the marker is inside brackets, so the gate that would
+    // otherwise notice content going missing reads the two documents as identical.
+    assert.equal(contentCoverage(marked, bare), 1);
+    assert.equal(contentCoverage(bare, marked), 1);
+  }
+  // The one conversion the editor IS licensed to make has to be atomic, because each half alone is
+  // a defect: the type without the text strip announces the letter and then reads it out, and the
+  // strip without the type deletes the only copy of the letters the page printed. Both failures are
+  // states this view can show, so both belong in the same test as the rule that forbids them.
+  assert.match(flatten(`<ol type="a"><li>(a) Estimating</li></ol>`), /\[List item a\] \(a\)/);
+  assert.match(flatten(`<ol><li>Estimating</li></ol>`), /\[List item 1\] Estimating/);
+  assert.ok(
+    /That is ONE change, not two/.test(EDITOR_SYSTEM),
+    "the editor's list conversion does not say that setting the type and stripping the text are one change",
+  );
+});
+
+test("half of the licensed list conversion is reported and the whole of it is not", () => {
+  // The prompt is the only thing standing between a licensed strip and a deleted marker, so the two
+  // halves get the check `droppedHrefs` gets: read off the same view a reader hears, because that is
+  // where `type="a"` and the item's own "(a)" are both visible at once.
+  const printed = `<ol><li>(a) Direct federal outlays</li><li>(b) Reimbursed state administration</li></ol>`;
+  const converted = `<ol type="a"><li>Direct federal outlays</li><li>Reimbursed state administration</li></ol>`;
+  const stripped = `<ol><li>Direct federal outlays</li><li>Reimbursed state administration</li></ol>`;
+  const doubled = `<ol type="a"><li>(a) Direct federal outlays</li><li>(b) Reimbursed state administration</li></ol>`;
+  // The whole conversion: the letters leave the text and the list announces them, so the two counts
+  // move together and nothing is reported.
+  assert.equal(listMarkerHalfEdit(printed, converted), null);
+  assert.equal(listMarkerHalfEdit(printed, printed), null);
+  // Each half, which is each of the two defects the prompt names.
+  assert.equal(listMarkerHalfEdit(printed, stripped), "text_markers_gone");
+  assert.equal(listMarkerHalfEdit(printed, doubled), "marker_announced_twice");
+  // The counts behind those verdicts, because a verdict read off a count nobody checked is a claim
+  // about arithmetic rather than about the document.
+  assert.deepEqual(listMarkers(printed), { items: 2, lettered: 0, printed: 2, printed_lettered: 2, doubled: 0 });
+  assert.deepEqual(listMarkers(converted), { items: 2, lettered: 2, printed: 0, printed_lettered: 0, doubled: 0 });
+  assert.deepEqual(listMarkers(stripped), { items: 2, lettered: 0, printed: 0, printed_lettered: 0, doubled: 0 });
+  assert.deepEqual(listMarkers(doubled), { items: 2, lettered: 2, printed: 2, printed_lettered: 2, doubled: 2 });
+  // A DIGIT leaving an item's text is the repair `READER_SYSTEM` asks for, not a loss: an <ol>
+  // announces 1, 2, 3 by itself, so the text's copy was the redundant one. This is the branch the
+  // Reader fires on first — #334's `(1)` list, whose rule already existed on main — and reading
+  // `printed` instead of `printed_lettered` labelled it as the loss.
+  const digitsPrinted = `<ol><li>(1) Direct federal outlays</li><li>(2) Reimbursed state administration</li></ol>`;
+  assert.equal(listMarkers(digitsPrinted).printed, 2);
+  assert.equal(listMarkers(digitsPrinted).printed_lettered, 0);
+  assert.equal(listMarkerHalfEdit(digitsPrinted, stripped), null);
+  // That `null` is also why the editor's conversion licence is NOT widened to the same-kind offset run
+  // the Reader now reports. If the editor were allowed to set `start="12"` on an `<ol>` whose items print
+  // 12., 13., the DESTRUCTIVE half of that change — markers stripped with no `start` set, which deletes
+  // the document's only record of its numbering — produces the same five counts as the whole change, so
+  // this cannot tell them apart. The lettered half of the same shape IS caught, and that asymmetry is a
+  // silence to close before the licence moves, not after.
+  // Both `after` documents here are `offsetRun`'s own items with the markers taken off, so the pair being
+  // compared is the two edits an editor could actually make and not a list that also reworded an item.
+  const offsetRun = `<ol><li>12. Payments to states</li><li>13. Reimbursed state administration</li></ol>`;
+  const offsetConverted = `<ol start="12"><li>Payments to states</li><li>Reimbursed state administration</li></ol>`;
+  const offsetStripped = `<ol><li>Payments to states</li><li>Reimbursed state administration</li></ol>`;
+  assert.deepEqual(listMarkers(offsetConverted), listMarkers(offsetStripped));
+  assert.equal(listMarkerHalfEdit(offsetRun, offsetConverted), null);
+  assert.equal(listMarkerHalfEdit(offsetRun, offsetStripped), null);
+  assert.equal(
+    listMarkerHalfEdit(
+      `<ol type="a"><li>(c) Estimating</li><li>(d) Admin</li></ol>`,
+      `<ol type="a"><li>Estimating</li><li>Admin</li></ol>`,
+    ),
+    "text_markers_gone",
+  );
+  // A conversion that is partial in BOTH directions is the state the totals cannot see: the list
+  // gains its letters, the text loses SOME of its markers, and the item that kept its own is
+  // announced "b" and then reads "(b)" out. `doubled` is per item, so it sees exactly that item.
+  const half = `<ol type="a"><li>Direct federal outlays</li><li>(b) Reimbursed state administration</li></ol>`;
+  assert.equal(listMarkers(half).doubled, 1);
+  assert.equal(listMarkerHalfEdit(printed, half), "marker_announced_twice");
+  // A round that RESIZED a list is not read at all: a deleted item takes its printed marker with it,
+  // and removing content the document printed twice is what this loop is for. Both directions,
+  // because a list that grew moves the same two counts the other way.
+  assert.equal(listMarkerHalfEdit(printed, `<ol><li>(a) Direct federal outlays</li></ol>`), null);
+  assert.equal(listMarkerHalfEdit(converted, `${converted}${converted}`), null);
+  // And an unordered list has no marker to lose either way.
+  assert.equal(listMarkerHalfEdit(`<ul><li>(a) Alpha</li></ul>`, `<ul><li>Alpha</li></ul>`), null);
+  // What is and is not a printed marker, each case a false positive this had. "(see)" is three
+  // letters and no numeral. "cm." and "ml." are runs of roman LETTERS and not roman numbers. An
+  // initial — "J. Smith chaired the committee" — is a single letter closed by a full stop, and a
+  // round that recasts that sentence is ordinary work for this pass, so it must not log a lost
+  // marker. The same letter closed by a bracket is a marker.
+  assert.equal(listMarkers(`<ol><li>(see) Alpha</li></ol>`).printed, 0);
+  assert.equal(listMarkers(`<ol><li>(iii) Alpha</li></ol>`).printed, 1);
+  assert.equal(listMarkers(`<ol><li>cm. Alpha</li><li>ml. Beta</li></ol>`).printed, 0);
+  assert.equal(listMarkers(`<ol><li>J. Smith chaired the committee</li></ol>`).printed, 0);
+  assert.equal(listMarkers(`<ol><li>a) Alpha</li></ol>`).printed, 1);
+  assert.equal(listMarkers(`<ol><li>(a) Alpha</li></ol>`).printed, 1);
+  assert.equal(
+    listMarkerHalfEdit(
+      `<ol><li>J. Smith chaired the committee</li><li>Reimbursed state administration</li></ol>`,
+      `<ol><li>The committee was chaired by J. Smith</li><li>Reimbursed state administration</li></ol>`,
+    ),
+    null,
+  );
+  // A bracketed abbreviation is the initial one bracket over, and the first narrowing let it through:
+  // an OPENING bracket satisfied nothing on its own, so "(e.g. the totals)" at the head of an item was
+  // a printed lettered marker and recasting the sentence logged the page's letters as deleted. A single
+  // letter now needs the CLOSER, which "(a." is not and "(a)" and "a)" are.
+  assert.equal(listMarkers(`<ol><li>(e.g. the totals) Alpha</li><li>(e.g. more) Beta</li></ol>`).printed, 0);
+  assert.equal(listMarkers(`<ol><li>(i.e. the totals) Alpha</li></ol>`).printed, 0);
+  assert.equal(listMarkers(`<ol><li>(a. Alpha</li></ol>`).printed, 0);
+  assert.equal(
+    listMarkerHalfEdit(
+      `<ol><li>(e.g. the totals) rose in 1998 across every state</li><li>Reimbursed state administration</li></ol>`,
+      `<ol><li>The totals rose, e.g. in 1998 across every state</li><li>Reimbursed state administration</li></ol>`,
+    ),
+    null,
+  );
+  // `doubled` matches the announced marker's own VALUE against the printed token, and every weaker
+  // version of that reported something a reader does not hear twice. A lettered list whose item prints
+  // "12." is a statute's clause number under its own marker — the reader hears "a" then "12", one
+  // marker and a number — so restoring that number is not a doubling.
+  const clauseNumber = `<ol type="a"><li>12. Payments to the state</li><li>Reimbursed state administration</li></ol>`;
+  assert.equal(listMarkers(clauseNumber).doubled, 0);
+  assert.equal(listMarkers(clauseNumber).printed, 1);
+  assert.equal(listMarkerHalfEdit(`<ol type="a"><li>Payments to the state</li><li>Reimbursed state administration</li></ol>`, clauseNumber), null);
+  // And a bare <ol> whose item prints "(1)" IS the doubling, in the kind the corpus actually holds:
+  // #334's own list. Requiring the announced marker to be a letter missed it entirely.
+  const digitsDoubled = `<ol><li>(1) Direct federal outlays</li><li>(2) Reimbursed state administration</li></ol>`;
+  assert.equal(listMarkers(digitsDoubled).doubled, 2);
+  assert.equal(listMarkerHalfEdit(stripped, digitsDoubled), "marker_announced_twice");
+  // Where a DIGIT-announced list's items print letters — announced "1", text reads "(a)" — nothing is
+  // doubled: that list is missing the `type` that would announce its letters, and the Reader prompt says
+  // the text's copy must STAY until it has one. That is the prompt's second branch, which is named for
+  // this shape and not for "they disagree in kind" — a test that also covers announced "a" beside a
+  // printed "12.", where a missing `type` is not the repair.
+  assert.equal(listMarkers(printed).doubled, 0);
+  // Matching on KIND rather than on value left two more of the same shape, one in each alphabet. A
+  // lettered list whose item prints "(i)" is a marker and a roman SUB-marker — "(a) (i) Payments" —
+  // and both are non-digits, so a kind test called it a doubling. A bare <ol> whose item prints "12."
+  // announces "1" and reads "12", both digits: the clause number again, on the side the kind test did
+  // not look at. Only the announced marker's own value separates them.
+  assert.equal(
+    listMarkerHalfEdit(
+      `<ol type="a"><li>Payments to states</li><li>Payments to tribes</li></ol>`,
+      `<ol type="a"><li>(i) Payments to states</li><li>(ii) Payments to tribes</li></ol>`,
+    ),
+    null,
+  );
+  assert.equal(
+    listMarkerHalfEdit(
+      `<ol><li>Payments to states</li><li>Reimbursed state administration</li></ol>`,
+      `<ol><li>12. Payments to states</li><li>13. Reimbursed state administration</li></ol>`,
+    ),
+    null,
+  );
+  // A marker is the SAME marker across case and however the list arrives at it, so all three of these
+  // are the doubling: a roman `type`, an uppercase text copy under a lowercase one, and a list whose
+  // announced letters come from `start` rather than from counting up from the first.
+  for (const [before, after] of [
+    [`<ol type="i"><li>Alpha item</li><li>Beta item</li></ol>`, `<ol type="i"><li>(i) Alpha item</li><li>(ii) Beta item</li></ol>`],
+    [`<ol type="a"><li>Alpha item</li><li>Beta item</li></ol>`, `<ol type="a"><li>(A) Alpha item</li><li>(B) Beta item</li></ol>`],
+    [`<ol type="a" start="3"><li>Gamma item</li><li>Delta item</li></ol>`, `<ol type="a" start="3"><li>(c) Gamma item</li><li>(d) Delta item</li></ol>`],
+  ]) {
+    assert.equal(listMarkerHalfEdit(before, after), "marker_announced_twice", after);
+  }
+  // Roman precision, stated because it is asymmetric on purpose: "ii." cannot be an initial and counts
+  // with a full stop, "i." can be one and does not. The alphabet is i/v/x only, which caps a roman
+  // marker at xxxix — admitting l, c, d and m is what made "cm." and "ml." matches in the first place.
+  assert.equal(listMarkers(`<ol><li>i. Alpha</li><li>ii. Beta</li><li>iii. Gamma</li></ol>`).printed, 2);
+  assert.equal(listMarkers(`<ol><li>(i) Alpha</li><li>(ii) Beta</li></ol>`).printed, 2);
+  assert.equal(listMarkers(`<ol><li>(xl) Alpha</li><li>(xli) Beta</li></ol>`).printed, 0);
+  // A lettered marker is ONE letter, so a list past its twenty-sixth item is invisible to BOTH branches
+  // and not only to the doubling one. Pinned with the ceiling above because both are the same trade: a
+  // wider class would have to tell a two-letter marker from any two-letter word at the head of an item.
+  assert.deepEqual(
+    listMarkers(`<ol type="a" start="27"><li>(aa) Alpha item</li><li>(ab) Beta item</li></ol>`),
+    { items: 2, lettered: 2, printed: 0, printed_lettered: 0, doubled: 0 },
+  );
+  // A `reversed` list announces 3, 2, 1, and an item printing "(3)" under the first of them is the
+  // doubling like any other — the announced marker is whatever `flatten` resolved, not the item's index.
+  assert.equal(
+    listMarkerHalfEdit(
+      `<ol reversed><li>Alpha item</li><li>Beta item</li><li>Gamma item</li></ol>`,
+      `<ol reversed><li>(3) Alpha item</li><li>(2) Beta item</li><li>(1) Gamma item</li></ol>`,
+    ),
+    "marker_announced_twice",
+  );
+  // The other silence, pinned so it stays a stated limit and not a surprise: every count here is a
+  // BLOCK total, so one list's correct conversion pays for another's destruction. `lettered` risen and
+  // `printed_lettered` fallen is what a single correct conversion looks like, and the second list's
+  // letters are gone from the delivered document with nothing announcing them. `flatten` marks items and
+  // never the list they belong to, so splitting per list means a second renderer of the announced
+  // marker beside `markerStyle` — the worse trade, and the block is the grain the rest of the file's
+  // loss accounting uses.
+  assert.equal(
+    listMarkerHalfEdit(
+      `<ol><li>(a) Direct federal outlays</li><li>(b) Reimbursed state administration</li></ol><ol><li>(a) Estimating a liability</li><li>(b) Filing the return</li></ol>`,
+      `<ol type="a"><li>Direct federal outlays</li><li>Reimbursed state administration</li></ol><ol><li>Estimating a liability</li><li>Filing the return</li></ol>`,
+    ),
+    null,
+  );
 });
 
 test("a page too deep for the recursive walk keeps its text instead of throwing", () => {

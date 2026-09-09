@@ -1058,7 +1058,190 @@ Places where a decision was left open, and where v1 intentionally stops:
 
   The prompt and the markers are one contract in the other direction too. `test/flatten.test.ts`
   asserts `READER_SYSTEM` advertises no marker `flatten` never emits (`[Option]` was documented and
-  unreachable). And every annotation that explains *correct* markup — `[spans N columns]`,
+  unreachable).
+
+  **An ordered item's marker is the number rendered in the list's style, not the number.** The
+  ordinal an `<li>` carries is always a number — that is what `start`, `value` and `reversed`
+  compute — but what a reader hears is that number rendered through `type`, and reading only the
+  number announced `<ol type="a">` as `[List item 1]`: a marker the delivered document renders
+  nowhere, in the one view the Reader has for checking markers against a page. It is the wrong
+  marker rather than a missing one, which is the same trade `reversed` was already honoured for.
+  `<li value="5">` inside `<ol type="a">` is `[List item e]`, because the two attributes mean the
+  count and its rendering and not two competing markers. A style that cannot represent the ordinal
+  falls back to the decimal — zero, a negative, a roman numeral past 3999 — because that is what
+  CSS does, and an approximation of it would put a third marker in the view that no reader hears.
+  On the bench corpus 31 of the 3,591 parseable page replies use `<ol type=…>`, every one of them a
+  style HTML renders, and those 31 are exactly the replies whose view this changes — with no text
+  outside the brackets moving on any of them, so `contentCoverage` cannot move either.
+  `agents/page.md` now asks for the attribute by name, so the view had to be able to see it before
+  the rule asking for it could be checked at all.
+
+  **A marker that lives in an attribute has to be named to the pass that rewrites blocks.** Asking
+  the extractor to put the letters in `type` and *not* in the item's text moves them out of the one
+  thing `EDITOR_SYSTEM` protects: that pass returns whole replacement blocks, and until now the only
+  attribute it was told to carry through by name was `href` — "the one kind no later pass can
+  recover". A copy-edit round rewriting a block for an unrelated issue could hand back a bare `<ol>`,
+  and nothing would notice: the marker sits inside brackets, which `contentCoverage` strips before
+  comparing words, and the editor path's other loss checks watch links (`droppedHrefs`) and the body
+  markers (`markerCounts`) only. So `EDITOR_SYSTEM` names `type`, `start`, `value` and `reversed` the
+  way it names `href` — all four, because `flatten` announces a different marker without any one of
+  them, and a list stated one member short reads as complete. That gap pre-dated `type`: a dropped
+  `start` was already unrecoverable and already unmeasured. It stays a rule rather than a check for
+  the reason the double marker stayed one: `editor_links_dropped` has fired once in the 151 logs on
+  disk that ran the copy editor, and `editor_markers_changed` never, so the instrument this would add
+  is one whose whole class shows up about as often as the defect it is watching for.
+
+  The Reader's side of the same asymmetry is that a double marker has two resolutions and only one is
+  right. `[List item a] (a) Estimating` clears if the text drops its copy, and it also clears if the
+  `<ol>` loses its `type` — which leaves a list printing 1, 2, 3 where the page printed letters, and
+  no gate can see that either. `READER_SYSTEM` therefore says which copy goes — **the text's, where the
+  two markers agree in kind**, which is the condition the next paragraph is about, and never the
+  duplication reported with the direction left to whoever fixes it.
+
+  **And the direction reverses on the shape that actually occurs.** Counting the corpus by whether a
+  list's marker is on the list or in its items: of the 1,075 replies with an `<ol>`, **7 have a bare
+  `<ol>` whose every item's text opens with a letter or roman marker — one distinct list, the same one
+  #334 reports — and 0 have a typed `<ol>` whose item text repeats the marker the list already
+  announces.** So the shape the "delete the text's copy" direction fires on is the one with no
+  occurrences, and the one with all of them flattens to `[List item 1] (a) Estimating`: a digit
+  announced beside a printed letter. There the letters are the document's ONLY record of what the page
+  printed, and deleting them is the single repair that loses a marker, so the rule splits on whether
+  the two markers agree in kind. Where they agree the text's copy goes; where the list announces a
+  digit and the items print letters, the list is what is missing its marker and the text must stay
+  until the list carries it.
+
+  That leaves who may repair it. Only the extractor sees the page, so the loop's default answer is
+  nobody — which would report the defect every round with no legal fix and converge it as unresolved.
+  `EDITOR_SYSTEM` gets one narrow licence instead, because this repair needs no page at all: the
+  letters are already in the document's text, so moving them onto the list adds nothing. It applies
+  only to a bare `<ol>` whose EVERY item opens with one sequence's marker, running consecutively from
+  the ordinal the list counts from, and it is atomic — set the `type` and strip the markers, or change
+  nothing. Each half alone is its own defect, which is why the rule says "one change, not two": the
+  `type` without the strip reads the letter out twice, and the strip without the `type` is the
+  deletion the paragraph above exists to prevent. A broken sequence, an unmarked item, or markers that
+  do not start where the list does all fall back to reporting it, because a list converted on a guess
+  announces a marker no page printed while one left alone still reads its letters out.
+
+  **A licensed removal of visible text needs its own check, because the two halves of it are defects
+  and the prose gate cannot see either.** `listMarkerHalfEdit` (`review.ts`) reads the announced
+  marker and the item's own printed marker off `flatten` — the view where `type="a"` and a transcribed
+  `(a)` are visible at once — and reports the two states the licence forbids: `marker_announced_twice`,
+  an item printing **the marker the list announces**, which is #334's defect arriving from the
+  review loop instead of from an extraction; and `text_markers_gone`, lettered markers leaving the items
+  with the list not gaining them, which is the page's letters deleted outright. A complete conversion
+  moves both counts together and is silent, which is why this compares two counts instead of watching
+  the prose shorten. It sits beside `droppedHrefs` and `markerCounts` in the correction round, the other
+  two records of something a round took away that no gate sees. It has **two stated silences**: a round
+  that changed the number of items is not read at all, because a deleted item takes its printed marker
+  with it and a signal that fires on the loop's own licensed deletions is one nobody reads; and every
+  count is a BLOCK total, so one list's correct conversion pays for another's destruction in the same
+  reply. The second is not narrowed because `flatten` marks items and never the list they belong to —
+  splitting per list means a second renderer of the announced marker beside `markerStyle`, and the cheap
+  substitute of starting a new list wherever the sequence restarts is wrong on any list carrying `start`.
+
+  **A check on a licensed edit has to be counted at the grain the edit is made at, and the loss branch
+  has to exclude the marker the list supplies itself.** The first version of this compared per-list
+  totals and counted every printed marker alike, and all three of its defects followed from that.
+  Counting a **digit** leaving an item's text as a loss put "the page's letters deleted" on the branch a
+  reviewer meets first — an `<ol>` prints 1, 2, 3 by itself, so a digit the text repeats is the second
+  copy the prompt asks for, and #334's own list is the digit shape. The loss branch therefore reads a
+  lettered-only count. Comparing totals also made a **partial** strip — the `type` set and only some
+  items stripped — satisfy neither condition and log nothing, which is exactly the half-edit the check
+  exists for; counting `doubled` **per item** catches it, because the item that kept its own marker is
+  the one a reader meets whatever the totals say. And a marker shape wide enough to match any letter
+  followed by a stop matched an **initial**, so recasting "J. Smith chaired the committee" logged a lost
+  marker: a printed marker is now three digits at most, a roman *number* (which `cm.` and `ml.` are not),
+  or a single letter closed by `)` or `]`. The stated cost is a marker genuinely printed `a.` with no
+  bracket, which this misses — the trade for not calling an ordinary sentence a deletion.
+
+  **Both of those repairs then had to be applied on the side I had not looked at, which is the actual
+  lesson.** The kind narrowing went one way only: a digit leaving an item's text stopped counting as a
+  loss, but a digit *arriving* still counted as a doubling under a lettered list, where `(a) 12.
+  Payments…` is a statute's clause number and a reader hears one marker and a number — while the digit
+  doubling that does occur, `(1)` put back into a bare `<ol>`, moved nothing the check read. Both went
+  away at once when `doubled` began matching the two markers **in kind** — one rule instead of two
+  exceptions, though see the paragraph below for why kind was not the end of it either. And the
+  punctuation narrowing stopped at the bare initial, leaving `(e.g. the
+  totals)` — the same initial with an opening bracket — a printed lettered marker, so a single letter now
+  needs the CLOSER and not merely a bracket. Two rounds, one shape of error each time: **a rule that
+  splits on a property has to be checked on every value of that property, including the one the failing
+  example did not have.**
+
+  **The kind test was itself an approximation of the value test, and the round after found the two shapes
+  it let through.** `(a) (i) Payments` is a marker and a roman SUB-marker — both non-digits, so a kind
+  match called it a doubling — and a bare `<ol>` whose item prints `12.` announces "1" and reads "12",
+  both digits: the same clause number in the other alphabet, on the side the kind test did not look at.
+  `doubled` now compares the announced marker's own VALUE against the printed token, case-insensitively,
+  which is what the rule always meant — an item repeating the marker it is announced with. It is also what
+  `READER_SYSTEM`'s own SAME MARKER branch says — labelled "where the two AGREE" until the round that
+  found the branches were not complementary — and reading that closely is what settles it: its examples are
+  `[List item a] (a)` and `[List item 1] (1)`, which agree in **value**, so the kind test was never the
+  prompt's split but a looser thing that admitted it. The prompt's two named branches are not
+  complementary either, which is the reason a kind test looked like a fit: announced `1` with `12.`
+  printed is the same *kind* and a different marker, so it falls outside both, and only the prompt's
+  catch-all covered it. It is now a third case in `READER_SYSTEM` in as many words — not one marker printed
+  twice, so neither copy may be dropped — because the Reader was reaching the right answer through a
+  prohibition rather than through a rule, and a rule stated as two branches invites reading the second as
+  everything the first is not. **Writing that third case then cost a round of its own, in the way this
+  whole note keeps describing.** Its first version said "leave the list and the text exactly as they are",
+  which forbids more than the prohibition it replaced: the prohibition only barred *dropping* the text's
+  marker, while a blanket "change nothing" also barred the report `EDITOR_SYSTEM` asks for on the same
+  input (*"where the markers do not begin where the list's own count does … report it instead"*) and the
+  one the Reader is asked for a dozen lines earlier. And its reason — a reader hears "one marker and then a
+  number" — was true of the digit example and false of `[List item a] (c)`, which the branch also covers
+  and where a reader hears two letters. **A remedy for a rule stated at the wrong
+  grain can be stated at the wrong grain itself, in both directions at once: too wide in what it forbids,
+  too narrow in what it justifies.**
+
+  The round after that found the replacement wrong on its own second example, which is the same lesson at
+  the next level down: the case split on whether the printed markers were "one run consecutive from
+  wherever it starts", a condition stated for **every** list, and the repair it then names does not exist
+  for half of them. `type` carries a marker's kind and `start` carries only its count, so `start="12"` on
+  an `<ol type="a">` announces `l.`, `m.`, `n.` — a marker no page printed, and the invention the same
+  prompt forbids nine lines later. The report is only true where the printed run is the **same kind** as
+  the announced marker, and then it is exactly true: `start="3"` on an `<ol type="a">` printing `(c)`,
+  `(d)` announces `c`, `d`. So the split is now on what `start` can announce — same kind and one
+  consecutive run is a missing `start`; a different kind, or no single run, is the document's own clause
+  numbering and stays in the text with no repair asked for at all. **A remedy that names a repair has to
+  be scoped to the inputs the repair exists for, and the example list under a rule is where that shows:
+  the sentence covered two examples and the mechanism it invoked reached one of them.** The same round
+  found the second branch still labelled "where they DISAGREE in kind", which literally covers the third
+  case's own new example (announced `a`, printed `12.`) and whose repair — "the list is missing the type
+  that would announce the letters" — is nonsense on a list already carrying `type="a"`. Naming a branch
+  by the shape its repair is true of, rather than by a property that shape happens to have, is what makes
+  "NEITHER of those" a condition and not a hope.
+
+  One consequence of that scoping was raised and **declined**, with the reason written down rather than
+  left implicit: the missing-`start` report names a repair `EDITOR_SYSTEM` forbids ("Never add one"), so it
+  converges as unresolved, and widening the licence to cover a same-kind consecutive run would close the
+  loop. It is not widened, because the half-edit detector cannot police the change it would license. On the
+  digit half of that shape the destructive half-edit — markers stripped, no `start` set, which deletes the
+  document's only record of its numbering — produces the SAME five counts as the whole conversion, since
+  `printed_lettered` was already 0 and stays 0; the lettered half is caught. **A licence is only as safe as
+  the check that can see its half-edits, so the check comes first and the licence second.** The report
+  itself stands: it names a defect nothing else in the document records, which is the class the
+  `[not legible]` and fidelity reports are in, and the editor's own precondition already sends that shape
+  to a report rather than a change.
+
+  Back to the predicate, and the thread the two paragraphs above interrupt: `docs/API.md` had the same
+  shape of error as those branch labels, in the
+  other direction — it defined the field by kind and *illustrated* it by value, so the examples were more
+  precise than the definition above them. Three rounds on one predicate, each approximation defensible
+  until the next value showed up: **when a check can be stated as "the same thing twice", compare the
+  thing and not a property of it** — and when a rule already exists in a prompt or a doc, read its
+  examples, because they are the specification and the sentence over them may be an approximation.
+
+  That check is also what makes the licensed strip legible where it collides with the loss machinery,
+  which it does and is left doing. `proseShortened` is a comparison of visible text, so the strip is a
+  `shrunk` block like any other: a reply that converts a list **and** carries a refusal is refused
+  whole as `refusal_with_loss`, and on a truncated round `lostAt` stops the claim at the converted
+  block. Both cost a round rather than shipping wrong markup, and the overlap is not new — a licensed
+  link-text rewrite shortens prose too. An exemption would have to live inside `gaveContentUp`, the gate
+  whose whole job is refusing silent content loss, to spare one corpus list's worth of conversions; the
+  thing that was actually missing was a maintainer's ability to tell a sanctioned strip from a real one
+  in the log, and that is a line rather than a change to the gate.
+
+  And every annotation that explains *correct* markup — `[spans N columns]`,
   `[spans N rows]`, `[decorative, alt empty]` — exists because the prompt tells the Reader that an
   unexplained mismatch is a defect, and the Copy Editor is licensed to restructure tables. Adding a
   check to that prompt without the annotation that reconciles it turns the review loop into a
