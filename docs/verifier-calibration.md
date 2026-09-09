@@ -241,8 +241,12 @@ about that matters: an object carrying neither flag read `ok = undefined !== fal
 false`, which is `true`, with an empty `problems` — so before the check they were silent passes buying
 no correction, and after it they are `unjudged` pages, also passing and also buying none. The page ships
 uncorrected either way and only the counter changes, to the better one. #426 carries the eight, and what
-is lost there is the problems those replies named, never this check. The direction that *does* cost
-something is the opposite shape — a `faithful: false` reply that omits `accessible` no longer buys a
+is lost there is the problems those replies named, never this check. The three that quote a row-group
+label are closed on the prompt side instead: `agents/feedback.md` asks the checker to quote the page's
+words with single quotes and no `"` of its own, which costs nothing per call, where recovering them in
+the parser means reading a `"` inside a value as content — a wider rule than the one this page has just
+measured losing on all 14 replies it changed, and one that wants its own measurement.
+The direction that *does* cost something is the opposite shape — a `faithful: false` reply that omits `accessible` no longer buys a
 correction — and that page is counted rather than corrected, which is the trade made knowingly.
 
 A whole class of decoy defeats both, and it is named here at its real width because it is the class the

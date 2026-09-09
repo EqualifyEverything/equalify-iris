@@ -278,7 +278,22 @@ a problem, and every entry of "problems" still needs its "problem" text. Write
 no JSON, no braces and no quoted field names inside it: a `{ "faithful": ... }`
 quoted in "notes" can be read as the reply instead of the reply. Use it only
 for a conclusion you would otherwise have written into a problem, and leave the
-field out when you have none. Respond with ONLY:
+field out when you have none.
+Clauses above ask you to QUOTE the page's own words — the printed count, the
+sentence standing in for a mapping, the terms beside a key's swatches, the cell
+whose number is wrong — and every one of those quotations goes inside a JSON
+string, so write them with no `"` of your own. Set the words off with single
+quotes, or with no marks at all: the row groups 'Selective sales and gross
+receipts' and 'Other' are <td>. An unescaped `"` ends the string where the
+reader meets it, and a quoted label listed beside another is followed by a
+comma — which is exactly where the rest of your reply begins reading as syntax
+and the whole object fails to parse. What is lost then is not the quotation but
+the verdict: a reply nothing can read is recorded as a page NOTHING JUDGED, the
+problems you found reach no correction pass, and the page ships with every one
+of them still in it. `\"` is correct JSON and is read correctly, so this is not
+a rule about what is allowed — it is that the marks you never write cannot be
+the ones you get wrong. It binds on "problems" and on "notes" alike.
+Respond with ONLY:
 { "faithful": true|false, "accessible": true|false,
   "problems": [{ "kind": "content_missing", "problem": "..." }],
   "notes": "one line, read by nothing — omit when you have none" }

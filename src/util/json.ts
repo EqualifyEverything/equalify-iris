@@ -391,7 +391,15 @@ function strictSpan(candidate: string, start: number): Span | null {
 // comma or a brace — `<p>She said "hello", he replied</p>` — which reads as a terminator and
 // fails the parse. That is the failure this had before, not a new one. It also bounds what the
 // whole-reply attempt fixes, and the bound is worth stating because a verdict is on the other side
-// of it. Three kinds of residual still leave the decoy as the last readable object — and the last of
+// of it — in the corpus and not only in principle. Three of the eight verify replies #426 collected
+// are the checker quoting a table's row-group labels back, `("Selective sales and gross receipts",
+// "Other")`, and each one cost the verdict and every problem under it. Recovering them HERE would
+// mean reading an unescaped `"` inside a value as content rather than as a terminator, which is a
+// wider repair than the colon rule the 14 replies above already bound and is unmeasured; #426 asks
+// for that half to be measured on its own. So they are closed on the prompt side instead —
+// `agents/feedback.md` asks the checker to quote the page's words with single quotes and no `"` of
+// its own — which leaves this limit exactly as wide as it was for every other reply.
+// Three kinds of residual still leave the decoy as the last readable object — and the last of
 // them is a CLASS rather than a shape, so this list is not countable and said "four shapes" until the
 // bullet below was widened. All of them are unchanged from before this repair rather than opened by it:
 //
