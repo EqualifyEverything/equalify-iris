@@ -22,6 +22,7 @@ import {
   joinContinuedTables,
   joinInCode,
   normalizeCell,
+  pairFromHalves,
   tableSpans,
   verifyJoin,
 } from "../src/pipeline/tables.ts";
@@ -772,6 +773,144 @@ test("a capped signature cannot be read as agreement, because the line already a
   // The counts are computed on the whole block too, so the cells past the cap are still counted.
   assert.equal(stood.data.header_rows_first, 1);
   assert.equal(stood.data.header_cells_first, 51);
+});
+
+// --- replaying a decline ---
+
+test("a declined pair replays to the same verdict from its log line alone", async () => {
+  // #326's open half. The bytes on the line ARE the pair, so a candidate loosening of a guard is scored
+  // against the pairs a paid round already bought: read them back with `pairFromHalves` and the free
+  // path returns the verdict it returned in the round, with no model and no round.
+  const first = piece("Table 4.—Revenue", STATES);
+  const second = reworded("Table 4.—Revenue—Continued", REST);
+  const { ctx, rec } = ctxWith(() => envelope(null));
+
+  await joinContinuedTables(ctx, first + second);
+
+  const [stood] = events(rec, "table_join_code_declined");
+  assert.equal(stood.data.halves, "logged");
+  assert.equal(stood.data.chars_first, first.length);
+  assert.equal(stood.data.chars_second, second.length);
+  // Byte for byte and not a normalization of them: a re-score has to parse what the round parsed.
+  assert.equal(stood.data.html_first, first);
+  assert.equal(stood.data.html_second, second);
+
+  const replayed = pairFromHalves(String(stood.data.html_first), String(stood.data.html_second));
+  assert.ok(replayed !== null);
+  // Against the reason the line carries rather than against a literal, which is the claim that matters:
+  // the replay agrees with the round, whatever the round said.
+  assert.deepEqual(joinInCode(replayed), { reason: stood.data.reason });
+});
+
+test("a free join carries its halves too, because those are the pairs a loosening must not break", async () => {
+  // Two populations and one question. A loosening's upside is on the declines; the joins the free path
+  // ALREADY takes are what it could break, so those carry their bytes as well — and a replayed pair
+  // reaches `verifyJoin`, which is the check that would catch a wrong loosening rather than the guard
+  // being loosened.
+  const first = piece("Table 1.—Income", STATES);
+  const second = piece("Table 1.—Income—Continued", REST);
+  const { ctx, rec } = ctxWith(() => {
+    throw new Error("a pair the code could join was put to the editor");
+  });
+
+  await joinContinuedTables(ctx, first + second);
+
+  const [joined] = events(rec, "table_joined");
+  assert.equal(joined.data.by, "code");
+  assert.equal(joined.data.halves, "logged");
+  assert.equal(Number(joined.data.chars_first) + Number(joined.data.chars_second), joined.data.chars_before);
+
+  const replayed = pairFromHalves(String(joined.data.html_first), String(joined.data.html_second));
+  assert.ok(replayed !== null);
+  const again = joinInCode(replayed);
+  assert.ok("html" in again, JSON.stringify(again));
+  assert.equal(again.html, goodJoin("Table 1.—Income", STATES, REST));
+  assert.equal(verifyJoin(replayed, again.html), null, "the replay scores the verification, not only the guard");
+});
+
+test("a paid join does not repeat the bytes its own decline line already carries", async () => {
+  const first = piece("Table 1.—Income", STATES);
+  const second = reworded("Table 1.—Income—Continued", REST);
+  const merged = goodJoin("Table 1.—Income", STATES, REST);
+  const { ctx, rec } = ctxWith(() => envelope(merged));
+
+  await joinContinuedTables(ctx, first + second);
+
+  const [joined] = events(rec, "table_joined");
+  assert.equal(joined.data.by, "editor");
+  // Absent, and `by` is the rule for that — a field on every line, so the population is countable.
+  // Every editor call in this loop is preceded by the decline that bought it, and `pairKey` is those
+  // two strings, so the pair is recovered by matching the bytes and not by trusting two lines' order.
+  assert.equal(joined.data.halves, undefined);
+  assert.equal(joined.data.html_first, undefined);
+  const [stood] = events(rec, "table_join_code_declined");
+  assert.equal(stood.data.html_first, first);
+  assert.equal(stood.data.html_second, second);
+});
+
+test("a three-page table logs the intermediate merge, because that is the pair the second pass judged", async () => {
+  // What the per-submission size range does NOT bound. The loop joins one pair per pass, so a table
+  // printed across three pages is joined twice and the second pass's first half IS the first pass's
+  // merge — the first two pieces' rows are on two lines. That is the correct thing to log, since the
+  // merge is what pass 2 decided on and a replay of that line needs it, but it means a document of long
+  // chains logs more than a corpus of two-piece tables and the ceiling is the loop's 12 pairs.
+  const a = piece("Table 7.—Effort", ["Alabama", "Alaska"]);
+  const b = piece("Table 7.—Effort—Continued", ["Arizona", "Arkansas"]);
+  const c = piece("Table 7.—Effort—Continued", REST);
+  const { ctx, rec } = ctxWith(() => {
+    throw new Error("a pair the code could join was put to the editor");
+  });
+
+  await joinContinuedTables(ctx, a + b + c);
+
+  const [one, two] = events(rec, "table_joined");
+  assert.equal(one.data.html_first, a);
+  assert.equal(two.data.chars_first, one.data.chars_after, "pass 2's first half is pass 1's merge");
+  assert.equal(two.data.html_first, goodJoin("Table 7.—Effort", ["Alabama", "Alaska"], ["Arizona", "Arkansas"]));
+  // And the re-logged bytes replay like any other line's, which is the reason to keep them.
+  const replayed = pairFromHalves(String(two.data.html_first), String(two.data.html_second));
+  assert.ok(replayed !== null);
+  const again = joinInCode(replayed);
+  assert.ok("html" in again, JSON.stringify(again));
+  assert.equal(again.html, goodJoin("Table 7.—Effort", ["Alabama", "Alaska", "Arizona", "Arkansas"], REST));
+});
+
+test("a pair past the bound logs no bytes rather than half a table", async () => {
+  // The one place this departs from the capped signatures above. A cut signature still compares cell by
+  // cell as far as it goes; half a table's bytes parse to a DIFFERENT table — fewer rows, no closing
+  // markup — so a rule scored against them returns a verdict that is not the rule's. So the bound
+  // refuses, the line says which it did, and the sizes stay, which is what makes the drop measurable.
+  const many = Array.from({ length: 600 }, (_, i) => `Row ${i}`);
+  const first = piece("Table 30.—Long", many);
+  const second = reworded("Table 30.—Long—Continued", many);
+  assert.ok(first.length + second.length > 64_000, "the fixture has to reach the bound to test it");
+  const { ctx, rec } = ctxWith(() => envelope(null));
+
+  await joinContinuedTables(ctx, first + second);
+
+  const [stood] = events(rec, "table_join_code_declined");
+  assert.equal(stood.data.halves, "too_large");
+  assert.equal(stood.data.html_first, undefined);
+  assert.equal(stood.data.html_second, undefined);
+  assert.equal(stood.data.chars_first, first.length);
+  assert.equal(stood.data.chars_second, second.length);
+  // What the bound drops is the replay. Why the pair was declined, and the headers behind that, are
+  // still on the line.
+  assert.equal(stood.data.reason, "header_differs");
+  assert.equal(stood.data.headers_identical, false);
+});
+
+test("a half no parser can read builds no pair, which is the decline it was logged as", async () => {
+  // `unreadable` is a half holding no `<table>`. Replaying that line has nothing to score, and says so
+  // with null rather than building a pair out of the other half and reporting what it makes of it.
+  const half = piece("Table 9.—Effort", REST);
+  assert.equal(pairFromHalves("<p>no table here</p>", half), null);
+  // A rebuilt half's offsets are into ITSELF, because a logged half has no body to be an offset into —
+  // so a merge produced from a replay cannot be spliced into a document by arithmetic that looks right.
+  const pair = pairFromHalves(half, half);
+  assert.deepEqual([pair?.first.start, pair?.first.end], [0, half.length]);
+  assert.equal(pair?.first.html, half);
+  assert.deepEqual(pair?.second.labels, REST, "and the figures are derived from the bytes, not supplied");
 });
 
 test("a pair the code path can join costs no request and splices the same way", async () => {

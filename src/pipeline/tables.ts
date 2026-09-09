@@ -275,6 +275,33 @@ export function continuationPairs(body: string): {
   return { pairs, declined, tables: tables.length };
 }
 
+// The other way to get a pair: from two halves' bytes alone, which is what the log lines carry
+// (`html_first` / `html_second` on `table_join_code_declined` and on a code join). This is the reason
+// those fields are worth their size — a re-score reads them back through THIS parse, the one the
+// pipeline used, rather than through a probe's own reading of the same markup (#326).
+//
+// Everything a pair is asked for downstream is derived here and nothing is taken on the caller's word:
+// `joinInCode` reads only the two `html` strings, and `verifyJoin` and `rowFloor` read the caption,
+// row, column, header and label figures that `read` derives FROM those strings. So a replayed pair
+// scores the whole free path — the guard AND the verification that would catch a wrong loosening of it
+// — and not merely the guard.
+//
+// Null where either half holds no `<table>`, which is `joinInCode`'s own `unreadable`: a decline logged
+// for that reason replays to it rather than to a pair that cannot be built.
+//
+// `start` and `end` are the half's offsets in ITSELF, because a logged half has no body to be an offset
+// into. Nothing here reads them, and a merge produced from a replayed pair must therefore not be
+// spliced anywhere: this builds a pair to SCORE, and the document it came from already shipped.
+export function pairFromHalves(first: string, second: string): ContinuationPair | null {
+  const f = parse(first).querySelector("table");
+  const s = parse(second).querySelector("table");
+  if (f === null || s === null) return null;
+  return {
+    first: read(f, { start: 0, end: first.length }, first),
+    second: read(s, { start: 0, end: second.length }, second),
+  };
+}
+
 export const TABLE_JOIN_SYSTEM = `You are the Copy Editor Agent, asked for one specific repair.
 
 You are given two HTML tables. They are the two halves of a SINGLE table that was printed across a
@@ -524,6 +551,58 @@ function capSignature(s: string): string {
   return s.length <= MAX_SIGNATURE_CHARS ? s : `${s.slice(0, MAX_SIGNATURE_CHARS)}…`;
 }
 
+// The two halves' source bytes, so a decline can be RE-SCORED for nothing (#326). The signatures above
+// explain a decline; these reproduce it: `pairFromHalves` reads them back into the pair `joinInCode` and
+// `verifyJoin` were given, so a candidate loosening of a guard can be run against the pairs a paid round
+// already bought instead of against a round that has to be bought to see it. That was the open half of
+// #326 — its recommendation against touching a guard rested on the pre-join body being persisted
+// nowhere, and the pairs are the part of that body this stage decides on.
+//
+// Bounded, and the bound REFUSES rather than truncates, which is the one place this block departs from
+// `capSignature` above. A cut signature still compares cell by cell as far as it goes; half a table's
+// bytes are not a table — they parse to a DIFFERENT table, with fewer rows and no closing markup, and a
+// rule scored against them would return a verdict that is not the rule's. A truncation here would be
+// silent damage of the kind this pipeline exists to find, so an over-large pair logs its sizes and no
+// bytes, and says which it did.
+//
+// 64,000 characters against every pair this corpus's 75 delivered submissions produce — 200 of them over
+// 37 submissions, running 5,898 to 25,938 characters (median 11,026), so the bound is 2.5x the largest
+// and drops none of them. That is what it is for: not a size a real pair reaches, but a stop on one
+// pathological document. What those 200 pairs actually add is 9–111 KB per submission, median 66 KB.
+//
+// The ceiling is per line and the per-document one follows from the loop, not from that median. A
+// document cannot log more of these blocks than the loop below emits: it runs `pass <= MAX_TABLE_JOINS`
+// but breaks at the last pass before choosing a pair, so 12 pairs reach a verdict and 12 blocks is
+// 750 KB, against round logs that run 220–940 KB.
+//
+// The median is a corpus's cost and not a ceiling, and the reason is chains. A table printed across three
+// pages is joined one pass at a time, so pass 2's pair is (the pass-1 merge, the third piece) and the
+// first two pieces' rows go on a second line — correctly, because that merge is the bytes pass 2 actually
+// judged, and a replay of that line has to have them. So a document of long chains sits above the range
+// and under the 750 KB, and this corpus has no chains at all: 0 of its 200 lines took the previous line's
+// merge as its first half, on 47 lines that had a code join immediately before them.
+const MAX_REPLAY_CHARS = 64_000;
+
+// `halves` is on the line whether the bytes are or not, because presence alone cannot be counted: a
+// re-score has to be able to say "N of M declines replayable" from the log, and the bound is a constant
+// in this file that a reader of an old log has no way to know. Its two values have one producer each —
+// the bound, and everything else.
+//
+// The sizes are always there, so what the bound dropped is measurable when it bites. On a code join
+// they are also `chars_before` split in two; that field stays because it is on the PAID joins as well,
+// where this block is deliberately absent.
+function replayHalves(pair: ContinuationPair): Record<string, unknown> {
+  const first = pair.first.html;
+  const second = pair.second.html;
+  const oversize = first.length + second.length > MAX_REPLAY_CHARS;
+  return {
+    chars_first: first.length,
+    chars_second: second.length,
+    halves: oversize ? "too_large" : "logged",
+    ...(oversize ? {} : { html_first: first, html_second: second }),
+  };
+}
+
 function headerRead(html: string): HeaderRead | null {
   const table = parse(html).querySelector("table");
   if (table === null) return null;
@@ -606,11 +685,21 @@ function stripMarker(caption: Element): boolean {
 // joins; #326 did not re-derive that on its three rounds, so it is one corpus's figure and not a
 // standing property either.
 //
-// The guards are NOT loosened on that finding, and #326 recommends against it: `verifyJoin` would
-// catch a wrong loosening, but the pre-join assembled body is not persisted, so a looser rule cannot
-// be scored on the artifacts in hand. `headerSignatures` above is the half of the answer that is
-// free — it puts both signatures on the decline line, which is what makes the next round's declines
-// re-scorable without paying for one.
+// The guards are still NOT loosened here, but the reason #326 gave for not touching them has now been
+// removed rather than restated: the pre-join assembled body is persisted nowhere, and what a loosening
+// has to be scored on is not the body but the pairs, so both halves' bytes go on the decline line and on
+// a free join's line (`replayHalves`). A candidate rule is therefore run against the pairs a paid round
+// already bought — its upside on the declines and its regressions on the joins it must not break — for
+// nothing, and `verifyJoin` runs in that replay too, because `pairFromHalves` rebuilds the same pair
+// this function was handed. `headerSignatures` above answers a different question on the same line: why
+// a pair was declined, which is the part a reader needs before deciding what to loosen at all.
+//
+// Two things a decline line still cannot score, both of them upstream of this function. A change to
+// which tables are PAIRED (`continuationPairs`: the caption rule, the span match, adjacency) reads the
+// whole body, and a pair it never formed leaves no bytes behind — the `unmatched_source` and
+// `not_adjacent` declines carry a caption and nothing else. And a change to the EXTRACTION that
+// produced the halves is a different document, so replaying it is buying a round. The instability
+// measured above lives there, which is why the range in this comment is still one corpus's figure.
 //
 // A caller must still put the result through `verifyJoin`. Nothing here is trusted on its own —
 // which is the whole reason this is safe to add rather than merely cheap: a bad code join is refused
@@ -910,6 +999,15 @@ export async function joinContinuedTables(ctx: PipelineContext, body: string): P
         rows_joined: checked.result.rows,
         chars_before: pair.first.html.length + pair.second.html.length,
         chars_after: checked.merged.length,
+        // The halves on a FREE join only, and the presence rule is `by` — which is on every line, so
+        // the population is countable rather than chosen by a missing field. A loosening cannot be
+        // scored on the declines alone: those are its upside, and the pairs it must not break are the
+        // ones the free path already takes, so those need their bytes too.
+        //
+        // A paid join does not repeat them because the decline line immediately before it is the same
+        // pair's bytes — every editor call in this loop is preceded by one — and `pairKey` is those two
+        // strings, so the two lines can be matched on the bytes themselves rather than on their order.
+        ...(by === "code" ? replayHalves(pair) : {}),
         ...(editorLog ? { editor_log: editorLog } : {}),
       });
     };
@@ -969,6 +1067,10 @@ export async function joinContinuedTables(ctx: PipelineContext, body: string): P
               ? "read_failed"
               : `verify:${codeChecked.reason}`,
       caption: pair.second.caption.slice(0, 200),
+      // Present on every decline, INCLUDING the two where the header fields below are absent — those
+      // are the declines a parse threw on, and the bytes that threw are exactly what a fix has to be
+      // run against. So absence of the header block does not travel with absence of the halves.
+      ...replayHalves(pair),
       ...(headers === null
         ? {}
         : {

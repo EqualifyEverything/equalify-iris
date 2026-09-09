@@ -438,10 +438,19 @@ Places where a decision was left open, and where v1 intentionally stops:
   the same corpus, with this stage, `agents/` and the model byte-identical, took 9 of 17 pairs, then 4
   of 17, then 5 of 16 — 24–53%, a $0.72-per-100-pages swing in a step that is 11.5% of the bill. Two
   readings of one printed header agree 48–61% of the time, so `header_differs` is usually two readings
-  of the same header rather than two different headers (#326). The guards are not loosened on that:
-  the pre-join body is not persisted, so a looser rule cannot be scored on the rounds already paid
-  for. What the decline line carries instead is both halves' header signatures, which makes the next
-  round's declines re-scorable for nothing.
+  of the same header rather than two different headers (#326). The guards are not loosened here, but
+  the reason for that has been removed rather than restated: what a loosening has to be scored on is
+  not the pre-join body — which is still persisted nowhere — but the PAIRS, so both halves' bytes go on
+  the decline line and on a free join's line, beside the header signatures that say why the pair was
+  declined. A candidate rule is then run against the pairs a paid round already bought, its upside on
+  the declines and its regressions on the joins it must not break, through the same parse the pipeline
+  used (`pairFromHalves`) and the same `verifyJoin`. The bound refuses rather than truncates: half a
+  table's bytes parse to a different table, so a rule scored against them would return a verdict that
+  is not the rule's. What that still cannot score is upstream — a change to which tables are paired
+  reads the whole body, and a pair that was never formed left no bytes behind. The price of it is that
+  the run log holds page markup verbatim where it used to hold captions and signatures: still only
+  readable by the owner of the session the page was submitted to, and still absent from `/v1/quality`,
+  but a log is now a copy of part of the document rather than a description of it.
 
   An id on the dropped half's own `<caption>` or `<table>` element does move, onto the counterpart
   that survives the join, and only where that counterpart carries no id of its own. Two live link

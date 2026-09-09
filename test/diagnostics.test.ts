@@ -1049,13 +1049,24 @@ test("the join tally splits free from paid, and counts the pairs that were bough
   // free share meant parsing log.jsonl by hand.
   const text = log(
     { ts: T(0), type: "run_start" },
-    { ts: T(1), type: "table_joined", by: "code", caption: "Table 1" },
+    { ts: T(1), type: "table_joined", by: "code", caption: "Table 1",
+      halves: "logged", chars_first: 700, chars_second: 800, chars_before: 1500, chars_after: 1200 },
+    // A free join past the replay bound, so the joins have the same two numbers the declines do. A
+    // loosening is scored on both populations — the declines it means to recover and the free joins it
+    // must not break — so a tally that could report the first as replayable and not the second could
+    // only ever measure the upside.
+    { ts: T(2), type: "table_joined", by: "code", caption: "Table 9",
+      halves: "too_large", chars_first: 40000, chars_second: 39000, chars_before: 79000, chars_after: 78000 },
     { ts: T(2), type: "table_join_code_declined", reason: "header_differs", caption: "Table 2—Continued",
+      halves: "logged", chars_first: 900, chars_second: 950,
       headers_identical: false, header_rows_first: 1, header_cells_first: 3,
       header_rows_second: 1, header_cells_second: 3,
       header_first: "TH:1:Col 1", header_second: "TH:1:Column 1" },
     { ts: T(3), type: "table_joined", by: "editor", caption: "Table 2" },
+    // One of the two declines is past the replay bound, so its bytes are not on the line. Both are
+    // declines and only one is re-scorable, which is the whole reason the second number is here.
     { ts: T(4), type: "table_join_code_declined", reason: "id_would_be_lost", caption: "Table 3—Continued",
+      halves: "too_large", chars_first: 40000, chars_second: 39000,
       headers_identical: true, header_rows_first: 2, header_cells_first: 8,
       header_rows_second: 2, header_cells_second: 8,
       header_first: "same", header_second: "same" },
@@ -1065,9 +1076,11 @@ test("the join tally splits free from paid, and counts the pairs that were bough
   const d = summarizeRun(text, done(Date.parse(T(6))));
 
   assert.deepEqual(d.tables, {
-    joined_in_code: 1,
+    joined_in_code: 2,
     joined_by_editor: 1,
+    joined_in_code_with_halves: 1,
     code_declined: 2,
+    code_declined_with_halves: 1,
     header_compared: 2,
     header_differs: 1,
     failed: 1,
@@ -1148,7 +1161,10 @@ test("a join line this build cannot read is counted in neither path, and an old 
   const text = log(
     { ts: T(0), type: "run_start" },
     { ts: T(1), type: "table_joined", caption: "Table 1" },
-    { ts: T(2), type: "table_joined", by: "elsewhere", caption: "Table 2" },
+    // Carrying the halves word as well, which a build that logged them on a third path would. It is not
+    // counted as replayable either: the tally is of lines whose OWN bytes are on them, and this reader
+    // cannot know what a path it does not recognize wrote there.
+    { ts: T(2), type: "table_joined", by: "elsewhere", caption: "Table 2", halves: "logged" },
     { ts: T(3), type: "table_join_code_declined", reason: "header_differs", caption: "Table 3—Continued" },
     { ts: T(4), type: "run_complete" },
   );
@@ -1156,10 +1172,14 @@ test("a join line this build cannot read is counted in neither path, and an old 
 
   assert.equal(d.tables.joined_in_code, 0);
   assert.equal(d.tables.joined_by_editor, 0);
+  assert.equal(d.tables.joined_in_code_with_halves, 0, "a path this build cannot name is not a free join");
   // The decline still counts — it is the line's existence that says a call was bought — while the
   // comparison it carries nothing about is withheld rather than guessed.
   assert.equal(d.tables.code_declined, 1);
   assert.equal(d.tables.header_compared, 0);
+  // And a log written before the halves were logged reports none replayable, which is what it is: the
+  // bytes of those pairs are gone, so a rule scored on that round would be scored on nothing.
+  assert.equal(d.tables.code_declined_with_halves, 0);
 });
 
 test("a run with no continued tables reports zeros rather than an absent section", () => {
@@ -1169,7 +1189,9 @@ test("a run with no continued tables reports zeros rather than an absent section
   assert.deepEqual(d.tables, {
     joined_in_code: 0,
     joined_by_editor: 0,
+    joined_in_code_with_halves: 0,
     code_declined: 0,
+    code_declined_with_halves: 0,
     header_compared: 0,
     header_differs: 0,
     failed: 0,
