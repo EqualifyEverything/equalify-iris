@@ -4532,8 +4532,9 @@ Three conditions have to hold together, and each stops a different mistake.
 so it is the narrow one — the text a reader is shown, with `script` and `style` content dropped, because a
 `.crosshatch` selector is author metadata and the third field of this line has to name a spelling somebody
 can find on the page. Condition 2 *refuses* one, so it is the wide one — prose plus every attribute
-value, quoted or bare and with entities decoded, because a bare `state` that lives only in an `alt` is
-still the document using the word, and a guard that cannot see it closes up `inter-state`. A word missing
+value, quoted or bare and with entities decoded, plus a quoted span inside an `@` comment, because a bare
+`state` that lives only in an `alt` is still the document using the word, and a guard that cannot see it
+closes up `inter-state`. A word missing
 from the first index leaves a hyphen; a word missing from the second closes a compound the printing owns.
 Widening the second costs zero joins across #334's 1,221 page files, measured.
 

@@ -262,7 +262,8 @@ const CLOSES_OPAQUE = /^<\/(script|style|pre|code)\b/i;
 // on text nothing shows. It swallows the rest of the DOCUMENT here and the rest of one PAGE there, which
 // is a divergence in the conservative direction on both sides — fewer joins, never more.
 const NOT_SHOWN = /<(script|style)\b[\s\S]*?(?:<\/\1\s*>|$)/gi;
-// Attribute VALUES as text, for the guard and never for the evidence. `alt` is prose a screen reader
+// Quoted and `name=value` text out of the markup — attribute VALUES, and see the comment note below —
+// for the guard and never for the evidence. `alt` is prose a screen reader
 // speaks, so a bare `state` living only there is still the document using the word — and a guard that
 // cannot see it closes up `inter-state`, which is the one outcome the tail condition exists to prevent.
 // Values and not attribute NAMES: a value is text somebody wrote, `colspan` is markup. Also zero cost on
@@ -273,6 +274,18 @@ const NOT_SHOWN = /<(script|style)\b[\s\S]*?(?:<\/\1\s*>|$)/gi;
 // tag perfectly well, and a guard that read only the quoted two would let `inter-state` through on exactly
 // the failure the other two exist to stop. The unquoted alternative stops at whitespace and at the four
 // characters HTML5 forbids in a bare value, so it cannot run past its own attribute or into the `>`.
+//
+// COMMENTS are in this width too, which the name of this function does not suggest and is deliberate.
+// `MARKUP` matches `<!--…-->` as well as a tag, so a quoted span or a `name=value` run inside a comment
+// lands in the guard — `<!-- @source "state" -->` refuses `inter-state`, where the same word as bare
+// comment prose does not, since the unquoted alternative needs its `=`. Kept rather than tidied, on two
+// grounds. The founding decision at the top of this file is that a model's `@` marker quotes the page's
+// words freely, and a word it quotes may well be one the printing uses alone, so seeing it is the
+// conservative reading — and the guard's only failure is not seeing a word. And it is free: excluding
+// comments from this scan moves nothing on the 1,221-file corpus, 29 joins and 18 distinct words either
+// way, so the tidier version would be a behaviour change bought with no measurement. The ragged edge
+// (quoted yes, bare no) is therefore pinned by a test rather than smoothed, because smoothing it means
+// widening the guard further on no evidence.
 //
 // Entity-decoded by the CALLER, not here, and the difference matters in one direction: an `alt` reading
 // `st&#97;te` has to put `state` in the guard, or a numerically spelled tail word is a hole in exactly the

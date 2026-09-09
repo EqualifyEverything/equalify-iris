@@ -647,6 +647,25 @@ test("a tail word that lives only in an attribute still refuses the join", () =>
   assert.deepEqual(joinBrokenWords(lt).pages, lt);
 });
 
+test("a quoted word in a comment refuses a join, and bare comment prose does not", () => {
+  // The guard's width includes comments, which the function's name does not suggest, so both halves of
+  // that ragged edge are pinned. A model's `@` marker quotes the page's words freely — the founding
+  // decision at the top of `hyphens.ts` — so a word it quotes may be one the printing uses alone, and
+  // seeing it is the conservative reading. Excluding comments moves nothing on the 1,221-file corpus (29
+  // joins, 18 distinct either way), so the tidier width would be a behaviour change bought with no
+  // measurement. Smoothing this edge means widening the guard further, also on no measurement.
+  const quoted = [`<p>The inter-state figure.</p><!-- @source "state" -->`, `<p>interstate</p>`];
+  assert.deepEqual(joinBrokenWords(quoted).pages, quoted, "a quoted word in a comment did not reach the guard");
+  const bare = [`<p>The inter-state figure.</p><!-- @source state -->`, `<p>interstate</p>`];
+  assert.deepEqual(joinBrokenWords(bare).joined, [
+    { split: "inter-state", written: "interstate", evidence: "interstate" },
+  ]);
+  // Nothing in a comment can LICENSE a join in either form: the evidence index is built from `textOf`,
+  // which strips comments before it reads anything.
+  const licence = [`<p>Agri-culture receipts.</p>`, `<!-- the page writes agriculture -->`];
+  assert.deepEqual(joinBrokenWords(licence).joined, []);
+});
+
 test("the page condition reads the page at part B's width, not the guard's", () => {
   // Three widths in this pass, and `own` is the third: script and style content in, attribute values out,
   // which is `splitWordContradictions`' width exactly. That is load-bearing rather than incidental. The
