@@ -1688,6 +1688,14 @@ it, which counting tokens alone would deliver empty. The statement therefore has
 in it but the name, whitespace and the cut mark. `2 images.`, `1 signature.` and a bulleted list of a
 page's contents all keep their affirmations, and `Two images.` was never at risk because it is two tokens.
 
+That makes the guard sensitive to **any** non-letter decoration, so `Page is blank. **handwriting**`,
+`handwriting:`, `(handwriting)` and `"handwriting"` all report where a bare `handwriting.` declares. The
+asymmetry is deliberate and the corpus settles it: of 3,402 one-token statements only 1,073 are bare, 2,329
+carry decoration, and all four that name text are decorated ones. A guard reading through decoration would
+move four real statements toward being shipped empty and none toward declaring, which is the losing
+direction. One decoration is not one: `1. handwriting` declares, because a numbered list marker ends in a
+`.` and statements end there, so the name arrives on its own.
+
 The guard's own cost is a lone name with no strip behind it: `Page is blank. handwriting.` now ships
 empty. That is one wording against the five above, both sides unobserved — one-token statements are common
 on the corpus (1,129 of 3,747 replies write one) but only four name text, all in replies that make no

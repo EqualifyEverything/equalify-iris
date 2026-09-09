@@ -2978,7 +2978,13 @@ function verblessAffirmation(tokens: Word[], i: number, statement: string): numb
   // one-token statements are COMMON — 1,129 of the 3,747 replies write one, 3,402 in all, most of them a
   // table cell or a file name (`page`, `png`, `n`) that names nothing. Four of them name text, over three
   // spellings (`paragraph`, `heading`, `line`), and every one is in a reply that does not claim blankness,
-  // so 0 of the 204 declarations on disk holds one and this guard moves no verdict on record.
+  // so 0 of the 204 declarations on disk holds one and this guard moves no verdict on record. Narrower than
+  // even that says, once the guard asks the statement to BE the token: only 1,073 of those 3,402 are bare,
+  // 2,329 carry decoration, and all four that name text are among the decorated ones (`' paragraph`,
+  // `Heading '9`, `heading '3`, `' line`). So the corpus reach of this guard is 0 statements and not 4, and
+  // a version reading THROUGH decoration would move those four toward shipped-empty and none toward
+  // declaring — which is why `**handwriting**` goes on reporting where `handwriting.` declares, an
+  // asymmetry pinned rather than smoothed.
   //
   // ONE TOKEN IS NOT THE WHOLE STATEMENT either, and that is the second half of the same mistake.
   // `words()` tokenizes `[A-Za-z][A-Za-z'’-]*`, so a digit and a bullet are invisible to it: `2 images.`

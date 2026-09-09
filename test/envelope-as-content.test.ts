@@ -2355,6 +2355,25 @@ test("a blank page's own fragments are not affirmations (#435)", () => {
   assert.equal(declaredBlank({ html: "", log: "Page is blank. 1 signature." }), false);
   assert.equal(declaredBlank({ html: "", log: "Page is blank. Two images." }), false);
   assert.equal(declaredBlank({ html: "", log: "Page is blank.\n- text\n- images" }), false);
+  // Where that leaves the boundary, pinned because the guard now turns on ANY non-letter decoration and the
+  // bullet above is only one shape of it. A colon, markdown emphasis, brackets and quotes all keep the
+  // affirmation, so `handwriting.` and `**handwriting**` reach opposite verdicts off the same word. That
+  // asymmetry is deliberate and the corpus is what settles it: of the 3,402 one-token statements in the
+  // 3,747-reply corpus only 1,073 are bare, 2,329 carry decoration (`,·` a table cell after a comma, and
+  // digits), and ALL FOUR that name text are decorated — `' paragraph`, `Heading '9`, `heading '3`, `' line`.
+  // So a guard reading through decoration would move four real statements toward shipped-empty and none
+  // toward declaring, which is the losing direction (#190). Raised by the review on PR #444.
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. handwriting:" }), false);
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. **handwriting**" }), false);
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. (handwriting)" }), false);
+  assert.equal(declaredBlank({ html: "", log: 'Page is blank. "handwriting"' }), false);
+  // And the two decorations that are NOT decoration by the time this read sees them. A numbered list marker
+  // ends in `.`, which is a statement boundary, so `1.` and the name are separate statements and the name
+  // arrives bare — the opposite verdict from the `-` bullet three lines up, off the same list. Case and
+  // surrounding whitespace fold, because the comparison is made at `words()`'s own normalization.
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. 1. handwriting" }), true);
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. HANDWRITING." }), true);
+  assert.equal(declaredBlank({ html: "", log: "Page is blank.  handwriting  ." }), true);
   // What the mark being a character in the text costs: a log could write one, and a forged one would hand
   // the guard back the affirmation it takes away. It cannot — `vetoScope` deletes `\f` and `\v` from its
   // input before inserting any — so a lone name for text with a form feed in front of it is read exactly
