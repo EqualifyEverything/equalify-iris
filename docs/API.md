@@ -3545,8 +3545,9 @@ distinction and not two readers disagreeing about one fact: whether the second h
 same note **again** turns on the note, which is the same note wherever the printer set it, while
 whether the merge **kept or moved** it turns on the place, because the place is the harm.
 
-A note counts as kept in the joined caption, or as a note row one of the halves **printed** as a row
-in that same part of the table — header block or body. Reading the caption alone refused the mirror of
+A note counts as kept in the joined caption, or — where the caption that carried it is the one rule 4
+**discards**, which the paragraph after next is about — as a note row one of the halves **printed** as
+a row in that same part of the table, header block or body. Reading the caption alone refused the mirror of
 the pair rule 6 joins for free — the note a ROW on the first half and a caption note on the second,
 where the row survives the merge and nothing is lost. Reading any note row in the answer is the
 opposite hole: a note that arrived in a caption and left as a row has been demoted into the phantom
@@ -3565,8 +3566,27 @@ struck the caption note and delivered it as a `<tbody>` cell of data matched the
 and cleared — the same demotion, with the caption no longer naming the units and a reader moving by
 row meeting them as data.
 
-What that compares is the text and the block, and nothing finer. A note moved within one block is
-invisible here, and so is a `<td>` note row delivered as a `<th>` one: `page.md` forbids both
+A row precedent excuses only one of the two captions, though, and reading it as excusing both left the
+same demotion clearing in the commoner spelling — the note in the first half's caption and printed as a
+**body** row by the second, which the block comparison cannot see because the delivered row and the
+printed row sit in the same block. Of the twelve notes printed outside a caption, seven are a `<th>` row
+and two a `<td>` row against two closing `<thead>`, so that is the likelier mixed pair of the two.
+
+The two shapes are mirror images and were being read as one. A note in the caption rule 4 **discards**
+goes with a duplicate caption being dropped whole, while the row stands in the half and the block that
+printed it: nothing moved, and that is the pair rule 6 joins for free. A note in the caption the join is
+**built on** is different — the surviving caption has been edited, text struck out of the one caption
+rule 4 says to copy, and the other half having printed the same note as a row does not make that a move
+of nothing. So a note in the title caption is owed the joined caption and nothing else will do, and only
+a note the discarded caption carried may be answered by a row. The title caption is the first half's, or
+the second half's where the first has none, which is rule 4 and what `joinInCode` does.
+
+That strict half cannot refuse a code join, because that path copies the title caption verbatim minus
+the marker and every note in it survives by construction. What it costs is exactly an editor answer that
+struck a note out of the caption it was told to copy.
+
+What all of it compares is a note's text, the block it sits in and which caption owed it, and nothing
+finer. A note moved within one block is invisible here, and so is a `<td>` note row delivered as a `<th>` one: `page.md` forbids both
 spellings, but the note in them has not been lost and `caption_note_lost` is the wrong reason to
 refuse a table over. Refusing the **editor's** answer ships both halves split, so a reason naming the
 wrong defect buys a split table and points the repair at the wrong rule.

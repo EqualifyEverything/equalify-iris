@@ -748,6 +748,63 @@ test("a note row a half printed in the body is not kept by promoting it into the
   assert.equal(verifyJoin(pair, coded.html), null);
 });
 
+test("a row on the other half does not excuse a note struck out of the caption the join is built on", () => {
+  // The same demotion again, in the spelling comparing the BLOCK cannot see: the note in the first
+  // half's caption and printed as a BODY row by the second, so the merge's <tbody> note row matches the
+  // second half's text and block and cleared. This is the commoner half of the census's mixed pair —
+  // of the twelve notes printed outside a caption, seven are a <th> row and two a <td> row, against two
+  // closing <thead> — and the fixture is the one the fullwidth test below already uses, which is how
+  // reachable it is: that pair joins for free today.
+  //
+  // The discriminator is not the block but WHICH caption owed the note. Rule 4 discards the second
+  // half's caption entire, so a note that goes with it is a duplicate caption being dropped while the
+  // row stands where it was printed — the mirror pair, and it must keep joining. The first half's
+  // caption is the one rule 4 says to COPY, so a note missing from the joined caption was struck out of
+  // it, and no row on the other half makes that a move of nothing.
+  const note = "[Percentage distribution]";
+  const first = `<table><caption>Table 6.—Shares ${note}</caption>${HEAD}<tbody>${dataRow("Alabama")}</tbody></table>`;
+  const second = `<table><caption>Table 6.—Shares—Continued</caption>${HEAD}<tbody>${noteRow(note)}${dataRow("Vermont")}</tbody></table>`;
+  const pair = onePair(first + second);
+  assert.deepEqual(pair.second.noteRows, [{ text: note, header: false }]);
+
+  const rows = `${dataRow("Alabama")}${dataRow("Vermont")}`;
+  const demoted = `<table><caption>Table 6.—Shares</caption>${HEAD}<tbody>${noteRow(note)}${rows}</tbody></table>`;
+  assert.equal(verifyJoin(pair, demoted), "caption_note_lost");
+  const asTh = `<table><caption>Table 6.—Shares</caption>${HEAD}<tbody><tr><th colspan="3">${note}</th></tr>${rows}</tbody></table>`;
+  assert.equal(verifyJoin(pair, asTh), "caption_note_lost");
+  // The free path's own answer on this pair is the one rule 4 asks for — the second half's row dropped
+  // as rule 6's repeat, the note kept in the caption — so nothing the code produces is newly refused.
+  const coded = joinInCode(pair);
+  assert.ok("html" in coded, JSON.stringify(coded));
+  assert.equal(verifyJoin(pair, coded.html), null);
+
+  // And the mirror stays joinable: the same two placements, swapped between the halves. Here the note
+  // leaves the DISCARDED caption and the surviving row is the first half's own, which is nothing moved.
+  const rowFirst = `<table><caption>Table 6.—Shares</caption>${HEAD}<tbody>${noteRow(note)}${dataRow("Alabama")}</tbody></table>`;
+  const capSecond = `<table><caption>Table 6.—Shares ${note}—Continued</caption>${HEAD}<tbody>${dataRow("Vermont")}</tbody></table>`;
+  const mirror = onePair(rowFirst + capSecond);
+  const mirrorJoin = `<table><caption>Table 6.—Shares</caption>${HEAD}<tbody>${noteRow(note)}${rows}</tbody></table>`;
+  assert.equal(verifyJoin(mirror, mirrorJoin), null);
+});
+
+test("a first half with no caption of its own has no title caption to be strict about", () => {
+  // Rule 4's exception, and the reason the strict reading is keyed on the title caption rather than on
+  // the first half: where the first half has no caption, the caption the join is built on is the SECOND
+  // half's, minus its marker. So a note in it is owed the joined caption too, and a row on the first
+  // half does not excuse striking it out — the same rule, read at the caption the merge actually copies.
+  const note = "[In millions of dollars]";
+  const first = `<table>${HEAD}<tbody>${noteRow(note)}${dataRow("Alabama")}</tbody></table>`;
+  const second = `<table><caption>Table 7.—Grants ${note}—Continued</caption>${HEAD}<tbody>${dataRow("Vermont")}</tbody></table>`;
+  const pair = onePair(first + second);
+  assert.equal(pair.first.caption, "", "the fixture is not the case being tested");
+
+  const rows = `${noteRow(note)}${dataRow("Alabama")}${dataRow("Vermont")}`;
+  const struck = `<table><caption>Table 7.—Grants</caption>${HEAD}<tbody>${rows}</tbody></table>`;
+  assert.equal(verifyJoin(pair, struck), "caption_note_lost");
+  const kept = `<table><caption>Table 7.—Grants ${note}</caption>${HEAD}<tbody>${rows}</tbody></table>`;
+  assert.equal(verifyJoin(pair, kept), null);
+});
+
 test("a fullwidth-bracketed note is a note in both readers, or it ships twice", () => {
   // One arm writes ［Percentage distribution］ with fullwidth brackets — 1 of the 68 delimited notes in
   // #374's corpus. It is read because the cost is a character class, and because the two readers have

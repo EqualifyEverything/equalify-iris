@@ -509,13 +509,14 @@ export function verifyJoin(pair: ContinuationPair, merged: string): string | nul
   // caption carries — so the check is one the prompt can satisfy, which is what makes refusing the
   // right answer rather than a dead end.
   //
-  // What counts as KEPT is the joined caption, or a note row some half PRINTED as a row in that same
-  // part of the table — header block or body. Reading
-  // the caption alone refused the mirror of the pair rule 6 now joins for free: the first half printing
-  // the note as a ROW and the second in its caption leaves the row in the merged table, nothing lost,
-  // and a caption-only reading called that a loss. Both placements are reachable — #374's census has the
-  // note inside the caption on 56 arm-pages and outside it on 12 — so the pair whose halves disagree
-  // about which is a shape to expect and not one to construct.
+  // What counts as KEPT is the joined caption, and — for a note the DISCARDED caption carried, which is
+  // the qualification the next-but-one paragraph is about — a note row some half printed in that same
+  // part of the table, header block or body. Reading the caption alone refused the mirror of the pair
+  // rule 6 now joins for free: the first half printing the note as a ROW and the second in its caption
+  // leaves the row in the merged table, nothing lost, and a caption-only reading called that a loss.
+  // Both placements are reachable — #374's census has the note inside the caption on 56 arm-pages and
+  // outside it on 12 — so the pair whose halves disagree about which is a shape to expect and not one
+  // to construct.
   //
   // "Printed as a row" and not "is a row in the answer", which is the weaker thing this asked at first
   // and is a hole rather than a licence: a note that arrived in a caption and left as a row has been
@@ -537,19 +538,44 @@ export function verifyJoin(pair: ContinuationPair, merged: string): string | nul
   // matched the second half's text and cleared — the exact demotion this check exists to refuse, with
   // both harms `page.md` names in as many words. So the two facts are matched together (`noteKey`).
   //
-  // What that compares is the note's text and the block it sits in, and nothing finer. A note moved
-  // within one block is invisible here, and so is a `<td>` note row delivered as a `<th>` one — page.md
-  // forbids both spellings of the row, but the note in them has not been lost, and `caption_note_lost`
-  // is the wrong reason to refuse a table over. A refusal of the EDITOR's answer ships both halves
-  // split, so a reason that names the wrong defect buys a split table and points the repair at the
-  // wrong rule.
+  // A row precedent excuses the caption for only ONE of the two captions, though, and reading it as
+  // excusing both left the same demotion clearing in the commoner spelling. The two shapes are mirror
+  // images of each other and were being read as one:
+  //
+  //   * the note in the SECOND half's caption and printed as a row by the first. Rule 4 discards the
+  //     second half's caption whole — marker, title and all — so a note going with it is a duplicate
+  //     caption being dropped, and the row still stands in the half and the block that printed it.
+  //     Nothing moved. This is the pair rule 6 joins for free, and it has to keep joining.
+  //   * the note in the caption the join is BUILT ON and printed as a row by the other half. Here the
+  //     surviving caption has been EDITED: text struck out of the one caption rule 4 says to copy. That
+  //     the other half printed the same note as a row does not make the striking a move of nothing —
+  //     the delivered caption stops naming the units and a reader moving by row meets them as data,
+  //     which are the two harms `page.md` names.
+  //
+  // So a note in the title caption is owed the joined CAPTION and nothing else will do, and only a note
+  // carried by the discarded caption may be answered by a row. The title caption is the first half's,
+  // or the second half's where the first has none — which is rule 4, and what `joinInCode` does.
+  //
+  // The strict half cannot refuse a code join, because that path copies the title caption verbatim
+  // minus the marker, so every note in it survives by construction. What it costs is exactly an editor
+  // answer that struck a note out of the caption it was told to copy.
+  //
+  // What all of this compares is a note's text, the block it sits in, and which caption owed it —
+  // nothing finer. A note moved within one block is invisible here, and so is a `<td>` note row
+  // delivered as a `<th>` one: `page.md` forbids both spellings of the row, but the note in them has
+  // not been lost, and `caption_note_lost` is the wrong reason to refuse a table over. A refusal of the
+  // EDITOR's answer ships both halves split, so a reason that names the wrong defect buys a split table
+  // and points the repair at the wrong rule.
   const printedAsRow = new Set([...pair.first.noteRows, ...pair.second.noteRows].map(noteKey));
   const rowNotes = [...tables[0].querySelectorAll("tr")]
     .filter(isUnitNoteRow)
     .map((r) => ({ text: normalizeCell(r.textContent ?? ""), header: isHeaderRow(r) }))
     .filter((n) => printedAsRow.has(noteKey(n)))
     .map((n) => n.text);
-  const kept = new Set([...captionNotes(joined.caption), ...rowNotes]);
+  const inCaption = captionNotes(joined.caption);
+  const titleNotes = captionNotes(pair.first.caption !== "" ? pair.first.caption : pair.second.caption);
+  if ([...titleNotes].some((n) => !inCaption.has(n))) return "caption_note_lost";
+  const kept = new Set([...inCaption, ...rowNotes]);
   const owed = new Set([...captionNotes(pair.first.caption), ...captionNotes(pair.second.caption)]);
   if ([...owed].some((n) => !kept.has(n))) return "caption_note_lost";
   return null;
