@@ -1177,12 +1177,36 @@ test("a name for text dressing a mark only the capture leaves goes with the mark
     // above; the hyphenated one never reached the defect, base having matched the whole compound.
     "Page is blank. Print/artifacts are visible.",
     "Page is blank. Print-artifacts are visible.",
-    // A listed adjective in front of the dressing word: the stack, the slot and the head are three
-    // different positions, and only the last one is read here.
-    "Page is blank. Faint print artifacts are visible.",
   ]) {
     assert.equal(declaredBlank({ html: "", log }), true, log);
   }
+
+  // A listed adjective in FRONT of the dressing word is a third position, and it is not this rule's to
+  // take. Seven `MARK_MODIFIER` entries are `DEGRADED_IMAGE_LOG` veto words, so a first version of this
+  // fix — replacing the whole match — turned `blank_vetoed` on `blurry` into a declaration and shipped a
+  // page whose log says the scan is blurry empty, which is #226's failure reached from the other side.
+  // The word is cut out of base's own output instead, so the stack stays in scope: the affirmation goes
+  // and the doubt is kept, and each of these refuses on the adjective rather than on the noun.
+  for (const [log, veto] of [
+    ["Page is blank. Blurry print artifacts are visible.", "blurry"],
+    ["Page is blank. Faint print artifacts are visible.", "faint"],
+    ["Page is blank. Noisy image artifacts are visible.", "noisy"],
+    ["Page is blank. Grainy print dust visible.", "grainy"],
+  ] as const) {
+    const r = blankDeclaration({ html: "", log });
+    assert.equal(r.blank, false, log);
+    assert.deepEqual(r.vetoes, [veto], log);
+    assert.equal(r.affirmed, undefined, `${log}: refused as a doubt about the capture, not as a contradiction`);
+  }
+  // Which is a CHANGE of kind and not only of outcome, and the pair says so: base refused the first of
+  // these by quoting `print are visible` — the ungrammatical contradiction #439 is about — where it now
+  // refuses by naming the doubt word. Same page reported either way; the remedy on the line is different,
+  // a doubt wanting a better scan and a contradiction wanting a re-extraction.
+  assert.equal(
+    blankDeclaration({ html: "", log: "Page is blank. Blurry print smudges are visible." }).affirmed,
+    "print are visible",
+    "a mark a pen also leaves keeps the dressing word, so this one is still the contradiction",
+  );
 
   // The half that must not move, and the pin that chose the head noun over the dressing word. #431's grid
   // asserts this exact sentence refuses, for eight names for text against eight more in the other part of
@@ -2321,6 +2345,16 @@ test("a blank page's own fragments are not affirmations (#435)", () => {
   // them — pinned beside the rows above so a future one-token rule cannot be tested on them by mistake.
   assert.equal(declaredBlank({ html: "", log: "Page is blank. Typed lines." }), false);
   assert.equal(declaredBlank({ html: "", log: "Page is blank. Printed text." }), false);
+  // One token is not the whole statement either, and `words()` is why: it tokenizes `[A-Za-z][A-Za-z'’-]*`,
+  // so a digit and a bullet are invisible to it and a guard counting tokens alone would read `2 images.` as
+  // a bare label. It is a COUNT of what is on the page, and a bulleted list of a page's contents is one
+  // token per line — so the guard asks the statement to BE the name, and each of these goes on reporting.
+  // `two images.` was never at risk, being two tokens, and is pinned beside its digit so the pair cannot
+  // drift apart. Raised by the review on PR #444.
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. 2 images." }), false);
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. 1 signature." }), false);
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. Two images." }), false);
+  assert.equal(declaredBlank({ html: "", log: "Page is blank.\n- text\n- images" }), false);
   // What the mark being a character in the text costs: a log could write one, and a forged one would hand
   // the guard back the affirmation it takes away. It cannot — `vetoScope` deletes `\f` and `\v` from its
   // input before inserting any — so a lone name for text with a form feed in front of it is read exactly

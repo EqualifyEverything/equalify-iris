@@ -1682,6 +1682,12 @@ here and invisible to the tokenizer, and a log cannot forge one because the scop
 and vertical tabs removed before any is inserted. A statement of one token that was cut declares nothing;
 a statement of one token that was always one word affirms nothing.
 
+One token is not the **whole statement** either. The tokenizer reads letters, so a digit and a list bullet
+are invisible to it and `2 images.` and a `- text` line are one token each — a page that says what is on
+it, which counting tokens alone would deliver empty. The statement therefore has to BE the token: nothing
+in it but the name, whitespace and the cut mark. `2 images.`, `1 signature.` and a bulleted list of a
+page's contents all keep their affirmations, and `Two images.` was never at risk because it is two tokens.
+
 The guard's own cost is a lone name with no strip behind it: `Page is blank. handwriting.` now ships
 empty. That is one wording against the five above, both sides unobserved — one-token statements are common
 on the corpus (1,129 of 3,747 replies write one) but only four name text, all in replies that make no
@@ -1704,6 +1710,13 @@ writes a name for text in front of a mark, 74 have an `artifact(s)` head and 7 a
 204 declarations change verdict, and the two whole sentences that change reading are one of each kind —
 a blank page now read as one, and a page whose log describes repairing a character, which a declaration
 around it would now be believed about.
+
+What leaves is **that one word and nothing else**, and the doubt words in front of it stay. Seven of the
+adjectives this strip can absorb are themselves doubt words, so `Page is blank. Blurry print artifacts are
+visible.` has to go on being refused on `blurry` — a page whose log says the scan is blurry wants a better
+scan, and shipping it empty is the same loss from the other side. Transplanted across the corpus's 17
+wordings in three frames, all 18 cells this widening moves were refused by a contradiction and none by a
+doubt word; put `blurry`, `faint` or `grainy` in front and all 51 cells stay refused.
 
 They are two findings with two remedies — a doubt word means the page could not be read and wants
 a better scan, a contradiction means the agent answered with no page for a page it says has

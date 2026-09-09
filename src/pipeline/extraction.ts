@@ -1479,8 +1479,11 @@ const PHRASE_GONE = " \f ";
 //
 // What that costs and what it buys, over the same corpus: 0 of the 204 blank declarations on record change
 // verdict, so nothing shipped moves either way; each wording transplanted into a declaration in three
-// frames flips 18 of 51 cells, every one of them an `artifact(s)` head and every one REPORTED -> blank;
-// and the two whole corpus SENTENCES that flip are one of each kind — `Removed three stray dots (printing
+// frames flips 18 of 51 cells, every one of them an `artifact(s)` head and every one REPORTED -> blank —
+// and every one of the 18 refused on base by a CONTRADICTION, none of them by a doubt word, which is the
+// bound below measured rather than argued. Put any `DEGRADED_IMAGE_LOG` word in front of the phrase
+// (`blurry`, `faint`, `grainy`) and 0 of the 51 flip: all 51 refuse on both arms. The two whole corpus
+// SENTENCES that flip are one of each kind — `Removed three stray dots (printing
 // artifacts/dust specks …)` is a blank page now read as one, and the sentence about an interpunct
 // transcribed as a character is a page with content on it that would now be declared empty. Neither reply
 // declares blank, so both are latent, and the second is the shape of what this can cost.
@@ -1532,9 +1535,18 @@ function marksPhraseStrip(match: string, ...groups: unknown[]): string {
   // captured is untouched — `smeared artifacts` still hands `smeared` back, and `smear\w*` is a veto
   // (#226). The head is read from the MATCH and immediately behind the slot's own word, because that is
   // where the pattern puts it: the slot is the last thing before the marks noun.
+  //
+  // And it takes exactly that one word, cut OUT OF BASE'S OWN OUTPUT rather than replacing the match, so
+  // the guarantee above holds for the STACK as well as for the slot. Returning `PHRASE_GONE` for the whole
+  // match here took the stack too, and seven `MARK_MODIFIER` entries are `DEGRADED_IMAGE_LOG` veto words:
+  // `Blurry print artifacts are visible.` went from `blank_vetoed` on `blurry` to a declaration, so a page
+  // whose log says the scan is blurry shipped empty — #226's failure, reached from the other side. Cutting
+  // the word out of `listed` leaves `Blurry  <cut>  are visible.`, which loses the affirmation and keeps
+  // the doubt. Anchored at the marker base left, because that is where the mark noun was and the slot's
+  // word is the token in front of it. Reported by the review on PR #444.
   if (NAMES_TEXT.test(word) || NAMES_TEXT_FORM.test(word)) {
     return new RegExp(String.raw`(?<![A-Za-z])${bounded}[\s/-]+(?:${CAPTURE_ONLY_MARK})\b`, "i").test(match)
-      ? PHRASE_GONE
+      ? listed.replace(new RegExp(String.raw`(?<![A-Za-z])${bounded}(?=[\s/-]*\f)`, "i"), "")
       : listed;
   }
   return ` ${adjective}${PHRASE_GONE}`;
@@ -2935,7 +2947,7 @@ const FRAGMENT_CLOSER = new Set("only alone too also".split(" "));
 // right, and the corpus separates none of them (0 of 201 declarations move either way on this change).
 // `A heading at the top.` is already pinned as delivered, beside two more of its shape, in
 // `envelope-as-content.test.ts` — the pins that say a widening must defend both halves of each pair.
-function verblessAffirmation(tokens: Word[], i: number, cut: boolean): number {
+function verblessAffirmation(tokens: Word[], i: number, statement: string): number {
   // A statement whose whole text is the name affirms — and this read splits statements on `.`, `!`, `?`,
   // `;` and line breaks alike, so "Blank page; text", "Page is blank; images; nothing present.",
   // "Page is blank. No printed text. Images." and "Page is blank. Any text? None found." each refused
@@ -2946,14 +2958,14 @@ function verblessAffirmation(tokens: Word[], i: number, cut: boolean): number {
   // `Page is blank; no text; no images.` are the near misses that always declared, so the hole was the
   // one-token statement and not the label list.
   //
-  // `cut` is what closes it, and it is why a `tokens.length === 1` guard alone was written and taken
+  // The marker is what closes it, and it is why a `tokens.length === 1` guard alone was written and taken
   // back out in `c43dff9`: ONE TOKEN IS NOT ONE WORD. `Handwriting smudges.` and `Cursive smudges.`
   // arrive here as a single token too, because `vetoScope` removed the head noun — and that phrase is
   // #435's own, six of the seven wordings this function exists for being it with a predicate on the end.
   // So the bare guard bought three unobserved blank pages reported as holes and paid a page of
   // handwriting delivered empty, which is the failure #190 and #435 are both about. `PHRASE_GONE` is the
-  // missing information: `cut` says a phrase was removed from THIS statement, so the two are now
-  // different cases and each gets its own answer.
+  // missing information: a marker in the statement's own text says a phrase was removed from THIS
+  // statement, so the two are now different cases and each gets its own answer.
   //
   // What it does NOT separate, stated because the guard's cost is real and unchanged there: `Page is
   // blank. handwriting.` is one word that was always one word, so it now declares blank and the page
@@ -2967,7 +2979,19 @@ function verblessAffirmation(tokens: Word[], i: number, cut: boolean): number {
   // table cell or a file name (`page`, `png`, `n`) that names nothing. Four of them name text, over three
   // spellings (`paragraph`, `heading`, `line`), and every one is in a reply that does not claim blankness,
   // so 0 of the 204 declarations on disk holds one and this guard moves no verdict on record.
-  if (tokens.length === 1 && !cut) return -1;
+  //
+  // ONE TOKEN IS NOT THE WHOLE STATEMENT either, and that is the second half of the same mistake.
+  // `words()` tokenizes `[A-Za-z][A-Za-z'’-]*`, so a digit and a bullet are invisible to it: `2 images.`
+  // and a `- text` line are one token each, and a guard reading the count alone would take the count and
+  // the list marker for nothing at all — a page that says what is on it, delivered empty, which is the
+  // losing direction. So the statement must BE the token: nothing in it but the name, whitespace and the
+  // marker. `two images.` was never at risk (two tokens) and `2 images.` must answer as it does; a
+  // bulleted enumeration of a page's contents is one token per line and every line keeps its affirmation.
+  // Reported by the review on PR #444.
+  // Compared at `words()`'s own normalization, which lowercases and folds the curly apostrophe: `Content`
+  // and `page’s` have to compare equal to the tokens they produced.
+  const bare = statement.replace(/[\s\f\v]+/g, "").toLowerCase().replace(/[’]/g, "'") === tokens[0]!.word;
+  if (tokens.length === 1 && bare && !statement.includes("\f")) return -1;
   for (let k = i - 1; k >= 0; k--) {
     const { word, comma } = tokens[k]!;
     // A comma between the noun and what precedes it opens a fresh phrase, and the words behind it are
@@ -3040,9 +3064,10 @@ export function contentAffirmed(scope: string): string | null {
       // walk, the substrate article, the folio modifier — are the same guards a fragment needs, and a
       // read placed past them would have to repeat all four.
       if (verb < 0) {
-        // The statement's TEXT and not its tokens, because the marker is deliberately invisible to the
-        // tokenizer: `words()` cannot start a token on a whitespace character (`PHRASE_GONE`).
-        const named = verblessAffirmation(tokens, i, statement.includes("\f"));
+        // The statement's TEXT and not its tokens, because both things the guard in there asks about are
+        // invisible to the tokenizer: `words()` cannot start a token on `PHRASE_GONE`, and it cannot start
+        // one on a digit or a bullet either.
+        const named = verblessAffirmation(tokens, i, statement);
         if (named >= 0) {
           return tokens
             .slice(i, named + 1)
