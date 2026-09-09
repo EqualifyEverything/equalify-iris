@@ -385,11 +385,11 @@ test("a joined caption may not drop the note of measure the first half's caption
   const [pair] = continuationPairs(body).pairs;
   assert.equal(pair.first.caption, titled, "the fixture is not the case being tested");
 
-  // `caption_note_struck` and not `caption_note_lost`: the note was in the caption rule 4 says to copy,
-  // so it was struck out of it, and a run log that could not tell that from a note gone from the table
-  // altogether would send a reader to the wrong half of this check. Both refuse and both point at rule
-  // 4 — the split buys the log, not the model.
-  assert.equal(verifyJoin(pair, goodJoin("Table 1.—Income", STATES, REST)), "caption_note_struck");
+  // `caption_note_lost` and not `caption_note_struck`, because on this pair no half printed the note as
+  // a row: it is not in the joined caption and there is nothing anywhere else in the table to find it
+  // in, so it is gone rather than moved. `caption_note_struck` is reserved for the merge that kept the
+  // note as a row and took it out of the caption, which is the one thing the lost-check cannot refuse.
+  assert.equal(verifyJoin(pair, goodJoin("Table 1.—Income", STATES, REST)), "caption_note_lost");
   // And it does not refuse the right answer: the note kept, the continuation marker gone.
   assert.equal(verifyJoin(pair, goodJoin(titled, STATES, REST)), null);
 
@@ -668,7 +668,7 @@ test("a caption note the merge demoted into a row has not been kept", () => {
     `<table><caption>Table 5.—Debt</caption><thead><tr><th scope="col">Col 1</th><th scope="col">Col 2</th><th scope="col">Col 3</th></tr>${noteRow(note)}</thead><tbody>${rows}</tbody></table>`,
     `<table><caption>Table 5.—Debt</caption>${HEAD}<tbody><tr><th colspan="3">${note}</th></tr>${rows}</tbody></table>`,
   ]) {
-    assert.equal(verifyJoin(pair, demoted), "caption_note_struck", demoted.slice(0, 90));
+    assert.equal(verifyJoin(pair, demoted), "caption_note_lost", demoted.slice(0, 90));
   }
 
   // The same note left where the page printed it clears, so this refuses the demotion and not the join.
@@ -699,7 +699,7 @@ test("a note row a half printed inside <thead> was printed by somebody", () => {
   const plain = `<table><caption>Table 6.—Shares—Continued</caption>${HEAD}<tbody>${dataRow("Vermont")}</tbody></table>`;
   const demotedPair = onePair(promoted + plain);
   const demoted = `<table><caption>Table 6.—Shares</caption>${HEAD}<tbody>${noteRow(other)}${dataRow("Alabama")}${dataRow("Vermont")}</tbody></table>`;
-  assert.equal(verifyJoin(demotedPair, demoted), "caption_note_struck");
+  assert.equal(verifyJoin(demotedPair, demoted), "caption_note_lost");
 });
 
 test("a note row printed in the header block and delivered as a cell of data has been moved, not kept", () => {
@@ -719,14 +719,19 @@ test("a note row printed in the header block and delivered as a cell of data has
 
   const rows = `${dataRow("Alabama")}${dataRow("Vermont")}`;
   const demoted = `<table><caption>Table 5.—Debt</caption>${HEAD}<tbody>${noteRow(note)}${rows}</tbody></table>`;
-  assert.equal(verifyJoin(pair, demoted), "caption_note_struck");
+  assert.equal(verifyJoin(pair, demoted), "caption_note_lost");
   // The <th> spelling of the same invention — page.md names a column that does not exist for this one.
   const asTh = `<table><caption>Table 5.—Debt</caption>${HEAD}<tbody><tr><th colspan="3">${note}</th></tr>${rows}</tbody></table>`;
-  assert.equal(verifyJoin(pair, asTh), "caption_note_struck");
+  assert.equal(verifyJoin(pair, asTh), "caption_note_lost");
   // And the answer rule 4 asks for on this pair clears, so what is refused above is the placement and
-  // not the pair: a check no answer can satisfy would decline this shape for good.
-  const inCaption = `<table><caption>Table 5.—Debt ${note}</caption>${headNote}<tbody>${rows}</tbody></table>`;
+  // not the pair: a check no answer can satisfy would decline this shape for good. The note lands in
+  // the caption once — the second half's <thead> row is a header row, which rule 3 drops on the merge.
+  const inCaption = `<table><caption>Table 5.—Debt ${note}</caption>${HEAD}<tbody>${rows}</tbody></table>`;
   assert.equal(verifyJoin(pair, inCaption), null);
+  // Keeping that row as well as the caption is the same units twice, which is its own refusal: a reader
+  // moving by row meets them again as a cell, and rule 3 said to drop the second half's header block.
+  const both = `<table><caption>Table 5.—Debt ${note}</caption>${headNote}<tbody>${rows}</tbody></table>`;
+  assert.equal(verifyJoin(pair, both), "note_shipped_twice");
 });
 
 test("a note row a half printed in the body is not kept by promoting it into the header block", () => {
@@ -805,8 +810,54 @@ test("a first half with no caption of its own has no title caption to be strict 
   const rows = `${noteRow(note)}${dataRow("Alabama")}${dataRow("Vermont")}`;
   const struck = `<table><caption>Table 7.—Grants</caption>${HEAD}<tbody>${rows}</tbody></table>`;
   assert.equal(verifyJoin(pair, struck), "caption_note_struck");
-  const kept = `<table><caption>Table 7.—Grants ${note}</caption>${HEAD}<tbody>${rows}</tbody></table>`;
+  // And the note in the caption while the row it was promoted from stays is the doubling, not the
+  // answer: this leg asserted `null` when it was written, and the check below found it. Rule 6's "one
+  // note, once" leaves exactly one clearing answer on this pair — the caption keeps it and the row goes.
+  const both = `<table><caption>Table 7.—Grants ${note}</caption>${HEAD}<tbody>${rows}</tbody></table>`;
+  assert.equal(verifyJoin(pair, both), "note_shipped_twice");
+  const kept = `<table><caption>Table 7.—Grants ${note}</caption>${HEAD}<tbody>${dataRow("Alabama")}${dataRow("Vermont")}</tbody></table>`;
   assert.equal(verifyJoin(pair, kept), null);
+  // Which the free path cannot produce here — it imports the second half's caption WITH the note and
+  // keeps the first half's row — so this pair is the editor's, and rule 6 is what it will be asked.
+  const coded = joinInCode(pair);
+  assert.ok("html" in coded, JSON.stringify(coded));
+  assert.equal(verifyJoin(pair, coded.html), "note_shipped_twice");
+});
+
+test("a note the joined table keeps in its caption and prints as a row as well is shipped twice", () => {
+  // Rule 6 says of the second half's repeat "drop it, and do not also copy it in under rule 1", and
+  // nothing read that half of the rule. Every check here treated a note row as an EXCUSE for a note
+  // missing from the caption, so a note row excusing nothing was never looked at: the caption was right,
+  // the row was extra, and a reader moving by row still met the units as a cell of data. Nothing else
+  // catches it — rows are only floored, `labels_lost` counts the caption's bracketed runs as present,
+  // and axe reports nothing about a full-width `<td>` row.
+  const note = "[In millions of dollars]";
+  const first = `<table><caption>Table 5.—Debt ${note}</caption>${HEAD}<tbody>${dataRow("Alabama")}</tbody></table>`;
+  const second = `<table><caption>Table 5.—Debt—Continued</caption>${HEAD}<tbody>${noteRow(note)}${dataRow("Vermont")}</tbody></table>`;
+  const pair = onePair(first + second);
+  const rows = `${dataRow("Alabama")}${dataRow("Vermont")}`;
+  const cap = `<caption>Table 5.—Debt ${note}</caption>`;
+
+  // The three the review of this PR ran: the row the second half printed copied in under rule 1, the
+  // `<th>` spelling of it, and — on a pair where NO half printed a note row at all — a row invented.
+  for (const twice of [
+    `<table>${cap}${HEAD}<tbody>${noteRow(note)}${rows}</tbody></table>`,
+    `<table>${cap}${HEAD}<tbody><tr><th colspan="3">${note}</th></tr>${rows}</tbody></table>`,
+    `<table>${cap}<thead><tr><th scope="col">Col 1</th><th scope="col">Col 2</th><th scope="col">Col 3</th></tr>${noteRow(note)}</thead><tbody>${rows}</tbody></table>`,
+  ]) {
+    assert.equal(verifyJoin(pair, twice), "note_shipped_twice", twice.slice(0, 90));
+  }
+  const plain = `<table><caption>Table 5.—Debt—Continued</caption>${HEAD}<tbody>${dataRow("Vermont")}</tbody></table>`;
+  const noRowAnywhere = onePair(first + plain);
+  const invented = `<table>${cap}${HEAD}<tbody>${noteRow(note)}${rows}</tbody></table>`;
+  assert.equal(verifyJoin(noRowAnywhere, invented), "note_shipped_twice");
+
+  // Once is once, in either place: the caption alone clears, and so does the row alone on the pair whose
+  // discarded caption carried the note — so what this refuses is the second copy and not either place.
+  assert.equal(verifyJoin(pair, `<table>${cap}${HEAD}<tbody>${rows}</tbody></table>`), null);
+  const coded = joinInCode(pair);
+  assert.ok("html" in coded, JSON.stringify(coded));
+  assert.equal(verifyJoin(pair, coded.html), null);
 });
 
 test("a fullwidth-bracketed note is a note in both readers, or it ships twice", () => {

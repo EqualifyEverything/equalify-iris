@@ -568,31 +568,54 @@ export function verifyJoin(pair: ContinuationPair, merged: string): string | nul
   // on the difference; it is written out because the two readings are easy to state as one and this
   // check has been wrong three times in a comment that did exactly that.
   //
-  // The strict half cannot refuse a code join, because that path copies the title caption verbatim
-  // minus the marker, so every note in it survives by construction — `stripMarker` eats only a run
-  // introduced by `[—–\-(]`, and the one caption where that could take a note with it is a marker
-  // printed INSIDE the brackets (`[In millions of dollars—Continued]`), which the lenient half already
-  // refused before this existed because the delimiters are compared as printed. What the strict half
-  // costs is exactly an editor answer that struck a note out of the caption it was told to copy.
+  // The lenient half is asked FIRST, and that ordering is what makes each reason mean something. A note
+  // in neither the joined caption nor an excusable row is gone from the delivered table, which is
+  // `caption_note_lost`; `caption_note_struck` is then left saying the one thing the lenient half cannot
+  // refuse — the note is still in the table, as a row a half printed in the place it printed it, and
+  // missing only from the caption the join was told to copy. That is the demotion, and nothing else
+  // reaches this line. Asked the other way round, the strict half answered first for every pair whose
+  // note simply vanished, and reported a striking-out on pairs where nothing was struck.
   //
-  // What all of this compares is a note's text, the block it sits in, and which caption owed it —
-  // nothing finer. A note moved within one block is invisible here, and so is a `<td>` note row
-  // delivered as a `<th>` one: `page.md` forbids both spellings of the row, but the note in them has
-  // not been lost, and neither reason above is the right one to refuse a table over. A refusal of the
-  // EDITOR's answer ships both halves split, so a reason that names the wrong defect buys a split table
-  // and points the repair at the wrong rule.
+  // Which also makes the free path's reach here derivable rather than asserted. The only thing that can
+  // remove text from the copied title caption is `stripMarker`, and it eats a run introduced by
+  // `[—–\-(]` — so `caption_note_struck` on a code join would need the printed note to CONTAIN the
+  // continuation marker (`[In millions of dollars—Continued]`) and a half to have printed that same run
+  // as a row to excuse it past the lenient half. Absent that, the free path copies the caption verbatim
+  // minus the marker and every note in it survives by construction; this reason is the editor's.
+  //
+  // Then the same doubling from the other side: a note the joined caption keeps AND emits as a row.
+  // Rule 6 says "drop it, and do not also copy it in under rule 1", and nothing here read that half of
+  // it — `printedAsRow` is only ever an EXCUSE for a note missing from the caption, so a note row that
+  // is not excusing anything was never looked at. A reader moving by row still meets the units as a
+  // cell of data, which is the harm `page.md` names, with the caption merely also correct. No half's
+  // printing excuses it: the check is on the delivered table, because "one note, once" is what both
+  // rule 6 and `page.md` ask for and a doubled note is the phantom row whichever page printed it.
+  //
+  // That last one can refuse a free join, on a shape nothing has measured: a half that printed the note
+  // in its caption AND as a row of its own. `joinInCode` drops only the SECOND half's repeat, so it
+  // would carry both through, and the pair would go to the editor — whose rule 6 asks for exactly the
+  // table this wants, so the refusal is satisfiable rather than a dead end. Left unexempted on purpose.
+  // An exemption for "the page printed it twice" is a distinction drawn on no measured pair: #374's
+  // census has the note in a caption on 56 arm-pages and outside one on 12, and never both on one.
+  //
+  // What all of this compares is a note's text, the block it sits in, which caption owed it, and whether
+  // the delivered table holds it in two places at once — nothing finer. A note moved within one block is
+  // invisible here, and so is a `<td>` note row delivered as a `<th>` one: `page.md` forbids both
+  // spellings of the row, but the note in them has not been lost, and none of these reasons is the right
+  // one to refuse a table over. A refusal of the EDITOR's answer ships both halves split, so a reason
+  // that names the wrong defect buys a split table and points the repair at the wrong rule.
   const printedAsRow = new Set([...pair.first.noteRows, ...pair.second.noteRows].map(noteKey));
-  const rowNotes = [...tables[0].querySelectorAll("tr")]
+  const joinedNoteRows = [...tables[0].querySelectorAll("tr")]
     .filter(isUnitNoteRow)
-    .map((r) => ({ text: normalizeCell(r.textContent ?? ""), header: isHeaderRow(r) }))
-    .filter((n) => printedAsRow.has(noteKey(n)))
-    .map((n) => n.text);
+    .map((r) => ({ text: normalizeCell(r.textContent ?? ""), header: isHeaderRow(r) }));
+  const rowNotes = joinedNoteRows.filter((n) => printedAsRow.has(noteKey(n))).map((n) => n.text);
   const inCaption = captionNotes(joined.caption);
-  const titleNotes = captionNotes(pair.first.caption !== "" ? pair.first.caption : pair.second.caption);
-  if ([...titleNotes].some((n) => !inCaption.has(n))) return "caption_note_struck";
   const kept = new Set([...inCaption, ...rowNotes]);
   const owed = new Set([...captionNotes(pair.first.caption), ...captionNotes(pair.second.caption)]);
   if ([...owed].some((n) => !kept.has(n))) return "caption_note_lost";
+  const titleNotes = captionNotes(pair.first.caption !== "" ? pair.first.caption : pair.second.caption);
+  if ([...titleNotes].some((n) => !inCaption.has(n))) return "caption_note_struck";
+  if (joinedNoteRows.some((n) => inCaption.has(n.text))) return "note_shipped_twice";
   return null;
 }
 

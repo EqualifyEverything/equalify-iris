@@ -3338,8 +3338,8 @@ reprinted with the header and belongs in the joined table once. Those figures we
 `page.md` decided where the note goes: it now asks for the note inside the `<caption>`, so the shape
 the merge meets should shift from a repeated full-width row to a repeated caption, and rule 6's
 forgiveness of the promoted row should get rarer rather than staying at the rate measured here.
-Either way the note has to survive the merge — as a row it is held by the label and row checks, and
-in the caption by `caption_note_struck` and `caption_note_lost`.
+Either way the note has to survive the merge exactly once — as a row it is held by the label and row
+checks, and in the caption by `caption_note_lost`, `caption_note_struck` and `note_shipped_twice`.
 
 Where one of those judgements is real the merge is a Copy Editor call (`copy_editor_table_join.md`
 in the agent ledger); where it is not — three of the editor's six rules are "move these bytes and
@@ -3528,17 +3528,18 @@ arrived rather than failing the phase, the way the lint one step later reports i
 header block came back as `<td>`, which axe does not report and which would have removed the header
 association from the one table this stage exists to improve), `rows_lost`, `labels_lost:<n>` (a
 bracketed unit note the merge moved from a row into the caption counts as kept, because the label
-check reads `th,td` and would otherwise refuse the very drop rule 6 licenses), `caption_note_struck`
-(a bracketed note of measure went from the caption rule 4 says to **copy**, whether or not it turned
-up elsewhere in the table) and `caption_note_lost` (a note EITHER half's caption carried is in neither
-the joined caption nor a row some half printed). Both are part of the table's name going missing, and
-both are invisible to every other check here, which read cells, columns and rows.
+check reads `th,td` and would otherwise refuse the very drop rule 6 licenses), `caption_note_lost` (a
+note EITHER half's caption carried is in neither the joined caption nor a row some half printed),
+`caption_note_struck` (a note still in the table, as a row a half printed in the place it printed it,
+and missing only from the caption rule 4 says to **copy**) and `note_shipped_twice` (the joined table
+holds one note in its caption **and** as a row). All three are part of the table's name going missing
+or being said twice, and all three are invisible to every other check here, which read cells, columns
+and rows.
 
-Two reasons rather than one because a decline is all a run log has, and the two send a reader to
-different places: the first to the caption the merge was told to copy, the second to whether a row
-survived. They ask for the same repair, so the split buys the log and not the model — and every
-`caption_note_struck` in a log is necessarily an editor answer, since the free path copies that caption
-verbatim.
+Three reasons rather than one because a decline is all a run log has, and they send a reader to
+different places: whether a row survived at all, the caption the merge was told to copy, or a note
+delivered in two places. They ask for the same one-sentence repair, so the split buys the log and not
+the model.
 
 `caption_note_lost` reads both halves' captions while rule 6's repeat set reads only the first
 half's, because those answer different questions: what the merge may **drop** is a repeat and not a
@@ -3597,13 +3598,40 @@ that empty caption and imports nothing, so the merged caption normalizes to `""`
 answers the pair before any note check runs; on the editor's path, falling to the second half's caption
 is what rule 4 asks for anyway. No outcome turns on the difference.
 
-That strict half cannot refuse a code join, because that path copies the title caption verbatim minus
-the marker and every note in it survives by construction. What it costs is exactly an editor answer that
-struck a note out of the caption it was told to copy.
+The lenient half is asked **first**, and that ordering is what makes each reason mean something. A note
+in neither the joined caption nor an excusable row is gone from the delivered table, which is
+`caption_note_lost`; `caption_note_struck` is then left saying the one thing the lenient half cannot
+refuse — the note is still in the table, as a row a half printed where it printed it, and missing only
+from the copied caption. That is the demotion, and nothing else reaches the line. Asked the other way
+round, the strict half answered first for every pair whose note simply vanished and reported a
+striking-out on pairs where nothing was struck.
 
-What all of it compares is a note's text, the block it sits in and which caption owed it, and nothing
-finer. A note moved within one block is invisible here, and so is a `<td>` note row delivered as a `<th>` one: `page.md` forbids both
-spellings, but the note in them has not been lost and neither reason above is the right one to
+Which also makes the free path's reach here derivable rather than asserted. The only thing that can
+remove text from the copied title caption is the marker strip, and it eats a run introduced by `—`,
+`–`, `-` or `(` — so `caption_note_struck` on a code join would need the printed note to **contain**
+the continuation marker (`[In millions of dollars—Continued]`) and a half to have printed that same
+run as a row to get it past the lenient half. Absent that shape, the free path copies the caption
+verbatim minus the marker and every note in it survives by construction, so this reason is the
+editor's.
+
+Then the same doubling from the other side: a note the joined caption keeps **and** emits as a row.
+Rule 6 says drop the repeat and do not also copy it in under rule 1, and nothing here read that half of
+it — a printed row is only ever an **excuse** for a note missing from the caption, so a note row
+excusing nothing was never looked at. A reader moving by row still meets the units as a cell of data,
+which is the harm `page.md` names, with the caption merely also correct. No half's printing excuses it:
+the check is on the delivered table, because one note once is what both rule 6 and `page.md` ask for and
+a doubled note is the phantom row whichever page printed it. That last reason can refuse a **free**
+join, on a shape nothing has measured — a half that printed the note in its caption and as a row of its
+own, which `joinInCode` carries through because it drops only the second half's repeat. The pair then
+goes to the editor, whose rule 6 asks for exactly the table this wants, so the refusal is satisfiable
+rather than a dead end. Left unexempted on purpose: an exemption for "the page printed it twice" is a
+distinction drawn on no measured pair, since the census has the note in a caption on 56 arm-pages and
+outside one on 12, and never both on one page.
+
+What all of it compares is a note's text, the block it sits in, which caption owed it, and whether the
+delivered table holds it in two places at once — nothing finer. A note moved within one block is
+invisible here, and so is a `<td>` note row delivered as a `<th>` one: `page.md` forbids both
+spellings, but the note in them has not been lost and none of the reasons above is the right one to
 refuse a table over. Refusing the **editor's** answer ships both halves split, so a reason naming the
 wrong defect buys a split table and points the repair at the wrong rule.
 
@@ -3628,10 +3656,11 @@ in the reference corpus is a note of measure, so a reason for the disagreement w
 distinction drawn on no measured pair.
 
 The order is only which reason a failed pair reports, since every one of them refuses the join, and
-the two note reasons are last on purpose: a merge that dropped the note *and* lost rows should say
+the three note reasons are last on purpose: a merge that dropped the note *and* lost rows should say
 `rows_lost`, because the note is the cheapest of these losses and would otherwise mask the dearest.
-Between the two, `caption_note_struck` reports first, so a merge that struck the title caption's note
-and lost another note says the one naming the caption it was told to copy.
+Among the three the order is lost, then struck, then doubled — least specific first, as the paragraphs
+above set out, so that each reason names what actually happened to the note rather than the first
+condition that happens to hold.
 
 The document keeps **both halves byte for byte**, so every failure here delivers the output the
 pipeline had before this stage existed, which is what makes the merge safe to ask a model for at
