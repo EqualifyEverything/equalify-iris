@@ -409,6 +409,11 @@ export async function verifyAgentOutput(
   // still `faithful: false` without `accessible`, at 0 observed replies, which is what the test
   // below means by "not free in one direction". #426 carries the eight and what each class would
   // take to recover — and the loss there is the problems those replies named, never this check.
+  // The three that quote a row-group label are addressed where they are written rather than here:
+  // `agents/feedback.md` asks the checker to quote the page's words with single quotes and no `"` of
+  // its own, which costs nothing per call, where repairing that quote in the parser is the wider
+  // reading `src/util/json.ts` was narrowed away from and wants its own measurement. This check is
+  // unchanged by that — such a reply still arrives either readable or unjudged, as before.
   // What it buys besides is the failure mode #339's `notes` field opens. `extractJson`
   // returns the LAST readable object in a reply, and a `notes` string that quotes the contract back
   // ends with one: an unescaped `{ "faithful": true, "problems": [] }` inside the prose, which read

@@ -78,6 +78,16 @@
 // the shape #339 produced and the shape both fixtures below use. A decoy carrying any string value
 // ends the real field early and still wins, on `main` and here alike — pinned as the class it is in
 // `test/envelope-as-content.test.ts`, and reachable only by the prompt clause.
+//
+// And #426 adds a fourth, which is the same hazard one field over. Everything above is about a
+// `notes` string quoting the CONTRACT; the shape that actually lost verdicts in the corpus is a
+// `problem` string quoting the PAGE — `("Selective sales and gross receipts", "Other")` — three
+// replies of the eight that carry no readable verdict, all on the model the reference deployment
+// runs this agent on. Clauses of this task ask for those quotations in half a dozen places ("quote
+// the printed number", "quote both strings", "quote where the HTML stops"), so the prompt was
+// asking for the marks and never saying how to write them. It says now, and both halves are pinned
+// at the end of this file: the clause, and the price of not having it, which is a verdict and every
+// problem under it replaced by a page nothing judged.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -381,4 +391,108 @@ test("the flags check is not free in one direction, and this is the direction", 
   const both = await verdict('{ "faithful": false, "accessible": true, "problems": [{ "kind": "content_missing", "problem": "the third data row is absent" }] }');
   assert.equal(both.ok, false);
   assert.deepEqual(both.problems, ["the third data row is absent"]);
+});
+
+// The reply that lost three verdicts in the corpus, and the same finding written the way the prompt
+// now asks for it. One fixture builder so the only difference between the two is the marks.
+const rowGroups = (marks: string): string =>
+  `{ "faithful": false, "accessible": true, "problems": [{ "kind": "structure_wrong", ` +
+  `"problem": "The four row groups (${marks}Selective sales and gross receipts${marks}, ` +
+  `${marks}Other${marks}) are <td> and not <th>." }] }`;
+
+test("the checker is told how to quote the page's words, next to the schema it answers", () => {
+  // #426. This task asks for the page's own wording in half a dozen findings and said nothing about
+  // the marks, so a checker quoting a table's row-group labels wrote them with `"` — and a `"`
+  // followed by a comma is a terminator to every reading `repairedSpan` tries, so the envelope does
+  // not parse and the verdict is gone (the test below is what that costs). The clause is the free
+  // half of the fix: repairing that quote in the parser means reading a `"` inside a VALUE as
+  // content, which is the widening `src/util/json.ts` was narrowed away from, and #426 asks for it
+  // to be measured on its own rather than bundled with this.
+  for (const [what, needle] of [
+    ["the quotations this task asks for are named as where the rule bites",
+      "Clauses above ask you to QUOTE the page's own words"],
+    ["the mark itself is what the checker is asked not to write",
+      'so write them with no `"` of your own'],
+    // A prohibition with nowhere to go is #303's lesson, so the clause names the substitute and
+    // shows it. Without this half the checker's next move is to stop quoting the page at all,
+    // which is the half of a finding the correction pass needs most.
+    ["there is somewhere for the quotation to go instead",
+      "Set the words off with single quotes, or with no marks at all"],
+    ["what the reply loses is stated as the verdict, not the quotation",
+      "a reply nothing can read is recorded as a page NOTHING JUDGED"],
+    // And it is a habit rule, not a legality rule: `\"` parses. Saying so is what stops a reword
+    // relaxing it to "write valid JSON", which is true, already asked for, and did not work.
+    ["escaping is acknowledged as correct, so the rule is about the marks and not about JSON",
+      '`\\"` is correct JSON and is read correctly'],
+    ["it covers the problem strings and not only the notes field",
+      'It binds on "problems" and on "notes" alike'],
+    // And what the task SHOWS has to agree with what it says. Three page quotations elsewhere in
+    // this same task were written with `"`, which is the style a checker imitating the prompt reaches
+    // for, and imitation is the failure the clause buys off. Pinned by their wording because the
+    // general property is not machine-checkable over the whole task: an example PROBLEM STRING
+    // quoted in prose ("this text is not on the page") is metatext about a field and legitimately
+    // carries the mark, and no regex separates that from a page word.
+    ["a count the page prints is quoted the way the clause asks", "a subtitle's 'eight of the twelve states'"],
+    ["so is a log line the image refutes", "'the table is fully transcribed' beside a table"],
+    ["and so is a page's own link text", "a link named 'here'"],
+  ] as [string, string][]) {
+    assert.ok(prompt.includes(needle), `agents/feedback.md no longer says: ${what}`);
+  }
+  // Position: with the schema, for #365's reason — the same clause 61 lines away from the shape it
+  // is about is the distance that measured 69% prose. Before the schema, since it is about how to
+  // fill the fields the schema then lists.
+  const clause = feedbackMd.indexOf("Clauses above ask you to QUOTE");
+  const schema = feedbackMd.indexOf('"notes": "one line, read by nothing');
+  assert.ok(clause > 0 && schema > 0 && clause < schema, "the clause introduces the schema, not the reverse");
+  const verifyHead = feedbackMd.search(/^TASK: verify$/m);
+  const scopeHead = feedbackMd.search(/^TASK: scope$/m);
+  assert.ok(verifyHead > 0 && clause > verifyHead && clause < scopeHead, "the clause is inside TASK: verify");
+  // Nothing the clause shows may itself carry the mark it forbids, which is the one way this clause
+  // can teach the opposite of what it says. Pinned as a property of the whole slice rather than as
+  // the worked example that happens to be there today: a naming guard (`row groups "Selective`)
+  // passes any second page phrase added later with `"` around it, which teaches the same wrong
+  // thing. The two field names the clause writes are metatext about the schema and not page words,
+  // so they are the only pair allowed through — the same line the rewrite drew, where `"of which"`
+  // and a link named `"here"` became single-quoted and `"content_missing"` did not.
+  const shown = feedbackMd.slice(clause, feedbackMd.indexOf("Respond with ONLY:", clause));
+  const quoted = [...shown.matchAll(/"[^"\n]+"/g)]
+    .map(([phrase]) => phrase)
+    .filter((phrase) => phrase !== '"problems"' && phrase !== '"notes"');
+  assert.deepEqual(quoted, [], "the clause sets a quotation off with the mark it forbids");
+});
+
+test("a quoted row-group label costs the whole verdict, which is the price the clause buys off", async () => {
+  // What the three corpus replies did, end to end through `verifyAgentOutput`: a real rejection
+  // naming a real structural defect arrives as a page nothing judged, `problems` empty, and the
+  // page ships with the defect in it. Written raw rather than through `JSON.stringify`, which
+  // escapes the quotes for you — the first draft of the tests above made that mistake and asserted
+  // nothing. This is the fixture the parser cannot read, and it is meant to stay unreadable:
+  // `src/util/json.ts` treats `"` before a comma as a terminator on purpose. What that pins is
+  // today's parser, not a property worth keeping: if the value-side repair #426 asks to be measured
+  // on its own ever lands, this reply parses and these three assertions go red — and that is the
+  // repair working, not a pin lost. Rewrite them then; do not restore them.
+  const lost = await verdict(rowGroups('"'));
+  assert.equal(lost.unjudged, true, "the reply parsed, so this fixture no longer pins the failure");
+  assert.deepEqual(lost.problems, [], "the problems this reply named do not reach `correctPage`");
+  assert.equal(lost.ok, true, "and the page ships, because verification never costs a page");
+  // The same finding with the marks the prompt asks for is the rejection it was meant to be. This
+  // is the whole of what the clause changes: one reply, two verdicts.
+  const kept = await verdict(rowGroups("'"));
+  assert.equal(kept.unjudged, undefined, "the page was judged");
+  assert.equal(kept.ok, false);
+  assert.deepEqual(kept.problems, [
+    "The four row groups ('Selective sales and gross receipts', 'Other') are <td> and not <th>.",
+  ]);
+  // And escaped is read too, so the clause is a rule about what is easy to get right rather than
+  // about what the parser accepts. Built with `JSON.stringify` deliberately here: correct JSON is
+  // exactly the input the whole-text `JSON.parse` is supposed to take before any span walk runs.
+  const escaped = await verdict(
+    JSON.stringify({
+      faithful: false,
+      accessible: true,
+      problems: [{ kind: "structure_wrong", problem: 'The four row groups ("Selective sales and gross receipts", "Other") are <td> and not <th>.' }],
+    }),
+  );
+  assert.equal(escaped.unjudged, undefined, "escaped quotes are correct JSON and must still be read");
+  assert.equal(escaped.ok, false);
 });

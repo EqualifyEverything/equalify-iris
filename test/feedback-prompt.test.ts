@@ -171,8 +171,11 @@ test("the verify task compares an enumeration against a count the page prints", 
   for (const [what, re] of [
     ["the free check is named, and named as free",
       /A count the page prints about its own picture settles more than the picture does, and reading it needs no ink at all/],
+    // The two printed phrases are shown in single quotes, which is #426's clause applying to the
+    // clause that asks for the quotation: the marks this task demonstrates on a page word are the
+    // marks a checker imitates, and a `"` there is what closed the envelope on three replies.
     ["with the shapes such a count comes in, and what it is compared against",
-      /where the HTML transcribes a number for the size of a category — a subtitle's "eight of the twelve states", a total row, an "of which" — and an alt attribute or a list in the same fragment enumerates that category's members, count them and compare the two/],
+      /where the HTML transcribes a number for the size of a category — a subtitle's 'eight of the twelve states', a total row, an 'of which' — and an alt attribute or a list in the same fragment enumerates that category's members, count them and compare the two/],
     // Which string wins, and why: one of them is transcription and the other is a reading. Without
     // this the verifier can as easily send back the caption.
     ["the page's own number is what the list is wrong against, and the kind is named",
