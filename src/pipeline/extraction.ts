@@ -1982,6 +1982,14 @@ const AFFIRMED_NOUN = new RegExp(`^(?:${TEXT_NOUN})$`, "i");
 // `NAMES_TEXT_FORM` is boundary-tested rather than anchored so that a hyphenated compound of a word it
 // carries is read (`hand-written`, `rubber-stamped`), and that is what is wanted here too: these
 // callers hold one token, and the token a log writes is as often the compound.
+//
+// WHAT THAT COSTS, stated because the parity this file pins elsewhere does not survive it: the other two
+// lists are token-exact, so a compound is read only when its stem is in the boundary-tested one. `typed`
+// is, `printed` is not (it is in `TEXT_NOUN` and `QUALIFIER`), and `hand-?printed` is an entry of its own
+// — so `pre-typed` affirms where `pre-printed` does not, and `The machine-printed notes are visible.`
+// declares a page with notes on it blank. Which member of such a pair is right is decided by the noun
+// BEHIND the modifier and not by its prefix, so no exclusion of compounds fixes both halves. Measured at
+// 25 pairs and 2 of 3,746 corpus logs (both ineligible), and filed as #437 rather than patched here.
 function affirmsText(word: string): boolean {
   return AFFIRMED_NOUN.test(word) || NAMES_TEXT_FORM.test(word);
 }
@@ -2522,7 +2530,9 @@ function exceptiveOrLocativeObject(tokens: Word[], k: number): number | null {
     // is in `QUALIFIER` and in `NAMES_TEXT_FORM` both, so without the exclusion `missing from the typed
     // heading` broke where `missing from the printed heading` affirms — two wordings differing only in
     // which of the two overlapping words they use. Skipping it costs nothing for the reason above: the
-    // real object is still ahead when there is one.
+    // real object is still ahead when there is one. The exclusion is token-exact and the list it guards
+    // against is boundary-tested, so it settles the pair for the bare words and not for their compounds
+    // (`pre-typed` against `pre-printed`), which is #437 and not a narrowing to make here.
     if (NAMES_TEXT_FORM.test(object) && !AFFIRMED_NOUN.test(object) && !QUALIFIER.has(object)) {
       const after = tokens[m + 1];
       if (after === undefined || tokens[m]!.comma || AFTER_COMPLEMENT.has(after.word)) {

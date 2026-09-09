@@ -1597,6 +1597,17 @@ anywhere on the sheet` into a denial, and the folio exemption that lets `The rub
 number is visible` stay blank, both test that class and not the shorter list of qualifiers they were
 written against.
 
+What the class does not reach evenly is a **hyphenated compound**. The adjective list is matched at word
+boundaries, so a compound of a word it holds is read (`hand-written`, `rubber-stamped`); the noun list
+and the qualifier list are matched whole, so a compound of a word only they hold is not. `printed` is
+only in those two, apart from `hand-printed`, which is an entry of its own — so
+`The machine-printed notes are visible.` and `The pre-printed notes are visible.` are pages whose log
+names notes on them and which are delivered empty, while `hand-printed notes` are seen. Which member of
+such a pair is right is decided by the noun behind the modifier, not by the prefix: `The pre-typed notes
+are visible.` is right to refuse the declaration and `The pre-typed form is empty.` is a blank form
+wrongly refused. Two of the 3,746 replies on record write such a compound at all and neither is a blank
+declaration, so nothing observed turns on it; it is issue #437.
+
 What no form of the name reaches is a **clause with no verb in it**. `handwriting smudges only.`
 declares the page blank, and so does `cursive smudges only.`, while `handwriting smudges are present.`
 refuses — the affirmation is found by handing a name for text the verb that predicates over it, and a
@@ -1774,8 +1785,9 @@ being one without this rule holding a list of them. Three words are not put back
 to the reading that has no slot in it: a function word, which dresses nothing (handing `with` back keeps
 the preposition while `noisy`, the whole doubt, leaves with the phrase); and a name for what a page bears
 written as an **attributive** — `handwritten`, `stamped`, `cursive`, and their hyphenated compounds —
-which is the form Iris reads only as a modifier, where the subject form of the same word (`handwriting`)
-is the one the contradiction check can see. The third is a word the slot-less reading had already
+which is the form this rule reads as a modifier. Until #431 that was also the form the contradiction
+check could not see, so the word was handed back and nothing downstream did anything with it; the check
+now reads both parts of speech, and handing it back is what lets it. The third is a word the slot-less reading had already
 removed, and there the phrase goes in full, slot included: nothing is handed back because base kept
 nothing to hand back, which is what makes this rule able only ever to strip **more** than the slot-less
 reading and never less. That slot moves no

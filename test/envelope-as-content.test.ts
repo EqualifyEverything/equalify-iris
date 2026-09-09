@@ -1744,6 +1744,16 @@ test("a name for text affirms in either part of speech, and the position was nev
   // adjective form: the copula guard (#220's blank page, a denial whose participle would otherwise take the
   // verb ten words along) and the folio guard (#222's page, which prints nothing but its own number). So
   // every one of these pairs has to agree, and what they agree on is the answer `printed` already gave.
+  //
+  // THE SCOPE OF THAT CLAIM IS THE BARE TOKEN, which is what these rows measure and all this file asserts.
+  // It does not hold for a hyphenated compound and cannot, because `NAMES_TEXT_FORM` is `\b`-tested while
+  // `QUALIFIER` and `TEXT_NOUN` are token-exact: `typed` is in the boundary-tested list so `pre-typed` is
+  // read, `printed` is in neither so `pre-printed` is not, and `hand-?printed` is in it as an entry of its
+  // own. Which member of such a pair is CORRECT depends on the noun behind the modifier and not on the
+  // prefix — `The pre-typed notes are visible.` is right to refuse and `The pre-printed notes are visible.`
+  // is a page with notes on it delivered empty, while `The pre-typed form is empty.` is a blank form
+  // refused. So excluding compounds of the overlap words would fix one row and break the other; that axis
+  // is #437 with the 25-pair grid, and nothing here is widened to reach it.
   for (const word of "typed stamped signed embossed watermarked annotated engraved scrawled inscribed".split(" ")) {
     for (const [wide, printed] of [
       [`Page is blank. The ${word} page number is visible.`, "Page is blank. The printed page number is visible."],
@@ -1803,7 +1813,10 @@ test("an exceptive object in the second part of speech is read by what it modifi
   // And the ordering, which is a defect this branch had before it was pinned: it runs in FRONT of the
   // `!QUALIFIER.has(object)` skip, so without the same exclusion on it, `typed` broke the walk where
   // `printed` is stepped over and the noun one word later affirms. Two wordings that differ only in which
-  // of the two overlapping words they use have to agree, whatever they agree on.
+  // of the two overlapping words they use have to agree, whatever they agree on — and that is asserted of
+  // the bare tokens, for the reason given at the `modifierForm` pairs above: the exclusion is token-exact
+  // and the list it protects the overlap against is boundary-tested, so a compound is a different question
+  // and it is #437's.
   for (const pair of [
     ["Page is blank. A caption is missing from the typed heading.", "Page is blank. A caption is missing from the printed heading."],
     ["Page is blank. Text is nowhere except for the typed heading.", "Page is blank. Text is nowhere except for the printed heading."],
