@@ -325,7 +325,8 @@ Fourteen structures are easy to render as something that merely looks right, so 
   room in an <h3> than it has anywhere else. The entries of each group then nest inside that group's
   own <li>, as a list within it — a flat list that runs the group labels and the entries it heads
   through one sequence says they are the same kind of thing, and loses what the group label was doing.
-  What is levelled here is a single such label, or a run the page marks not at all.
+  What is levelled here is a single such label, a run the page marks not at all, or one it marks without
+  advancing.
   And whether anything is under it at all: a heading names a section, so a line that SAYS something
   rather than naming something — SAVE THESE INSTRUCTIONS, FOR COMMERCIAL USE ONLY, a stamp or a
   notice the page sets in bold with nothing subordinate to it — is a <p> (or a <strong> inside one)

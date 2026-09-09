@@ -491,8 +491,15 @@ test("the page agent's heading rules keep the clauses that place a section's par
       /That reaches the contents labels too, and is meant to: where a contents page marks its group labels A\. Preparations, B\. Operation, those groups are a list/],
     ["and each group's entries nest inside its item rather than running flat beside it",
       /The entries of each group then nest inside that group's own <li>, as a list within it — a flat list that runs the group labels and the entries it heads through one sequence says they are the same kind of thing/],
-    ["and what is left to level is the single label, or a run the page never marked",
-      /What is levelled here is a single such label, or a run the page marks not at all/],
+    // All THREE residue cases, which round 3 of #447 found at two. The exception above reaches a run whose
+    // marker ADVANCES, and the third limit under NUMBERS THE PAGE SHOWS deliberately holds back the
+    // repeating case (1., 1., 1. is numbers the page prints), so a repeating run of step labels is still a
+    // heading run to level — and it is neither of the two cases the summary named. A summary of what a
+    // rule does NOT reach is read as exhaustive whether or not it was written that way, so it has to
+    // enumerate as many cases as the rule excludes: two of three is the shape that sends the third
+    // somewhere nobody chose.
+    ["and what is left to level is the single label, the unmarked run, and the repeating one",
+      /What is levelled here is a single such label, a run the page marks not at all, or one it marks without advancing/],
     // #128: SAVE THESE INSTRUCTIONS and FOR COMMERCIAL USE ONLY were promoted to <h2>
     // for being set in bold, putting two entries in the outline that head nothing.
     ["a line that says something rather than naming a section is not a heading",
