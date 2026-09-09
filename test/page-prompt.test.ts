@@ -964,6 +964,45 @@ test("the page agent's numbering and abbreviation rules keep the clauses that ma
       /The parentheses are not reproduced — a browser marks the item "a\." in its own punctuation/],
     ["type states the printed shape and is never chosen to tidy a sequence",
       /never pick one to tidy a sequence into letters the page does not show, and a list the page marks with no markers at all takes no type/],
+    // #334, the next axis. Every clause above opens "a list the page marks…", so all of it presupposes
+    // that list-hood is already settled — and on a run of run-in bold labels it is not, because THREE
+    // rules reach that one printed shape: LISTS, NAMED ITEMS (a <dl>) and the run-in heading rule. On the
+    // replies on record, 56 of 68 draws over three printed runs settled the tie by emitting none of the
+    // three — a run of <p> elements opening in bold, the shape NAMED ITEMS already names and forbids —
+    // and only 12 put the run in a list at all. So the rule has to say what decides, and the marker is
+    // the only candidate that survives: a heading and a <dt> can hold the name but have nowhere to put
+    // the letter. One limit on that evidence: all 68 draws read a page.md predating the type clause
+    // above, so it is the DIGIT run (16 of 27 outside a list, and `start` was already specified then)
+    // that indicts the prompt as it stands. The two lettered runs are latent-or-fixed until a paid round
+    // re-draws them.
+    ["the marker is what settles that a run of labels is a list",
+      /the marker is what settles that it is.*two or more consecutive labels open with a printed marker that ADVANCES/],
+    // Without the reason, this reads as an arbitrary tie-break and the next rule added over it can
+    // re-open the tie. The reason is also the harm: acir-p060's e-to-i run came back as five <h2>s with
+    // the letters deleted outright, in a reply that gave a correct <ul> to the unmarked run beside it.
+    ["the reason is the sequence, which no other element can carry",
+      /a heading run and a <dl> both have somewhere to put the name and nowhere to put the letter/],
+    ["a marked series of named things is a list and not a <dl>",
+      /A marked series of named things is a list of them and not a <dl>/],
+    // This is the one clause that CHANGES an existing answer rather than adding one: NAMED ITEMS sends a
+    // named item with several paragraphs to the heading rule, and for a marked run that would lose the
+    // sequence. Saying which rule is being overridden is what makes it reviewable.
+    ["a marked run stays a list even where its items run long, and says which test it overrides",
+      /list even where each item runs to several paragraphs of its own — the one place that rule's substantial-content test does not send you to headings instead/],
+    ["the bold-paragraph answer is ruled out for the marked case too",
+      /What is never right is the third answer, a run of <p> elements opening in bold/],
+    // The four failure paths. A rule that says "a marker makes it a list" without these turns every
+    // capitalised paragraph opening with a numeral into a list of one, and re-tidies the repeated
+    // sequences that NUMBERS THE PAGE SHOWS exists to protect.
+    ["one marked paragraph is not a run", /One marked paragraph is not a run: a marker needs something to advance to/],
+    ["a repeating marker is not a sequence", /A marker that repeats rather than advances is not a sequence/],
+    ["a partly marked run is still one list, and the gap is logged",
+      /A marker on only some of the labels does not break the run.*say in the "log" field which labels the page marked/],
+    // The corpus's own instance: a-to-d on acir-p059 and e-to-i on acir-p060. A model shown one page
+    // cannot emit one list across both, so the second page's list has to carry start rather than
+    // beginning again at a — which is the reading that says the page printed two sequences.
+    ["a run continuing from an unseen page carries start rather than restarting",
+      /an a-to-d run on one page and an e-to-i run on the next are two lists, the second start="5", never one list beginning again at a/],
     ["an irregularity is annotated in the document, immediately after the element",
       /say so once in a <p> immediately after that list or table/],
     // Adjacency is linear-reading-order only. A reader moving between tables lands on
@@ -1615,6 +1654,12 @@ test("the page agent promotes a sub-topic the page names, and invents no outline
     ["the name is the page's own", /Use the name the page prints for each/],
     ["and where the page names nothing, no outline is supplied",
       /this promotes a label the page gives, it does not supply an outline the page does not have/],
+    // #334. This rule promotes a run-in bold label to a heading, and a marked run — a., b., c. — prints
+    // the same ink while being a list. The tie-break lives under NUMBERS THE PAGE SHOWS, but a rule is
+    // only bound where it is read: a model applying THIS clause never reaches that one, so the exception
+    // has to appear on this branch too rather than only at the place it is decided.
+    ["a marked run is excepted here as well, not only where the tie-break is stated",
+      /One shape is outside this rule: where those names open with a printed marker that advances — a\., b\., c\. — the run is a list and not a set of headings/],
     // #216, from a session on an appliance manual: the page printed a label over the two
     // cord-safety topics and another over the two grinding topics, and all of it came back
     // as a flat run of <h2>s. The promotion rule above makes the sub-topics headings; it
@@ -1686,8 +1731,16 @@ test("the page agent's definition-list rule keeps the clauses that make it a rul
     // page agent has to be told which case it is looking at or the two rules contradict.
     ["a named item with substantial content of its own is a heading, not a term",
       /it is not the case where a named item has substantial content of its own — its own table, its own procedure, several paragraphs — which is a heading with that content under it/],
-    ["and the <dl> is bounded to the case where the explanation is the item's own text",
-      /A <dl> is right where an item's explanation is its own text and nothing more/],
+    // Guard three, #334: a marked series is a list, decided under NUMBERS THE PAGE SHOWS. On acir-p059
+    // the a-to-d run is named things with one paragraph each, so the two guards above both send it here
+    // — and 3 of 19 draws duly emitted <dt>a. Locally assessed land…</dt>, letter and all, which is the
+    // one place the printed marker has no attribute to live in.
+    ["a marked series of names is a list rather than a term list",
+      /Nor is it a series whose labels open with a printed marker that advances — a\., b\., c\. — which is a list/],
+    // The bound carries both conditions. Pinning only the explanation half would let a later edit drop
+    // the marker half while this test still passed, which is how the case above comes back.
+    ["and the <dl> is bounded to an unmarked item whose explanation is its own text",
+      /A <dl> is right where an item's explanation is its own text and nothing more, and the page prints no marker on the names/],
   ] as [string, RegExp][]) {
     assert.match(prompt, re, `agents/page.md no longer says: ${what}`);
   }

@@ -294,7 +294,9 @@ Fourteen structures are easy to render as something that merely looks right, so 
   how a screen-reader user reaches the second of those tables, and a section that names its parts
   only visually has none of them in the outline. Use the name the page prints for each. Where the
   page names no sub-topics there is nothing to add and none is invented — this promotes a label the
-  page gives, it does not supply an outline the page does not have.
+  page gives, it does not supply an outline the page does not have. One shape is outside this rule: where
+  those names open with a printed marker that advances — a., b., c. — the run is a list and not a set of
+  headings, for the reason given under NUMBERS THE PAGE SHOWS below.
   A label the page prints over a cluster of those sub-topics is their parent and not their peer:
   where two or more of them sit under a title that names the group, that title is the heading and
   they each step one level down under it — a group label at <h2> makes them <h3>, not a run of four
@@ -536,11 +538,13 @@ Fourteen structures are easy to render as something that merely looks right, so 
   <dt> exactly as the page prints the label and add nothing to it — <dt>Name</dt>, never
   <dt>CONTACT: Name</dt> — because the heading, <legend> or <dl> the term sits in already says
   which group it belongs to, and the prefix is a word only you can see.
-  Two cases this is not. It is not a way to lay out prose: a paragraph that happens to begin with
+  Three cases this is not. It is not a way to lay out prose: a paragraph that happens to begin with
   a capitalised phrase is a paragraph, and a <dl> is for a page that names items and explains them.
   And it is not the case where a named item has substantial content of its own — its own table, its
   own procedure, several paragraphs — which is a heading with that content under it by the heading
-  rule above. A <dl> is right where an item's explanation is its own text and nothing more.
+  rule above. Nor is it a series whose labels open with a printed marker that advances — a., b., c. —
+  which is a list, for the reason given under NUMBERS THE PAGE SHOWS below. A <dl> is right where an
+  item's explanation is its own text and nothing more, and the page prints no marker on the names.
 - TABLE ROW GROUPS: where a table gathers its rows under printed group labels — regions with their
   states indented beneath them, a category with its items, a tax class with the taxes in it — that
   grouping is structure and has to reach the markup. Open a <tbody> for each group, its first row
@@ -610,6 +614,25 @@ Fourteen structures are easy to render as something that merely looks right, so 
   above already makes, so it is not a reason to transcribe the marker as well. And type states the
   shape the page printed and nothing else: never pick one to tidy a sequence into letters the page
   does not show, and a list the page marks with no markers at all takes no type.
+  Everything above assumes the run is already a list, and the marker is what settles that it is. Where two
+  or more consecutive labels open with a printed marker that ADVANCES — a. then b., 9. then 10. — that run
+  is a list and the labels stay inside their <li> items. The sequence is the page saying these items belong
+  together and in what order, and no other element carries it: a heading run and a <dl> both have somewhere
+  to put the name and nowhere to put the letter, so the letter survives only as text a reader hears twice or
+  not at all. So the marker decides against the two other rules such a run also answers to. A marked series
+  of named things is a list of them and not a <dl> (NAMED ITEMS AND THEIR EXPLANATIONS above), and it is a
+  list even where each item runs to several paragraphs of its own — the one place that rule's
+  substantial-content test does not send you to headings instead. What is never right is the third answer, a
+  run of <p> elements opening in bold, which keeps the marker as text and the sequence nowhere; that shape is
+  already ruled out for the unmarked case and a printed marker is not what licenses it.
+  Four limits on this. One marked paragraph is not a run: a marker needs something to advance to, and a
+  single (a) with no (b) after it stays whatever it would have been unmarked. A marker that repeats rather
+  than advances is not a sequence — labels running 1., 1., 1. are numbers the page prints and this rule
+  leaves them alone. A marker on only some of the labels does not break the run: emit the whole of it as one
+  list, carry the printed markers with value, and say in the "log" field which labels the page marked. And a
+  run continuing from a page you were not shown starts where this page starts it, with start on the <ol> — an
+  a-to-d run on one page and an e-to-i run on the next are two lists, the second start="5", never one list
+  beginning again at a.
   Where the sequence skips or repeats, say so once in
   a <p> immediately after that list or table, give that <p> an id and point the table's or list's
   aria-describedby at it, so the note reaches a reader who arrives by moving from table to table
