@@ -625,11 +625,40 @@ test("a tail word that lives only in an attribute still refuses the join", () =>
   const cls = [`<p>The inter-state figure.</p><td class="state">x</td>`, `<p>interstate</p>`];
   assert.deepEqual(joinBrokenWords(cls).pages, cls);
   // Attribute NAMES are markup and not text, so a `colspan` does not put `colspan` in the guard: a
-  // `col-span` broken at a line end is still joined.
-  const names = [`<p>A col-span of two.</p><td colspan="2">x</td>`, `<p>The colspan is two.</p>`];
-  assert.deepEqual(joinBrokenWords(names).joined, [
-    { split: "col-span", written: "colspan", evidence: "colspan" },
-  ]);
+  // `col-span` broken at a line end is still joined, quoted value or bare.
+  for (const tag of [`<td colspan="2">x</td>`, `<td colspan=2>x</td>`]) {
+    const names = [`<p>A col-span of two.</p>${tag}`, `<p>The colspan is two.</p>`];
+    const want = [{ split: "col-span", written: "colspan", evidence: "colspan" }];
+    assert.deepEqual(joinBrokenWords(names).joined, want, tag);
+  }
+  // An UNQUOTED value is a value: HTML allows `class=state`, `MARKUP` matches the tag, and a guard reading
+  // only the quoted forms would let the compound through on the very failure the rest of this test pins.
+  const bare = [`<p>The inter-state figure.</p><td class=state>x</td>`, `<p>interstate</p>`];
+  assert.deepEqual(joinBrokenWords(bare).pages, bare, "an unquoted attribute value did not reach the guard");
+  // And the guard is entity-decoded, which the WRITE side is not. An `alt` spelling the tail word
+  // `st&#97;te` has to refuse the join, or a numerically spelled attribute is a hole in exactly the
+  // blindness the guard was widened to close.
+  const entity = [`<p>The inter-state figure.</p><img alt="Shaded by st&#97;te.">`, `<p>interstate</p>`];
+  assert.deepEqual(joinBrokenWords(entity).pages, entity, "an entity-spelled tail did not reach the guard");
+  // A value carrying a bare `<` keeps the words after it in the guard, which is why the attribute text is
+  // decoded on its own rather than appended to the document and put through `textOf`: under that spelling
+  // the `<` reads as a tag opening and the tail word disappears from the guard.
+  const lt = [`<p>The inter-state figure.</p><img alt="a < b, by state">`, `<p>interstate</p>`];
+  assert.deepEqual(joinBrokenWords(lt).pages, lt);
+});
+
+test("the page condition reads the page at part B's width, not the guard's", () => {
+  // Three widths in this pass, and `own` is the third: script and style content in, attribute values out,
+  // which is `splitWordContradictions`' width exactly. That is load-bearing rather than incidental. The
+  // condition's claim is that it declines precisely the population part B raises, so a closed spelling
+  // living only in an `alt` on the hyphen's own page must NOT trip it — part B cannot see that `alt`
+  // either, so nothing was asked about the word and nothing is being reversed. Widening `own` to the
+  // guard's width would leave this word answered by no pass at all.
+  const pages = [`<p>Agri-culture</p><img src="m.png" alt="agriculture">`, `<p>Total agriculture receipts.</p>`];
+  const out = joinBrokenWords(pages);
+  assert.equal(out.pages[0], `<p>Agriculture</p><img src="m.png" alt="agriculture">`);
+  assert.deepEqual(out.joined, [{ split: "Agri-culture", written: "Agriculture", evidence: "agriculture" }]);
+  assert.deepEqual(splitWordContradictions(pages[0]), [], "and part B raises nothing about it, which is the point");
 });
 
 test("a break with no whole spelling anywhere is left alone, so a joined form from nowhere is impossible", () => {

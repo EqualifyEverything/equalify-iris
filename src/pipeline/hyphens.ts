@@ -262,15 +262,26 @@ const CLOSES_OPAQUE = /^<\/(script|style|pre|code)\b/i;
 // on text nothing shows. It swallows the rest of the DOCUMENT here and the rest of one PAGE there, which
 // is a divergence in the conservative direction on both sides — fewer joins, never more.
 const NOT_SHOWN = /<(script|style)\b[\s\S]*?(?:<\/\1\s*>|$)/gi;
-// Quoted attribute values as text, for the guard and never for the evidence. `alt` is prose a screen
-// reader speaks, so a bare `state` living only there is still the document using the word — and a guard
-// that cannot see it closes up `inter-state`, which is the one outcome the tail condition exists to
-// prevent. Values and not attribute NAMES: a value is text somebody wrote, `colspan` is markup. Also zero
-// cost on that corpus, measured, which is why it is a fix rather than a documented limit.
+// Attribute VALUES as text, for the guard and never for the evidence. `alt` is prose a screen reader
+// speaks, so a bare `state` living only there is still the document using the word — and a guard that
+// cannot see it closes up `inter-state`, which is the one outcome the tail condition exists to prevent.
+// Values and not attribute NAMES: a value is text somebody wrote, `colspan` is markup. Also zero cost on
+// that corpus, measured, which is why it is a fix rather than a documented limit.
+//
+// Three quotings, because a guard has to be blind to nothing it could refuse on: double, single, and
+// UNQUOTED. The third is the one worth stating — HTML allows `<td class=state>`, `MARKUP` matches such a
+// tag perfectly well, and a guard that read only the quoted two would let `inter-state` through on exactly
+// the failure the other two exist to stop. The unquoted alternative stops at whitespace and at the four
+// characters HTML5 forbids in a bare value, so it cannot run past its own attribute or into the `>`.
+//
+// Entity-decoded by the CALLER, not here, and the difference matters in one direction: an `alt` reading
+// `st&#97;te` has to put `state` in the guard, or a numerically spelled tail word is a hole in exactly the
+// blindness this function was added to close. Left to the caller because `textOf` already decodes AFTER
+// stripping tags for a reason of its own, and this output has no tags to strip.
 function attributeText(html: string): string {
   let out = "";
   for (const [tag] of html.matchAll(MARKUP)) {
-    for (const m of tag.matchAll(/"([^"]*)"|'([^']*)'/g)) out += ` ${m[1] ?? m[2] ?? ""}`;
+    for (const m of tag.matchAll(/"([^"]*)"|'([^']*)'|=\s*([^\s"'=<>`]+)/g)) out += ` ${m[1] ?? m[2] ?? m[3] ?? ""}`;
   }
   return out;
 }
@@ -370,7 +381,13 @@ export function joinBrokenWords(pages: string[]): { pages: string[]; joined: Joi
   // A word missing from the first leaves a hyphen; a word missing from the second closes a compound the
   // printing owns, which is what the second condition exists to prevent, so the two cannot share a width.
   const whole = wholeWords(textOf(document.replace(NOT_SHOWN, " ")));
-  const guard = wholeWords(textOf(document) + attributeText(document));
+  // `decodeEntities` on the attribute text rather than `textOf`, so `alt="st&#97;te"` puts `state` in the
+  // guard: the read side decodes on purpose, and a guard that did not would leave a numerically spelled
+  // tail word as a hole in the blindness it was added to close. Not `textOf(document + attributeText(…))`,
+  // which is the shorter spelling of the same fix and a worse one — a value containing a `<` would then be
+  // read as a tag opening and take the words after it out of the guard, which is the direction that closes
+  // a compound the printing owns.
+  const guard = wholeWords(textOf(document) + decodeEntities(attributeText(document)));
   const joined: JoinedWord[] = [];
   const seen = new Set<string>();
   // A word spelled with an entity hyphen (`Govern&#45;ment`) is not a `WORD` match at all, so it is
@@ -388,6 +405,14 @@ export function joinBrokenWords(pages: string[]): { pages: string[]; joined: Joi
         // page agent answers it holding the image, and `splitWordProblem` gives it an explicit licence
         // to answer "the page really does print both spellings" and change nothing. Joining it here
         // would reverse that answer from a pass that never saw the page.
+        //
+        // `own` is a THIRD width and neither of the other two: script and style content IN, attribute
+        // values OUT, which is `splitWordContradictions`' width exactly (`wholeWords(textOf(page))`, at the
+        // call below). That is not incidental and must not drift, because the condition's whole claim is
+        // that it declines precisely the population part B raises. A closed spelling living only in an
+        // `alt` on this page therefore does NOT trip it — correctly, since part B cannot see that `alt`
+        // either, so nothing has been asked about the word and nothing is being reversed. Widening `own`
+        // to the guard's width would leave those words answered by no pass at all.
         if (own.has(closed)) return word;
         const evidence = whole.get(closed);
         if (evidence === undefined) return word;

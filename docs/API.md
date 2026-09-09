@@ -4531,11 +4531,17 @@ Three conditions have to hold together, and each stops a different mistake.
 **Conditions 1 and 2 read the document at different widths, on purpose.** Condition 1 *licenses* a join,
 so it is the narrow one — the text a reader is shown, with `script` and `style` content dropped, because a
 `.crosshatch` selector is author metadata and the third field of this line has to name a spelling somebody
-can find on the page. Condition 2 *refuses* one, so it is the wide one — prose plus every quoted attribute
-value, because a bare `state` that lives only in an `alt` is still the document using the word, and a
-guard that cannot see it closes up `inter-state`. A word missing from the first index leaves a hyphen; a
-word missing from the second closes a compound the printing owns. Widening the second costs zero joins
-across #334's 1,221 page files, measured.
+can find on the page. Condition 2 *refuses* one, so it is the wide one — prose plus every attribute
+value, quoted or bare and with entities decoded, because a bare `state` that lives only in an `alt` is
+still the document using the word, and a guard that cannot see it closes up `inter-state`. A word missing
+from the first index leaves a hyphen; a word missing from the second closes a compound the printing owns.
+Widening the second costs zero joins across #334's 1,221 page files, measured.
+
+Condition 3 reads a **third** width, and it is neither of those: `script` and `style` content in, attribute
+values out, which is `page_split_words`' own width exactly. That is what makes the condition decline
+precisely the words that step raises. A closed spelling living only in an `alt` on the hyphen's page
+therefore does not trip it — `page_split_words` cannot see that `alt` either, so nothing was asked about
+the word and nothing is being reversed.
 
 The words this pass declines stay with `page_split_words` and its correction call. Nothing is asked
 twice, and nothing is answered twice.
