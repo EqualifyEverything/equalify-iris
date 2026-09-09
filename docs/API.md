@@ -3655,12 +3655,22 @@ anchor belongs on the surviving markup is rule 2's reading for the editor; and m
 repeat in one join declines as `note_repeats_exceed_licence`, because past that the verification would
 answer `rows_lost` — a reason about rows for a note the caption still carries.
 
+One spelling of the repeat row is deliberately **not** dropped there and still arrives here: a `<th>`
+note row inside `<thead>`. Dropping that takes a header **cell** with it, and `header_cells_lost` is
+asked before any note reason, so the log would name the header block collapsing for a note's sake and
+point the repair at rule 3. Left in place, the pair reaches `note_shipped_twice` — the same refusal it
+got before the drop existed, with the reason naming the note. It costs no join that was free, because
+nothing dropped that row before either. The `<td>` spelling of the same row is not a header cell, is
+dropped, and is the one the census measured: `p068` closes its `<thead>` with `<td colspan="8">`.
+
 What all of it compares is a note's text, the block it sits in, which caption owed it, and whether the
 delivered table holds it in two places at once — nothing finer. A note moved within one block is
 invisible here, and so is a `<td>` note row delivered as a `<th>` one: `page.md` forbids both
 spellings, but the note in them has not been lost and none of the reasons above is the right one to
-refuse a table over. Refusing the **editor's** answer ships both halves split, so a reason naming the
-wrong defect buys a split table and points the repair at the wrong rule.
+refuse a table over. Which of the two spellings the **first half** used does decide the reason a
+caption-importing join declines under, per the paragraph above, and that is the one place the
+distinction is visible at all. Refusing the **editor's** answer ships both halves split, so a reason
+naming the wrong defect buys a split table and points the repair at the wrong rule.
 
 Both bracket widths are read, ASCII and fullwidth, and the parenthesised spelling is not — a check
 demanding every parenthesised run survive would demand the survival of `(continued`, which rule 4

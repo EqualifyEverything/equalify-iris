@@ -609,12 +609,19 @@ export function verifyJoin(pair: ContinuationPair, merged: string): string | nul
   // editor call and shipped split if that call declined. That is fixed where it is made, by dropping the
   // row the imported caption now repeats, and not by an exemption here; the same rule 6 licence, applied
   // one step earlier, and a pair that would need more drops than the licence allows declines there too.
+  // One spelling of that row is deliberately NOT dropped there and still arrives here: a `<th>` note row
+  // inside `<thead>`, because dropping it takes a header cell with it and `header_cells_lost` is asked
+  // before any note reason, so the log would name the header block for a note's sake. Left in place, that
+  // pair reaches `note_shipped_twice` — the same refusal it got before the drop existed, with the reason
+  // naming the note. It costs no join that was free: nothing dropped it before either.
   //
   // What all of this compares is a note's text, the block it sits in, which caption owed it, and whether
   // the delivered table holds it in two places at once — nothing finer. A note moved within one block is
   // invisible here, and so is a `<td>` note row delivered as a `<th>` one: `page.md` forbids both
   // spellings of the row, but the note in them has not been lost, and none of these reasons is the right
-  // one to refuse a table over. A refusal of the EDITOR's answer ships both halves split, so a reason
+  // one to refuse a table over. Which of the two spellings the FIRST half used does decide the reason a
+  // caption-importing join declines under, per the paragraph above, and that is the one place the
+  // distinction is visible at all. A refusal of the EDITOR's answer ships both halves split, so a reason
   // that names the wrong defect buys a split table and points the repair at the wrong rule.
   const printedAsRow = new Set([...pair.first.noteRows, ...pair.second.noteRows].map(noteKey));
   const joinedNoteRows = [...tables[0].querySelectorAll("tr")]
@@ -1012,6 +1019,13 @@ export function joinInCode(pair: ContinuationPair): { html: string } | { reason:
     const importedNotes = captionNotes(made.textContent ?? "");
     for (const row of frows) {
       if (!isUnitNoteRow(row) || !importedNotes.has(normalizeCell(row.textContent ?? ""))) continue;
+      // Not a row that would take a header CELL with it. `header_cells_lost` is asked before any note
+      // reason and counts `<th>` in header rows, so dropping a `<th colspan>` note row out of `<thead>`
+      // reports a header block collapsing — rule 3's defect — for a drop rule 6 licensed. Left in place
+      // instead, which is the pair `verifyJoin` then refuses as `note_shipped_twice`: the same refusal as
+      // before this drop existed, with the reason naming the note. The `<td>` spelling of the same phantom
+      // row is not a header cell and is dropped, and that is the one the census measured (`p068`).
+      if (isHeaderRow(row) && [...row.children].some((c) => c.tagName === "TH")) continue;
       // An id inside that row has nowhere to go, and nothing else would say so: the id checks at the end
       // read the SECOND half's ids against the finished table, because this is the only place a FIRST
       // half's row is dropped. Declined rather than moved — where a footnote anchor belongs on the

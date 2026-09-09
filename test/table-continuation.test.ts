@@ -841,6 +841,39 @@ test("a first half with no caption of its own has no title caption to be strict 
   assert.deepEqual(joinInCode(onePair(first + twice)), { reason: "note_repeats_exceed_licence" });
 });
 
+test("the free join leaves the repeat row alone where dropping it would take a header cell", () => {
+  // That drop is a shape test, and one shape it must not touch: the note printed as a `<th>` row inside
+  // `<thead>`. `header_cells_lost` counts `<th>` cells in header rows and is asked before any note
+  // reason, so dropping that row points a maintainer at the header block collapsing for a note's sake.
+  // Left in place, the pair declines as `note_shipped_twice` instead — which is what it declined as
+  // before this drop existed, so no join that was free is lost, and the reason names the note.
+  const note = "[In millions of dollars]";
+  const headWith = (cell: string) =>
+    `<thead><tr><th scope="col">Col 1</th><th scope="col">Col 2</th><th scope="col">Col 3</th></tr><tr>${cell}</tr></thead>`;
+  const build = (head: string) => {
+    const first = `<table>${head}<tbody>${dataRow("Alabama")}</tbody></table>`;
+    const cap = `<caption>Table 8.—Aid ${note}—Continued</caption>`;
+    const second = `<table>${cap}${head}<tbody>${dataRow("Vermont")}</tbody></table>`;
+    const pair = onePair(first + second);
+    assert.equal(pair.first.caption, "", "the fixture is not the caption-importing case");
+    return pair;
+  };
+
+  // The spelling the census measured — `p068` closes its `<thead>` with `<td colspan="8">` — is not a
+  // header cell, so it is dropped and the pair still joins for free with the note in the caption once.
+  const td = build(headWith(`<td colspan="3">${note}</td>`));
+  const tdJoin = joinInCode(td);
+  assert.ok("html" in tdJoin, JSON.stringify(tdJoin));
+  assert.equal(verifyJoin(td, tdJoin.html), null);
+  assert.equal([...tdJoin.html.matchAll(/In millions/g)].length, 1, tdJoin.html);
+
+  // The `<th>` spelling stays, and the reason is about the note and not the header block.
+  const th = build(headWith(`<th colspan="3">${note}</th>`));
+  const thJoin = joinInCode(th);
+  assert.ok("html" in thJoin, JSON.stringify(thJoin));
+  assert.equal(verifyJoin(th, thJoin.html), "note_shipped_twice");
+});
+
 test("a note the joined table keeps in its caption and prints as a row as well is shipped twice", () => {
   // Rule 6 says of the second half's repeat "drop it, and do not also copy it in under rule 1", and
   // nothing read that half of the rule. Every check here treated a note row as an EXCUSE for a note
