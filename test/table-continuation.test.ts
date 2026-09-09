@@ -642,6 +642,35 @@ test("a note the merge kept as a row is not a note the merge lost", () => {
   assert.equal(verifyJoin(pair, neither), "labels_lost:1");
 });
 
+test("a caption note the merge demoted into a row has not been kept", () => {
+  // The hole in counting any note row as proof of keeping. Both halves print the note in the caption —
+  // the placement page.md asks for — and the merge strips the caption and emits it as a row instead.
+  // That is not a note kept, it is a note DEMOTED into the phantom row page.md forbids in as many
+  // words: a <td> invents a cell of data the page never printed, a <th> names a column that does not
+  // exist. All three shapes below are what #374's census counts as harm, two of the twelve being
+  // exactly a <thead>-closing row. joinInCode never demotes, so this is the Copy Editor's shape —
+  // rule 6's "belongs once, at the top" reads as licence for the row while rule 4 asks for the caption,
+  // and a model satisfying one rule and not the other must not clear the check.
+  const note = "[In millions of dollars]";
+  const first = `<table><caption>Table 5.—Debt ${note}</caption>${HEAD}<tbody>${dataRow("Alabama")}</tbody></table>`;
+  const second = `<table><caption>Table 5.—Debt—Continued</caption>${HEAD}<tbody>${dataRow("Vermont")}</tbody></table>`;
+  const pair = onePair(first + second);
+  const rows = `${dataRow("Alabama")}${dataRow("Vermont")}`;
+  assert.ok(![...pair.first.labels, ...pair.second.labels].includes(note), "no half printed it as a row");
+
+  // As a data row, as a row closing <thead>, and as a <th> row: the three the review of this PR ran.
+  for (const demoted of [
+    `<table><caption>Table 5.—Debt</caption>${HEAD}<tbody>${noteRow(note)}${rows}</tbody></table>`,
+    `<table><caption>Table 5.—Debt</caption><thead><tr><th scope="col">Col 1</th><th scope="col">Col 2</th><th scope="col">Col 3</th></tr>${noteRow(note)}</thead><tbody>${rows}</tbody></table>`,
+    `<table><caption>Table 5.—Debt</caption>${HEAD}<tbody><tr><th colspan="3">${note}</th></tr>${rows}</tbody></table>`,
+  ]) {
+    assert.equal(verifyJoin(pair, demoted), "caption_note_lost", demoted.slice(0, 90));
+  }
+
+  // The same note left where the page printed it clears, so this refuses the demotion and not the join.
+  assert.equal(verifyJoin(pair, `<table><caption>Table 5.—Debt ${note}</caption>${HEAD}<tbody>${rows}</tbody></table>`), null);
+});
+
 test("a fullwidth-bracketed note is a note in both readers, or it ships twice", () => {
   // One arm writes ［Percentage distribution］ with fullwidth brackets — 1 of the 68 delimited notes in
   // #374's corpus. It is read because the cost is a character class, and because the two readers have

@@ -331,7 +331,10 @@ Rules, in order of importance:
    dollars]") belongs once, at the top. Keep the first and drop the repeat. The two halves need not
    print it in the same place: where the first half already carries that note in its caption and the
    second prints it as a full-width row, the row is the repeat — drop it, and do not also copy it in
-   under rule 1. One note, once, and in the caption if that is where the first half has it.
+   under rule 1. One note, once, and in the caption if that is where the first half has it. Never the
+   other way about: a note a half printed in its caption does not become a row of the joined table. A row
+   holding it invents a cell of data the page never printed, and "at the top" above means the top of the
+   table's own name and not a first row of data.
 
 DECLINE if these are not two halves of one table — different columns that no single header block
 describes, or two different tables whose captions merely look alike. Declining costs nothing: the
@@ -492,16 +495,30 @@ export function verifyJoin(pair: ContinuationPair, merged: string): string | nul
   // caption carries — so the check is one the prompt can satisfy, which is what makes refusing the
   // right answer rather than a dead end.
   //
-  // What counts as KEPT is the note anywhere in the joined table that a reader meets it as the table's
-  // own — its caption, or a surviving note row. Reading the caption alone refused the mirror of the pair
-  // rule 6 now joins for free: the first half printing the note as a ROW and the second in its caption
-  // leaves the row in the merged table, nothing lost, and a caption-only reading called that a loss.
-  // Both placements are reachable — #374's census has the note inside the caption on 56 arm-pages and
-  // outside it on 12 — so the pair whose halves disagree about which is a shape to expect and not one to
-  // construct.
+  // What counts as KEPT is the joined caption, or a note row that some half PRINTED as a row. Reading
+  // the caption alone refused the mirror of the pair rule 6 now joins for free: the first half printing
+  // the note as a ROW and the second in its caption leaves the row in the merged table, nothing lost,
+  // and a caption-only reading called that a loss. Both placements are reachable — #374's census has the
+  // note inside the caption on 56 arm-pages and outside it on 12 — so the pair whose halves disagree
+  // about which is a shape to expect and not one to construct.
+  //
+  // "Printed as a row" and not "is a row in the answer", which is the weaker thing this asked at first
+  // and is a hole rather than a licence: a note that arrived in a caption and left as a row has been
+  // DEMOTED into the phantom row `page.md` forbids in as many words — a `<td>` invents a cell of data
+  // the page never printed, a `<th>` names a column that does not exist — and counting any note row as
+  // proof of keeping would pass exactly that, including the `<thead>`-closing form the census counts as
+  // harm. `joinInCode` never demotes, so the shape is the Copy Editor's: rule 6's "belongs once, at the
+  // top" can be read as licence for the row while rule 4 asks for the caption, and a model that
+  // satisfies one and not the other must not clear this.
+  //
+  // The distinction is already on the pair, because a note row's text is that row's label — which is why
+  // a merge dropping the note row reports `labels_lost` and not this. A note in no half's labels is a
+  // note no half printed as a data row.
+  const printedAsRow = new Set([...pair.first.labels, ...pair.second.labels]);
   const rowNotes = [...tables[0].querySelectorAll("tr")]
     .filter(isUnitNoteRow)
-    .map((r) => normalizeCell(r.textContent ?? ""));
+    .map((r) => normalizeCell(r.textContent ?? ""))
+    .filter((n) => printedAsRow.has(n));
   const kept = new Set([...captionNotes(joined.caption), ...rowNotes]);
   const owed = new Set([...captionNotes(pair.first.caption), ...captionNotes(pair.second.caption)]);
   if ([...owed].some((n) => !kept.has(n))) return "caption_note_lost";

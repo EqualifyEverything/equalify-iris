@@ -3540,10 +3540,15 @@ keeps the first half's caption and discards the second's — and `p049`/`p050` a
 that shape. A refusal costs one editor call rather than the table: the pair goes on to the Copy
 Editor, whose rule 4 asks for the note either half's caption carries.
 
-A note counts as kept where a reader meets it as the table's own: in the joined caption, or as a
-surviving note row. Reading the caption alone refused the mirror of the pair rule 6 joins for free —
-the note a ROW on the first half and a caption note on the second, where the row survives the merge
-and nothing is lost.
+A note counts as kept in the joined caption, or as a note row that one of the halves **printed** as a
+row. Reading the caption alone refused the mirror of the pair rule 6 joins for free — the note a ROW
+on the first half and a caption note on the second, where the row survives the merge and nothing is
+lost. Reading any note row in the answer is the opposite hole: a note that arrived in a caption and
+left as a row has been demoted into the phantom row `page.md` forbids, `<thead>`-closing form
+included, and counting it as proof of keeping would clear exactly that. `joinInCode` never demotes,
+so the shape is the Copy Editor's — rule 6's "belongs once, at the top" can be read as licence for
+the row while rule 4 asks for the caption. The distinction is already on the pair: a note row's text
+is that row's label, so a note in no half's labels is a note no half printed as a row.
 
 Both bracket widths are read, ASCII and fullwidth, and the parenthesised spelling is not — a check
 demanding every parenthesised run survive would demand the survival of `(continued`, which rule 4
