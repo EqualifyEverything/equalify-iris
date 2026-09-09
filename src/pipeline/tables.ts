@@ -553,17 +553,32 @@ export function verifyJoin(pair: ContinuationPair, merged: string): string | nul
   //     which are the two harms `page.md` names.
   //
   // So a note in the title caption is owed the joined CAPTION and nothing else will do, and only a note
-  // carried by the discarded caption may be answered by a row. The title caption is the first half's,
-  // or the second half's where the first has none — which is rule 4, and what `joinInCode` does.
+  // carried by the discarded caption may be answered by a row. Two reasons rather than one, because a
+  // decline is all a run log has: `caption_note_struck` is a note gone from the caption the join was
+  // told to copy, whether or not it turned up elsewhere, and `caption_note_lost` is a note in neither
+  // the joined caption nor a row some half printed. Both point at rule 4 and the repair is the same
+  // sentence, so this buys the log and not the model.
+  //
+  // The title caption is the first half's, or the second half's where the first has none. That is rule
+  // 4, and it is NOT the same predicate `joinInCode` branches on: this reads the caption's normalized
+  // TEXT and `joinInCode` asks whether the caption ELEMENT is there. They part over one shape, a first
+  // half whose `<caption>` holds markup and no text — where `joinInCode` keeps that empty caption and
+  // imports nothing, so `no_caption` above answers the pair before any of this is reached, and on the
+  // editor's path falling to the second half's caption is what rule 4 asks for anyway. No outcome turns
+  // on the difference; it is written out because the two readings are easy to state as one and this
+  // check has been wrong three times in a comment that did exactly that.
   //
   // The strict half cannot refuse a code join, because that path copies the title caption verbatim
-  // minus the marker, so every note in it survives by construction. What it costs is exactly an editor
-  // answer that struck a note out of the caption it was told to copy.
+  // minus the marker, so every note in it survives by construction — `stripMarker` eats only a run
+  // introduced by `[—–\-(]`, and the one caption where that could take a note with it is a marker
+  // printed INSIDE the brackets (`[In millions of dollars—Continued]`), which the lenient half already
+  // refused before this existed because the delimiters are compared as printed. What the strict half
+  // costs is exactly an editor answer that struck a note out of the caption it was told to copy.
   //
   // What all of this compares is a note's text, the block it sits in, and which caption owed it —
   // nothing finer. A note moved within one block is invisible here, and so is a `<td>` note row
   // delivered as a `<th>` one: `page.md` forbids both spellings of the row, but the note in them has
-  // not been lost, and `caption_note_lost` is the wrong reason to refuse a table over. A refusal of the
+  // not been lost, and neither reason above is the right one to refuse a table over. A refusal of the
   // EDITOR's answer ships both halves split, so a reason that names the wrong defect buys a split table
   // and points the repair at the wrong rule.
   const printedAsRow = new Set([...pair.first.noteRows, ...pair.second.noteRows].map(noteKey));
@@ -574,7 +589,7 @@ export function verifyJoin(pair: ContinuationPair, merged: string): string | nul
     .map((n) => n.text);
   const inCaption = captionNotes(joined.caption);
   const titleNotes = captionNotes(pair.first.caption !== "" ? pair.first.caption : pair.second.caption);
-  if ([...titleNotes].some((n) => !inCaption.has(n))) return "caption_note_lost";
+  if ([...titleNotes].some((n) => !inCaption.has(n))) return "caption_note_struck";
   const kept = new Set([...inCaption, ...rowNotes]);
   const owed = new Set([...captionNotes(pair.first.caption), ...captionNotes(pair.second.caption)]);
   if ([...owed].some((n) => !kept.has(n))) return "caption_note_lost";

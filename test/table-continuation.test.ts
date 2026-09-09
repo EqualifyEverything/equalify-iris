@@ -385,12 +385,16 @@ test("a joined caption may not drop the note of measure the first half's caption
   const [pair] = continuationPairs(body).pairs;
   assert.equal(pair.first.caption, titled, "the fixture is not the case being tested");
 
-  assert.equal(verifyJoin(pair, goodJoin("Table 1.—Income", STATES, REST)), "caption_note_lost");
+  // `caption_note_struck` and not `caption_note_lost`: the note was in the caption rule 4 says to copy,
+  // so it was struck out of it, and a run log that could not tell that from a note gone from the table
+  // altogether would send a reader to the wrong half of this check. Both refuse and both point at rule
+  // 4 — the split buys the log, not the model.
+  assert.equal(verifyJoin(pair, goodJoin("Table 1.—Income", STATES, REST)), "caption_note_struck");
   // And it does not refuse the right answer: the note kept, the continuation marker gone.
   assert.equal(verifyJoin(pair, goodJoin(titled, STATES, REST)), null);
 
   // The reason a failed pair reports is the dearest loss and not this one. A merge that dropped the
-  // note AND lost rows says `rows_lost`: the note is the cheapest of the five losses to take, and
+  // note AND lost rows says `rows_lost`: the note is the cheapest of the losses to take, and
   // reported first it would mask the one worth reading. Only the reported string differs — every one
   // of them refuses the join — so this is what a human debugging `table_join_failed` sees.
   const alsoShort = goodJoin("Table 1.—Income", STATES, REST.slice(0, 1));
@@ -664,7 +668,7 @@ test("a caption note the merge demoted into a row has not been kept", () => {
     `<table><caption>Table 5.—Debt</caption><thead><tr><th scope="col">Col 1</th><th scope="col">Col 2</th><th scope="col">Col 3</th></tr>${noteRow(note)}</thead><tbody>${rows}</tbody></table>`,
     `<table><caption>Table 5.—Debt</caption>${HEAD}<tbody><tr><th colspan="3">${note}</th></tr>${rows}</tbody></table>`,
   ]) {
-    assert.equal(verifyJoin(pair, demoted), "caption_note_lost", demoted.slice(0, 90));
+    assert.equal(verifyJoin(pair, demoted), "caption_note_struck", demoted.slice(0, 90));
   }
 
   // The same note left where the page printed it clears, so this refuses the demotion and not the join.
@@ -695,7 +699,7 @@ test("a note row a half printed inside <thead> was printed by somebody", () => {
   const plain = `<table><caption>Table 6.—Shares—Continued</caption>${HEAD}<tbody>${dataRow("Vermont")}</tbody></table>`;
   const demotedPair = onePair(promoted + plain);
   const demoted = `<table><caption>Table 6.—Shares</caption>${HEAD}<tbody>${noteRow(other)}${dataRow("Alabama")}${dataRow("Vermont")}</tbody></table>`;
-  assert.equal(verifyJoin(demotedPair, demoted), "caption_note_lost");
+  assert.equal(verifyJoin(demotedPair, demoted), "caption_note_struck");
 });
 
 test("a note row printed in the header block and delivered as a cell of data has been moved, not kept", () => {
@@ -715,10 +719,10 @@ test("a note row printed in the header block and delivered as a cell of data has
 
   const rows = `${dataRow("Alabama")}${dataRow("Vermont")}`;
   const demoted = `<table><caption>Table 5.—Debt</caption>${HEAD}<tbody>${noteRow(note)}${rows}</tbody></table>`;
-  assert.equal(verifyJoin(pair, demoted), "caption_note_lost");
+  assert.equal(verifyJoin(pair, demoted), "caption_note_struck");
   // The <th> spelling of the same invention — page.md names a column that does not exist for this one.
   const asTh = `<table><caption>Table 5.—Debt</caption>${HEAD}<tbody><tr><th colspan="3">${note}</th></tr>${rows}</tbody></table>`;
-  assert.equal(verifyJoin(pair, asTh), "caption_note_lost");
+  assert.equal(verifyJoin(pair, asTh), "caption_note_struck");
   // And the answer rule 4 asks for on this pair clears, so what is refused above is the placement and
   // not the pair: a check no answer can satisfy would decline this shape for good.
   const inCaption = `<table><caption>Table 5.—Debt ${note}</caption>${headNote}<tbody>${rows}</tbody></table>`;
@@ -769,9 +773,9 @@ test("a row on the other half does not excuse a note struck out of the caption t
 
   const rows = `${dataRow("Alabama")}${dataRow("Vermont")}`;
   const demoted = `<table><caption>Table 6.—Shares</caption>${HEAD}<tbody>${noteRow(note)}${rows}</tbody></table>`;
-  assert.equal(verifyJoin(pair, demoted), "caption_note_lost");
+  assert.equal(verifyJoin(pair, demoted), "caption_note_struck");
   const asTh = `<table><caption>Table 6.—Shares</caption>${HEAD}<tbody><tr><th colspan="3">${note}</th></tr>${rows}</tbody></table>`;
-  assert.equal(verifyJoin(pair, asTh), "caption_note_lost");
+  assert.equal(verifyJoin(pair, asTh), "caption_note_struck");
   // The free path's own answer on this pair is the one rule 4 asks for — the second half's row dropped
   // as rule 6's repeat, the note kept in the caption — so nothing the code produces is newly refused.
   const coded = joinInCode(pair);
@@ -800,7 +804,7 @@ test("a first half with no caption of its own has no title caption to be strict 
 
   const rows = `${noteRow(note)}${dataRow("Alabama")}${dataRow("Vermont")}`;
   const struck = `<table><caption>Table 7.—Grants</caption>${HEAD}<tbody>${rows}</tbody></table>`;
-  assert.equal(verifyJoin(pair, struck), "caption_note_lost");
+  assert.equal(verifyJoin(pair, struck), "caption_note_struck");
   const kept = `<table><caption>Table 7.—Grants ${note}</caption>${HEAD}<tbody>${rows}</tbody></table>`;
   assert.equal(verifyJoin(pair, kept), null);
 });

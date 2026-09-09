@@ -3339,7 +3339,7 @@ reprinted with the header and belongs in the joined table once. Those figures we
 the merge meets should shift from a repeated full-width row to a repeated caption, and rule 6's
 forgiveness of the promoted row should get rarer rather than staying at the rate measured here.
 Either way the note has to survive the merge — as a row it is held by the label and row checks, and
-in the caption by `caption_note_lost`.
+in the caption by `caption_note_struck` and `caption_note_lost`.
 
 Where one of those judgements is real the merge is a Copy Editor call (`copy_editor_table_join.md`
 in the agent ledger); where it is not — three of the editor's six rules are "move these bytes and
@@ -3528,9 +3528,17 @@ arrived rather than failing the phase, the way the lint one step later reports i
 header block came back as `<td>`, which axe does not report and which would have removed the header
 association from the one table this stage exists to improve), `rows_lost`, `labels_lost:<n>` (a
 bracketed unit note the merge moved from a row into the caption counts as kept, because the label
-check reads `th,td` and would otherwise refuse the very drop rule 6 licenses), `caption_note_lost`
-(the joined caption dropped a bracketed note of measure that EITHER half's caption carried — part of
-the table's name, and invisible to every other check here, which read cells, columns and rows).
+check reads `th,td` and would otherwise refuse the very drop rule 6 licenses), `caption_note_struck`
+(a bracketed note of measure went from the caption rule 4 says to **copy**, whether or not it turned
+up elsewhere in the table) and `caption_note_lost` (a note EITHER half's caption carried is in neither
+the joined caption nor a row some half printed). Both are part of the table's name going missing, and
+both are invisible to every other check here, which read cells, columns and rows.
+
+Two reasons rather than one because a decline is all a run log has, and the two send a reader to
+different places: the first to the caption the merge was told to copy, the second to whether a row
+survived. They ask for the same repair, so the split buys the log and not the model — and every
+`caption_note_struck` in a log is necessarily an editor answer, since the free path copies that caption
+verbatim.
 
 `caption_note_lost` reads both halves' captions while rule 6's repeat set reads only the first
 half's, because those answer different questions: what the merge may **drop** is a repeat and not a
@@ -3579,7 +3587,15 @@ printed it: nothing moved, and that is the pair rule 6 joins for free. A note in
 rule 4 says to copy, and the other half having printed the same note as a row does not make that a move
 of nothing. So a note in the title caption is owed the joined caption and nothing else will do, and only
 a note the discarded caption carried may be answered by a row. The title caption is the first half's, or
-the second half's where the first has none, which is rule 4 and what `joinInCode` does.
+the second half's where the first has none, which is rule 4.
+
+That is **not** the same predicate `joinInCode` branches on, and stating the two as one would be the
+fourth comment on this check to claim an invariant it does not hold. The verification reads the
+caption's normalized **text**; `joinInCode` asks whether the caption **element** is there. They part
+over one shape — a first half whose `<caption>` holds markup and no text — where `joinInCode` keeps
+that empty caption and imports nothing, so the merged caption normalizes to `""` and `no_caption`
+answers the pair before any note check runs; on the editor's path, falling to the second half's caption
+is what rule 4 asks for anyway. No outcome turns on the difference.
 
 That strict half cannot refuse a code join, because that path copies the title caption verbatim minus
 the marker and every note in it survives by construction. What it costs is exactly an editor answer that
@@ -3587,7 +3603,7 @@ struck a note out of the caption it was told to copy.
 
 What all of it compares is a note's text, the block it sits in and which caption owed it, and nothing
 finer. A note moved within one block is invisible here, and so is a `<td>` note row delivered as a `<th>` one: `page.md` forbids both
-spellings, but the note in them has not been lost and `caption_note_lost` is the wrong reason to
+spellings, but the note in them has not been lost and neither reason above is the right one to
 refuse a table over. Refusing the **editor's** answer ships both halves split, so a reason naming the
 wrong defect buys a split table and points the repair at the wrong rule.
 
@@ -3612,8 +3628,10 @@ in the reference corpus is a note of measure, so a reason for the disagreement w
 distinction drawn on no measured pair.
 
 The order is only which reason a failed pair reports, since every one of them refuses the join, and
-`caption_note_lost` is last on purpose: a merge that dropped the note *and* lost rows should say
+the two note reasons are last on purpose: a merge that dropped the note *and* lost rows should say
 `rows_lost`, because the note is the cheapest of these losses and would otherwise mask the dearest.
+Between the two, `caption_note_struck` reports first, so a merge that struck the title caption's note
+and lost another note says the one naming the caption it was told to copy.
 
 The document keeps **both halves byte for byte**, so every failure here delivers the output the
 pipeline had before this stage existed, which is what makes the merge safe to ask a model for at

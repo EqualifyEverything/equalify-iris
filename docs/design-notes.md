@@ -430,8 +430,8 @@ Places where a decision was left open, and where v1 intentionally stops:
   reprinted with the header and belongs in the joined table once. That last figure counts the note as
   a full-width ROW, which is how it arrived before `page.md` said where it goes; the page rule now
   puts it inside the `<caption>`, and a joined caption that drops it is refused as
-  `caption_note_lost`. Only three of the editor's six
-  rules hold a judgement, though — the other three are "move these bytes and change nothing" — so the
+  `caption_note_struck` or `caption_note_lost`, by which caption carried it. Only three of the
+  editor's six rules hold a judgement, though — the other three are "move these bytes and change nothing" — so the
   join is **tried in code first** and stands down wherever the judgement is real. Measured on 50
   pairs read out of already-delivered documents, 26 join with no model call and no output tokens, and
   `verifyJoin` refuses none of what the code path produces (#276). The 24 that stand down are 17
