@@ -388,6 +388,13 @@ test("a joined caption may not drop the note of measure the first half's caption
   assert.equal(verifyJoin(pair, goodJoin("Table 1.—Income", STATES, REST)), "caption_note_lost");
   // And it does not refuse the right answer: the note kept, the continuation marker gone.
   assert.equal(verifyJoin(pair, goodJoin(titled, STATES, REST)), null);
+
+  // The reason a failed pair reports is the dearest loss and not this one. A merge that dropped the
+  // note AND lost rows says `rows_lost`: the note is the cheapest of the five losses to take, and
+  // reported first it would mask the one worth reading. Only the reported string differs — every one
+  // of them refuses the join — so this is what a human debugging `table_join_failed` sees.
+  const alsoShort = goodJoin("Table 1.—Income", STATES, REST.slice(0, 1));
+  assert.equal(verifyJoin(pair, alsoShort), "rows_lost");
 });
 
 test("a parenthesised caption note is not held, because the marker rule needs that shape dropped", () => {
@@ -556,6 +563,35 @@ test("a bracketed unit note the first half prints too is dropped once, and any o
   assert.equal(verifyJoin(pair, joined.html), null, "the note this dropped is a row verifyJoin wants");
 
   assert.deepEqual(joinInCode(onePair(first + other)), { reason: "note_repeat_unclear" });
+});
+
+test("the halves need not print the unit note in the same place for it to be a repeat", async () => {
+  // The mixed pair, which `page.md` asking for the note in the <caption> is what makes reachable: the
+  // first half carries the note under its title, the second still prints it as a full-width row. That
+  // is one note printed twice, and judging rule 6 on the note ROWS alone called it a note the first
+  // half does not carry — `note_repeat_unclear`, which declines the free join and buys a Copy Editor
+  // call for a pair with no judgement in it. Worse on the model path: rule 6 licensed no drop, rule 1
+  // says copy every data row, so the sound reading shipped the note in the caption AND as a phantom
+  // row, which is the harm the page rule exists to remove.
+  const note = noteRow("[In millions of dollars]");
+  const first = `<table><caption>Table 5.—Debt [In millions of dollars]</caption>${HEAD}<tbody>${dataRow("Alabama")}</tbody></table>`;
+  const second = `<table><caption>Table 5.—Debt—Continued</caption>${HEAD}<tbody>${note}${dataRow("Vermont")}</tbody></table>`;
+
+  const pair = onePair(first + second);
+  const joined = joinInCode(pair);
+  assert.ok("html" in joined, JSON.stringify(joined));
+  // The row is gone and the caption's copy is the one that survived — one note, once, where the first
+  // half had it.
+  assert.equal(
+    joined.html,
+    `<table><caption>Table 5.—Debt [In millions of dollars]</caption>${HEAD}<tbody>${dataRow("Alabama")}${dataRow("Vermont")}</tbody></table>`,
+  );
+  assert.equal(verifyJoin(pair, joined.html), null, "the free path must not trip its own caption check");
+
+  // And the asymmetry is deliberate: a note only the CONTINUED half carries is a first appearance and
+  // not a repeat, so folding in the second half's caption would license dropping it.
+  const onlySecond = `<table><caption>Table 5.—Debt</caption>${HEAD}<tbody>${dataRow("Alabama")}</tbody></table>`;
+  assert.deepEqual(joinInCode(onePair(onlySecond + second)), { reason: "note_repeat_unclear" });
 });
 
 test("an id inside the note row rule 6 drops has not survived the join", async () => {

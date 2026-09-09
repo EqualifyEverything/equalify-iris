@@ -3393,7 +3393,10 @@ continued page is wider than the first half already is, so appending it would pu
 header block that does not describe them — reached where the continued page reprinted no header at
 all, which is the case the header comparison above cannot see), `note_repeat_unclear` (the
 continued page opens with a bracketed unit note the first half does not carry, so it is not the
-reprint rule 6 licenses dropping), `caption_unclear` / `no_caption_available` (the continuation
+reprint rule 6 licenses dropping — "carry" reads the first half's note ROWS **and** its caption,
+because `page.md` asks for the note in the `<caption>` and the two halves need not agree on where
+they print it; the reverse is not a repeat, since a note only the continued half carries is a first
+appearance), `caption_unclear` / `no_caption_available` (the continuation
 marker is not wholly inside one text node, so taking it off means rewriting markup; or neither
 half has a caption, which the verification requires), `content_outside_table` (a half's span
 parses to something beside its own table — the parser fosters a stray `<p>` out of a `<table>` and
@@ -3520,12 +3523,18 @@ halves not to be one table, `no_output` for a reply with no HTML in it, `truncat
 and overflows on a body nested a few hundred thousand levels deep, which is reachable because
 `anchors.ts` delivers a page past 500 levels as written; the document then ships exactly as it
 arrived rather than failing the phase, the way the lint one step later reports its own overflow as
-`@lint-unavailable`), or one of the verification failures — `not_one_table`, `no_caption`,
-`still_continued`, `caption_note_lost` (the joined caption dropped a bracketed note of measure the
-first half's caption carried — part of the table's name, and invisible to every other check here,
-which read cells, columns and rows), `columns_lost`, `header_cells_lost` (the merged header block
-came back as `<td>`, which axe does not report and which would have removed the header association
-from the one table this stage exists to improve), `rows_lost`, `labels_lost:<n>`.
+`@lint-unavailable`), or one of the verification failures, in the order they are checked —
+`not_one_table`, `no_caption`, `still_continued`, `columns_lost`, `header_cells_lost` (the merged
+header block came back as `<td>`, which axe does not report and which would have removed the header
+association from the one table this stage exists to improve), `rows_lost`, `labels_lost:<n>` (a
+bracketed unit note the merge moved from a row into the caption counts as kept, because the label
+check reads `th,td` and would otherwise refuse the very drop rule 6 licenses), `caption_note_lost`
+(the joined caption dropped a bracketed note of measure the first half's caption carried — part of
+the table's name, and invisible to every other check here, which read cells, columns and rows).
+
+The order is only which reason a failed pair reports, since every one of them refuses the join, and
+`caption_note_lost` is last on purpose: a merge that dropped the note *and* lost rows should say
+`rows_lost`, because the note is the cheapest of these losses and would otherwise mask the dearest.
 
 The document keeps **both halves byte for byte**, so every failure here delivers the output the
 pipeline had before this stage existed, which is what makes the merge safe to ask a model for at

@@ -327,7 +327,10 @@ Rules, in order of importance:
    reader the figures with nothing to read them in.
 5. Keep <th scope="rowgroup"> group headers where either half has them, in place.
 6. A bracketed unit note that both halves repeat as a full-width row (e.g. "[In millions of
-   dollars]") belongs once, at the top. Keep the first and drop the repeat.
+   dollars]") belongs once, at the top. Keep the first and drop the repeat. The two halves need not
+   print it in the same place: where the first half already carries that note in its caption and the
+   second prints it as a full-width row, the row is the repeat — drop it, and do not also copy it in
+   under rule 1. One note, once, and in the caption if that is where the first half has it.
 
 DECLINE if these are not two halves of one table — different columns that no single header block
 describes, or two different tables whose captions merely look alike. Declining costs nothing: the
@@ -428,24 +431,6 @@ export function verifyJoin(pair: ContinuationPair, merged: string): string | nul
   // table BEFORE it — a wrong join, and a loop that never runs out of pairs. Rule 4 of the prompt,
   // enforced because termination depends on it.
   if (CONTINUED_CAPTION.test(joined.caption)) return "still_continued";
-  // A note of measure inside the caption ("[In millions of dollars]") is part of the table's name, and
-  // rule 4 says to keep it. Checked rather than only asked for, because nothing else here can see it
-  // go: `labels_lost` reads cells, `columns_lost` reads columns, `rows_lost` reads rows, and a joined
-  // caption holding the bare title passes all three while handing a reader the figures and nothing to
-  // read them in. The shape only became reachable when the page agent was told to put the note in the
-  // caption at all — before that it arrived as a full-width row, which is rule 6's case and is covered
-  // by the label and row checks above.
-  //
-  // Read on SQUARE brackets, which is how 61 of the 68 delimited notes in #374's corpus are printed.
-  // The parenthesised spelling (6 of the 68) is deliberately not read: `CONTINUED_CAPTION` matches
-  // "(continued", so demanding that every parenthesised run survive would demand the one run rule 4
-  // requires to be dropped. A note printed with no delimiter at all (3 arm-pages, unanimous across
-  // arms, so it is the ink) is not separable from the title by any string test and is not reached
-  // here. Keyed on the FIRST half's caption, because that is the one `joinInCode` copies and the one
-  // rule 4 calls the table's own title.
-  const captionNotes = (c: string) => new Set((c.match(/\[[^\]]+\]/g) ?? []).map((n) => normalizeCell(n)));
-  const kept = captionNotes(joined.caption);
-  if ([...captionNotes(pair.first.caption)].some((n) => !kept.has(n))) return "caption_note_lost";
   const cols = Math.max(pair.first.cols, pair.second.cols);
   if (joined.cols < cols) return "columns_lost";
   // A table whose header cells all came back as `<td>` is a data table with no headers, which is the
@@ -470,8 +455,28 @@ export function verifyJoin(pair: ContinuationPair, merged: string): string | nul
   // first cell, because a join that adds a column legitimately moves the label along one, and a
   // guard that refuses that would refuse the repair it exists to protect.
   const cells = new Set([...tables[0].querySelectorAll("th,td")].map((c) => normalizeCell(c.textContent ?? "")));
+  // A unit note the merge moved out of a row and into the CAPTION is not a lost label, and without
+  // this it read as one: a note row is a data row, so its bracketed text is the row's label, and
+  // `cells` is read off `th,td` and never sees a caption. The mixed pair rule 6 now resolves — the
+  // note in the first half's caption, still a row in the second — drops that row on purpose, so this
+  // check would have refused exactly the join above it just made. Bounded to the bracketed runs the
+  // joined caption actually carries: a row label that is not a bracketed run, or one whose note the
+  // caption does not hold, is missing as before.
+  for (const note of captionNotes(joined.caption)) cells.add(note);
   const lost = [...new Set([...pair.first.labels, ...pair.second.labels])].filter((l) => !cells.has(l));
   if (lost.length > 0) return `labels_lost:${lost.length}`;
+  // A note of measure inside the caption ("[In millions of dollars]") is part of the table's name, and
+  // rule 4 says to keep it. Checked rather than only asked for, because nothing else here can see it
+  // go: the checks above read cells, columns and rows, and a joined caption holding the bare title
+  // passes every one of them while handing a reader the figures and nothing to read them in. The shape
+  // only became reachable when `page.md` was told to put the note in the caption at all — before that
+  // it arrived as a full-width row, which is rule 6's case and is held by the label and row checks.
+  //
+  // LAST of the five, and deliberately, because the reason is what a failed pair reports: a merge that
+  // dropped the note AND lost rows should say `rows_lost`. This is the cheapest of the losses and it
+  // would otherwise mask the dearest.
+  const kept = captionNotes(joined.caption);
+  if ([...captionNotes(pair.first.caption)].some((n) => !kept.has(n))) return "caption_note_lost";
   return null;
 }
 
@@ -508,6 +513,24 @@ function isUnitNoteRow(row: Element): boolean {
   const cells = [...row.children];
   if (cells.length !== 1) return false;
   return /^\[.*\]$/.test(normalizeCell(cells[0].textContent ?? ""));
+}
+
+// The same note as `isUnitNoteRow` finds, in the other place a half can print it: inside the caption
+// under the title, which is where `page.md` now asks for it. Returned as a set of the bracketed runs
+// so a note the FIRST half carries in its caption and the second half repeats as a row is recognisable
+// as one note in two spellings — `isUnitNoteRow` matches a cell that is wholly `[...]`, and the run
+// this pulls out of a caption carries its brackets too, so the two agree without either normalizing
+// the other's shape away. Read by `verifyJoin`, which will not let a joined caption lose one, and by
+// `joinInCode`, which counts one as grounds to drop the second half's repeat.
+//
+// SQUARE brackets, and that is a collision rather than a preference: `CONTINUED_CAPTION` matches
+// "(continued", so reading parenthesised runs too would make a kept-note check demand the survival of
+// the one run rule 4 requires to be dropped. In #374's corpus the bracketed spelling is 61 of 68
+// delimited notes and the parenthesised one 6. A note printed with no delimiter at all — 3 arm-pages,
+// unanimous across the arms that read them, so it is the ink and not a model's invention — is not
+// separable from the title by any string test and is reached by nothing here.
+function captionNotes(caption: string): Set<string> {
+  return new Set((caption.match(/\[[^\]]+\]/g) ?? []).map((n) => normalizeCell(n)));
 }
 
 // The header block written as a string that changes whenever anything a reader would notice about it
@@ -813,8 +836,18 @@ export function joinInCode(pair: ContinuationPair): { html: string } | { reason:
   // imported whole above and brought its id with it.
   if (fcap !== null && !moveId(scap, fcap)) return { reason: "id_would_be_lost" };
 
-  // Rule 6's repeats are judged against the first half's own note rows.
+  // Rule 6's repeats are judged against the note the first half already carries — in a row, or in its
+  // CAPTION, which is where `page.md` now asks for it. Both, because the two halves need not agree: a
+  // pair whose first half puts the note under the title and whose second half still prints it as a
+  // full-width row is one note printed twice, and reading only the rows would call it a note the first
+  // half does not carry. That answer is `note_repeat_unclear`, which declines the free join and buys a
+  // Copy Editor call for a pair with nothing to judge — and the placements do vary within one arm
+  // (#374's census: 56 of 68 in the caption, 12 outside it), so the disagreement is reachable as soon
+  // as the page rule lands. What is NOT folded in is the second half's caption: a note only the
+  // continued half carries says something about the continued rows, and rule 6 licenses dropping a
+  // repeat rather than a first appearance.
   const fNotes = new Set(frows.filter(isUnitNoteRow).map((r) => normalizeCell(r.textContent ?? "")));
+  for (const note of captionNotes(fcap?.textContent ?? "")) fNotes.add(note);
 
   // Where the second half's rows go: the first half's last `<tbody>`, or the table itself when it
   // has none. Appending to the element the first half's data rows already live in is what keeps rule
