@@ -611,6 +611,27 @@ test("a compound whose tail is a word the document uses is left for the model, c
   ]);
 });
 
+test("a tail word that lives only in an attribute still refuses the join", () => {
+  // The reading side of this file skips attributes, and applied to the tail condition that skip removes a
+  // GUARD rather than a signal: the failure is a printed compound closed up, which is the one outcome the
+  // condition exists to prevent. An `alt` is prose a screen reader speaks, so a bare `state` there is the
+  // document using the word. Measured against the corpus before widening it — no join on those 1,221
+  // files turns on this, so it costs nothing and removes a way to do damage.
+  const alt = [`<p>The inter-state figure.</p><img src="m.png" alt="Shaded by state.">`, `<p>interstate</p>`];
+  assert.deepEqual(joinBrokenWords(alt).pages, alt, "an alt-text tail did not protect its compound");
+  assert.deepEqual(joinBrokenWords(alt).joined, []);
+  // Every quoted value, not just `alt`, because the guard's job is to find a reason to refuse and a
+  // `class="state"` is still somebody writing the word. Over-refusal is the direction to fail in here.
+  const cls = [`<p>The inter-state figure.</p><td class="state">x</td>`, `<p>interstate</p>`];
+  assert.deepEqual(joinBrokenWords(cls).pages, cls);
+  // Attribute NAMES are markup and not text, so a `colspan` does not put `colspan` in the guard: a
+  // `col-span` broken at a line end is still joined.
+  const names = [`<p>A col-span of two.</p><td colspan="2">x</td>`, `<p>The colspan is two.</p>`];
+  assert.deepEqual(joinBrokenWords(names).joined, [
+    { split: "col-span", written: "colspan", evidence: "colspan" },
+  ]);
+});
+
 test("a break with no whole spelling anywhere is left alone, so a joined form from nowhere is impossible", () => {
   // `valorem` is no word and no document prints `advalorem`, so the tail condition ALONE would close
   // `ad-valorem` into a spelling no printing contains. Corroboration is what stops it, which is why
@@ -691,6 +712,27 @@ test("script, style, pre and code content is not prose, and is not rewritten", (
       "one word, and it came from the prose",
     );
   }
+});
+
+test("a class name is not a spelling the document prints, so script and style cannot corroborate", () => {
+  // The evidence side is the narrow index, and this is why: `evidence` goes into the log line as the
+  // document's own spelling, and a reader spot-checking it has to be able to find it. A `.crosshatch`
+  // selector or a `var crosshatch` is author metadata — nothing on the page shows those characters — so
+  // licensing a join with one both changes text on no evidence and names evidence that is not there.
+  for (const metadata of [`<style>.crosshatch { fill: grey }</style>`, `<script>var crosshatch = 1;</script>`]) {
+    const pages = [`<p>Cross-hatch fill.</p>`, metadata];
+    assert.deepEqual(joinBrokenWords(pages).pages, pages, metadata);
+    assert.deepEqual(joinBrokenWords(pages).joined, []);
+  }
+  // `pre` and `code` are deliberately NOT dropped: a listing is text the document shows, so a `crosshatch`
+  // in one is a spelling it prints. The asymmetry with the WRITE side above is the point — that side
+  // refuses to edit a listing, this side is willing to read one.
+  assert.deepEqual(joinBrokenWords([`<p>Cross-hatch fill.</p>`, `<pre><code>crosshatch</code></pre>`]).joined, [
+    { split: "Cross-hatch", written: "Crosshatch", evidence: "crosshatch" },
+  ]);
+  // And an unclosed `<style>` takes the rest of the document with it rather than leaking its selectors
+  // into the index, which is the conservative direction for a licence.
+  assert.deepEqual(joinBrokenWords([`<p>Cross-hatch fill.</p>`, `<style>.crosshatch { fill: grey }`]).joined, []);
 });
 
 test("every occurrence is rewritten and reported once, and a two-hyphen word is neither", () => {

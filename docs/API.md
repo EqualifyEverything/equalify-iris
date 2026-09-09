@@ -4528,6 +4528,15 @@ Three conditions have to hold together, and each stops a different mistake.
    the page. Not theoretical — without this condition, 7 of the 36 joins measured over #334's corpus are
    words the page step had already raised.
 
+**Conditions 1 and 2 read the document at different widths, on purpose.** Condition 1 *licenses* a join,
+so it is the narrow one — the text a reader is shown, with `script` and `style` content dropped, because a
+`.crosshatch` selector is author metadata and the third field of this line has to name a spelling somebody
+can find on the page. Condition 2 *refuses* one, so it is the wide one — prose plus every quoted attribute
+value, because a bare `state` that lives only in an `alt` is still the document using the word, and a
+guard that cannot see it closes up `inter-state`. A word missing from the first index leaves a hyphen; a
+word missing from the second closes a compound the printing owns. Widening the second costs zero joins
+across #334's 1,221 page files, measured.
+
 The words this pass declines stay with `page_split_words` and its correction call. Nothing is asked
 twice, and nothing is answered twice.
 
@@ -4536,8 +4545,10 @@ It runs after the page-break prose join, which is the only place it can: before 
 word broken across a **line** are settled by the same pass, and the hyphen
 [`prose_joined`](#prose_joined)'s `word_splits` records as kept is the input to it.
 
-**Prose only**, on the same reasoning `page_split_words` gives for not reading attributes: a repair that
-writes into attribute values is a repair that can reach an `href`. `script`, `style`, `pre` and `code`
+**Written into prose only**, on the same reasoning `page_split_words` gives for not reading attributes: a
+repair that writes into attribute values is a repair that can reach an `href`. Reading one is a different
+act from writing one, which is the asymmetry above: an attribute value is enough to refuse a join and never
+enough to license one. `script`, `style`, `pre` and `code`
 are skipped for the neighbouring reason — a hyphen in a code listing is a flag, not a line break, and a
 reader has to be able to copy it. One line can therefore stand for a word closed in the body while the
 same word keeps its hyphen inside a long `alt` on the same page: measured, not hypothetical, on a

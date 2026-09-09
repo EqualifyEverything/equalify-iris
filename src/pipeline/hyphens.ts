@@ -249,6 +249,32 @@ const MARKUP = /<!--[\s\S]*?(?:-->|$)|<(?:[^>"']|"[^"]*"|'[^']*')*>/g;
 const OPENS_OPAQUE = /^<(script|style|pre|code)\b/i;
 const CLOSES_OPAQUE = /^<\/(script|style|pre|code)\b/i;
 
+// The two elements whose text the document does not SHOW, dropped from the evidence index — a class name
+// in a `<style>` block or an identifier in a `<script>` is author metadata, and `evidence` in the log line
+// has to name something a reader spot-checking it can find on the page. `pre` and `code` are deliberately
+// not here: a listing is text the document shows, so a `foobar` in one is a spelling it prints. `textOf`
+// itself is unchanged, because it is shared with `splitWordContradictions` and narrowing it would quietly
+// change what that check has always compared. Zero joins on the 1,221-file corpus turn on this.
+//
+// Running to end-of-input when the closing tag never comes, on `COMMENT`'s `(?:-->|$)` reasoning and the
+// `walk` below's: an unterminated `<style>` already makes every following character opaque to the WRITE
+// side, so letting its selectors into the evidence index is the one combination that would license a join
+// on text nothing shows. It swallows the rest of the DOCUMENT here and the rest of one PAGE there, which
+// is a divergence in the conservative direction on both sides — fewer joins, never more.
+const NOT_SHOWN = /<(script|style)\b[\s\S]*?(?:<\/\1\s*>|$)/gi;
+// Quoted attribute values as text, for the guard and never for the evidence. `alt` is prose a screen
+// reader speaks, so a bare `state` living only there is still the document using the word — and a guard
+// that cannot see it closes up `inter-state`, which is the one outcome the tail condition exists to
+// prevent. Values and not attribute NAMES: a value is text somebody wrote, `colspan` is markup. Also zero
+// cost on that corpus, measured, which is why it is a fix rather than a documented limit.
+function attributeText(html: string): string {
+  let out = "";
+  for (const [tag] of html.matchAll(MARKUP)) {
+    for (const m of tag.matchAll(/"([^"]*)"|'([^']*)'/g)) out += ` ${m[1] ?? m[2] ?? ""}`;
+  }
+  return out;
+}
+
 // #334's remaining hyphen axis: a word the printing broke at a line end, carried into the markup with
 // its hyphen, where the page it landed on never writes the word whole. `splitWordContradictions` is
 // blind to it by construction — its evidence is one page's own two spellings — and the comment at the
@@ -305,9 +331,12 @@ const CLOSES_OPAQUE = /^<\/(script|style|pre|code)\b/i;
 //    the rewrite below only walks the text between tags. That is not hypothetical: on one measured arm
 //    `Cross-hatch` occurs eight times, three in body text and five inside long `alt` descriptions, and
 //    only the three move. The alternative is rewriting attribute values, which is how a repair reaches
-//    an `href`, so the mismatch is the price. Nothing downstream reads it as a new defect either —
-//    `textOf` drops attributes, so the contradiction check above cannot see the `alt` copy in the first
-//    place. One attribute makes that mismatch a WCAG failure rather than an inconsistency: a visible
+//    an `href`, so the mismatch is the price. An attribute value is therefore READ by the tail guard and
+//    never WRITTEN by the rewrite, which is the asymmetry the two indexes below exist for: a word in an
+//    `alt` is enough to refuse a join and never enough to license one. Nothing downstream reads the
+//    leftover as a new defect either — `textOf` drops attributes, so the contradiction check above cannot
+//    see the `alt` copy in the first place. One attribute makes that mismatch a WCAG failure rather than
+//    an inconsistency: a visible
 //    label joined beside an `aria-label` or `title` that keeps its hyphen no longer has its visible text
 //    contained in its accessible name (2.5.3), and no gate here catches it, because axe's
 //    `label-content-name-mismatch` is experimental and outside `runOnly` (lint.ts). It is latent rather
@@ -334,7 +363,14 @@ const CLOSES_OPAQUE = /^<\/(script|style|pre|code)\b/i;
 // dictionary built from the pages that happen to have finished would give a different document run to
 // run. This one is built from the whole assembled body.
 export function joinBrokenWords(pages: string[]): { pages: string[]; joined: JoinedWord[] } {
-  const whole = wholeWords(textOf(pages.join("\n\n")));
+  const document = pages.join("\n\n");
+  // Two indexes over the same document, at two widths, because the two questions they answer fail in
+  // opposite directions. Evidence LICENSES a join, so it is the narrow one: only what the document shows.
+  // The tail GUARD refuses one, so it is the wide one: anything that might be a word, wherever it sits.
+  // A word missing from the first leaves a hyphen; a word missing from the second closes a compound the
+  // printing owns, which is what the second condition exists to prevent, so the two cannot share a width.
+  const whole = wholeWords(textOf(document.replace(NOT_SHOWN, " ")));
+  const guard = wholeWords(textOf(document) + attributeText(document));
   const joined: JoinedWord[] = [];
   const seen = new Set<string>();
   // A word spelled with an entity hyphen (`Govern&#45;ment`) is not a `WORD` match at all, so it is
@@ -355,7 +391,7 @@ export function joinBrokenWords(pages: string[]): { pages: string[]; joined: Joi
         if (own.has(closed)) return word;
         const evidence = whole.get(closed);
         if (evidence === undefined) return word;
-        if (whole.has(tail.toLowerCase())) return word;
+        if (guard.has(tail.toLowerCase())) return word;
         const written = word.replace("-", "");
         // One entry per word, not per occurrence, on `splitWordAudit`'s reasoning: a document that broke
         // `Compos-ite` in four cells had one spelling settled, and all four are rewritten either way.
