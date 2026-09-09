@@ -5,6 +5,7 @@ import { stripDeprecatedRoles, stripInvalidRoles, type RoleStrip, type InvalidRo
 import { stripNestedMain, type MainStrip } from "./landmarks.ts";
 import { joinContinuedTables } from "./tables.ts";
 import { joinPageBreakProse, type ProseJoinReport } from "./prose.ts";
+import { joinBrokenWords, type JoinedWord } from "./hyphens.ts";
 import { stripPositionalMarkers, type MarkerReport } from "./markers.ts";
 import type { Fragment } from "./fragment.ts";
 import type { PipelineContext } from "./context.ts";
@@ -14,6 +15,11 @@ export interface AssemblyResult {
   body: string; // body content only (what the review loop edits)
   lint: LintResult;
 }
+
+// How many joined words `assembly_words_joined` spells out. Larger than `prose.ts`'s five because these
+// are single words rather than sentence fragments and a whole-document pass has more of them to show,
+// and bounded for the same reason: the list is text out of the user's document going into a log.
+const MAX_JOINED_LOGGED = 20;
 
 // Join page fragments in order into clean body content — no provenance comments
 // in the delivered HTML. Per-page provenance is preserved in fragments.json.
@@ -63,6 +69,7 @@ export function assembleBodyWithReport(fragments: Fragment[]): {
   mains: MainStrip;
   prose: ProseJoinReport;
   markers: MarkerReport;
+  words: JoinedWord[];
 } {
   const ordered = [...fragments].sort((a, b) => a.order - b.order);
   const { pages, report } = namespaceAnchors(ordered.map((f) => ({ order: f.order, innerHtml: f.innerHtml.trim() })));
@@ -98,7 +105,30 @@ export function assembleBodyWithReport(fragments: Fragment[]): {
   // run over those bytes further down.
   const markers = stripPositionalMarkers(kept);
   const prose = joinPageBreakProse(kept.map((p, i) => ({ ...p, html: markers.pages[i]! })));
-  const joined = stripDeprecatedRoles(prose.pages.join("\n\n"));
+  // And the hyphen the prose join deliberately kept, where the rest of the document decides it. That
+  // join names this pass without naming it — "whether the hyphen can be decided after all is a
+  // separate question", "the one datum that lets a later pass decide the hyphen with evidence" — and
+  // AFTER it is the only place the pass can run: before the seam closes, "Simi-" and "larly" are two
+  // whole words in two paragraphs, which is the shape `hyphens.ts` documents itself as blind to.
+  //
+  // Here rather than in `runAssembly` for the reproduction argument the lint disclosure rests on: what
+  // is linted has to be `wrapDocument(assembleBody(fragments))`, so a pass that changes the delivered
+  // text belongs on this side of that call. It is pure, so it does not weaken the claim.
+  //
+  // Before the role strips and after the marker strip, and the ordering is immaterial in both
+  // directions rather than merely untested: those passes read and write attribute tokens, this one
+  // rewrites text between tags, and neither can see the other's characters.
+  //
+  // It takes the pages APART rather than joined, because two of its three conditions need the page
+  // boundary: the evidence has to come from the document and not from the page carrying the hyphen,
+  // which is what keeps it off the ground `splitWordContradictions` already covers with the image in
+  // hand. Joining first would erase exactly that distinction.
+  //
+  // A page being delivered byte for byte (`skipped_pages`) is edited here too, on the marker strip's
+  // reasoning above rather than the prose join's: this rewrites text between tags and reserializes
+  // nothing, so it cannot depend on the parse the page's bytes disagree with.
+  const words = joinBrokenWords(prose.pages);
+  const joined = stripDeprecatedRoles(words.pages.join("\n\n"));
   // And a role that is not a role at all, on the same argument one step further (roles.ts, #345).
   // After the deprecated pass rather than before it only for reading order: the two look at
   // disjoint sets of tokens — every role ARIA deprecates is still a valid role — so neither pass
@@ -113,6 +143,7 @@ export function assembleBodyWithReport(fragments: Fragment[]): {
     mains,
     prose: prose.report,
     markers: markers.report,
+    words: words.joined,
   };
 }
 
@@ -554,8 +585,22 @@ export async function runAssembly(
   fragments: Fragment[],
   opts: { unresolved?: string[] } = {},
 ): Promise<AssemblyResult> {
-  const { body: joinedPages, anchors, deprecatedRoles, invalidRoles, mains, prose, markers } =
+  const { body: joinedPages, anchors, deprecatedRoles, invalidRoles, mains, prose, markers, words } =
     assembleBodyWithReport(fragments);
+  // Logged before anything else can fail, because this pass CHANGED THE TEXT the pages delivered and
+  // an unlogged text edit is one no reader of the run can find. Each entry names the broken spelling,
+  // what replaced it, and the occurrence elsewhere that licensed it — the third field is the one that
+  // makes the line checkable rather than merely informative, since a reader is asking whether the
+  // document really contains the whole spelling somewhere.
+  // Bounded on `prose_joined`'s reasoning eleven lines down (`MAX_EXAMPLES`, prose.ts): the count is the
+  // figure, the list is the evidence a reader spot-checks, and an OCR-garbled submission is what a cap
+  // is for. `count` is always the whole of it, so a truncated list never understates the change.
+  if (words.length) {
+    ctx.log.event("assembly_words_joined", {
+      count: words.length,
+      words: words.slice(0, MAX_JOINED_LOGGED).map((w) => `${w.split} -> ${w.written} (document writes ${w.evidence})`),
+    });
+  }
   // A table the source printed across a page break arrives here as two tables, and this is the
   // first moment both halves exist in one string — each page was extracted alone, so the agent that
   // wrote the second half had nothing to append to (#239). The join belongs on THIS side of the

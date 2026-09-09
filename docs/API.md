@@ -974,8 +974,8 @@ The events worth grepping for have a section each below, and the index is a link
 the index when you have a `type` off a log line and want to know what it means; read a section when
 you want to know what the field it names is for and what it costs.
 
-**The index is the whole log.** `src/` emits **117** event types and every one of them has a section
-below — **112** sections, because a few cover a pair of events that are only read together. So a
+**The index is the whole log.** `src/` emits **118** event types and every one of them has a section
+below — **113** sections, because a few cover a pair of events that are only read together. So a
 `type` you cannot find here is not one the index skipped: it is a misread line, or a name `src/` no
 longer emits.
 
@@ -1073,6 +1073,7 @@ emits fails it too.
 | [`editor_navigation`](#editor_navigation) | The structures a reader navigates by, on a reply that was **adopted** |
 | [`assembly`](#assembly) | The pages were joined into one body, and the first lint of it |
 | [`assembly_anchors`](#assembly_anchors) | What namespacing the pages' `id`s cost |
+| [`assembly_words_joined`](#assembly_words_joined) | A word broken at a line end was closed up, and what licensed it |
 | [`deprecated_roles_stripped`](#deprecated_roles_stripped) | A deprecated ARIA role was removed from an element that already said it |
 | [`invalid_roles_stripped`](#invalid_roles_stripped) | A `role` naming something that is **not an ARIA role at all** was removed |
 | [`page_main_stripped`](#page_main_stripped) | A `<main>` a page emitted for its own content was taken out of the body |
@@ -4498,6 +4499,84 @@ other pages renamed away from.
 
 Whether a reference lands in the bytes that ship is measured on the delivered document
 ([`internal_links`](#internal_links)), not here.
+
+### `assembly_words_joined`
+
+A word the printing broke at a line end, carried into the markup with its hyphen, **rewritten without
+it** — written only when something was rewritten, so an ordinary run adds no line. Each entry reads
+`Govern-ment -> Government (document writes government)`: the spelling that stood, what replaced it,
+and the unhyphenated occurrence elsewhere in the document that licensed the change.
+
+**This line is the only trace, and it reports a change to delivered TEXT** rather than to markup,
+which no other assembly line does. Read the third field first: it is the evidence, and a reader
+checking this line is asking whether the document really writes the whole spelling somewhere. If it
+does not, the join is wrong and the log is where that is visible.
+
+Three conditions have to hold together, and each stops a different mistake.
+
+1. **The joined spelling appears somewhere in the document.** Without it, `ad-valorem` would be closed
+   into an `advalorem` no page prints.
+2. **The fragment after the hyphen is not a word the document uses on its own.** Without it, every
+   compound whose document also prints the closed form gets closed, which is why `inter-state`,
+   `non-tax`, `non-farm`, `Mid-east` and `Non-property` are never touched here. A compound joins words,
+   so a hyphen whose right-hand side is not a word cannot be a compound joint — and that is the whole of
+   what makes this one decidable without the image.
+3. **The joined spelling is not on the page carrying the hyphen.** That page is
+   [`page_split_words`](#page_split_words)'s ground: it raises exactly this shape, the page agent answers
+   it holding the image, and it is explicitly allowed to answer "the page really does print both
+   spellings" and change nothing. Joining it here would revoke that answer from a pass that never saw
+   the page. Not theoretical — without this condition, 7 of the 36 joins measured over #334's corpus are
+   words the page step had already raised.
+
+**Conditions 1 and 2 read the document at different widths, on purpose.** Condition 1 *licenses* a join,
+so it is the narrow one — the text a reader is shown, with `script` and `style` content dropped, because a
+`.crosshatch` selector is author metadata and the third field of this line has to name a spelling somebody
+can find on the page. Condition 2 *refuses* one, so it is the wide one — prose plus every attribute
+value, quoted or bare and with entities decoded, plus any **quote pair** or `name=value` run **anywhere in
+the markup, comments included**, because a bare `state` that lives only in an `alt` is still the document
+using the word, and a guard that cannot see it closes up `inter-state`. A pair rather than a quoted span,
+because two apostrophes in ordinary prose are a pair: only comment prose with neither a pair nor an `=` is
+outside the width. A comment can suppress a join and never license one, which is the direction to fail in,
+and two classes of comment reach this pass — a model-written one inside a page fragment, and Iris's own
+`@page-failed` comment (see [`page_extraction_failed`](#page_extraction_failed)), which is the whole body of
+its fragment and carries up to 300 characters of provider error text. The `@` markers of a delivered
+document are not among them: `wrapDocument` appends those after this pass has run. A word missing
+from the first index leaves a hyphen; a word missing from the second closes a compound the printing owns.
+Widening the second costs zero joins across #334's 1,221 page files, measured.
+
+Condition 3 reads a **third** width, and it is neither of those: `script` and `style` content in, attribute
+values out, which is `page_split_words`' own width exactly. That is what makes the condition decline
+precisely the words that step raises. A closed spelling living only in an `alt` on the hyphen's page
+therefore does not trip it — `page_split_words` cannot see that `alt` either, so nothing was asked about
+the word and nothing is being reversed.
+
+The words this pass declines stay with `page_split_words` and its correction call. Nothing is asked
+twice, and nothing is answered twice.
+
+It runs after the page-break prose join, which is the only place it can: before that seam closes,
+`Simi-` and `larly` are two whole words in two paragraphs. So a word broken across a **page** and a
+word broken across a **line** are settled by the same pass, and the hyphen
+[`prose_joined`](#prose_joined)'s `word_splits` records as kept is the input to it.
+
+**Written into prose only**, on the same reasoning `page_split_words` gives for not reading attributes: a
+repair that writes into attribute values is a repair that can reach an `href`. Reading one is a different
+act from writing one, which is the asymmetry above: an attribute value is enough to refuse a join and never
+enough to license one. `script`, `style`, `pre` and `code`
+are skipped for the neighbouring reason — a hyphen in a code listing is a flag, not a line break, and a
+reader has to be able to copy it. One line can therefore stand for a word closed in the body while the
+same word keeps its hyphen inside a long `alt` on the same page: measured, not hypothetical, on a
+map-heavy arm where `Cross-hatch` occurs eight times and only the three in body text move. Nothing
+downstream reads that leftover as a defect, because `page_split_words` does not examine attributes
+either — but one attribute makes it a WCAG failure rather than an inconsistency. A visible label joined
+beside an `aria-label` or `title` that keeps its hyphen no longer has its visible text contained in its
+accessible name (2.5.3), and no gate here catches it: axe's `label-content-name-mismatch` is
+experimental and outside the `runOnly` list. It is latent rather than live, because `agents/page.md`
+tells the page agent not to put printed text in an `aria-label` at all.
+
+**`words` is capped at 20 spellings; `count` is not.** Bounded on the same reasoning as
+[`prose_joined`](#prose_joined)'s examples — the count is the figure, the list is what a reader
+spot-checks, and an OCR-garbled submission is what a cap is for — so a truncated list never understates
+how much text changed.
 
 ### `deprecated_roles_stripped`
 
