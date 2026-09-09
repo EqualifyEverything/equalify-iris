@@ -3530,7 +3530,9 @@ arrived rather than failing the phase, the way the lint one step later reports i
 `@lint-unavailable`), or one of the verification failures, in the order they are checked —
 `not_one_table`, `no_caption`, `still_continued`, `columns_lost`, `header_cells_lost` (the merged
 header block came back as `<td>`, which axe does not report and which would have removed the header
-association from the one table this stage exists to improve), `rows_lost`, `labels_lost:<n>` (a
+association from the one table this stage exists to improve — counted over the cells that describe
+columns, so a bracketed note row printed inside the block is not one of them and carrying it into the
+caption as rule 6 asks costs nothing here), `rows_lost`, `labels_lost:<n>` (a
 bracketed unit note the merge moved from a row into the caption counts as kept, because the label
 check reads `th,td` and would otherwise refuse the very drop rule 6 licenses), `caption_note_lost` (a
 note EITHER half's caption carried is in neither the joined caption nor a row some half printed),
@@ -3655,22 +3657,25 @@ anchor belongs on the surviving markup is rule 2's reading for the editor; and m
 repeat in one join declines as `note_repeats_exceed_licence`, because past that the verification would
 answer `rows_lost` — a reason about rows for a note the caption still carries.
 
-One spelling of the repeat row is deliberately **not** dropped there and still arrives here: a `<th>`
-note row inside `<thead>`. Dropping that takes a header **cell** with it, and `header_cells_lost` is
-asked before any note reason, so the log would name the header block collapsing for a note's sake and
-point the repair at rule 3. Left in place, the pair reaches `note_shipped_twice` — the same refusal it
-got before the drop existed, with the reason naming the note. It costs no join that was free, because
-nothing dropped that row before either. The `<td>` spelling of the same row is not a header cell, is
-dropped, and is the one the census measured: `p068` closes its `<thead>` with `<td colspan="8">`.
+Both spellings of that repeat row are dropped, `<td>` and `<th>`, and that took `header_cells_lost`
+being asked on the right cells first. A bracketed note row inside the header block is **not** a header
+cell — `read`'s `headerCells` skips it whichever tag it used — because rule 6 tells the editor to carry
+that note into the caption once and print no row for it, so counting its `<th colspan>` made the check
+refuse the answer the prompt asks for. On the corpus's own ink: of the two phantom `<thead>` rows the
+census located, `p068` spells it `<td colspan="8">` and `p029` spells it `<th>`, and 6 of the 8 across
+every round log are `<th>`. Guarding the free path's drop instead — leaving a `<th>` note row in place
+so the reason came out as `note_shipped_twice` — treated this as the code path's problem, and it is not:
+the same count refused an **editor** answer that obeyed rule 6, where the price is not one call but both
+halves shipped split. What the count exists for survives, because a reply that flattened the real column
+headers to `<td>` still loses every one of them.
 
 What all of it compares is a note's text, the block it sits in, which caption owed it, and whether the
 delivered table holds it in two places at once — nothing finer. A note moved within one block is
 invisible here, and so is a `<td>` note row delivered as a `<th>` one: `page.md` forbids both
 spellings, but the note in them has not been lost and none of the reasons above is the right one to
-refuse a table over. Which of the two spellings the **first half** used does decide the reason a
-caption-importing join declines under, per the paragraph above, and that is the one place the
-distinction is visible at all. Refusing the **editor's** answer ships both halves split, so a reason
-naming the wrong defect buys a split table and points the repair at the wrong rule.
+refuse a table over. That now holds for both spellings on every path through this stage, which it did
+not for one commit. Refusing the **editor's** answer ships both halves split, so a reason naming the
+wrong defect buys a split table and points the repair at the wrong rule.
 
 Both bracket widths are read, ASCII and fullwidth, and the parenthesised spelling is not — a check
 demanding every parenthesised run survive would demand the survival of `(continued`, which rule 4

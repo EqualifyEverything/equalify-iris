@@ -434,9 +434,10 @@ Places where a decision was left open, and where v1 intentionally stops:
   caption *and* as a row is refused as `note_shipped_twice`. That last one is why the free path, where
   it imports the continued half's caption because the first half has none, also drops the first half's
   note row that caption now repeats — otherwise the merge manufactures the doubling its own verifier
-  refuses, on a pair whose page printed the note once. It drops the `<td>` spelling of that row, which
-  is the one the census measured, and leaves a `<th>` one inside `<thead>` alone: dropping that takes a
-  header cell with it, and the reason would then name the header block rather than the note. Only three of the
+  refuses, on a pair whose page printed the note once. It drops both spellings of that row, `<td>` and
+  `<th>`: the corpus prints each — `p068`'s `<td colspan="8">` and `p029`'s `<th>` — and a note row
+  inside the header block does not count as a header cell either way, or `header_cells_lost` would refuse
+  the editor for obeying rule 6 and ship the halves split. Only three of the
   editor's six rules hold a judgement, though — the other three are "move these bytes and change nothing" — so the
   join is **tried in code first** and stands down wherever the judgement is real. Measured on 50
   pairs read out of already-delivered documents, 26 join with no model call and no output tokens, and

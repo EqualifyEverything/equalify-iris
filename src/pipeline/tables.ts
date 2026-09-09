@@ -110,6 +110,15 @@ export interface TablePiece {
   // The count is the block's cells and not every `<th>` in the table, so that it says one thing: a
   // table with a `<th scope="row">` per data row would otherwise scale this with its row count and
   // report a lost ROW as a lost header.
+  //
+  // A bracketed unit note row inside the block does not count, whichever tag it used, and that is not
+  // a detail: rule 6 of the merge prompt tells the editor to carry that note into the caption once and
+  // print no row for it, so counting its `<th colspan>` as a header cell made `header_cells_lost`
+  // refuse the answer the prompt asks for — on the corpus's own ink, since one of the two phantom
+  // `<thead>` rows the census found spells it `<th>` (`p029`) and 6 of the 8 across every round log do.
+  // Refusing the EDITOR's answer ships both halves split, so this counted a note row out of the header
+  // block at the price of a table. What the count is for survives: a reply that flattened the real
+  // column headers to `<td>` still loses every one of them.
   headerRows: number;
   headerCells: number;
   // The bracketed note rows this half printed: for each, its text and whether the half printed it
@@ -207,7 +216,7 @@ function read(table: Element, span?: { start: number; end: number }, html = ""):
     ),
     headerRows: rows.filter(isHeaderRow).length,
     headerCells: rows
-      .filter(isHeaderRow)
+      .filter((r) => isHeaderRow(r) && !isUnitNoteRow(r))
       .reduce((n, r) => n + [...r.children].filter((c) => c.tagName === "TH").length, 0),
     labels: rows
       .filter((r) => !isHeaderRow(r))
@@ -609,19 +618,18 @@ export function verifyJoin(pair: ContinuationPair, merged: string): string | nul
   // editor call and shipped split if that call declined. That is fixed where it is made, by dropping the
   // row the imported caption now repeats, and not by an exemption here; the same rule 6 licence, applied
   // one step earlier, and a pair that would need more drops than the licence allows declines there too.
-  // One spelling of that row is deliberately NOT dropped there and still arrives here: a `<th>` note row
-  // inside `<thead>`, because dropping it takes a header cell with it and `header_cells_lost` is asked
-  // before any note reason, so the log would name the header block for a note's sake. Left in place, that
-  // pair reaches `note_shipped_twice` — the same refusal it got before the drop existed, with the reason
-  // naming the note. It costs no join that was free: nothing dropped it before either.
+  // Both spellings of that row are dropped, `<td>` and `<th>`, which took `header_cells_lost` being
+  // asked on the right cells first — see `read`. Guarding the drop instead, so a `<th>` note row stayed
+  // and this answered `note_shipped_twice`, treated the collision as the free path's problem: the same
+  // count refused an EDITOR answer that carried the note into the caption exactly as rule 6 asks, and
+  // there the price is not one call, it is both halves shipped split.
   //
   // What all of this compares is a note's text, the block it sits in, which caption owed it, and whether
   // the delivered table holds it in two places at once — nothing finer. A note moved within one block is
   // invisible here, and so is a `<td>` note row delivered as a `<th>` one: `page.md` forbids both
   // spellings of the row, but the note in them has not been lost, and none of these reasons is the right
-  // one to refuse a table over. Which of the two spellings the FIRST half used does decide the reason a
-  // caption-importing join declines under, per the paragraph above, and that is the one place the
-  // distinction is visible at all. A refusal of the EDITOR's answer ships both halves split, so a reason
+  // one to refuse a table over — which is now true of the two spellings on every path here, and was not
+  // for one commit. A refusal of the EDITOR's answer ships both halves split, so a reason
   // that names the wrong defect buys a split table and points the repair at the wrong rule.
   const printedAsRow = new Set([...pair.first.noteRows, ...pair.second.noteRows].map(noteKey));
   const joinedNoteRows = [...tables[0].querySelectorAll("tr")]
@@ -1019,13 +1027,12 @@ export function joinInCode(pair: ContinuationPair): { html: string } | { reason:
     const importedNotes = captionNotes(made.textContent ?? "");
     for (const row of frows) {
       if (!isUnitNoteRow(row) || !importedNotes.has(normalizeCell(row.textContent ?? ""))) continue;
-      // Not a row that would take a header CELL with it. `header_cells_lost` is asked before any note
-      // reason and counts `<th>` in header rows, so dropping a `<th colspan>` note row out of `<thead>`
-      // reports a header block collapsing — rule 3's defect — for a drop rule 6 licensed. Left in place
-      // instead, which is the pair `verifyJoin` then refuses as `note_shipped_twice`: the same refusal as
-      // before this drop existed, with the reason naming the note. The `<td>` spelling of the same phantom
-      // row is not a header cell and is dropped, and that is the one the census measured (`p068`).
-      if (isHeaderRow(row) && [...row.children].some((c) => c.tagName === "TH")) continue;
+      // Both spellings of the row are dropped, `<td>` and `<th>`, and the note reasons below are what
+      // judges the result. This needed `read`'s `headerCells` to stop counting a note row's `<th>` as a
+      // header cell first: `header_cells_lost` is asked before any note reason, so while it did, dropping
+      // a `<th colspan>` note row out of `<thead>` reported a header block collapsing — rule 3's defect —
+      // for a drop rule 6 licensed. Guarding the drop here was the wrong half of that: the same count
+      // refused the EDITOR's rule-6-obedient answer too, and there the price is a split table.
       // An id inside that row has nowhere to go, and nothing else would say so: the id checks at the end
       // read the SECOND half's ids against the finished table, because this is the only place a FIRST
       // half's row is dropped. Declined rather than moved — where a footnote anchor belongs on the

@@ -841,37 +841,40 @@ test("a first half with no caption of its own has no title caption to be strict 
   assert.deepEqual(joinInCode(onePair(first + twice)), { reason: "note_repeats_exceed_licence" });
 });
 
-test("the free join leaves the repeat row alone where dropping it would take a header cell", () => {
-  // That drop is a shape test, and one shape it must not touch: the note printed as a `<th>` row inside
-  // `<thead>`. `header_cells_lost` counts `<th>` cells in header rows and is asked before any note
-  // reason, so dropping that row points a maintainer at the header block collapsing for a note's sake.
-  // Left in place, the pair declines as `note_shipped_twice` instead — which is what it declined as
-  // before this drop existed, so no join that was free is lost, and the reason names the note.
-  const note = "[In millions of dollars]";
-  const headWith = (cell: string) =>
-    `<thead><tr><th scope="col">Col 1</th><th scope="col">Col 2</th><th scope="col">Col 3</th></tr><tr>${cell}</tr></thead>`;
-  const build = (head: string) => {
-    const first = `<table>${head}<tbody>${dataRow("Alabama")}</tbody></table>`;
-    const cap = `<caption>Table 8.—Aid ${note}—Continued</caption>`;
-    const second = `<table>${cap}${head}<tbody>${dataRow("Vermont")}</tbody></table>`;
-    const pair = onePair(first + second);
-    assert.equal(pair.first.caption, "", "the fixture is not the caption-importing case");
-    return pair;
-  };
+test("a note row inside the header block is not a header cell in either spelling", () => {
+  // The corpus prints that phantom row both ways — `p068`'s `<td colspan="8">` and `p029`'s `<th>`, one
+  // each of the two the census located inside `<thead>`, and 6 of 8 across every round log are `<th>` —
+  // and rule 6 says the same thing about both: carry the note into the caption once, print no row. While
+  // `headerCells` counted the `<th>` one, `header_cells_lost` refused the merge for obeying that, and it
+  // is asked before any note reason, so the log named the header block collapsing. Guarding the free
+  // path's drop is not the fix: the same count refuses the EDITOR's answer, where the price is a split
+  // table rather than one call. So the count is on the cells that describe columns.
+  const note = "[Percentage distribution]";
+  const cols = `<tr><th scope="col">Col 1</th><th scope="col">Col 2</th><th scope="col">Col 3</th></tr>`;
+  const headWith = (cell: string) => `<thead>${cols}<tr>${cell}</tr></thead>`;
 
-  // The spelling the census measured — `p068` closes its `<thead>` with `<td colspan="8">` — is not a
-  // header cell, so it is dropped and the pair still joins for free with the note in the caption once.
-  const td = build(headWith(`<td colspan="3">${note}</td>`));
-  const tdJoin = joinInCode(td);
-  assert.ok("html" in tdJoin, JSON.stringify(tdJoin));
-  assert.equal(verifyJoin(td, tdJoin.html), null);
-  assert.equal([...tdJoin.html.matchAll(/In millions/g)].length, 1, tdJoin.html);
+  for (const cell of [`<td colspan="3">${note}</td>`, `<th colspan="3">${note}</th>`]) {
+    const head = headWith(cell);
+    // The editor's answer first, because that is the expensive path: rule 6 obeyed to the letter.
+    const kept = `<table><caption>Table 9.—Revenue</caption>${head}<tbody>${dataRow("Alabama")}</tbody></table>`;
+    const cont = `<table><caption>Table 9.—Revenue—Continued</caption>${head}<tbody>${dataRow("Vermont")}</tbody></table>`;
+    const paid = onePair(kept + cont);
+    const rule6 = `<table><caption>Table 9.—Revenue ${note}</caption><thead>${cols}</thead><tbody>${dataRow("Alabama")}${dataRow("Vermont")}</tbody></table>`;
+    assert.equal(verifyJoin(paid, rule6), null, cell);
+    // And a reply that dropped a real column header still loses one, which is what the count is for.
+    const flat = `<table><caption>Table 9.—Revenue ${note}</caption><thead><tr><th scope="col">Col 1</th><th scope="col">Col 2</th><td>Col 3</td></tr></thead><tbody>${dataRow("Alabama")}${dataRow("Vermont")}</tbody></table>`;
+    assert.equal(verifyJoin(paid, flat), "header_cells_lost", cell);
 
-  // The `<th>` spelling stays, and the reason is about the note and not the header block.
-  const th = build(headWith(`<th colspan="3">${note}</th>`));
-  const thJoin = joinInCode(th);
-  assert.ok("html" in thJoin, JSON.stringify(thJoin));
-  assert.equal(verifyJoin(th, thJoin.html), "note_shipped_twice");
+    // Then the free path, where the same row is the repeat the imported caption already carries.
+    const capless = `<table>${head}<tbody>${dataRow("Alabama")}</tbody></table>`;
+    const noted = `<table><caption>Table 9.—Revenue ${note}—Continued</caption>${head}<tbody>${dataRow("Vermont")}</tbody></table>`;
+    const free = onePair(capless + noted);
+    assert.equal(free.first.caption, "", "the fixture is not the caption-importing case");
+    const coded = joinInCode(free);
+    assert.ok("html" in coded, `${cell}: ${JSON.stringify(coded)}`);
+    assert.equal(verifyJoin(free, coded.html), null, cell);
+    assert.equal([...coded.html.matchAll(/Percentage distribution/g)].length, 1, coded.html);
+  }
 });
 
 test("a note the joined table keeps in its caption and prints as a row as well is shipped twice", () => {
