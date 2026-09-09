@@ -2676,6 +2676,15 @@ const FRAGMENT_CLOSER = new Set("only alone too also".split(" "));
 // `A heading at the top.` is already pinned as delivered, beside two more of its shape, in
 // `envelope-as-content.test.ts` — the pins that say a widening must defend both halves of each pair.
 function verblessAffirmation(tokens: Word[], i: number): number {
+  // A statement whose WHOLE text is the name is a label, not a statement about the page, and this read
+  // splits statements on `;` and line breaks — so "Blank page; text" and "Page is blank; images;
+  // nothing present." hand it a single word with no determiner, no count and no predicate, and in the
+  // second one the denial is in the next statement where this read cannot see it. `A heading.` and
+  // `Two headings.` still affirm: the article and the count are part of the phrase, so what this bound
+  // excludes is only the bare label. Nothing on disk writes one (0 of 3,747 page logs), and what it
+  // costs is a page whose log says `Text.` and nothing else, which ships empty — the direction this
+  // section is otherwise written to avoid, taken here because a word alone predicates nothing.
+  if (tokens.length === 1) return -1;
   for (let k = i - 1; k >= 0; k--) {
     const { word, comma } = tokens[k]!;
     // A comma between the noun and what precedes it opens a fresh phrase, and the words behind it are

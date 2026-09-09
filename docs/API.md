@@ -1613,12 +1613,15 @@ Either form of the name also reaches a **clause with no verb in it**, which it d
 declared the page blank, because the affirmation is found by handing a name for text the verb that
 predicates over it and a fragment has none to hand it. A fragment is now read on its own — a predicate
 after the noun (`visible`, `present`, `apparent`, `discernible`, the four words the denial reads already
-use for the same dropped copula) or the end of the statement, optionally past a closing `only`.
+use for the same dropped copula) or the end of the statement, optionally past a closer — `only`,
+`alone`, `too` or `also`, read at the end of the statement and nowhere else, so that the `only` in
+`handwriting only in the margin.` is not mistaken for one.
 
 The risk there runs the other way from everything above, because a blank page's own log is written in
 fragments as often as not — 94 of the 204 blank declarations on record have a verbless statement in
 them, and every one of those is a denial. So the noun phrase must **open** its statement, with nothing
-in front of it but a determiner, a count, a qualifier, an `only`, or another name for text or marks.
+in front of it but a determiner, a count, a qualifier, an opener (`only`, `just`, `merely`, `simply`,
+`solely` — `Only handwriting smudges.` is #435's own title), or another name for text or marks.
 That is what keeps `Devoid of text.`, `Lacking text.` and `Free of text.` blank: none of those words is
 in the negator lists this section reads, and each is a page that would otherwise be reported lost. A
 comma is a boundary on both sides of the noun, for a reason the corpus supplies rather than a
@@ -1630,6 +1633,13 @@ What the commas cost is a fragment whose denial stands **behind** its noun: `A s
 else.` is a page with a signature on it, delivered empty. The read that would catch it is the one
 anchored on the denial, and that one only looks forward from the negator. Unchanged by #435 and stated
 rather than left to be re-measured.
+
+A statement that is a name for text and **nothing else** is a label, not a fragment, and does not
+affirm: `Blank page; text`, `Blank page. Content` and `Page is blank; images; nothing present.` all
+stay blank, the last one because its denial is in the next `;`-statement where this read cannot reach
+it. `A heading.` and `Two headings.` still refuse the declaration, the article and the count being part
+of the phrase. What that bound costs is a log whose whole statement is `Text.`, which ships empty; no
+page log on record writes one.
 
 They are two findings with two remedies — a doubt word means the page could not be read and wants
 a better scan, a contradiction means the agent answered with no page for a page it says has

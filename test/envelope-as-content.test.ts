@@ -1935,6 +1935,17 @@ test("a blank page's own fragments are not affirmations (#435)", () => {
   // cannot pick up either, because it only looks forward from the negator. Base delivers this page empty
   // too, so this is a defect left standing and not one bought.
   assert.equal(declaredBlank({ html: "", log: "Page is blank. A signature, nothing else." }), true);
+  // A statement that is the name and nothing else is a label and affirms nothing. Statements split on `;`
+  // and on line breaks as well as on `.`, so these are one word each by the time the read sees them — and
+  // the third is the one that costs something, its denial sitting in the next statement where nothing here
+  // can reach it. Below them, the shapes that keep affirming: an article or a count is part of the phrase.
+  assert.equal(declaredBlank({ html: "", log: "Blank page; text" }), true);
+  assert.equal(declaredBlank({ html: "", log: "Blank page. Content" }), true);
+  assert.equal(declaredBlank({ html: "", log: "Blank page\nhandwriting" }), true);
+  assert.equal(declaredBlank({ html: "", log: "Page is blank; images; nothing present." }), true);
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. A heading." }), false);
+  assert.equal(declaredBlank({ html: "", log: "Page is blank; two headings." }), false);
+  assert.equal(declaredBlank({ html: "", log: "Blank page; text visible" }), false);
 });
 
 // --- blankness the reply STATES, rather than blankness read out of its prose (#371) ---------------
