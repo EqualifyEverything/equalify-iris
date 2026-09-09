@@ -659,6 +659,29 @@ test("the page agent's page-break rule keeps the clauses that make it a rule", (
     // most likely to get the wrong one applied.
     ["and it is written whole, with the column's hyphen dropped",
       /a "condi-" ending one line with "tions" beginning the next is one word split to fit the column — write it whole, "conditions", and do not carry the break into the markup/],
+    // The two cases above are told apart by what the agent can SEE, and the shipped model reads that
+    // as where on the sheet the text stops. Its own log on #374's 100-page round says so twice, in
+    // its own words: "Sentence split across page break: 'rela-' ends left column, 'tive capacity...'
+    // begins right column" calls a column a page break, and "The word 'Fed-eral' at the column break
+    // was printed with a hyphen; kept as 'Fed-eral' per the rule for breaks at the page edge where
+    // the other half is on a sheet not shown" names this rule and takes the wrong branch of it. Both
+    // halves are on the sheet in a two-column page, so the disposition is the LINE one. Pinned
+    // because the checker is nearly blind to it — 1 of 548 problems in that round, on `p098` — so
+    // nothing downstream will report the clause going missing.
+    ["a column's foot is a line break and not a page turn",
+      /A page set in two columns stops its text at the foot of the left column and takes it up again at the head of the right, so a "rela-" ending the left column and a "tive capacity" opening the right is a line break and not a page turn/],
+    // The same case inside a table, which is where every measured instance of it is. A narrow column
+    // head stacks one word over two or three lines, and 68 of them in that round's raw arm output
+    // carry the break into the delivered head on 8 of 91 pages — 44 as a soft hyphen (sonnet-4-6),
+    // 24 as a visible one (kimi-k2.5, shipped), 0 on gpt-5.6-luna, which had the same pages. Most are
+    // repaired downstream: `stripSoftHyphens` removes all 44 and `joinBrokenWords` closes 17 of the
+    // 24. The residue is why the <br> is named here rather than left to the general clause — 4 of the
+    // 7 survivors are `Compos-<br>ite`, `col-<br>lections` and `represent-<br>ative` on `p069`, where
+    // the break is an ELEMENT, `textOf` flattens it to a space, and `WORD` needs a letter
+    // immediately after the hyphen, so neither `splitWordContradictions` nor `joinBrokenWords` can
+    // see the word is broken at all.
+    ["a stacked column head is the same case, with no <br> keeping the printed lines",
+      /A word stacked down a narrow column head is that same case seen sideways — "Con-" over "struc-" over "tion" is one word broken twice to fit the column, and the head is "Construction", with no <br> standing in for the lines it was printed on/],
     // The exception without which the join manufactures a word no page printed, which is what the
     // whole paragraph exists to prevent: "well-" over "being" is "well-being", not "wellbeing".
     // Unmeasured — the corpus evidence is all page-edge — and joining line-broken words is already
@@ -672,7 +695,7 @@ test("the page agent's page-break rule keeps the clauses that make it a rule", (
     // you cannot see is on another sheet and is never transcribed at all; what is kept as printed is
     // your own edge, which is the break whose other half you cannot see.
     ["the summary names the break, not the half that was never transcribed",
-      /Only a break whose other half is on a sheet you cannot see is kept as printed/],
+      /Only a break whose other half is on a sheet you cannot see is kept as printed: the sheet, not the column/],
     ["the fact is declared in the log, for the pass that holds both halves",
       /that this page opens mid-sentence, or ends mid-sentence, with the few words at the edge quoted — because only a pass holding both halves can join them, and your log is what tells it there is a join to be made/],
   ] as [string, RegExp][]) {
@@ -1924,6 +1947,22 @@ test("the page agent's table-naming rule keeps the clauses that make it a rule",
       /where its other tables sit under headings of their own, this heading is the page's doing, and one table out of forty wearing an <h2> is the sign the wrapper is yours/],
     ["and where the document is not in front of it, the page decides on its own printing and logs it",
       /You are shown one page, so where the rest of the document is not in front of you, decide it on what this page prints[\s\S]*?say in the "log" field which you took it to be/],
+    // The rule above named two things printed over a table — the number and the title — and this
+    // corpus prints three. On #374's 100-page round, 77 arm-pages carry a note of measure under the
+    // title ("[In millions of dollars]", "[Percentage distribution]", "[Per capita as a percent of
+    // U.S. average]"), and the prompt decided nothing about it, so the three arms placed it three
+    // ways: 56 of the 68 locatable ones inside <caption> and 12 outside it, 7 of those as a <th> and
+    // 2 as a `<tr><td colspan="8">` closing the <thead> — a row of data the page never printed. Only
+    // gpt-5.6-luna was near-clean on placement (1 of 22), and it is the arm that spelled the note
+    // `［Percentage distribution］` in fullwidth brackets on `p041` and `(Percentage distribution)` on
+    // `p052`, so no arm gets this right unprompted. `docs/API.md` already treats the note as one of
+    // the joins the Copy Editor decides, which is a rule for merging a mark nothing asked for.
+    ["a note of measure under the title is part of the caption",
+      /a note of measure set under it — "\[In millions of dollars\]", "\[Percentage distribution\]", "\[Per capita as a percent of U.S. average\]" — is part of that name too, and goes inside the same <caption> after the title, delimiters as printed/],
+    // The harm named in the terms a reader meets it in, because "put it in the caption" alone reads as
+    // a tidiness rule. Both misplacements it names are measured above.
+    ["and it is not a row of the table, in either element",
+      /It is not a row of the table\. A <td> holding it invents a cell of data the page never printed, a <th> holding it names a column that does not exist/],
   ] as [string, RegExp][]) {
     assert.match(prompt, re, `agents/page.md no longer says: ${what}`);
   }
