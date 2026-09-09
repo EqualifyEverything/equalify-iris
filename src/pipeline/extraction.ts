@@ -1420,12 +1420,88 @@ const MARKS_PHRASE = marksPhrase(true);
 // The same phrase with no slot in it: what a refused slot falls back to, and what this file matched
 // before the slot existed.
 const MARKS_PHRASE_LISTED = marksPhrase(false);
+// What a removed phrase leaves behind. Every strip in `vetoScope` used to leave a bare space, and a
+// space is indistinguishable from the space that was already there — so by the time anything reads the
+// scope, the fact that WORDS WERE CUT OUT OF IT is gone. This is that fact, carried in the one form
+// that no existing read can see.
+//
+// It is a whitespace character on purpose, and that is the whole safety argument. `\f` is in `\s`, so
+// every pattern in this file that puts `\s+` or `[\s/-]+` between two words matches across it exactly
+// as it matched across the space; `[^.!?;\n]` crosses it, so the clause guards reach as far as they
+// did; `words()` starts a token on `[A-Za-z]` and cannot start one on it; `\b` sees a non-word
+// character either way; and `contentAffirmed` splits statements on `[.!?;\n]+`, which it is not in. So
+// the marker moves NOTHING by itself, and that is measured rather than argued: an arm carrying the marker
+// with BOTH reads of it removed fails 2 of this repo's 1,649 tests — the two whose pins are those reads —
+// and moves 0 of the 204 blank declarations on disk. The one read that wants it looks for it in the
+// statement's TEXT rather than in its tokens.
+//
+// Why anything wants it: #440. `Blank page; text` refuses the declaration off a bare noun with no
+// determiner, no count and no predicate, and the obvious guard — a statement of one token is not an
+// assertion — was written and reverted in `c43dff9`, because after this strip `Handwriting smudges.`
+// is also one token, and that phrase is #435's own. One token is not one word, and this is the
+// difference between them.
+//
+// Not the alternative #440 also offers — handing `verblessAffirmation` the raw log beside the scope —
+// because the strip is what every denial read in this section is reasoning about, and a read given both
+// has two answers available and no rule for choosing. This says only what the scope itself lost, where
+// it lost it.
+//
+// A log cannot forge one: `vetoScope` deletes `\f` and `\v` from its input before inserting any.
+const PHRASE_GONE = " \f ";
+// The marks nouns that ONLY THE CAPTURE leaves, which is what decides #439.
+//
+// #439: `Page is blank. Print artifacts are visible.` is reported as a lost page. `print` is a name for
+// text (`TEXT_NOUN` carries `print(?:s|ing|ed)?`), so the slot below hands it back to base — and base
+// removes the mark head and nothing else, leaving the word that was DRESSING that head standing where a
+// subject goes, with the head's own verb behind it. The quote on the failure is `affirmed: "print are
+// visible"`, and the missing noun is what makes two words look like a sentence. Four of the issue's ten
+// wordings predate the slot and predate #438's fragment read (verified against a worktree at `8c9ef0b`:
+// identical before and after), because base leaves the word standing whether or not the slot ever looked
+// at it.
+//
+// The HEAD and not the dresser, which is the opposite of what the issue asked for and is the whole of
+// what this decides. #439 asks for a list of the text words that can dress a mark as capture noise, and
+// `print` cannot be one: `print artifacts` is the scanner's and `print smudges` is smudged printing,
+// which is a page with content on it. That is not an argument, it is a PIN — #431's grid asserts
+// `Page is blank. Only print smudges are visible.` refuses the declaration, for eight names for text
+// against eight more in the other part of speech, and a rule about the dressing word broke one of its
+// sixteen cells. Turned around, the same rule needs no exception for it: `artifact`, `debris` and `dust`
+// are words for what nobody put there, and no wording a person's marks are described with is on the
+// list. `smudges`, `specks`, `dots`, `flecks`, `blemishes` and `marks` all stay where they are, which is
+// #435's own half of this (`handwriting smudges`, `cursive smudges`, `stamped dots`).
+//
+// Which nouns, as a measurement rather than a guess. Over all 3,747 page replies with a log, 76 put a
+// name for text immediately in front of a marks noun as `MARK` defines one, in 81 occurrences of 9
+// spellings, and the head is `artifact(s)` in 74 of them and `dot(s)` in the other 7. So the list covers
+// the head the corpus actually writes, and `printed dot leaders` — a real corpus statement, and
+// typographic CONTENT — keeps the reading it had. Widening the net to bare `mark(s)` and bare `noise`,
+// which `MARK` excludes for #193's reason, adds 9 replies and 8 wordings and moves none of them.
+//
+// What that costs and what it buys, over the same corpus: 0 of the 204 blank declarations on record change
+// verdict, so nothing shipped moves either way; each wording transplanted into a declaration in three
+// frames flips 18 of 51 cells, every one of them an `artifact(s)` head and every one REPORTED -> blank —
+// and every one of the 18 refused on base by a CONTRADICTION, none of them by a doubt word, which is the
+// bound below measured rather than argued. Put any `DEGRADED_IMAGE_LOG` word in front of the phrase
+// (`blurry`, `faint`, `grainy`) and 0 of the 51 flip: all 51 refuse on both arms. The two whole corpus
+// SENTENCES that flip are one of each kind — `Removed three stray dots (printing
+// artifacts/dust specks …)` is a blank page now read as one, and the sentence about an interpunct
+// transcribed as a character is a page with content on it that would now be declared empty. Neither reply
+// declares blank, so both are latent, and the second is the shape of what this can cost.
+//
+// NOT added to `MARK_MODIFIER`, where the mirror image of this idea already lives (`scan`, `scanner`,
+// `scanning`, `dust`, `paper`, `toner`, `ink` are the dressers, these are the heads). That list is read a
+// second time by `CONT_CORE`, as what may CONTINUE a denial after a marks noun, and a wider continuation
+// there exempts more sentences from the veto lists — the direction that loses pages (#190). Read only
+// where the slot hands a name for text back, this can only take an affirmation away, and it takes no
+// veto with it: `artifact`, `debris` and `dust` are in neither `UNREADABLE_LOG` nor
+// `DEGRADED_IMAGE_LOG`, which is pinned rather than asserted.
+const CAPTURE_ONLY_MARK = String.raw`artifacts?|debris|dust`;
 function marksPhraseStrip(match: string, ...groups: unknown[]): string {
   const adjective = (groups[0] ?? groups[1]) as string | undefined;
-  if (adjective === undefined) return " ";
+  if (adjective === undefined) return PHRASE_GONE;
   const word = adjective.toLowerCase();
   // What base does to this same span, which is both the fallback and the test below.
-  const listed = match.replace(MARKS_PHRASE_LISTED, " ");
+  const listed = match.replace(MARKS_PHRASE_LISTED, PHRASE_GONE);
   // A word base itself removed here is not handed back — that would take a strip away rather than add
   // one. Asked of base's own output rather than of a list of words base might have matched, because the
   // ways the slot can capture something base was already stripping are not enumerable: a fourth listed
@@ -1438,8 +1514,8 @@ function marksPhraseStrip(match: string, ...groups: unknown[]): string {
   // can begin inside a hyphenated spelling: the slot's word in `dark-streaked specks` is `streaked`, with
   // `dark` read as the stack. Comparing whole tokens there answers that base stripped `streaked` — base
   // stripped neither half — and stripping the span on that answer drops a `streak\w*` veto base raised.
-  if (!new RegExp(String.raw`(?<![A-Za-z])${word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![A-Za-z])`, "i").test(listed))
-    return " ";
+  const bounded = word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  if (!new RegExp(String.raw`(?<![A-Za-z])${bounded}(?![A-Za-z])`, "i").test(listed)) return PHRASE_GONE;
   // A word that does not dress a noun at all: it opens a phrase of its own, and the stack in FRONT of it
   // then belongs to whatever that phrase is about rather than to the marks. "the scan is noisy with
   // artifacts" is the case, and handing `with` back is not enough to save it — the word stays in the
@@ -1452,8 +1528,28 @@ function marksPhraseStrip(match: string, ...groups: unknown[]): string {
   // A name for text goes back into the scope like anything else, but only `contentAffirmed` can act on
   // it, and it reads NOUNS. So the forms it cannot read fall back to base instead of being handed to a
   // check that will not see them.
-  if (NAMES_TEXT.test(word) || NAMES_TEXT_FORM.test(word)) return listed;
-  return ` ${adjective} `;
+  //
+  // Except where the noun it was dressing is one only the capture leaves, and then it leaves WITH that
+  // noun (#439). Inside this branch rather than ahead of it, which is the scope of the whole widening:
+  // the only words it can move are the ones base was already handing back, so a doubt word the slot
+  // captured is untouched — `smeared artifacts` still hands `smeared` back, and `smear\w*` is a veto
+  // (#226). The head is read from the MATCH and immediately behind the slot's own word, because that is
+  // where the pattern puts it: the slot is the last thing before the marks noun.
+  //
+  // And it takes exactly that one word, cut OUT OF BASE'S OWN OUTPUT rather than replacing the match, so
+  // the guarantee above holds for the STACK as well as for the slot. Returning `PHRASE_GONE` for the whole
+  // match here took the stack too, and seven `MARK_MODIFIER` entries are `DEGRADED_IMAGE_LOG` veto words:
+  // `Blurry print artifacts are visible.` went from `blank_vetoed` on `blurry` to a declaration, so a page
+  // whose log says the scan is blurry shipped empty — #226's failure, reached from the other side. Cutting
+  // the word out of `listed` leaves `Blurry  <cut>  are visible.`, which loses the affirmation and keeps
+  // the doubt. Anchored at the marker base left, because that is where the mark noun was and the slot's
+  // word is the token in front of it. Reported by the review on PR #444.
+  if (NAMES_TEXT.test(word) || NAMES_TEXT_FORM.test(word)) {
+    return new RegExp(String.raw`(?<![A-Za-z])${bounded}[\s/-]+(?:${CAPTURE_ONLY_MARK})\b`, "i").test(match)
+      ? listed.replace(new RegExp(String.raw`(?<![A-Za-z])${bounded}(?=[\s/-]*\f)`, "i"), "")
+      : listed;
+  }
+  return ` ${adjective}${PHRASE_GONE}`;
 }
 // Two constructions that say the marks are not text, and so are the declaration rather than a
 // failure to read. Both are anchored to a marks noun earlier in the sentence with NO NAME FOR TEXT
@@ -1953,15 +2049,20 @@ const INPUT_SUBSTRATE = new RegExp(
 // The substrate strip runs before all of them, because what it removes is what stands between the two
 // anchored strips and the nouns they anchor to.
 // The two anchored strips run before the last: `MARKS_PHRASE` removes the very nouns they are anchored to.
+// Every strip leaves `PHRASE_GONE` and not a space, so what the scope LOST is legible in it (#440), and
+// the log's own `\f`/`\v` go first so that a marker in the scope is always this function's and never a
+// reply's. That cleaning runs ahead of the `HARD_DOUBT` return too: the untouched log is a scope like any
+// other, and a marker in it would say a phrase was removed from a scope nothing was removed from.
 function vetoScope(log: string): string {
-  if (HARD_DOUBT.test(log)) return log;
-  return log
-    .replace(INPUT_SUBSTRATE, " ")
+  const text = log.replace(/[\f\v]/g, " ");
+  if (HARD_DOUBT.test(text)) return text;
+  return text
+    .replace(INPUT_SUBSTRATE, PHRASE_GONE)
     .replace(MARKS_NOT_TEXT, (match, offset: number, whole: string) =>
-      deniesAfterResolveObject(whole, offset + match.length) ? " " : match,
+      deniesAfterResolveObject(whole, offset + match.length) ? PHRASE_GONE : match,
     )
     .replace(NOT_LEGIBLE_TEXT, (match, offset: number, whole: string) =>
-      deniesToStatementEnd(whole, offset + match.length) ? " " : match,
+      deniesToStatementEnd(whole, offset + match.length) ? PHRASE_GONE : match,
     )
     .replace(MARKS_PHRASE, marksPhraseStrip);
 }
@@ -2846,23 +2947,109 @@ const FRAGMENT_CLOSER = new Set("only alone too also".split(" "));
 // right, and the corpus separates none of them (0 of 201 declarations move either way on this change).
 // `A heading at the top.` is already pinned as delivered, beside two more of its shape, in
 // `envelope-as-content.test.ts` — the pins that say a widening must defend both halves of each pair.
-function verblessAffirmation(tokens: Word[], i: number): number {
-  // A statement whose whole text is the name affirms, and this read splits statements on `.`, `!`, `?`,
-  // `;` and line breaks alike — so "Blank page; text", "Page is blank; images; nothing present.",
-  // "Page is blank. No printed text. Images." and "Page is blank. Any text? None found." all refuse the
-  // declaration off one word with no determiner, no count and no predicate. The denial is in a
-  // NEIGHBOURING statement in three of those, ahead of the label in one and behind it in another, and
-  // this read sees neither: the boundaries are what limit how far a subject may reach, so a word alone
+// A statement holding nothing but one name, whitespace and whatever the marks strip left: what the guard
+// below fires on, and asked of a NEIGHBOUR as well, because a run of them is a list and not a lone name.
+function loneNameStatement(statement: string | undefined): boolean {
+  if (statement === undefined) return false;
+  const tokens = words(statement);
+  return (
+    tokens.length === 1 &&
+    statement.replace(/[\s\f\v]+/g, "").toLowerCase().replace(/[’]/g, "'") === tokens[0]!.word
+  );
+}
+function verblessAffirmation(tokens: Word[], i: number, statements: string[], s: number): number {
+  // A statement whose whole text is the name affirms — and this read splits statements on `.`, `!`, `?`,
+  // `;` and line breaks alike, so "Blank page; text", "Page is blank; images; nothing present.",
+  // "Page is blank. No printed text. Images." and "Page is blank. Any text? None found." each refused
+  // the declaration off ONE WORD with no determiner, no count and no predicate. In three of those the
+  // denial is in a neighbouring statement — behind the word in one, ahead of it in another — and this
+  // read sees neither: the boundaries are what limit how far a subject may reach, so a word alone
   // between two of them is all there is to read. `Text: none.`, `Text (none).` and
-  // `Page is blank; no text; no images.` are the near misses that keep declaring, so the hole is the
-  // one-token statement and not the label list. Left standing, and a `tokens.length === 1` guard for
-  // it was written and taken back out: after the marks strip, one token is not the same thing as one
-  // word. `Handwriting smudges.` and `Cursive smudges.` arrive here as a single token because `vetoScope`
-  // removed the head noun, and that phrase is #435's own — six of the seven
-  // wordings this function exists for are it, with a predicate. So the guard bought a blank page
-  // reported as a hole (nothing on disk writes one: 0 of 3,747 logs) and paid for it with a page of
-  // handwriting delivered empty, which is the failure #190 and #435 are both about. The information
-  // that separates them is what the strip removed, and it is gone by the time this runs.
+  // `Page is blank; no text; no images.` are the near misses that always declared, so the hole was the
+  // one-token statement and not the label list.
+  //
+  // The marker is what closes it, and it is why a `tokens.length === 1` guard alone was written and taken
+  // back out in `c43dff9`: ONE TOKEN IS NOT ONE WORD. `Handwriting smudges.` and `Cursive smudges.`
+  // arrive here as a single token too, because `vetoScope` removed the head noun — and that phrase is
+  // #435's own, six of the seven wordings this function exists for being it with a predicate on the end.
+  // So the bare guard bought three unobserved blank pages reported as holes and paid a page of
+  // handwriting delivered empty, which is the failure #190 and #435 are both about. `PHRASE_GONE` is the
+  // missing information: a marker in the statement's own text says a phrase was removed from THIS
+  // statement, so the two are now different cases and each gets its own answer.
+  //
+  // What it does NOT separate, stated because the guard's cost is real and unchanged there: `Page is
+  // blank. handwriting.` is one word that was always one word, so it now declares blank and the page
+  // ships empty. Nothing distinguishes it from `Blank page; text` in the text — the whole difference is
+  // which noun, and a list of the nouns that may stand alone is the same list this file has refused to
+  // write everywhere else. It is pinned as delivered-empty beside its rescued neighbours, and the trade
+  // is 5 wordings that reported a blank page as a hole against 1 that ships a page of handwriting.
+  //
+  // Both sides are unobserved, and #440's own version of that figure is wrong in a way worth writing down:
+  // one-token statements are COMMON — 1,129 of the 3,747 replies write one, 3,402 in all, most of them a
+  // table cell or a file name (`page`, `png`, `n`) that names nothing. Four of them name text, over three
+  // spellings (`paragraph`, `heading`, `line`), and every one is in a reply that does not claim blankness,
+  // so 0 of the 204 declarations on disk holds one and this guard moves no verdict on record. Narrower than
+  // even that says, once the guard asks the statement to BE the token: only 1,073 of those 3,402 are bare,
+  // 2,329 carry decoration, and all four that name text are among the decorated ones (`' paragraph`,
+  // `Heading '9`, `heading '3`, `' line`). So the corpus reach of this guard is 0 statements and not 4, and
+  // a version reading THROUGH decoration would move those four toward shipped-empty and none toward
+  // declaring — which is why `**handwriting**` goes on reporting where `handwriting.` declares, an
+  // asymmetry pinned rather than smoothed.
+  //
+  // ONE TOKEN IS NOT THE WHOLE STATEMENT either, and that is the second half of the same mistake.
+  // `words()` tokenizes `[A-Za-z][A-Za-z'’-]*`, so a digit and a bullet are invisible to it: `2 images.`
+  // and a `- text` line are one token each, and a guard reading the count alone would take the count and
+  // the list marker for nothing at all — a page that says what is on it, delivered empty, which is the
+  // losing direction. So the statement must BE the token: nothing in it but the name, whitespace and the
+  // marker. `two images.` was never at risk (two tokens) and `2 images.` must answer as it does; a
+  // bulleted enumeration of a page's contents is one token per line and every line keeps its affirmation.
+  // Reported by the review on PR #444. A NUMBERED enumeration is the same shape and is not fixed by this,
+  // because `1.` is a boundary rather than decoration — see the paragraph below `bare`.
+  // Compared at `words()`'s own normalization, which lowercases and folds the curly apostrophe: `Content`
+  // and `page’s` have to compare equal to the tokens they produced.
+  //
+  // AND A BOUNDARY IS NOT ALWAYS A SENTENCE END, which is the third face of the same mistake and the one
+  // the `bare` fix above created. A numbered list marker ENDS IN A `.`, so `1.` is a boundary and every
+  // line of `Page is blank.\n1. text\n2. images` arrives here as a bare single token: the whole enumeration
+  // of what is on the page was eaten and the page shipped empty, while the `-` bulleted spelling two
+  // paragraphs up is rescued. The premise of this guard is that a name alone BETWEEN TWO BOUNDARIES is all
+  // there is to read — and that only holds where the boundary behind it ended a sentence. A preceding
+  // statement with no letter in it is a marker and not a sentence, so the name is a list item and affirms.
+  //
+  // Keyed on "no letter" rather than on a marker vocabulary because the corpus says which spellings exist:
+  // 73 of the 3,747 replies write a `1.` list line and 2 write a `-` one, while `1)`, `a.`, `a)` and roman
+  // numerals appear in ZERO — so a lettered or parenthesised branch would be a guess, and the digits are
+  // the whole observed population. (The lettered spellings `i.` and `A.` end up handled anyway, by the
+  // sequence clause below: a marker that IS a letter is itself a lone-name statement.) What that test
+  // actually catches is wider than "a marker", and the
+  // difference is worth having in writing: a statement the marks strip reduced to `PHRASE_GONE` has no
+  // letter in it either, so `Page is blank. Print artifacts. text` reads its emptied neighbour as a marker
+  // and hands `text` back. That is base's own answer for it and the safe direction, but a later narrowing of
+  // this test toward real markers would start declaring those, which is why the clause is here and not
+  // implied. Reported by the review on PR #444.
+  //
+  // AND A MARKER IS NOT WHAT MAKES A LIST — the SEQUENCE is, which is the last face of this and the one the
+  // fix above left. `Page is blank.\ntext\nimages` has no marker at all, so every line is a lone name behind
+  // a sentence and the guard ate the whole enumeration: a page that listed its own contents, shipped empty.
+  // A run of lone names is a list, and one lone name is a lone name, so the neighbour decides — and the
+  // rescues #440 exists for all survive it, because every one of them has a SENTENCE on the other side
+  // (`Page is blank; images; nothing present.`, `Page is blank. Images. No text.`) or nothing at all
+  // (`Blank page; text`). Where it cannot help is a ONE-ITEM list: `Page is blank.\ntext` is
+  // `Blank page; text` in every respect this read can see, and it declares. That is the bound, and it is the
+  // `handwriting.` cost restated at the level of the shape rather than of the wording.
+  //
+  // Which clause does the work, over the same 3,747 replies: of the 1,073 bare one-token statements on
+  // record, 147 are in an enumeration by this rule — 2 by the letterless neighbour and 145 by the sequence —
+  // and NONE of the 147 names text. So the whole guard still moves 0 of the 204 declarations, and the
+  // sequence clause is where the population actually is.
+  const statement = statements[s]!;
+  const previous = s > 0 ? statements[s - 1] : undefined;
+  const bare = loneNameStatement(statement);
+  const enumerated =
+    (previous !== undefined && !/[A-Za-z]/.test(previous)) ||
+    loneNameStatement(previous) ||
+    loneNameStatement(statements[s + 1]);
+  if (tokens.length === 1 && bare && !enumerated && !statement.includes("\f")) return -1;
   for (let k = i - 1; k >= 0; k--) {
     const { word, comma } = tokens[k]!;
     // A comma between the noun and what precedes it opens a fresh phrase, and the words behind it are
@@ -2903,7 +3090,12 @@ export function contentAffirmed(scope: string): string | null {
   // above, which have to cross a line break because these logs put one where a comma belongs — here
   // the boundaries only limit how far a subject may reach for its verb, so a boundary the denial
   // scan crosses is one this one is free to stop at.
-  for (const statement of scope.split(/[.!?;\n]+/)) {
+  // Kept as an array rather than iterated straight off `split`, because one read below asks what was
+  // BEHIND the boundary: a `.` that ends a numbered list marker is not a sentence end, and the statement in
+  // front of it is what says which it was.
+  const statements = scope.split(/[.!?;\n]+/);
+  for (let s = 0; s < statements.length; s++) {
+    const statement = statements[s]!;
     const tokens = words(statement);
     const reach = affirmingReach(tokens);
     const affirmed = denialAffirmations(tokens);
@@ -2935,7 +3127,10 @@ export function contentAffirmed(scope: string): string | null {
       // walk, the substrate article, the folio modifier — are the same guards a fragment needs, and a
       // read placed past them would have to repeat all four.
       if (verb < 0) {
-        const named = verblessAffirmation(tokens, i);
+        // The statement's TEXT and not its tokens, because both things the guard in there asks about are
+        // invisible to the tokenizer: `words()` cannot start a token on `PHRASE_GONE`, and it cannot start
+        // one on a digit or a bullet either.
+        const named = verblessAffirmation(tokens, i, statements, s);
         if (named >= 0) {
           return tokens
             .slice(i, named + 1)

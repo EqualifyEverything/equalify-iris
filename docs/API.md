@@ -1664,21 +1664,88 @@ else.` is a page with a signature on it, delivered empty. The read that would ca
 anchored on the denial, and that one only looks forward from the negator. Unchanged by #435 and stated
 rather than left to be re-measured.
 
-A statement that is a name for text and **nothing else** still affirms, so `Blank page; text`,
+A statement that is a name for text and **nothing else** no longer affirms, so `Blank page; text`,
 `Blank page. Content`, `Page is blank; images; nothing present.`, `Page is blank. No printed text.
-Images.` and `Page is blank. Any text? None found.` are blank pages reported as holes. Statements here
-end at a `.`, `!`, `?`, `;` or a line break alike, and in three of those the denial is in a neighbouring
-statement — ahead of the label in one, behind it in another — which this read cannot reach either way,
-the boundaries being what limit how far a subject may look for its verb. The near misses say how narrow
-the hole is: `Text: none.`, `Text (none).`, `Text/handwriting: none detected.` and `Page is blank; no
-text; no images.` all still declare the page blank. A guard
-for that (refuse when the noun is the only token) was written and taken back out, because after the
-marks strip **one token is not one word**: `Handwriting smudges.` and `Cursive smudges.` reach this read
-as a single token, their head noun having been removed upstream, and that phrase
-is the one #435 is about — six of its seven wordings are it with a predicate on the end. So the guard
-would trade three blank pages reported as holes, none of them written on disk, for a page of handwriting
-delivered empty. Both halves are pinned in `envelope-as-content.test.ts`; what separates them is what the
-strip removed, which is not something this read can still see.
+Images.` and `Page is blank. Images. No text.` declare the page blank instead of reporting it as a hole
+(issue #440). Statements here end at a `.`, `!`, `?`, `;` or a line break alike, and in three of those the
+denial is in a neighbouring statement — ahead of the label in one, behind it in another — which this read
+cannot reach either way, the boundaries being what limit how far a subject may look for its verb.
+
+Counting the tokens is not what does it, and the reason is the shape of the rest of this section. The
+doubt-word scope has the marks phrase stripped out of it, so **one token is not one word**: `Handwriting
+smudges.` and `Cursive smudges.` reach this read as a single token, their head noun having been removed
+upstream, and that phrase is the one #435 is about — six of its seven wordings are it with a predicate on
+the end. A plain one-token guard was written for #440 and taken back out for exactly that, because it
+delivered a page of handwriting empty. What ships instead is the strip leaving a **mark where it cut**, so
+a statement can say it lost a word: the mark is a form feed, which is whitespace to every other pattern
+here and invisible to the tokenizer, and a log cannot forge one because the scope's input has form feeds
+and vertical tabs removed before any is inserted. A statement of one token that was cut declares nothing;
+a statement of one token that was always one word affirms nothing.
+
+One token is not the **whole statement** either. The tokenizer reads letters, so a digit and a list bullet
+are invisible to it and `2 images.` and a `- text` line are one token each — a page that says what is on
+it, which counting tokens alone would deliver empty. The statement therefore has to BE the token: nothing
+in it but the name, whitespace and the cut mark. `2 images.`, `1 signature.` and a bulleted list of a
+page's contents all keep their affirmations, and `Two images.` was never at risk because it is two tokens.
+
+That makes the guard sensitive to **any** non-letter decoration, so `Page is blank. **handwriting**`,
+`handwriting:`, `(handwriting)` and `"handwriting"` all report where a bare `handwriting.` declares. The
+asymmetry is deliberate and the corpus settles it: of 3,402 one-token statements only 1,073 are bare, 2,329
+carry decoration, and all four that name text are decorated ones. A guard reading through decoration would
+move four real statements toward being shipped empty and none toward declaring, which is the losing
+direction.
+
+A **boundary is not always a sentence end**, and that is the third face of the same mistake. A numbered list
+marker ends in a `.`, so `1.` is a boundary and every line of `Page is blank.\n1. text\n2. images` arrives as
+a bare one-token statement — the whole enumeration of what is on the page eaten, and the page shipped empty,
+where the `-` spelling is rescued. The guard's premise is that a name alone *between two boundaries* is all
+there is to read, and that holds only where the boundary behind it ended a sentence: a preceding statement
+with **no letter in it** is a marker, so the name is a list item and affirms. The corpus says which
+spellings exist rather than a marker vocabulary guessing — 73 of 3,747 replies write a `1.` list line, 2
+write a `-` one, and `1)`, `a.`, `a)` and roman numerals appear in none. That test reaches a little wider
+than "a marker" on purpose: a statement the marks strip reduced to its cut mark has no letter in it either,
+so `Page is blank. Print artifacts. text` hands `text` back, which is what the pipeline did before any of
+this.
+
+And a marker is not what makes a list — **the sequence is**. A model that lists a page's contents one per
+line with no marker at all has a sentence behind every line, so the rule above helps none of them:
+`Page is blank.\ntext\nimages` had the whole enumeration eaten. A run of lone names is a list and one lone
+name is a lone name, so the neighbour on either side decides, and the lettered spellings `i.` and `A.` fall
+out of the same clause, a marker that is itself a letter being a lone name too. Of the 1,073 bare one-token
+statements on record, 147 are in an enumeration by this rule — 2 by the letterless neighbour and 145 by the
+sequence — and none of the 147 names text.
+
+**The guard's cost is a shape and not a wording:** any bare one-token statement whose neighbours are
+sentences, of which `Page is blank. handwriting.` is one spelling and a **one-item list**
+(`Page is blank.\ntext`) is the other. Nothing this read can see separates that from `Blank page; text`,
+which is the thing #440 asked to have declared, so both declare and the page ships empty. Both sides are
+unobserved: one-token statements are common on the corpus (1,129 of 3,747 replies write one) but only four
+name text, all in replies that make no blank claim, so 0 of the 204 declarations on record move. The near
+misses say how narrow the guard is: `Any text? None found.` is two tokens and reports, and `Text: none.`,
+`Text (none).`, `Text/handwriting: none detected.` and `Page is blank; no text; no images.` declared before
+it and still do. Every one of these is pinned in `envelope-as-content.test.ts`.
+
+The same strip decides one more case, and there the **head noun** is what the reading turns on (issue
+#439). A log that calls the scan's own noise `print artifacts` had the mark removed and the word that was
+dressing it left standing where a subject goes, with the mark's verb behind it — `Page is blank. Print
+artifacts are visible.` was reported as a lost page, quoting the two words `print are visible`. A name for
+text now leaves **with** the mark where the mark is one only the capture leaves (`artifact`, `debris`,
+`dust`), so those pages declare. It is the head and not the dressing word that decides, because the same
+dressing word means the opposite in front of a mark a pen also leaves: `Only print smudges are visible.`
+is smudged printing and goes on being reported, as `handwriting smudges` does. `Printed dots are visible.`
+is reported too — `dot` is outside the list, a page can have real printed dots, and `the table contains
+the printed dot leaders` is a corpus statement about typographic content. Of the 81 places the corpus
+writes a name for text in front of a mark, 74 have an `artifact(s)` head and 7 a `dot(s)` one; 0 of the
+204 declarations change verdict, and the two whole sentences that change reading are one of each kind —
+a blank page now read as one, and a page whose log describes repairing a character, which a declaration
+around it would now be believed about.
+
+What leaves is **that one word and nothing else**, and the doubt words in front of it stay. Seven of the
+adjectives this strip can absorb are themselves doubt words, so `Page is blank. Blurry print artifacts are
+visible.` has to go on being refused on `blurry` — a page whose log says the scan is blurry wants a better
+scan, and shipping it empty is the same loss from the other side. Transplanted across the corpus's 17
+wordings in three frames, all 18 cells this widening moves were refused by a contradiction and none by a
+doubt word; put `blurry`, `faint` or `grainy` in front and all 51 cells stay refused.
 
 They are two findings with two remedies — a doubt word means the page could not be read and wants
 a better scan, a contradiction means the agent answered with no page for a page it says has
