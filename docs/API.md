@@ -1595,16 +1595,48 @@ anywhere on the sheet` into a denial, and the folio exemption that lets `The rub
 number is visible` stay blank, both test that class and not the shorter list of qualifiers they were
 written against.
 
-What the class does not reach evenly is a **hyphenated compound**. The adjective list is matched at word
-boundaries, so a compound of a word it holds is read (`hand-written`, `rubber-stamped`); the noun list
-and the qualifier list are matched whole, so a compound of a word only they hold is not. `printed` is
-only in those two, apart from `hand-printed`, which is an entry of its own — so
-`The machine-printed notes are visible.` and `The pre-printed notes are visible.` are pages whose log
-names notes on them and which are delivered empty, while `hand-printed notes` are seen. Which member of
-such a pair is right is decided by the noun behind the modifier, not by the prefix: `The pre-typed notes
-are visible.` is right to refuse the declaration and `The pre-typed form is empty.` is a blank form
-wrongly refused. Two of the 3,746 replies on record write such a compound at all and neither is a blank
-declaration, so nothing observed turns on it; it is issue #437.
+A **hyphenated compound** is read as the word it is a compound of, and until issue #437 it was not. The
+adjective list is matched at word boundaries, so a compound of a word it holds was always read
+(`hand-written`, `rubber-stamped`); the noun list and the qualifier list are matched whole, so a compound
+of a word only they held was not. `printed` was only in those two — so `The machine-printed notes are
+visible.` was a page whose log names notes on it, delivered empty, while `hand-printed notes` were seen,
+and `pre-typed` was read where `pre-printed` was not. Across the five readings that ask about a modifier,
+24 of 40 (bare word, compound) pairs answered differently from their own bare stem; all 40 agree now.
+Twelve of those 24 were the object of a denial's preposition and went the silent way: `A caption is
+missing from the machine-printed heading.` is a heading presupposed by the log and a page delivered
+empty, and it read that way for `typed` as much as for `printed`.
+
+The same rule reads a compound of any of the thirteen qualifiers, not only of the two that overlap the
+names for text, and that is measured on the same terms: 13 words × 3 prefixes × the 4 frames the three
+readings own is 156 cells, the compound disagreed with its own bare word in 75 of them before this and in
+none after, and every one of the 75 moved to the bare word's answer. Thirty-six of the 75 moved toward a
+declaration and 39 toward a refusal, so there is no safe side to it. Thirty-three of the 36 are one
+interaction, and it is a decision made elsewhere: a **definite** `image` is the scan rather than a thing
+on the page, so `The legible image is visible.` declares — and `The semi-legible image is visible.` now
+reaches the same reading instead of stopping short of the article. A compound built on a word none of the
+lists holds still stops it: `The foo-bar image is visible.` is refused. The other three are a different
+mechanism — `No content is present in the machine-typed.` and its two siblings, which declare because a
+denial's terminal object that is only a modifier is skipped, as the bare `typed` is.
+
+What that parity buys is parity with the bare word, not a claim that the bare word's answer is right —
+whether a page needs `The pre-printed notes are visible.` refused or `The pre-printed form is empty.`
+kept is still decided by the noun behind the modifier, by the same reading that decides it for `printed`.
+A compound whose prefix negates is read as the word it negates (`un-printed`, and `un-written` before
+it), which is what boundary-matching costs and errs toward reporting a page rather than losing one.
+
+Nothing on the corpus turns on this either way, and the reason is worth stating exactly: of 3,747 page
+replies with a log, 4 write a hyphenated compound of `printed` or `typed` anywhere in the log, and all 4
+are pages whose HTML carries content — so none of them ever reaches the blank reading. Replayed, 0 of
+3,747 verdicts move. That is an empty denominator rather than a measured zero: the evidence for the
+change is the 40 pairs, and the corpus evidence is only that it breaks nothing on record.
+
+What the reader still does not read is the **complement** of a copula. `Handwriting is absent.` is a
+denial and declares; `The heading is empty.` is read as a heading on the page and reports the blank one
+as a hole, and so are `is blank`, `is unmarked`, `is unfilled`, `is featureless` and `is void of content`
+— six of the ten absence wordings measured, on every subject that names text and on no subject that does
+not (`The sheet is empty.` declares). No log on record is affected: 135 of the 204 declarations write one
+of those wordings and all 135 declare, because the subject a real log uses is the page and not its
+heading. It is issue #442.
 
 Either form of the name also reaches a **clause with no verb in it**, which it did not until #435:
 `handwriting smudges only.`, `handwriting visible.`, `Only handwriting smudges.` and `A heading.` each

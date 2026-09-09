@@ -1689,7 +1689,9 @@ test("a name for text affirms in either part of speech, and the position was nev
     "Page is blank. There is no barcode.",
     "Page is blank. No watermark is present.",
     "Page is blank. Nothing is stamped or signed.",
-    "Page is blank. The pre-printed form is empty; no handwritten entries.",
+    // `The pre-printed form is empty; no handwritten entries.` was pinned here and is pinned as a refusal at
+    // the end of this test now, beside its bare stem and the reason (#437, #442): the stem was always
+    // refused, so this row recorded a hyphen escaping a token-exact list, not a decision about blank forms.
     // And the sentences a blank page is actually written in on the corpus, which name the marks and deny
     // the text. Unchanged, and the reason they are unchanged is that neither list has the marks
     // vocabulary in it (#193).
@@ -1819,15 +1821,9 @@ test("a name for text affirms in either part of speech, and the position was nev
   // verb ten words along) and the folio guard (#222's page, which prints nothing but its own number). So
   // every one of these pairs has to agree, and what they agree on is the answer `printed` already gave.
   //
-  // THE SCOPE OF THAT CLAIM IS THE BARE TOKEN, which is what these rows measure and all this file asserts.
-  // It does not hold for a hyphenated compound and cannot, because `NAMES_TEXT_FORM` is `\b`-tested while
-  // `QUALIFIER` and `TEXT_NOUN` are token-exact: `typed` is in the boundary-tested list so `pre-typed` is
-  // read, `printed` is in neither so `pre-printed` is not, and `hand-?printed` is in it as an entry of its
-  // own. Which member of such a pair is CORRECT depends on the noun behind the modifier and not on the
-  // prefix — `The pre-typed notes are visible.` is right to refuse and `The pre-printed notes are visible.`
-  // is a page with notes on it delivered empty, while `The pre-typed form is empty.` is a blank form
-  // refused. So excluding compounds of the overlap words would fix one row and break the other; that axis
-  // is #437 with the 25-pair grid, and nothing here is widened to reach it.
+  // THE SCOPE OF THAT CLAIM WAS THE BARE TOKEN, and #437 widened it to the hyphenated compound as well —
+  // the rows below this loop are that half. What this loop still measures is the bare word, because the
+  // guards it names are the two that ask `modifierForm`.
   for (const word of "typed stamped signed embossed watermarked annotated engraved scrawled inscribed".split(" ")) {
     for (const [wide, printed] of [
       [`Page is blank. The ${word} page number is visible.`, "Page is blank. The printed page number is visible."],
@@ -1850,6 +1846,165 @@ test("a name for text affirms in either part of speech, and the position was nev
     blankDeclaration({ html: "", log: "Page is blank. The stamped page number and a heading are visible." }).affirmed,
     "heading are visible",
   );
+
+  // AND THE HYPHENATED COMPOUND ANSWERS AS ITS OWN STEM, which is #437 and is the half this file used to say
+  // could not be closed. `NAMES_TEXT_FORM` is `\b`-tested and `TEXT_NOUN`/`QUALIFIER` are token-exact, so
+  // before this a compound was read by whichever list happened to hold its stem: `typed` was in the
+  // boundary-tested one so `pre-typed` was read, `printed` was in neither so `pre-printed` was not. 24 of
+  // these 40 pairs answered differently from their bare stem — 6 in the affirmation path, 12 in the object
+  // walk of a locative denial, 2 in a copula — and both directions were represented, with the fatal one
+  // dominating: `A caption is missing from the machine-printed heading.` is a page with a heading on it
+  // delivered empty, and it read that way for `typed` as much as for `printed`, so this was never a
+  // consequence of the widening beside it. All 40 agree now, at three call sites: `printed` joining
+  // `NAMES_TEXT_FORM`, and `qualifies` in place of `QUALIFIER.has` in `definiteBefore` and on both of
+  // `exceptiveOrLocativeObject`'s reads of the object.
+  //
+  // What a pair pins is parity with the STEM and not that the stem is right — whether these frames get the
+  // answer a page needs is what the rows further up ask, and here the claim is only that the hyphen decides
+  // nothing.
+  for (const frame of [
+    (w: string) => `The ${w} notes are visible.`,
+    (w: string) => `The ${w} form is empty.`,
+    (w: string) => `The ${w} template is visible.`,
+    (w: string) => `No content is present in the ${w}.`,
+    (w: string) => `No content is present in the ${w} area of the form.`,
+    (w: string) => `A caption is missing from the ${w} heading.`,
+    (w: string) => `A caption is missing from the ${w} figure on the page.`,
+    (w: string) => `Printing is nowhere except a ${w} stamp at the top.`,
+    (w: string) => `The page is ${w}.`,
+    (w: string) => `The ${w} page number is visible.`,
+  ]) {
+    for (const [stem, compound] of [
+      ["printed", "machine-printed"],
+      ["printed", "pre-printed"],
+      ["typed", "pre-typed"],
+      ["typed", "machine-typed"],
+    ]) {
+      assert.equal(
+        declaredBlank({ html: "", log: `Page is blank. ${frame(compound!)}` }),
+        declaredBlank({ html: "", log: `Page is blank. ${frame(stem!)}` }),
+        frame(compound!),
+      );
+    }
+  }
+  // Both ways round again, one row per direction, because 40 agreeing pairs say nothing about what they
+  // agree on. The first is the fatal one the walk had to keep crossing the compound to reach; the second is
+  // the object phrase that ends AT the word, where the modifier is all there is and skipping it is right.
+  assert.equal(
+    declaredBlank({ html: "", log: "Page is blank. A caption is missing from the machine-printed heading." }),
+    false,
+  );
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. No content is present in the pre-typed." }), true);
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. The machine-printed notes are visible." }), false);
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. The machine-printed page number is visible." }), true);
+  // THE ROW THIS COST, pinned as a refusal where it used to be pinned as a declaration, because it is a
+  // blank page reported and that is a real loss. It was never a decision about blank forms: the same
+  // sentence with the bare stem in it is refused here and was refused before #431 too, so what made the
+  // hyphenated wording a declaration was the hyphen — `printed` read as a name for text only when
+  // token-exact — and the pin recorded the escape rather than an answer. The word that ought to decide both
+  // is `empty`, and no read in this file looks at it: `absent`, `missing` and `not present` are read as
+  // denials of the noun in front of them, `empty`, `blank` and `unmarked` are not, so `The heading is
+  // empty.` and `The stamped area is blank.` are refused on base as well. That is #442, filed with the grid
+  // that measured it (6 of 10 absence complements unread, on 8 of 8 text-naming subjects, and 0 of the 204
+  // corpus declarations affected), and fixing it fixes this row in both wordings at once rather than in the
+  // one that happened to have a hyphen in it.
+  for (const log of [
+    "Page is blank. The pre-printed form is empty; no handwritten entries.",
+    "Page is blank. The printed form is empty; no handwritten entries.",
+    "Page is blank. The printed form is empty.",
+    "Page is blank. The heading is empty.",
+    "Page is blank. The stamped area is blank.",
+  ]) {
+    assert.equal(declaredBlank({ html: "", log }), false, log);
+  }
+  // And the complements that ARE read, so the pairing above is a statement about `empty` and not about a
+  // denial behind a copula generally.
+  for (const log of [
+    "Page is blank. The typed heading is absent.",
+    "Page is blank. The machine-printed heading is absent.",
+    "Page is blank. Handwriting is missing.",
+    "Page is blank. Printing is absent.",
+  ]) {
+    assert.equal(declaredBlank({ html: "", log }), true, log);
+  }
+
+  // ALL THIRTEEN QUALIFIERS, not the two the overlap is about, because `qualifies` reads compounds of the
+  // whole list and round 1 of #437's review was right that the evidence covered two of them. Swept — 13
+  // words x 3 prefixes x the 4 frames the three call sites own, 156 cells — the compound disagreed with its
+  // own bare stem in 75 cells on base and in 0 now, and every one of the 75 moved TO the stem's answer. The
+  // split by direction is 36 toward a declaration and 39 toward a refusal, so this is not a widening with a
+  // safe side; it is the same sentence being answered by one rule instead of two.
+  for (const frame of [
+    (w: string) => `The ${w} image is visible.`,
+    (w: string) => `A caption is missing from the ${w} heading.`,
+    (w: string) => `No content is present in the ${w}.`,
+    (w: string) => `The ${w} heading is visible.`,
+  ]) {
+    for (const word of "meaningful legible readable printed typed visible discernible apparent recognizable recognisable clear other more".split(
+      " ",
+    )) {
+      for (const prefix of ["semi", "machine", "barely"]) {
+        assert.equal(
+          declaredBlank({ html: "", log: `Page is blank. ${frame(`${prefix}-${word}`)}` }),
+          declaredBlank({ html: "", log: `Page is blank. ${frame(word)}` }),
+          frame(`${prefix}-${word}`),
+        );
+      }
+    }
+  }
+  // One row per direction with the answer written down, and the control that says the walk still stops at a
+  // compound it does not recognise. 33 of the 36 declaring rows are one interaction and it is the deliberate
+  // one — the other 3 are `No content is present in the {semi,machine,barely}-typed.`, which declare through
+  // the terminal-object exclusion and are pinned with the rest of that frame below, and they are named apart
+  // because an aggregate covering two mechanisms hides one of them. The 33: a DEFINITE `image` is the scan
+  // rather than a thing on the page (`LOCATIVE_SUBSTRATE`), and the
+  // qualifier walk in `definiteBefore` is what finds the article in front of it. `The legible image is
+  // visible.` declares on base as it does here; what changed is that the compound now reaches the same
+  // reading instead of stopping short of the article and affirming the scan.
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. The legible image is visible." }), true);
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. The semi-legible image is visible." }), true);
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. The foo-bar image is visible." }), false);
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. The rotated image is visible." }), false);
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. An image is visible." }), false);
+  // The refusing direction, same word: the object walk crosses the compound to the noun behind it, so the
+  // heading the log presupposes is read and the page is reported rather than delivered empty.
+  assert.equal(
+    declaredBlank({ html: "", log: "Page is blank. A caption is missing from the semi-legible heading." }),
+    false,
+  );
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. A caption is missing from the legible heading." }), false);
+  // THE ONE PLACE A COMPOUND STILL DISAGREES WITH ANOTHER SPELLING OF ITSELF, pinned because round 1 of the
+  // review found it and because the disagreement is not with the stem: `hand-printed` is read as a compound
+  // of `printed` and skipped, while `handprinted` written solid matches only the standalone `hand-?printed`
+  // entry and is read as a name for text. For this sentence the skipping answer is the right one — the log
+  // denies content in a region and the page is blank — so what the pair exposes is the OTHER side: a
+  // terminal object that is a name for text and not a qualifier refuses a page whose log denied content,
+  // which is what `written`, `stamped`, `hand-written` and `handprinted` all do here and did before this
+  // change. The frame is not log English (the natural wording puts a noun behind the modifier, and there all
+  // five spellings agree on both arms), so this is recorded rather than widened.
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. No content is present in the printed." }), true);
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. No content is present in the machine-printed." }), true);
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. No content is present in the hand-printed." }), true);
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. No content is present in the handprinted." }), false);
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. No content is present in the written." }), false);
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. No content is present in the hand-written." }), false);
+  // And with the noun behind the modifier, which is how a log writes it: every spelling agrees, both
+  // directions, and none of these moved.
+  for (const log of [
+    "Page is blank. No content is present in the hand-printed area of the form.",
+    "Page is blank. No content is present in the handprinted area of the form.",
+    "Page is blank. Printing is nowhere except a hand-printed note at the top.",
+    "Page is blank. Printing is nowhere except a handprinted note at the top.",
+  ]) {
+    assert.equal(declaredBlank({ html: "", log }), true, log);
+  }
+  for (const log of [
+    "Page is blank. The hand-printed notes are visible.",
+    "Page is blank. The handprinted notes are visible.",
+    "Page is blank. The machine-printed notes are visible.",
+  ]) {
+    assert.equal(declaredBlank({ html: "", log }), false, log);
+  }
 });
 
 // The one caller that reads the second list on different terms, and why it has to. The object of a
