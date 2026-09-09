@@ -3324,6 +3324,12 @@ every line, so the population is countable. A paid join does not repeat them bec
 bought it is the same pair's bytes, on the line immediately before — and since a pair's identity in
 this loop IS those two strings, the two lines can be matched on the bytes rather than on their order.
 
+A table printed across three or more pages is joined one pair per pass, so the second pass's first half
+**is** the first pass's merged table: `chars_first` on the later line equals `chars_after` on the earlier
+one, and the first two pieces' rows are on both. That is what the later pass judged, so a replay of that
+line needs it. It also means the retention figures below are a corpus's cost and not a ceiling — the
+ceiling is per line, and per document it is the 12 pairs the loop can reach.
+
 The merge is not a plain concatenation, because the halves do not
 always agree on what to concatenate: in the reference corpus two of 18 pairs declare a different
 column count from their own first half, 13 carry footnote-reference ids in the repeated header
@@ -3474,9 +3480,23 @@ bytes parse to a *different* table — fewer rows, no closing markup — so a ru
 returns a verdict that is not the rule's. It is 64,000 characters for the pair, measured against every
 pair the reference corpus's 75 delivered submissions produce — 200 of them, 5,898–25,938 characters,
 median 11,026 — so it is 2.5x the largest and drops none of them, and it is not quietly choosing which of
-that corpus's declines are scorable. What it protects against is one pathological document: 12 declines
-at the bound is under 800 KB, against round logs that run 220–940 KB. What the 200 real pairs add is
-9–111 KB per submission, median 66 KB, and all 200 replay to the verdict their line recorded.
+that corpus's declines are scorable. What it protects against is one pathological document, and the
+per-document ceiling follows from the loop rather than from the range below: at most 12 pairs reach a
+verdict in a run, so at most 12 of these blocks are written, which is 750 KB against round logs that run
+220–940 KB. What the 200 real pairs add is 9–111 KB per submission, median 66 KB, and all 200 replay to
+the verdict their line recorded.
+
+That range is a corpus's cost and not a bound. This corpus's continued tables are all two-piece — 0 of
+its 200 lines took the previous line's merge as its first half, on 47 that had a free join immediately
+before them — and a document of longer chains logs the growing merge on each pass, as
+[`table_joined`](#table_joined) describes.
+
+**The run log now carries page content, not only metadata about it.** Before these fields the table
+events held captions and header signatures; they now hold table markup from the submitted document
+verbatim. `GET /v1/sessions/{id}/logs` and the diagnostics route are both owner-scoped, so the only
+reader is whoever submitted the document the bytes came from, and `/v1/quality` publishes aggregates with
+no log text in them. It is worth knowing before a run log is attached to a bug report or exported
+somewhere the document itself would not go.
 
 Two things these bytes still cannot score, both upstream of this stage. A change to which tables are
 **paired** (the caption rule, the span match, adjacency — see `table_continuations`) reads the whole
@@ -5248,7 +5268,7 @@ curl -s -H "$AUTH" "$BASE/sessions/$SID/diagnostics" | jq
   },
   "tables": {
     "joined_in_code": 5, "joined_by_editor": 8, "code_declined": 11,
-    "code_declined_with_halves": 11,
+    "joined_in_code_with_halves": 5, "code_declined_with_halves": 11,
     "header_compared": 9, "header_differs": 4,
     "failed": 3, "body_unreadable": 0, "capped_pending": 0
   },
@@ -5712,6 +5732,12 @@ can be scored on them without buying a round (see
 published for that reason: a bound nothing reaches is a bound whose biting would otherwise be invisible,
 and the difference between the two numbers is the part of a re-score that would have no evidence behind
 it. A log written before the bytes were logged reads `0` here, which is what it is.
+
+`joined_in_code_with_halves` is the same number for the free joins, and it is here because the two
+populations answer one question between them: a loosening is scored on the declines it means to recover
+**and** on the free joins it must not break, so a payload that could report the first as replayable and
+not the second could only ever measure the upside. Paid joins are in neither count and cannot be — their
+bytes are on the decline line that bought the call, which `code_declined_with_halves` counts.
 
 Three separate counts say a reader met a table cut in two, and they are separate because their remedies
 are:

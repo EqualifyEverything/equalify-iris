@@ -447,7 +447,10 @@ Places where a decision was left open, and where v1 intentionally stops:
   used (`pairFromHalves`) and the same `verifyJoin`. The bound refuses rather than truncates: half a
   table's bytes parse to a different table, so a rule scored against them would return a verdict that
   is not the rule's. What that still cannot score is upstream — a change to which tables are paired
-  reads the whole body, and a pair that was never formed left no bytes behind.
+  reads the whole body, and a pair that was never formed left no bytes behind. The price of it is that
+  the run log holds page markup verbatim where it used to hold captions and signatures: still only
+  readable by the owner of the session the page was submitted to, and still absent from `/v1/quality`,
+  but a log is now a copy of part of the document rather than a description of it.
 
   An id on the dropped half's own `<caption>` or `<table>` element does move, onto the counterpart
   that survives the join, and only where that counterpart carries no id of its own. Two live link

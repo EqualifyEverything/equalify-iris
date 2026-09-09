@@ -568,8 +568,19 @@ function capSignature(s: string): string {
 // 64,000 characters against every pair this corpus's 75 delivered submissions produce — 200 of them over
 // 37 submissions, running 5,898 to 25,938 characters (median 11,026), so the bound is 2.5x the largest
 // and drops none of them. That is what it is for: not a size a real pair reaches, but a stop on one
-// pathological document, since 12 declines at the bound is under 800 KB against round logs that run
-// 220–940 KB. What those 200 pairs actually add is 9–111 KB per submission, median 66 KB.
+// pathological document. What those 200 pairs actually add is 9–111 KB per submission, median 66 KB.
+//
+// The ceiling is per line and the per-document one follows from the loop, not from that median. A
+// document cannot log more of these blocks than the loop below emits: it runs `pass <= MAX_TABLE_JOINS`
+// but breaks at the last pass before choosing a pair, so 12 pairs reach a verdict and 12 blocks is
+// 750 KB, against round logs that run 220–940 KB.
+//
+// The median is a corpus's cost and not a ceiling, and the reason is chains. A table printed across three
+// pages is joined one pass at a time, so pass 2's pair is (the pass-1 merge, the third piece) and the
+// first two pieces' rows go on a second line — correctly, because that merge is the bytes pass 2 actually
+// judged, and a replay of that line has to have them. So a document of long chains sits above the range
+// and under the 750 KB, and this corpus has no chains at all: 0 of its 200 lines took the previous line's
+// merge as its first half, on 47 lines that had a code join immediately before them.
 const MAX_REPLAY_CHARS = 64_000;
 
 // `halves` is on the line whether the bytes are or not, because presence alone cannot be counted: a

@@ -593,6 +593,13 @@ export interface Diagnostics {
     // logs from before #278 have no `by` at all, and read as zero joins rather than as free ones.
     joined_in_code: number;
     joined_by_editor: number;
+    // Of the free joins, the ones carrying their halves' bytes — the same bound, on the population a
+    // loosening must not BREAK rather than the one it means to recover. Both numbers or neither: a
+    // re-score that can read "N of M declines are replayable" and cannot read the same of the joins can
+    // only ever measure the upside, which is the reading `table_joined` grew these bytes to prevent.
+    // Paid joins are not in it and cannot be — their bytes are on the decline line that bought them, and
+    // those are counted below.
+    joined_in_code_with_halves: number;
     // Pairs the free path stood down on, each of which bought a Copy Editor call. NOT a failure
     // count: a decline delivers exactly what the pipeline delivered before the code path existed. The
     // per-reason split stays in log.jsonl, because the reasons are an open set — `verify:<reason>`
@@ -1274,6 +1281,7 @@ export function summarizeRun(
   const tables: Diagnostics["tables"] = {
     joined_in_code: 0,
     joined_by_editor: 0,
+    joined_in_code_with_halves: 0,
     code_declined: 0,
     code_declined_with_halves: 0,
     header_compared: 0,
@@ -1539,6 +1547,11 @@ export function summarizeRun(
       // #326 says a later round must be able to re-measure.
       if (e.by === "code") tables.joined_in_code += 1;
       else if (e.by === "editor") tables.joined_by_editor += 1;
+      // Inside the `by === "code"` test and not beside it: the emitter writes the halves on a free join
+      // only, so a paid line carrying this word would be from a build that changed that rule, and
+      // counting it would put a pair whose bytes are on ANOTHER line into the tally of lines that carry
+      // their own. The `"logged"`/`"too_large"` reading is the declines' below, for the same reason.
+      if (e.by === "code" && e.halves === "logged") tables.joined_in_code_with_halves += 1;
     } else if (e.type === "table_join_code_declined") {
       tables.code_declined += 1;
       // Off the state field rather than off the bytes. A replay needs BOTH halves, so two presence

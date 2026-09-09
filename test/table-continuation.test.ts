@@ -848,6 +848,33 @@ test("a paid join does not repeat the bytes its own decline line already carries
   assert.equal(stood.data.html_second, second);
 });
 
+test("a three-page table logs the intermediate merge, because that is the pair the second pass judged", async () => {
+  // What the per-submission size range does NOT bound. The loop joins one pair per pass, so a table
+  // printed across three pages is joined twice and the second pass's first half IS the first pass's
+  // merge — the first two pieces' rows are on two lines. That is the correct thing to log, since the
+  // merge is what pass 2 decided on and a replay of that line needs it, but it means a document of long
+  // chains logs more than a corpus of two-piece tables and the ceiling is the loop's 12 pairs.
+  const a = piece("Table 7.—Effort", ["Alabama", "Alaska"]);
+  const b = piece("Table 7.—Effort—Continued", ["Arizona", "Arkansas"]);
+  const c = piece("Table 7.—Effort—Continued", REST);
+  const { ctx, rec } = ctxWith(() => {
+    throw new Error("a pair the code could join was put to the editor");
+  });
+
+  await joinContinuedTables(ctx, a + b + c);
+
+  const [one, two] = events(rec, "table_joined");
+  assert.equal(one.data.html_first, a);
+  assert.equal(two.data.chars_first, one.data.chars_after, "pass 2's first half is pass 1's merge");
+  assert.equal(two.data.html_first, goodJoin("Table 7.—Effort", ["Alabama", "Alaska"], ["Arizona", "Arkansas"]));
+  // And the re-logged bytes replay like any other line's, which is the reason to keep them.
+  const replayed = pairFromHalves(String(two.data.html_first), String(two.data.html_second));
+  assert.ok(replayed !== null);
+  const again = joinInCode(replayed);
+  assert.ok("html" in again, JSON.stringify(again));
+  assert.equal(again.html, goodJoin("Table 7.—Effort", ["Alabama", "Alaska", "Arizona", "Arkansas"], REST));
+});
+
 test("a pair past the bound logs no bytes rather than half a table", async () => {
   // The one place this departs from the capped signatures above. A cut signature still compares cell by
   // cell as far as it goes; half a table's bytes parse to a DIFFERENT table — fewer rows, no closing
