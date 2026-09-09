@@ -373,6 +373,34 @@ test("a joined table may not still call itself a continuation", () => {
   assert.equal(verifyJoin(pair, goodJoin("Table 1.—Income—Continued", STATES, REST)), "still_continued");
 });
 
+test("a joined caption may not drop the note of measure the first half's caption carried", () => {
+  // The shape this exists for was created by the page rule that puts the note of measure inside the
+  // <caption> rather than in a full-width row. As a row the note is held by the label and row checks
+  // above; in the caption nothing here could see it go, because every other check reads cells,
+  // columns or rows and the caption is only tested for existence and for "Continued". A joined table
+  // whose caption reads "Table 1.—Income" alone passes all of them and hands a reader every figure
+  // with nothing to read it in.
+  const titled = "Table 1.—Income [In millions of dollars]";
+  const body = piece(titled, STATES) + piece("Table 1.—Income—Continued", REST);
+  const [pair] = continuationPairs(body).pairs;
+  assert.equal(pair.first.caption, titled, "the fixture is not the case being tested");
+
+  assert.equal(verifyJoin(pair, goodJoin("Table 1.—Income", STATES, REST)), "caption_note_lost");
+  // And it does not refuse the right answer: the note kept, the continuation marker gone.
+  assert.equal(verifyJoin(pair, goodJoin(titled, STATES, REST)), null);
+});
+
+test("a parenthesised caption note is not held, because the marker rule needs that shape dropped", () => {
+  // Square brackets only, and the reason is a collision rather than a preference: CONTINUED_CAPTION
+  // matches "(continued", so a check demanding every parenthesised run survive the merge would demand
+  // the one run rule 4 requires to be dropped. In #374's corpus the parenthesised spelling is 6 of 68
+  // delimited notes and the bracketed one is 61, so the shape left unheld is the rarer one — and a
+  // note printed with no delimiter at all is not separable from the title by any string test.
+  const body = piece("Table 1.—Income (In millions of dollars)", STATES) + piece("Table 1.—Income—Continued", REST);
+  const [pair] = continuationPairs(body).pairs;
+  assert.equal(verifyJoin(pair, goodJoin("Table 1.—Income", STATES, REST)), null);
+});
+
 // --- the join that needs no model ---
 //
 // Three of the editor's six rules are a move of bytes, so `joinInCode` tries the pair first and hands

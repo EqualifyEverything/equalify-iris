@@ -645,8 +645,13 @@ test("the page agent's page-break rule keeps the clauses that make it a rule", (
       /Do not supply the words you judge came before it, do not recast the fragment into a sentence that reads whole, and do not leave it out because it reads broken/],
     ["and the reason for both halves of that is given",
       /an invented half is content no reader can check against any page, and a dropped half is text no other page will emit/],
-    ["a word the page breaks at its edge keeps its hyphen",
-      /Keep the printing as it stands, hyphen included, where the page breaks a word at its edge/],
+    // The sheet is named in THIS sentence and not only in the summary four lines down, because this is
+    // the sentence the shipped model quotes back when it gets the case wrong: "kept as 'Fed-eral' per
+    // the rule for breaks at the page edge where the other half is on a sheet not shown" — it read
+    // "edge" and supplied "page edge", then applied it to a column. A distinction stated downstream of
+    // where the licence is picked up is a distinction the reader has already decided without.
+    ["a word the SHEET breaks keeps its hyphen, and the sheet is named in the licence itself",
+      /Keep the printing as it stands, hyphen included, where the page breaks a word at the edge of the\s+SHEET and the half that finishes it is on a page you were not shown/],
     // And the case that sentence also reads on if it stands alone, which the second review of #247
     // raised: a word the paper broke at the end of a LINE has both halves on this page, so keeping
     // that hyphen ships `public serv- ices` inside one paragraph. Nothing downstream sees it — axe is

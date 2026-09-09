@@ -3334,7 +3334,12 @@ The merge is not a plain concatenation, because the halves do not
 always agree on what to concatenate: in the reference corpus two of 18 pairs declare a different
 column count from their own first half, 13 carry footnote-reference ids in the repeated header
 block that an endnote links back to, and a bracketed unit note ("[In millions of dollars]") is
-reprinted with the header and belongs in the joined table once.
+reprinted with the header and belongs in the joined table once. Those figures were read before
+`page.md` decided where the note goes: it now asks for the note inside the `<caption>`, so the shape
+the merge meets should shift from a repeated full-width row to a repeated caption, and rule 6's
+forgiveness of the promoted row should get rarer rather than staying at the rate measured here.
+Either way the note has to survive the merge — as a row it is held by the label and row checks, and
+in the caption by `caption_note_lost`.
 
 Where one of those judgements is real the merge is a Copy Editor call (`copy_editor_table_join.md`
 in the agent ledger); where it is not — three of the editor's six rules are "move these bytes and
@@ -3516,9 +3521,11 @@ and overflows on a body nested a few hundred thousand levels deep, which is reac
 `anchors.ts` delivers a page past 500 levels as written; the document then ships exactly as it
 arrived rather than failing the phase, the way the lint one step later reports its own overflow as
 `@lint-unavailable`), or one of the verification failures — `not_one_table`, `no_caption`,
-`still_continued`, `columns_lost`, `header_cells_lost` (the merged header block came back as
-`<td>`, which axe does not report and which would have removed the header association from the one
-table this stage exists to improve), `rows_lost`, `labels_lost:<n>`.
+`still_continued`, `caption_note_lost` (the joined caption dropped a bracketed note of measure the
+first half's caption carried — part of the table's name, and invisible to every other check here,
+which read cells, columns and rows), `columns_lost`, `header_cells_lost` (the merged header block
+came back as `<td>`, which axe does not report and which would have removed the header association
+from the one table this stage exists to improve), `rows_lost`, `labels_lost:<n>`.
 
 The document keeps **both halves byte for byte**, so every failure here delivers the output the
 pipeline had before this stage existed, which is what makes the merge safe to ask a model for at

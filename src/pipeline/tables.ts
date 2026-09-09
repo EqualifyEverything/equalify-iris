@@ -321,6 +321,10 @@ Rules, in order of importance:
    describe their columns differently, use the structure that correctly describes the rows you are
    keeping — and if the two halves genuinely have different columns, say so and decline (see below).
 4. ONE <caption>: the table's own title, WITHOUT the continuation marker. Do not write "Continued".
+   Where that caption carries a note of measure under the title ("[In millions of dollars]"), the note
+   is part of the table's name and stays in the joined caption. The page agent is told to put it there,
+   so a caption arriving with one is not carrying a stray row, and a joined table that loses it hands a
+   reader the figures with nothing to read them in.
 5. Keep <th scope="rowgroup"> group headers where either half has them, in place.
 6. A bracketed unit note that both halves repeat as a full-width row (e.g. "[In millions of
    dollars]") belongs once, at the top. Keep the first and drop the repeat.
@@ -424,6 +428,24 @@ export function verifyJoin(pair: ContinuationPair, merged: string): string | nul
   // table BEFORE it — a wrong join, and a loop that never runs out of pairs. Rule 4 of the prompt,
   // enforced because termination depends on it.
   if (CONTINUED_CAPTION.test(joined.caption)) return "still_continued";
+  // A note of measure inside the caption ("[In millions of dollars]") is part of the table's name, and
+  // rule 4 says to keep it. Checked rather than only asked for, because nothing else here can see it
+  // go: `labels_lost` reads cells, `columns_lost` reads columns, `rows_lost` reads rows, and a joined
+  // caption holding the bare title passes all three while handing a reader the figures and nothing to
+  // read them in. The shape only became reachable when the page agent was told to put the note in the
+  // caption at all — before that it arrived as a full-width row, which is rule 6's case and is covered
+  // by the label and row checks above.
+  //
+  // Read on SQUARE brackets, which is how 61 of the 68 delimited notes in #374's corpus are printed.
+  // The parenthesised spelling (6 of the 68) is deliberately not read: `CONTINUED_CAPTION` matches
+  // "(continued", so demanding that every parenthesised run survive would demand the one run rule 4
+  // requires to be dropped. A note printed with no delimiter at all (3 arm-pages, unanimous across
+  // arms, so it is the ink) is not separable from the title by any string test and is not reached
+  // here. Keyed on the FIRST half's caption, because that is the one `joinInCode` copies and the one
+  // rule 4 calls the table's own title.
+  const captionNotes = (c: string) => new Set((c.match(/\[[^\]]+\]/g) ?? []).map((n) => normalizeCell(n)));
+  const kept = captionNotes(joined.caption);
+  if ([...captionNotes(pair.first.caption)].some((n) => !kept.has(n))) return "caption_note_lost";
   const cols = Math.max(pair.first.cols, pair.second.cols);
   if (joined.cols < cols) return "columns_lost";
   // A table whose header cells all came back as `<td>` is a data table with no headers, which is the

@@ -185,7 +185,8 @@ were never shown. Where your page opens in the middle of a sentence — or in th
 nothing more. Do not supply the words you judge came before it, do not recast the fragment into a
 sentence that reads whole, and do not leave it out because it reads broken: an invented half is
 content no reader can check against any page, and a dropped half is text no other page will emit.
-Keep the printing as it stands, hyphen included, where the page breaks a word at its edge. A word
+Keep the printing as it stands, hyphen included, where the page breaks a word at the edge of the
+SHEET and the half that finishes it is on a page you were not shown. A word
 the paper broke at the end of a LINE is the opposite case, and what tells them apart is what you can
 see: both halves of a line break are printed on your page, so a "condi-" ending one line with
 "tions" beginning the next is one word split to fit the column — write it whole, "conditions", and do
