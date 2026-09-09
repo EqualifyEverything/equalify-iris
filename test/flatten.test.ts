@@ -816,11 +816,14 @@ test("half of the licensed list conversion is reported and the whole of it is no
   // the document's only record of its numbering — produces the same five counts as the whole change, so
   // this cannot tell them apart. The lettered half of the same shape IS caught, and that asymmetry is a
   // silence to close before the licence moves, not after.
+  // Both `after` documents here are `offsetRun`'s own items with the markers taken off, so the pair being
+  // compared is the two edits an editor could actually make and not a list that also reworded an item.
   const offsetRun = `<ol><li>12. Payments to states</li><li>13. Reimbursed state administration</li></ol>`;
   const offsetConverted = `<ol start="12"><li>Payments to states</li><li>Reimbursed state administration</li></ol>`;
-  assert.deepEqual(listMarkers(offsetConverted), listMarkers(stripped));
+  const offsetStripped = `<ol><li>Payments to states</li><li>Reimbursed state administration</li></ol>`;
+  assert.deepEqual(listMarkers(offsetConverted), listMarkers(offsetStripped));
   assert.equal(listMarkerHalfEdit(offsetRun, offsetConverted), null);
-  assert.equal(listMarkerHalfEdit(offsetRun, stripped), null);
+  assert.equal(listMarkerHalfEdit(offsetRun, offsetStripped), null);
   assert.equal(
     listMarkerHalfEdit(
       `<ol type="a"><li>(c) Estimating</li><li>(d) Admin</li></ol>`,

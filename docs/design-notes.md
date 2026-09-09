@@ -1221,7 +1221,10 @@ Places where a decision was left open, and where v1 intentionally stops:
   the check that can see its half-edits, so the check comes first and the licence second.** The report
   itself stands: it names a defect nothing else in the document records, which is the class the
   `[not legible]` and fidelity reports are in, and the editor's own precondition already sends that shape
-  to a report rather than a change. `docs/API.md` had the same shape of error in the
+  to a report rather than a change.
+
+  Back to the predicate, and the thread the two paragraphs above interrupt: `docs/API.md` had the same
+  shape of error as those branch labels, in the
   other direction — it defined the field by kind and *illustrated* it by value, so the examples were more
   precise than the definition above them. Three rounds on one predicate, each approximation defensible
   until the next value showed up: **when a check can be stated as "the same thing twice", compare the
