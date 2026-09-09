@@ -1831,25 +1831,110 @@ test("an exceptive object in the second part of speech is read by what it modifi
   assert.equal(declaredBlank({ html: "", log: "Page is blank. Nothing is legible in the typed area of the form." }), true);
 });
 
-// What this did NOT fix, recorded so that the next round finds it written down rather than measuring it
-// again. A log naming writing in a VERBLESS fragment loses its page whichever list the word is in:
-// `affirmingReach` needs a verb to hand the noun, and there is none in `handwriting smudges only.` That
-// is a second gap on the same sentence, it is orthogonal to the vocabulary one — `handwriting` is listed
-// and still delivered empty here — and folding it in would have meant affirming off a noun with no
-// predicate anywhere, which is a different risk with a different measurement.
-test("a name for text with no verb behind it is still a page delivered empty, listed or not", () => {
+// The gap #431 recorded and #435 closed: a log naming writing in a VERBLESS fragment lost its page
+// whichever list the word was in, because `affirmingReach` needs a verb to hand the noun and there is
+// none in `handwriting smudges only.` Orthogonal to the vocabulary axis — `handwriting` was listed and
+// delivered empty here — so both halves are pinned, listed word and unlisted-then-listed alike.
+test("a name for text in a verbless fragment is a contradiction (#435)", () => {
   for (const log of [
+    // #435's table, which is the spec: seven wordings measured declaring a page with writing on it blank.
+    "Page is blank. handwriting visible.",
+    "Page is blank. handwriting smudges visible.",
+    "Page is blank. handwriting present.",
     "Page is blank. handwriting smudges only.",
     "Page is blank. handwriting only.",
     "Page is blank. Only handwriting smudges.",
+    "Page is blank. A heading.",
+    // The other vocabulary, which is #431's axis and is read here by the same `affirmsText` — so the two
+    // fixes compose rather than each covering one wording of the pair.
     "Page is blank. cursive smudges only.",
+    "Page is blank. Typed lines visible.",
+    // A predicate, the end of the statement, and a closing particle are the three ways the read ends.
+    "Page is blank. Just a heading.",
+    "Page is blank. A caption only.",
+    "Page is blank. Two headings.",
+  ]) {
+    assert.equal(declaredBlank({ html: "", log }), false, log);
+  }
+  // The words the refusal is reported in, which is the whole reason `affirmed` is a string: a fragment's
+  // quote runs from the noun to what ends it, so `blank_vetoed` shows the fragment and not just the noun.
+  assert.equal(
+    blankDeclaration({ html: "", log: "Page is blank. handwriting smudges visible." }).affirmed,
+    "handwriting visible",
+  );
+  assert.equal(blankDeclaration({ html: "", log: "Page is blank. A heading." }).affirmed, "heading");
+  // The same sentence with a verb in it is the contradiction it always was, and the pair is what makes
+  // the read above one about the noun phrase rather than one about the verb.
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. handwriting smudges are present." }), false);
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. cursive smudges are present." }), false);
+});
+
+// The other direction, and the one that decides whether the read above is worth having: a blank page's
+// own log is written in fragments too — 94 of the corpus's 204 blank-page logs have a verbless statement
+// in them — and every one of those fragments is a DENIAL. Refusing any of these is #190 from the other
+// end, so the bounds that keep them are asserted here beside the wordings that pay for them.
+test("a blank page's own fragments are not affirmations (#435)", () => {
+  for (const log of [
+    // Fragments whose noun is not a name for text at all, which the noun lists already decided (#193).
+    "Page is blank. Just specks.",
+    "Page is blank. Only scanner dust.",
+    "Page is blank. Nothing but dust.",
+    "Page is blank. Only faint speckling.",
+    "Page is blank. Nothing but scanner dust and light speckling.",
+    // Fragments a negator owns, which `negatedInList` already read — and this is how the corpus writes
+    // them: `No content to transcribe.`, `No page number printed.` and `Nothing to transcribe.` are
+    // verbatim from blank-page logs on disk.
+    "Page is blank. No content to transcribe.",
+    "Page is blank. Nothing to transcribe.",
+    "Page is blank. No page number printed.",
+    "Page is blank. No page number printed on the page, so no page-break marker emitted.",
+    "Page is blank. No text, nothing legible.",
+    "Page is blank. no handwriting.",
+    "Page is blank. Nothing printed.",
+    "Page is blank. No text, images, or handwriting.",
+    "Page is blank. Nothing legible; no words or characters.",
+    "Page is blank. No printed text, only scanner noise.",
+    "Page is blank. Only scattered dust/noise artifacts visible.",
+    // A negative complement AFTER the noun, refused by the forward walk not crossing it rather than by
+    // any list of complements: whatever says "not there" is a word the walk stops at.
+    "Page is blank. Text absent.",
+    "Page is blank. Text missing.",
+    "Page is blank. Text nowhere.",
+    "Page is blank. Text nowhere on the sheet.",
+    // A negating word in FRONT of the noun that is in none of this file's negator lists — `devoid` and
+    // `lacks` are deliberately outside `NEGATIVE_COMPLEMENT`, and nothing reads `free of`. These four are
+    // the rows that fail when the opening bound is dropped, so the bound is not decoration; no corpus
+    // wording fails with it dropped, which is why they are constructed and said to be.
+    "Page is blank. Devoid of text.",
+    "Page is blank. Lacking text.",
+    "Page is blank. Free of text.",
+    "Page is blank. Empty of text.",
+    // Not a fragment about the page at all. `printed` is in `TEXT_NOUN` for its noun sense, and `number`
+    // and `marker` are outside it, so the opening bound is again what decides — this one verbatim from a
+    // corpus log.
+    "Page is blank. the page-break marker uses the document sequence number 4 as given by the filename metadata.",
   ]) {
     assert.equal(declaredBlank({ html: "", log }), true, log);
   }
-  // The same sentence with a verb in it is the contradiction it always was, which is what makes the line
-  // above a statement about the verb and not about the noun.
-  assert.equal(declaredBlank({ html: "", log: "Page is blank. handwriting smudges are present." }), false);
-  assert.equal(declaredBlank({ html: "", log: "Page is blank. cursive smudges are present." }), false);
+  // Where this read is NARROWER than the verb read, which looks like an inconsistency and is one: the verb
+  // walk crosses any word to find its verb, and this one crosses only the words a noun phrase is made of
+  // — and bare `marks` is deliberately not one of them (#193: `marks` is what a blank page calls the dust
+  // on it). So the pair disagrees, and the pin says which way each goes rather than leaving it to be found.
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. Handwritten marks only." }), true);
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. Handwritten marks are visible." }), false);
+  // The locative tail, not read here and not free to read: `A heading at the top.` is pinned as delivered
+  // above with two more of its shape, and the paragraph there says a widening must defend both halves of
+  // each pair. `Blank apart from a caption.` is the same kind of gap from the exceptive side — the
+  // exceptive read needs a denial and this fragment has none. Base delivers both empty and so does this.
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. handwriting only in the margin." }), true);
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. Blank apart from a caption." }), true);
+  // What the comma bounds cost, pinned as the gap it is rather than left to be re-measured: a fragment cut
+  // off at its own noun is a list member, and the list a blank page writes is a list of what is ABSENT
+  // with the denial at either end. So a noun with a comma on it is not read, and the price is a fragment
+  // whose denial stands BEHIND the noun — which the denial-anchored read at the end of `contentAffirmed`
+  // cannot pick up either, because it only looks forward from the negator. Base delivers this page empty
+  // too, so this is a defect left standing and not one bought.
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. A signature, nothing else." }), true);
 });
 
 // --- blankness the reply STATES, rather than blankness read out of its prose (#371) ---------------

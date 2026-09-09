@@ -1738,8 +1738,11 @@ const QUALIFIER = new Set(
 // `detected`, `seen` and `found` are left out for the reason `AFFIRMING_VERB` leaves them out — they are
 // the wording a denial reaches for — and `legible` and `readable` are left out because they are read as
 // qualifiers in front of the noun everywhere else in the file, and a post-nominal one is not a wording
-// these logs use. Every word here is one `DENIAL_WORD` also lists, which is the only way the read is
-// reached at all: a statement with a word outside that list in it has already refused a line above.
+// these logs use. Every word here is one `DENIAL_WORD` also lists, which used to be the only way the
+// read was reached at all: a statement with a word outside that list in it has already refused a line
+// above. `verblessAffirmation` is the second reader and has no such gate — it reads any statement the
+// affirmation loop reaches — so a word added here now widens an affirmation as well as a denial, and
+// the two directions of error are opposite. Read that function's bounds before adding one.
 const PREDICATED = new Set("visible present apparent discernible".split(" "));
 // `image` is the one word the lists genuinely disagree about: it is the substrate in "not legible text
 // in this image" and a thing the page bears in "an image is visible", and both wordings are ones these
@@ -2616,6 +2619,95 @@ function affirmedObjectAfter(tokens: Word[], verb: number): number {
   return -1;
 }
 
+// A marks noun as a single token, for the one thing a fragment's noun phrase may put between its name
+// for text and its end: `handwriting smudges only.` `MARK` is written for the phrase reads, so its
+// multi-word branches (`stray markings`, `scanner noise`) cannot match one token and do not here, and
+// bare `marks` is not a member of it at all — #193's decision inherited rather than retaken.
+//
+// That last one is where the fragment read is NARROWER than the verb read, stated because the pair looks
+// like an inconsistency and is one: `affirmingReach` crosses any word to find a verb, so `Handwritten
+// marks are visible.` refuses the declaration, while `Handwritten marks only.` declares it, because
+// `marks` is not a word this walk may cross. Widening the walk to any noun is what would match them, and
+// that is the direction #193 refused — `marks` is what a blank page calls the dust on it.
+const MARK_NOUN = new RegExp(`^(?:${MARK})$`, "i");
+// What may stand in FRONT of the noun in a fragment and leave it the thing the fragment is about.
+// Kept apart from `QUANTIFIER` and `DETERMINER` rather than added to either, because these three words
+// are the ones a marks phrase also opens with (`MARK_QUANTIFIER` lists them) and the only reason they
+// are needed here is `Only handwriting smudges.` — the wording in #435's title.
+const FRAGMENT_OPENER = new Set("only just merely simply solely".split(" "));
+// What a fragment's noun phrase may tail into and still be a fragment: `handwriting only`, `a heading
+// too`. Read at the END of the statement and nowhere else, so `only` closing a phrase is separated
+// from `only` qualifying whatever comes next (`handwriting only in the margin` is not read here).
+const FRAGMENT_CLOSER = new Set("only alone too also".split(" "));
+
+// The affirmation in a statement with no verb in it, as the index of the word that ends it, or -1.
+//
+// `contentAffirmed`'s subject read hands a name for text to the verb that predicates over it, and a
+// fragment has no verb: `affirmingReach` returns -1 and the noun is dropped. So on base "Page is
+// blank. handwriting smudges only." delivered a page with writing on it as empty, and 7 of the 13
+// wordings #435 measured were fragments of this shape. `PREDICATED` exists for exactly this
+// construction — "'heading visible' is 'a heading is visible' with the copula dropped" — and was
+// reachable only through the DENIAL reads, gated on a `DENIAL_WORD`, so nothing in the affirmation
+// path consulted it.
+//
+// The risk here runs OPPOSITE to the rest of this section, and that is what shapes the rule: affirming
+// off a noun with no verb gives `NEGATED` and `negatedInList` less to work with, and a blank page's own
+// log is as often a fragment ("Just specks.", "Only scanner dust.", "No text, nothing legible.").
+// So the noun phrase must OPEN its statement, which is the same bound #227 drew at
+// `deniesToStatementEnd` and for the same reason: a fragment IS its noun phrase, and a name for text
+// standing in the middle of one has something in front of it that decides what it is doing there.
+// `Devoid of text.`, `Lacking text.` and `Free of text.` are the cases that pays for — none of those
+// words is a `NEGATOR` or a `NEGATIVE_COMPLEMENT` the backward walk reads (`devoid` and `lacks` are
+// deliberately out of that list), and each is a blank page that would otherwise be reported lost.
+// What it costs is `Blank apart from a caption.`, where the exceptive read wants a denial it does not
+// have: that page ships empty today and still does, so the bound leaves a defect rather than buying
+// one.
+//
+// Forward, a predicate ends it and so does the end of the statement, because a fragment whose whole
+// text is a name for text is an affirmation with nothing left to qualify it. Everything else refuses,
+// which is where `Text absent.` and `Text nowhere on the sheet.` stay denials — not by listing the
+// complements, but by not crossing them.
+//
+// A LOCATIVE tail is the case that refusal leaves open: `A heading at the top.` and `handwriting only in
+// the margin.` are pages with writing on them, and both declare. Deliberately not read here, because it
+// is not one of the seven wordings #435 measured and it is not a free widening — `Text in this image.`
+// and `Nothing on the sheet apart from a stamp.` are two shapes a locative tail would newly have to get
+// right, and the corpus separates none of them (0 of 201 declarations move either way on this change).
+// `A heading at the top.` is already pinned as delivered, beside two more of its shape, in
+// `envelope-as-content.test.ts` — the pins that say a widening must defend both halves of each pair.
+function verblessAffirmation(tokens: Word[], i: number): number {
+  for (let k = i - 1; k >= 0; k--) {
+    const { word, comma } = tokens[k]!;
+    // A comma between the noun and what precedes it opens a fresh phrase, and the words behind it are
+    // then about something else: `no text, a heading only` is one denied list (`negatedInList`'s
+    // eleven pinned wordings say so), not a denial and a fragment.
+    if (comma) return -1;
+    if (FRAGMENT_OPENER.has(word) || DETERMINER.has(word) || QUALIFIER.has(word) || QUANTIFIER.has(word)) continue;
+    if (affirmsText(word) || MARK_NOUN.test(word)) continue;
+    return -1;
+  }
+  // A comma on the noun ITSELF ends the phrase there, and a fragment cut off at its own noun is a
+  // LIST member. That is not a hypothetical shape: `vetoScope` strips the marks and the `not legible
+  // text` phrase out of the scope this reads, so the corpus log "A few specks, not legible text,
+  // figures, captions visible." arrives here as `A few figures, captions visible` with its negator
+  // already gone — a blank page whose remaining nouns look un-negated because the words that denied
+  // them were removed. Base survives it by needing a verb; this read has to survive it by the commas,
+  // and it is the reason both of them are here rather than only the one behind the noun.
+  if (tokens[i]!.comma) return -1;
+  for (let k = i + 1; k < tokens.length; k++) {
+    const { word, comma } = tokens[k]!;
+    // Before the comma check: a predicate is the affirmation, and what follows it is a second clause
+    // this read is already done with. "handwriting visible, page otherwise empty" says both things.
+    if (PREDICATED.has(word)) return k;
+    if (comma) return -1;
+    if (affirmsText(word) || MARK_NOUN.test(word) || QUALIFIER.has(word) || DETERMINER.has(word) || QUANTIFIER.has(word))
+      continue;
+    if (FRAGMENT_CLOSER.has(word) && k === tokens.length - 1) return k;
+    return -1;
+  }
+  return tokens.length - 1;
+}
+
 // The affirmation, as the words that make it, or null. Returned rather than a boolean so the refusal
 // can say what it saw: `blank_vetoed` exists because #190 had to trace four pages back to a word by
 // hand, and a contradiction is harder to spot in a log than a doubt word is.
@@ -2650,7 +2742,20 @@ export function contentAffirmed(scope: string): string | null {
       // this pipeline never delivers (`folioAt`).
       if (modifierForm(word) && folioAt(tokens, i + 1)) continue;
       const verb = reach[i + 1]!;
-      if (verb < 0) continue;
+      // No verb for this noun: the statement may still be a fragment that affirms it (#435). Read
+      // before the `continue` rather than after the loop, because the guards above — the negator
+      // walk, the substrate article, the folio modifier — are the same guards a fragment needs, and a
+      // read placed past them would have to repeat all four.
+      if (verb < 0) {
+        const named = verblessAffirmation(tokens, i);
+        if (named >= 0) {
+          return tokens
+            .slice(i, named + 1)
+            .map((t) => t.word)
+            .join(" ");
+        }
+        continue;
+      }
       if (!deniedAfterVerb(tokens, verb)) {
         return tokens
           .slice(i, Math.min(verb + 2, tokens.length))

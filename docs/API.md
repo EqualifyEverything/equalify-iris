@@ -1608,11 +1608,28 @@ are visible.` is right to refuse the declaration and `The pre-typed form is empt
 wrongly refused. Two of the 3,746 replies on record write such a compound at all and neither is a blank
 declaration, so nothing observed turns on it; it is issue #437.
 
-What no form of the name reaches is a **clause with no verb in it**. `handwriting smudges only.`
-declares the page blank, and so does `cursive smudges only.`, while `handwriting smudges are present.`
-refuses — the affirmation is found by handing a name for text the verb that predicates over it, and a
-verbless fragment has none to hand it. It is a second gap on the same sentence and it is not closed
-here.
+Either form of the name also reaches a **clause with no verb in it**, which it did not until #435:
+`handwriting smudges only.`, `handwriting visible.`, `Only handwriting smudges.` and `A heading.` each
+declared the page blank, because the affirmation is found by handing a name for text the verb that
+predicates over it and a fragment has none to hand it. A fragment is now read on its own — a predicate
+after the noun (`visible`, `present`, `apparent`, `discernible`, the four words the denial reads already
+use for the same dropped copula) or the end of the statement, optionally past a closing `only`.
+
+The risk there runs the other way from everything above, because a blank page's own log is written in
+fragments as often as not — 94 of the 204 blank declarations on record have a verbless statement in
+them, and every one of those is a denial. So the noun phrase must **open** its statement, with nothing
+in front of it but a determiner, a count, a qualifier, an `only`, or another name for text or marks.
+That is what keeps `Devoid of text.`, `Lacking text.` and `Free of text.` blank: none of those words is
+in the negator lists this section reads, and each is a page that would otherwise be reported lost. A
+comma is a boundary on both sides of the noun, for a reason the corpus supplies rather than a
+hypothetical one: the doubt-word scope has the marks and the `not legible text` phrase stripped out of
+it, so `A few specks, not legible text, figures, captions visible.` arrives at this read as
+`A few figures, captions visible` with the words that denied those nouns already gone.
+
+What the commas cost is a fragment whose denial stands **behind** its noun: `A signature, nothing
+else.` is a page with a signature on it, delivered empty. The read that would catch it is the one
+anchored on the denial, and that one only looks forward from the negator. Unchanged by #435 and stated
+rather than left to be re-measured.
 
 They are two findings with two remedies — a doubt word means the page could not be read and wants
 a better scan, a contradiction means the agent answered with no page for a page it says has
