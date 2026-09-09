@@ -321,10 +321,11 @@ Rules, in order of importance:
    describe their columns differently, use the structure that correctly describes the rows you are
    keeping — and if the two halves genuinely have different columns, say so and decline (see below).
 4. ONE <caption>: the table's own title, WITHOUT the continuation marker. Do not write "Continued".
-   Where that caption carries a note of measure under the title ("[In millions of dollars]"), the note
-   is part of the table's name and stays in the joined caption. The page agent is told to put it there,
-   so a caption arriving with one is not carrying a stray row, and a joined table that loses it hands a
-   reader the figures with nothing to read them in.
+   Where EITHER half's caption carries a note of measure under the title ("[In millions of dollars]"),
+   the note is part of the table's name and stays in the joined caption — including where only the
+   continued half printed it, because a note is no less the table's own for having been set over the
+   second half. The page agent is told to put it there, so a caption arriving with one is not carrying a
+   stray row, and a joined table that loses it hands a reader the figures with nothing to read them in.
 5. Keep <th scope="rowgroup"> group headers where either half has them, in place.
 6. A bracketed unit note that both halves repeat as a full-width row (e.g. "[In millions of
    dollars]") belongs once, at the top. Keep the first and drop the repeat. The two halves need not
@@ -475,8 +476,24 @@ export function verifyJoin(pair: ContinuationPair, merged: string): string | nul
   // LAST of the five, and deliberately, because the reason is what a failed pair reports: a merge that
   // dropped the note AND lost rows should say `rows_lost`. This is the cheapest of the losses and it
   // would otherwise mask the dearest.
+  //
+  // EITHER half's caption, which is a different question from the one `fNotes` asks and was wrong here
+  // for a while because the two got answered together. `fNotes` asks what rule 6 may DROP, and there
+  // the asymmetry is right: a note only the continued half carries is a first appearance and not a
+  // repeat. This asks what the joined caption must still SAY, and a note is no less part of the table's
+  // name for having been printed over the second half. Keyed on the first half alone, the free path
+  // dropped it silently — `joinInCode` keeps the first half's caption and discards the second's, so a
+  // second half whose caption carried the note and whose rows carried none passed every check with the
+  // units gone from the delivered table. Not a constructed shape: `p049`/`p050` are two halves of one
+  // continued table where each arm dropped the note on exactly one half.
+  //
+  // What a refusal costs here is one editor call and not the table. A code join that trips this logs
+  // its decline and the pair goes on to the Copy Editor, whose rule 4 asks for the note either half's
+  // caption carries — so the check is one the prompt can satisfy, which is what makes refusing the
+  // right answer rather than a dead end.
   const kept = captionNotes(joined.caption);
-  if ([...captionNotes(pair.first.caption)].some((n) => !kept.has(n))) return "caption_note_lost";
+  const owed = new Set([...captionNotes(pair.first.caption), ...captionNotes(pair.second.caption)]);
+  if ([...owed].some((n) => !kept.has(n))) return "caption_note_lost";
   return null;
 }
 
@@ -509,10 +526,16 @@ function checkJoin(
 // Rule 6's shape: a full-width row whose whole text is a bracketed note, reprinted at the top of a
 // continued page. Matched on the row being a SINGLE cell as well as on the text, so an ordinary data
 // row whose first cell happens to start with a bracket is not eligible to be dropped as a repeat.
+//
+// Both bracket widths, and the same two as `captionNotes` deliberately: a note the first half writes
+// in its caption and the second half repeats as a row is one note, and a reader here that could not
+// see the row form of a spelling the caption reader CAN see would copy that row in under rule 1 and
+// ship the note twice — the harm the caption rule exists to remove, reintroduced by the two readers
+// disagreeing about what a note looks like.
 function isUnitNoteRow(row: Element): boolean {
   const cells = [...row.children];
   if (cells.length !== 1) return false;
-  return /^\[.*\]$/.test(normalizeCell(cells[0].textContent ?? ""));
+  return /^[[［].*[\]］]$/.test(normalizeCell(cells[0].textContent ?? ""));
 }
 
 // The same note as `isUnitNoteRow` finds, in the other place a half can print it: inside the caption
@@ -523,14 +546,25 @@ function isUnitNoteRow(row: Element): boolean {
 // the other's shape away. Read by `verifyJoin`, which will not let a joined caption lose one, and by
 // `joinInCode`, which counts one as grounds to drop the second half's repeat.
 //
-// SQUARE brackets, and that is a collision rather than a preference: `CONTINUED_CAPTION` matches
-// "(continued", so reading parenthesised runs too would make a kept-note check demand the survival of
-// the one run rule 4 requires to be dropped. In #374's corpus the bracketed spelling is 61 of 68
-// delimited notes and the parenthesised one 6. A note printed with no delimiter at all — 3 arm-pages,
-// unanimous across the arms that read them, so it is the ink and not a model's invention — is not
-// separable from the title by any string test and is reached by nothing here.
+// Brackets, ASCII and fullwidth, and the whole of #374's delimiter census accounted for rather than
+// the part that was convenient: of its 68 delimited notes, 61 are ASCII `[...]`, 6 are parenthesised
+// and 1 is the fullwidth `［...］` one arm printed on `p041`. The fullwidth pair is read because it
+// costs a character class; the PARENTHESISED spelling is not, and that is a collision rather than a
+// preference — `CONTINUED_CAPTION` matches "(continued", so reading parenthesised runs would make a
+// kept-note check demand the survival of the one run rule 4 requires to be dropped.
+//
+// Two shapes are therefore out of reach, and neither is a false refusal — both are a note that can go
+// missing without this noticing. A parenthesised note, 6 of the 68. And a note printed with no
+// delimiter at all — 3 arm-pages, unanimous across the arms that read them, so it is the ink and not a
+// model's invention — which no string test separates from the title.
+//
+// The delimiters are compared as printed, not folded together: `normalizeCell` takes out soft hyphens
+// and collapses whitespace and does nothing to bracket width, so a merge that reprinted an ASCII note
+// in fullwidth brackets reads as a note dropped and one added, and is refused. That is the safe
+// direction — the pair declines and both halves ship — but it is a refusal for a delimiter and not for
+// a loss, and it is the one way this check can cost a join that lost nothing.
 function captionNotes(caption: string): Set<string> {
-  return new Set((caption.match(/\[[^\]]+\]/g) ?? []).map((n) => normalizeCell(n)));
+  return new Set((caption.match(/[[［][^\]］]+[\]］]/g) ?? []).map((n) => normalizeCell(n)));
 }
 
 // The header block written as a string that changes whenever anything a reader would notice about it
@@ -846,6 +880,11 @@ export function joinInCode(pair: ContinuationPair): { html: string } | { reason:
   // as the page rule lands. What is NOT folded in is the second half's caption: a note only the
   // continued half carries says something about the continued rows, and rule 6 licenses dropping a
   // repeat rather than a first appearance.
+  //
+  // That asymmetry is about DROPPING and about nothing else. What the joined caption must still say is
+  // `verifyJoin`'s question, and it is answered over both halves' captions there — a note printed over
+  // the second half is still part of the table's name, and this half of the code declining to call it a
+  // repeat is not a licence to lose it.
   const fNotes = new Set(frows.filter(isUnitNoteRow).map((r) => normalizeCell(r.textContent ?? "")));
   for (const note of captionNotes(fcap?.textContent ?? "")) fNotes.add(note);
 

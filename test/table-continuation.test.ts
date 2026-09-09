@@ -594,6 +594,48 @@ test("the halves need not print the unit note in the same place for it to be a r
   assert.deepEqual(joinInCode(onePair(onlySecond + second)), { reason: "note_repeat_unclear" });
 });
 
+test("a note only the continued half's caption carries is not the free path's to lose", () => {
+  // The other side of that asymmetry, and the one it hid: rule 6 declining to call this a repeat is not
+  // a licence to drop it. `joinInCode` keeps the FIRST half's caption and discards the second's, so a
+  // second half whose caption carried the note and whose rows carried none used to pass every check
+  // with the units gone from the delivered table, on the free path, with no reason logged. Measured
+  // shape rather than a constructed one — p049 and p050 are two halves of one continued table where
+  // each arm drops the note on exactly one half, so a first half without it and a second half with it
+  // is a pair the corpus produces.
+  const first = `<table><caption>Table 5.—Debt</caption>${HEAD}<tbody>${dataRow("Alabama")}</tbody></table>`;
+  const second = `<table><caption>Table 5.—Debt [In millions of dollars]—Continued</caption>${HEAD}<tbody>${dataRow("Vermont")}</tbody></table>`;
+  const pair = onePair(first + second);
+
+  const coded = joinInCode(pair);
+  assert.ok("html" in coded, JSON.stringify(coded));
+  // The code path still produces the bytes it always did — it is the verification that refuses them,
+  // which is what sends this pair to the editor rather than shipping it.
+  assert.equal(verifyJoin(pair, coded.html), "caption_note_lost");
+  // And the answer rule 4 asks for clears it: the note kept, the marker gone.
+  assert.equal(
+    verifyJoin(pair, `<table><caption>Table 5.—Debt [In millions of dollars]</caption>${HEAD}<tbody>${dataRow("Alabama")}${dataRow("Vermont")}</tbody></table>`),
+    null,
+  );
+});
+
+test("a fullwidth-bracketed note is a note in both readers, or it ships twice", () => {
+  // One arm writes ［Percentage distribution］ with fullwidth brackets — 1 of the 68 delimited notes in
+  // #374's corpus. It is read because the cost is a character class, and because the two readers have
+  // to agree: a caption reader that saw this spelling while the ROW reader did not would leave the
+  // second half's repeat looking like an ordinary data row, copy it in under rule 1, and ship the note
+  // in the caption AND as a phantom row — the harm the caption rule exists to remove, put back by the
+  // two halves of the code disagreeing about what a note looks like.
+  const note = noteRow("［Percentage distribution］");
+  const first = `<table><caption>Table 6.—Shares ［Percentage distribution］</caption>${HEAD}<tbody>${dataRow("Alabama")}</tbody></table>`;
+  const second = `<table><caption>Table 6.—Shares—Continued</caption>${HEAD}<tbody>${note}${dataRow("Vermont")}</tbody></table>`;
+  const pair = onePair(first + second);
+
+  const coded = joinInCode(pair);
+  assert.ok("html" in coded, JSON.stringify(coded));
+  assert.ok(!coded.html.includes("<td colspan"), "the repeat row survived, so the row reader missed the spelling");
+  assert.equal(verifyJoin(pair, coded.html), null);
+});
+
 test("an id inside the note row rule 6 drops has not survived the join", async () => {
   // Rule 6 and rule 2 meet here: the note repeats on both pages, and each page's copy carries its own
   // footnote anchor. Dropping the repeat as a duplicate ROW drops the anchor with it, and it is the one

@@ -3529,8 +3529,23 @@ header block came back as `<td>`, which axe does not report and which would have
 association from the one table this stage exists to improve), `rows_lost`, `labels_lost:<n>` (a
 bracketed unit note the merge moved from a row into the caption counts as kept, because the label
 check reads `th,td` and would otherwise refuse the very drop rule 6 licenses), `caption_note_lost`
-(the joined caption dropped a bracketed note of measure the first half's caption carried — part of
+(the joined caption dropped a bracketed note of measure that EITHER half's caption carried — part of
 the table's name, and invisible to every other check here, which read cells, columns and rows).
+
+`caption_note_lost` reads both halves' captions while rule 6's repeat set reads only the first
+half's, because those answer different questions: what the merge may **drop** is a repeat and not a
+first appearance, while what the joined caption must still **say** includes a note printed over the
+continued half. Keyed on the first half alone it was a silent loss on the free path — `joinInCode`
+keeps the first half's caption and discards the second's — and `p049`/`p050` are a measured pair of
+that shape. A refusal costs one editor call rather than the table: the pair goes on to the Copy
+Editor, whose rule 4 asks for the note either half's caption carries.
+
+Both bracket widths are read, ASCII and fullwidth, and the parenthesised spelling is not — a check
+demanding every parenthesised run survive would demand the survival of `(continued`, which rule 4
+requires dropped. So a parenthesised note (6 of the 68 delimited notes in the reference corpus) and
+a note printed with no delimiter at all (3 arm-pages) can still go missing without this seeing it.
+Delimiters are compared as printed, so a merge that reprinted an ASCII note in fullwidth brackets is
+refused — the one way this check can cost a join that lost nothing.
 
 The order is only which reason a failed pair reports, since every one of them refuses the join, and
 `caption_note_lost` is last on purpose: a merge that dropped the note *and* lost rows should say
