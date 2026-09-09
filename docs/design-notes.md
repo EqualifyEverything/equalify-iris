@@ -1126,7 +1126,7 @@ Places where a decision was left open, and where v1 intentionally stops:
   and the prose gate cannot see either.** `listMarkerHalfEdit` (`review.ts`) reads the announced
   marker and the item's own printed marker off `flatten` — the view where `type="a"` and a transcribed
   `(a)` are visible at once — and reports the two states the licence forbids: `marker_announced_twice`,
-  an item holding both markers at once **in the same kind**, which is #334's defect arriving from the
+  an item printing **the marker the list announces**, which is #334's defect arriving from the
   review loop instead of from an extraction; and `text_markers_gone`, lettered markers leaving the items
   with the list not gaining them, which is the page's letters deleted outright. A complete conversion
   moves both counts together and is silent, which is why this compares two counts instead of watching
@@ -1166,6 +1166,16 @@ Places where a decision was left open, and where v1 intentionally stops:
   needs the CLOSER and not merely a bracket. Two rounds, one shape of error each time: **a rule that
   splits on a property has to be checked on every value of that property, including the one the failing
   example did not have.**
+
+  **The kind test was itself an approximation of the value test, and the round after found the two shapes
+  it let through.** `(a) (i) Payments` is a marker and a roman SUB-marker — both non-digits, so a kind
+  match called it a doubling — and a bare `<ol>` whose item prints `12.` announces "1" and reads "12",
+  both digits: the same clause number in the other alphabet, on the side the kind test did not look at.
+  `doubled` now compares the announced marker's own VALUE against the printed token, case-insensitively,
+  which is what the rule always meant — an item repeating the marker it is announced with — and is the
+  definition `docs/API.md` had already written down while the code approximated it. Three rounds on one
+  predicate, and each round's approximation was defensible until the next value showed up: **when a check
+  can be stated as "the same thing twice", compare the thing and not a property of it.**
 
   That check is also what makes the licensed strip legible where it collides with the loss machinery,
   which it does and is left doing. `proseShortened` is a comparison of visible text, so the strip is a

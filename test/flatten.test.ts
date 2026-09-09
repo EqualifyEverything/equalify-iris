@@ -782,9 +782,10 @@ test("half of the licensed list conversion is reported and the whole of it is no
     ),
     null,
   );
-  // `doubled` matches the two markers by KIND, and both directions of that are a case of their own.
-  // A lettered list whose item prints "12." is a statute's clause number under its own marker — the
-  // reader hears "a" then "12", one marker and a number — so restoring that number is not a doubling.
+  // `doubled` matches the announced marker's own VALUE against the printed token, and every weaker
+  // version of that reported something a reader does not hear twice. A lettered list whose item prints
+  // "12." is a statute's clause number under its own marker — the reader hears "a" then "12", one
+  // marker and a number — so restoring that number is not a doubling.
   const clauseNumber = `<ol type="a"><li>12. Payments to the state</li><li>Reimbursed state administration</li></ol>`;
   assert.equal(listMarkers(clauseNumber).doubled, 0);
   assert.equal(listMarkers(clauseNumber).printed, 1);
@@ -794,10 +795,39 @@ test("half of the licensed list conversion is reported and the whole of it is no
   const digitsDoubled = `<ol><li>(1) Direct federal outlays</li><li>(2) Reimbursed state administration</li></ol>`;
   assert.equal(listMarkers(digitsDoubled).doubled, 2);
   assert.equal(listMarkerHalfEdit(stripped, digitsDoubled), "marker_announced_twice");
-  // Where the kinds DISAGREE the other way — announced "1", text reads "(a)" — nothing is doubled:
+  // Where the two DISAGREE the other way — announced "1", text reads "(a)" — nothing is doubled:
   // that list is missing the `type` that would announce its letters, and the Reader prompt says the
   // text's copy must STAY until it has one. Same split as the prompt's two branches.
   assert.equal(listMarkers(printed).doubled, 0);
+  // Matching on KIND rather than on value left two more of the same shape, one in each alphabet. A
+  // lettered list whose item prints "(i)" is a marker and a roman SUB-marker — "(a) (i) Payments" —
+  // and both are non-digits, so a kind test called it a doubling. A bare <ol> whose item prints "12."
+  // announces "1" and reads "12", both digits: the clause number again, on the side the kind test did
+  // not look at. Only the announced marker's own value separates them.
+  assert.equal(
+    listMarkerHalfEdit(
+      `<ol type="a"><li>Payments to states</li><li>Payments to tribes</li></ol>`,
+      `<ol type="a"><li>(i) Payments to states</li><li>(ii) Payments to tribes</li></ol>`,
+    ),
+    null,
+  );
+  assert.equal(
+    listMarkerHalfEdit(
+      `<ol><li>Payments to states</li><li>Reimbursed state administration</li></ol>`,
+      `<ol><li>12. Payments to states</li><li>13. Reimbursed state administration</li></ol>`,
+    ),
+    null,
+  );
+  // A marker is the SAME marker across case and however the list arrives at it, so all three of these
+  // are the doubling: a roman `type`, an uppercase text copy under a lowercase one, and a list whose
+  // announced letters come from `start` rather than from counting up from the first.
+  for (const [before, after] of [
+    [`<ol type="i"><li>Alpha item</li><li>Beta item</li></ol>`, `<ol type="i"><li>(i) Alpha item</li><li>(ii) Beta item</li></ol>`],
+    [`<ol type="a"><li>Alpha item</li><li>Beta item</li></ol>`, `<ol type="a"><li>(A) Alpha item</li><li>(B) Beta item</li></ol>`],
+    [`<ol type="a" start="3"><li>Gamma item</li><li>Delta item</li></ol>`, `<ol type="a" start="3"><li>(c) Gamma item</li><li>(d) Delta item</li></ol>`],
+  ]) {
+    assert.equal(listMarkerHalfEdit(before, after), "marker_announced_twice", after);
+  }
   // Roman precision, stated because it is asymmetric on purpose: "ii." cannot be an initial and counts
   // with a full stop, "i." can be one and does not. The alphabet is i/v/x only, which caps a roman
   // marker at xxxix — admitting l, c, d and m is what made "cm." and "ml." matches in the first place.

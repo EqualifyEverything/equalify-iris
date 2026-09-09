@@ -3415,11 +3415,11 @@ The licence: a bare `<ol>` whose every item's text opens with one sequence's mar
 editor may set the `type` those markers show **and** strip them from the text. That is one change,
 and each half of it alone is a defect:
 
-* `shape: "marker_announced_twice"` — an item holds both markers at once **and in the same kind**, so a
-  reader hears "a" and then "(a)", or "1" and then "(1)". The same defect an extraction can produce,
-  arriving from the review loop instead. Read off `doubled`, which is counted **per item**, so a round
-  that sets the `type` and strips only some of the items is caught: the item that kept its own marker is
-  the one a reader meets.
+* `shape: "marker_announced_twice"` — an item prints **the marker the list announces**, so a reader hears
+  "a" and then "(a)", or "1" and then "(1)". The same defect an extraction can produce, arriving from the
+  review loop instead. Read off `doubled`, which is counted **per item**, so a round that sets the `type`
+  and strips only some of the items is caught: the item that kept its own marker is the one a reader
+  meets.
 * `shape: "text_markers_gone"` — **lettered** markers left the items and the list did not gain them, so
   a list the page printed `(a)`, `(b)`, `(c)` now prints 1, 2, 3 and **no copy of the letters is left in
   the document**. This is the loss.
@@ -3427,15 +3427,24 @@ and each half of it alone is a defect:
 The counts, all read off the flattened view because that is where a `type` and a transcribed marker are
 visible at once: `lettered` is items whose **announced** marker is not a digit; `printed` is items whose
 own text opens with a marker of any shape; `printed_lettered` is those of them whose marker is not a
-digit; `doubled` is items whose announced and printed markers are **the same kind**.
+digit; `doubled` is items that print **the marker the list announces**, token against token and
+case-insensitively.
 
-Both directions of that kind match matter. A lettered list whose item prints `12.` is a statute's clause
-number under its own marker — `(a) 12. Payments…` is an ordinary shape — so a reader hears "a" and then
-"12", one marker and a number rather than one marker twice, and restoring that number is not a doubling.
-A bare `<ol>` whose item prints `(1)` **is** the doubling, in the one kind the corpus actually holds.
-Where the kinds disagree the other way — announced `1`, text reads `(a)` — nothing is doubled either:
-that list is missing the `type` that would announce its letters, and the Reader prompt says the text's
-copy must **stay** until it has one. Same split as the prompt's two branches.
+That comparison is by **value**, and every weaker version of it reported something a reader does not hear
+twice. A lettered list whose item prints `12.` is a statute's clause number under its own marker —
+`(a) 12. Payments…` is an ordinary shape — so a reader hears "a" and then "12", one marker and a number.
+`(a) (i) Payments` is a marker and a roman **sub**-marker, and a bare `<ol>` whose item prints `12.`
+announces `1` and reads `12`: those are the same clause number in each alphabet, and both are matches on
+kind. A bare `<ol>` whose item prints `(1)` **is** the doubling, and it is the kind the corpus holds.
+Where the two disagree the other way — announced `1`, text reads `(a)` — nothing is doubled either: that
+list is missing the `type` that would announce its letters, and the Reader prompt says the text's copy
+must **stay** until it has one. Same split as the prompt's two branches. `type`, `start` and `value` all
+feed the announced marker, so `<ol type="a" start="3">` with an item printing `(c)` counts.
+
+An item printing a marker that **contradicts** the announced one — `(b)` on an `<ol type="a">`'s first
+item — is not counted, and is not this event's question. Neither half of the licensed conversion can
+produce it: the licence sets the `type` those very markers show, so its half-edits leave the two agreeing
+by construction, and a disagreeing pair is a mis-set `type` or `start` rather than half a conversion.
 
 `text_markers_gone` reads `printed_lettered` and not `printed`, because **a digit leaving an item's text
 is a repair and not a loss**: an `<ol>` announces 1, 2, 3 by itself, so a digit the text repeats is a

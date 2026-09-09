@@ -737,17 +737,19 @@ const ANNOUNCED_ITEM = /\[List item ([^\]]+)\]([^[]*)/g;
 const PRINTED_MARKER = /^\s*(\(|\[)?\s*([a-z]|[ivx]{2,5}|\d{1,3})\s*(\)|\]|\.)/i;
 const ROMAN_NUMBER = /^x{0,3}(?:ix|iv|v?i{0,3})$/i;
 
-// Whether the head of an item's own text is a printed marker, and if so whether it is a DIGIT. The
-// two are separate questions because the repair for each is the opposite of the other's: a digit
-// transcribed into an item is a copy of what the list already announces and the text's copy is the
-// one that goes, while a letter transcribed into an item is the only record of what the page printed.
-function printedMarker(text: string): { marker: boolean; digit: boolean } {
+// Whether the head of an item's own text is a printed marker, whether it is a DIGIT, and the token
+// itself. The digit is a separate question because the repair for each is the opposite of the other's:
+// a digit transcribed into an item is a copy of what the list already announces and the text's copy is
+// the one that goes, while a letter transcribed into an item is the only record of what the page
+// printed. The token is returned because `doubled` compares it against the marker the list announces —
+// see `ListMarkers`.
+function printedMarker(text: string): { marker: boolean; digit: boolean; token: string } {
   const m = PRINTED_MARKER.exec(text);
-  if (!m) return { marker: false, digit: false };
+  if (!m) return { marker: false, digit: false, token: "" };
   const token = m[2];
-  if (/^\d+$/.test(token)) return { marker: true, digit: true };
-  if (token.length > 1) return { marker: ROMAN_NUMBER.test(token), digit: false };
-  return { marker: m[3] !== ".", digit: false };
+  if (/^\d+$/.test(token)) return { marker: true, digit: true, token };
+  if (token.length > 1) return { marker: ROMAN_NUMBER.test(token), digit: false, token };
+  return { marker: m[3] !== ".", digit: false, token };
 }
 
 interface ListMarkers {
@@ -763,19 +765,28 @@ interface ListMarkers {
   // deletion loses something: a digit the text repeats is a copy of what an `<ol>` announces by
   // itself, so stripping it is the repair `READER_SYSTEM` asks for rather than a loss.
   printed_lettered: number;
-  // Items that hold both markers at once AND IN THE SAME KIND: announced "a" while the text reads
-  // "(a)", or announced "1" while the text reads "(1)". Counted per item rather than inferred from the
-  // two totals, because the state this names is a property of one item and a round can create it on
-  // some items and not others.
+  // Items that print THE MARKER THE LIST ANNOUNCES, compared token against token and case-insensitively:
+  // announced "a" while the text reads "(a)", announced "1" while the text reads "(1)", announced "c"
+  // under `start="3"` while the text reads "(c)". Counted per item rather than inferred from the two
+  // totals, because the state this names is a property of one item and a round can create it on some
+  // items and not others.
   //
-  // The kinds have to match, and both directions of that mattered. A lettered list whose item prints
-  // "12." is a statute's clause number under its own marker — "(a) 12. Payments …" is an ordinary
-  // shape — and a reader hears "a" then "12", which is a marker and a number rather than one marker
-  // twice. And a bare `<ol>` whose item prints "(1)" IS the doubling, in the one kind the corpus
-  // actually holds; requiring a letter would have missed it. Where the kinds DISAGREE the other way —
-  // announced "1", text reads "(a)" — nothing is doubled either: that is a list missing the `type`
-  // that would announce its letters, and `READER_SYSTEM` says the text's copy must STAY until it has
-  // one. Same split as the prompt's two branches, which is why it is this predicate and not a total.
+  // The comparison is the announced marker's own VALUE, and every weaker version of it reported
+  // something a reader does not hear twice. Matching nothing but "the list announces letters" called a
+  // statute's clause number a doubling — "(a) 12. Payments …" is an ordinary shape and the reader hears
+  // a marker and a number. Matching on KIND fixed that one and kept two more: "(a) (i) Payments" is a
+  // marker and a roman SUB-marker, both non-digits; and a bare `<ol>` whose item prints "12." announces
+  // "1" and reads "12", both digits, which is the same clause number one alphabet over. Only the value
+  // settles it, and it is also the definition the prompt gives — an item repeating the marker it is
+  // announced with. Where the two markers disagree in kind the other way — announced "1", text reads
+  // "(a)" — nothing is doubled either, which is `READER_SYSTEM`'s DISAGREE branch: that list is missing
+  // the `type` that would announce its letters, and the text's copy must STAY until it has one.
+  //
+  // An item printing a marker that CONTRADICTS the announced one — "(b)" under an `<ol type="a">`'s
+  // first item — is not counted and is not this check's question. Neither half of the licensed
+  // conversion can produce it: the licence sets the `type` those very markers show, so its half-edits
+  // leave the two agreeing by construction, and a disagreeing pair is a mis-set `type` or `start`
+  // rather than half a conversion.
   doubled: number;
 }
 
@@ -787,12 +798,12 @@ export function listMarkers(html: string): ListMarkers {
   let doubled = 0;
   for (const m of flatten(html).matchAll(ANNOUNCED_ITEM)) {
     items++;
-    const announcedLettered = !/^\d+$/.test(m[1]);
+    const announced = m[1].trim();
     const printedHead = printedMarker(m[2]);
-    if (announcedLettered) lettered++;
+    if (!/^\d+$/.test(announced)) lettered++;
     if (printedHead.marker) printed++;
     if (printedHead.marker && !printedHead.digit) printedLettered++;
-    if (printedHead.marker && announcedLettered === !printedHead.digit) doubled++;
+    if (printedHead.marker && printedHead.token.toLowerCase() === announced.toLowerCase()) doubled++;
   }
   return { items, lettered, printed, printed_lettered: printedLettered, doubled };
 }
