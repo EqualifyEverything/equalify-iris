@@ -2947,7 +2947,7 @@ const FRAGMENT_CLOSER = new Set("only alone too also".split(" "));
 // right, and the corpus separates none of them (0 of 201 declarations move either way on this change).
 // `A heading at the top.` is already pinned as delivered, beside two more of its shape, in
 // `envelope-as-content.test.ts` — the pins that say a widening must defend both halves of each pair.
-function verblessAffirmation(tokens: Word[], i: number, statement: string): number {
+function verblessAffirmation(tokens: Word[], i: number, statement: string, previous: string | undefined): number {
   // A statement whose whole text is the name affirms — and this read splits statements on `.`, `!`, `?`,
   // `;` and line breaks alike, so "Blank page; text", "Page is blank; images; nothing present.",
   // "Page is blank. No printed text. Images." and "Page is blank. Any text? None found." each refused
@@ -2993,11 +2993,28 @@ function verblessAffirmation(tokens: Word[], i: number, statement: string): numb
   // losing direction. So the statement must BE the token: nothing in it but the name, whitespace and the
   // marker. `two images.` was never at risk (two tokens) and `2 images.` must answer as it does; a
   // bulleted enumeration of a page's contents is one token per line and every line keeps its affirmation.
-  // Reported by the review on PR #444.
+  // Reported by the review on PR #444. A NUMBERED enumeration is the same shape and is not fixed by this,
+  // because `1.` is a boundary rather than decoration — see the paragraph below `bare`.
   // Compared at `words()`'s own normalization, which lowercases and folds the curly apostrophe: `Content`
   // and `page’s` have to compare equal to the tokens they produced.
+  //
+  // AND A BOUNDARY IS NOT ALWAYS A SENTENCE END, which is the third face of the same mistake and the one
+  // the `bare` fix above created. A numbered list marker ENDS IN A `.`, so `1.` is a boundary and every
+  // line of `Page is blank.\n1. text\n2. images` arrives here as a bare single token: the whole enumeration
+  // of what is on the page was eaten and the page shipped empty, while the `-` bulleted spelling two
+  // paragraphs up is rescued. The premise of this guard is that a name alone BETWEEN TWO BOUNDARIES is all
+  // there is to read — and that only holds where the boundary behind it ended a sentence. A preceding
+  // statement with no letter in it is a marker and not a sentence, so the name is a list item and affirms.
+  //
+  // Keyed on "no letter" rather than on a marker vocabulary because the corpus says which spellings exist:
+  // 73 of the 3,747 replies write a `1.` list line and 2 write a `-` one, while `1)`, `a.`, `a)` and roman
+  // numerals appear in ZERO — so a lettered or parenthesised branch would be a guess, and the digits are
+  // the whole observed population. Latent either way: 2 of the 1,073 bare one-token statements on record sit
+  // behind a letterless statement and neither names text, so this can only hand an affirmation back.
+  // Reported by the review on PR #444.
   const bare = statement.replace(/[\s\f\v]+/g, "").toLowerCase().replace(/[’]/g, "'") === tokens[0]!.word;
-  if (tokens.length === 1 && bare && !statement.includes("\f")) return -1;
+  const marked = previous !== undefined && !/[A-Za-z]/.test(previous);
+  if (tokens.length === 1 && bare && !marked && !statement.includes("\f")) return -1;
   for (let k = i - 1; k >= 0; k--) {
     const { word, comma } = tokens[k]!;
     // A comma between the noun and what precedes it opens a fresh phrase, and the words behind it are
@@ -3038,7 +3055,12 @@ export function contentAffirmed(scope: string): string | null {
   // above, which have to cross a line break because these logs put one where a comma belongs — here
   // the boundaries only limit how far a subject may reach for its verb, so a boundary the denial
   // scan crosses is one this one is free to stop at.
-  for (const statement of scope.split(/[.!?;\n]+/)) {
+  // Kept as an array rather than iterated straight off `split`, because one read below asks what was
+  // BEHIND the boundary: a `.` that ends a numbered list marker is not a sentence end, and the statement in
+  // front of it is what says which it was.
+  const statements = scope.split(/[.!?;\n]+/);
+  for (let s = 0; s < statements.length; s++) {
+    const statement = statements[s]!;
     const tokens = words(statement);
     const reach = affirmingReach(tokens);
     const affirmed = denialAffirmations(tokens);
@@ -3073,7 +3095,7 @@ export function contentAffirmed(scope: string): string | null {
         // The statement's TEXT and not its tokens, because both things the guard in there asks about are
         // invisible to the tokenizer: `words()` cannot start a token on `PHRASE_GONE`, and it cannot start
         // one on a digit or a bullet either.
-        const named = verblessAffirmation(tokens, i, statement);
+        const named = verblessAffirmation(tokens, i, statement, s > 0 ? statements[s - 1] : undefined);
         if (named >= 0) {
           return tokens
             .slice(i, named + 1)

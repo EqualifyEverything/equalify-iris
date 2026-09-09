@@ -1693,8 +1693,18 @@ That makes the guard sensitive to **any** non-letter decoration, so `Page is bla
 asymmetry is deliberate and the corpus settles it: of 3,402 one-token statements only 1,073 are bare, 2,329
 carry decoration, and all four that name text are decorated ones. A guard reading through decoration would
 move four real statements toward being shipped empty and none toward declaring, which is the losing
-direction. One decoration is not one: `1. handwriting` declares, because a numbered list marker ends in a
-`.` and statements end there, so the name arrives on its own.
+direction.
+
+A **boundary is not always a sentence end**, and that is the third face of the same mistake. A numbered list
+marker ends in a `.`, so `1.` is a boundary and every line of `Page is blank.\n1. text\n2. images` arrives as
+a bare one-token statement — the whole enumeration of what is on the page eaten, and the page shipped empty,
+where the `-` spelling is rescued. The guard's premise is that a name alone *between two boundaries* is all
+there is to read, and that holds only where the boundary behind it ended a sentence: a preceding statement
+with **no letter in it** is a marker, so the name is a list item and affirms. The corpus says which
+spellings exist rather than a marker vocabulary guessing — 73 of 3,747 replies write a `1.` list line, 2
+write a `-` one, and `1)`, `a.`, `a)` and roman numerals appear in none — and 2 of the 1,073 bare one-token
+statements on record sit behind a letterless statement, neither of them naming text, so this can only hand
+an affirmation back.
 
 The guard's own cost is a lone name with no strip behind it: `Page is blank. handwriting.` now ships
 empty. That is one wording against the five above, both sides unobserved — one-token statements are common

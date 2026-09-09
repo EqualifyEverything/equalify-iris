@@ -2367,13 +2367,32 @@ test("a blank page's own fragments are not affirmations (#435)", () => {
   assert.equal(declaredBlank({ html: "", log: "Page is blank. **handwriting**" }), false);
   assert.equal(declaredBlank({ html: "", log: "Page is blank. (handwriting)" }), false);
   assert.equal(declaredBlank({ html: "", log: 'Page is blank. "handwriting"' }), false);
-  // And the two decorations that are NOT decoration by the time this read sees them. A numbered list marker
-  // ends in `.`, which is a statement boundary, so `1.` and the name are separate statements and the name
-  // arrives bare — the opposite verdict from the `-` bullet three lines up, off the same list. Case and
-  // surrounding whitespace fold, because the comparison is made at `words()`'s own normalization.
-  assert.equal(declaredBlank({ html: "", log: "Page is blank. 1. handwriting" }), true);
+  // Case and surrounding whitespace are NOT decoration by the time this read sees them, because the
+  // comparison is made at `words()`'s own normalization and that is what folds them.
   assert.equal(declaredBlank({ html: "", log: "Page is blank. HANDWRITING." }), true);
   assert.equal(declaredBlank({ html: "", log: "Page is blank.  handwriting  ." }), true);
+  // A boundary is not always a sentence end, which is the third face of the same mistake and the one the
+  // `bare` rule above created. A numbered list marker ENDS IN A `.`, so `1.` is a boundary and every line of
+  // a numbered enumeration arrives as a bare single token — the whole list of what is on the page eaten, and
+  // the page shipped empty, while the `-` spelling four lines up is rescued. The guard's premise is that a
+  // name alone BETWEEN TWO BOUNDARIES is all there is to read, and that holds only where the boundary behind
+  // it ended a sentence: a preceding statement with no letter in it is a marker, so the name is a list item.
+  // Keyed on "no letter" and not on a marker vocabulary because the corpus says which spellings exist — 73
+  // of 3,747 replies write a `1.` list line, 2 write a `-` one, and `1)`, `a.`, `a)` and roman numerals
+  // appear in none. Every spelling is pinned here so a later narrowing has to say which it drops.
+  // Raised by the review on PR #444.
+  assert.equal(declaredBlank({ html: "", log: "Page is blank.\n1. text\n2. images" }), false);
+  assert.equal(declaredBlank({ html: "", log: "Page is blank.\n1. handwriting\n2. signature" }), false);
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. 1. handwriting" }), false);
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. 12. text" }), false);
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. 3.\ntext" }), false);
+  assert.equal(declaredBlank({ html: "", log: "Page is blank.\n1) text\n2) images" }), false);
+  assert.equal(declaredBlank({ html: "", log: "Page is blank.\n* text\n* images" }), false);
+  // And the rule reaches no further than the boundary behind the name: a lone name whose preceding
+  // statement is a SENTENCE still declares, which is the whole of what #440 asked for and the row the fix
+  // above must not take with it.
+  assert.equal(declaredBlank({ html: "", log: "Blank page; text" }), true);
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. handwriting." }), true);
   // What the mark being a character in the text costs: a log could write one, and a forged one would hand
   // the guard back the affirmation it takes away. It cannot — `vetoScope` deletes `\f` and `\v` from its
   // input before inserting any — so a lone name for text with a form feed in front of it is read exactly
