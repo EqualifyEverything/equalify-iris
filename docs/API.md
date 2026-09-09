@@ -1684,6 +1684,16 @@ stopped position between the anchor and the object, and eight wordings of that s
 form log writes — shipped a page with content on it as blank. Trying each position in order can only add an
 affirmation, because the position first-hit used is still among them.
 
+One family of wordings **loses** a page to this, and it is the comma bound rather than the complement:
+`The heading is empty, handwriting only.` and seven siblings of it go out blank where they were reported
+before. A fragment cut off at its own comma is read as a member of the list a blank page writes, and the
+list is a list of what is *absent* — so a denial standing behind the noun reaches nothing, which is the
+defect `A signature, nothing else.` is pinned against. These eight only join it because `is empty` is now a
+denial. That is the pairing rule holding rather than breaking: `The heading is absent, handwriting only.`
+lost the same page before the fix and still does, so the two wordings say the same thing and answer the
+same way, and the repair belongs at the comma and not in the complement list. Base reported them by
+affirming `heading` off the very complement that denied it.
+
 No log on record moves. Of 3,747 page replies with a log, 153 write one of these complements and 135 of
 those sit inside a blank declaration, 0 in the negated form and 0 in the contracted one, and 0 verdicts
 move — because the subject a real log uses is the page and not its heading. The all-positions scan has a

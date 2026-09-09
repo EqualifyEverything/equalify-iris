@@ -2301,6 +2301,19 @@ test("a blank page's own fragments are not affirmations (#435)", () => {
   // cannot pick up either, because it only looks forward from the negator. Base delivers this page empty
   // too, so this is a defect left standing and not one bought.
   assert.equal(declaredBlank({ html: "", log: "Page is blank. A signature, nothing else." }), true);
+  // And what #442 added to that bill, which round 2 of #446 asked for and was right to: an absence complement
+  // in front of the comma is a denial standing BEHIND the noun too, so six more wordings of the same fragment
+  // reach the same bound. Base reported these — for the wrong reason, by affirming `heading` off the very
+  // complement that denied it — so the loss is bought in the ledger sense and pre-existing in the mechanism,
+  // and the pair says which: the complement wording answers the way the NEGATOR wording that means the same
+  // thing already answered, `is absent` having shipped this page empty all along. That is the whole test, and
+  // it is why the fix is at the comma bound rather than in the complement list. 8 wordings measured, of the
+  // shape `The heading is empty, handwriting only.`; none is in the corpus.
+  assert.equal(
+    declaredBlank({ html: "", log: "Page is blank. The heading is empty, handwriting only." }),
+    declaredBlank({ html: "", log: "Page is blank. The heading is absent, handwriting only." }),
+  );
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. The heading is empty, handwriting only." }), true);
   // A statement that is the name and NOTHING else no longer affirms (#440). Statements split on `;` and on
   // line breaks as well as on `.`, so each of these is one word by the time the read sees it, and in the
   // third the denial is in the next statement where nothing here can reach it. A plain `tokens.length === 1`
@@ -3577,10 +3590,40 @@ test("a complement saying the subject holds nothing is a denial, as the negator 
       complement,
     );
   }
+  // THE ORDER, swept, which is the sampling round 1 of #446 said was missing and it was right: the 8 rows
+  // above and the 18 controls are all a complement with no negator after it, and the ordering a real form log
+  // writes was on neither side of the evidence. 5 complements x 8 exception objects x 3 orderings, 120 cells,
+  // each against the pure-negator wording for the same object — the same pairing, base-independent, and it
+  // holds in 120 of 120. Against base the same grid moves 25 cells toward reporting and 0 toward blank, and
+  // the 25 are exactly the complement-only frame on the five objects that name text.
+  for (const complement of ["empty", "blank", "unmarked", "unfilled", "featureless"]) {
+    for (const object of [
+      "a caption",
+      "a signature",
+      "handwriting",
+      "a stamp",
+      "dust",
+      "specks",
+      "a printed page number",
+      "a watermark",
+    ]) {
+      const negatorOnly = declaredBlank({ html: "", log: `Page is blank. No text apart from ${object}.` });
+      const capital = complement[0]!.toUpperCase() + complement.slice(1);
+      for (const log of [
+        `Page is blank. The page is ${complement}, nothing on it except ${object}.`,
+        `Page is blank. Nothing on it except ${object}; the page is ${complement}.`,
+        `Page is blank. ${capital} apart from ${object}.`,
+      ]) {
+        assert.equal(declaredBlank({ html: "", log }), negatorOnly, log);
+      }
+    }
+  }
   // Where the same word is NOT a complement, because the scan opens at any of these words and whatever
-  // names text after it becomes the affirmation — which is how this read could invent a hole. `empty of
-  // text` is the complement's own prepositional form and declares; the rest are attributive (`blank form`,
-  // `empty rows`) or a second clause, and all of them were declarations on base and still are.
+  // names text after it becomes the affirmation — which is how this read could invent a hole. The first two
+  // are the complement read doing its job and not an exemption: `empty of text` denies its subject and
+  // declares BECAUSE `empty` is taken as the complement, with `of text` trailing behind it, which is also
+  // why the negated and contracted spellings of it report (pinned at the bottom of this test). The rest are
+  // attributive (`blank form`, `empty rows`) or a second clause, and all were declarations on base and still are.
   for (const log of [
     "Page is blank. The heading is empty of text.",
     "Page is blank. The margin is blank of handwriting.",
@@ -3626,13 +3669,25 @@ test("a complement saying the subject holds nothing is a denial, as the negator 
     assert.equal(declaredBlank({ html: "", log }), false, log);
   }
   // And the linking verbs the gate keeps, so it is a statement about objects and not about the copula: the
-  // three of `AFFIRMING_VERB` that predicate over their subject read the complement exactly as `is` does.
+  // members of `AFFIRMING_VERB` that predicate over their subject read the complement exactly as `is` does.
   for (const log of [
     "Page is blank. The heading appears empty.",
     "Page is blank. The heading remains empty.",
     "Page is blank. The headings are unmarked.",
   ]) {
     assert.equal(declaredBlank({ html: "", log }), true, log);
+  }
+  // Every member of that list, swept, because the gate is a claim about the whole of it and three rows are a
+  // sample of it (round 2 of #446 named the coupling this pins: the gate asks `TRANSITIVE_AFFIRM` which verbs
+  // take an object, so it is complete only while every object-taker in `AFFIRMING_VERB` is in that list too).
+  // The list is copied from `extraction.ts` and a member added there is not covered here either — which is
+  // why the warning that a reader will actually meet sits at its definition, and this sweep is the check that
+  // the twelve shipping today are split the way the gate says. 8 linking declare, 4 object-takers report.
+  for (const verb of "is are was were appear appears remain remains".split(" ")) {
+    assert.equal(declaredBlank({ html: "", log: `Page is blank. The heading ${verb} empty rows.` }), true, verb);
+  }
+  for (const verb of "contain contains hold holds".split(" ")) {
+    assert.equal(declaredBlank({ html: "", log: `Page is blank. The heading ${verb} empty rows.` }), false, verb);
   }
   // THE CONTRACTED SPELLING of the double negative, which is the same sentence one apostrophe over and was
   // the losing side of it: no list in this file reads a contraction as a verb — `AFFIRMING_VERB` holds none
@@ -3665,6 +3720,27 @@ test("a complement saying the subject holds nothing is a denial, as the negator 
     "Page is blank. The stamp isn't void.",
   ]) {
     assert.equal(declaredBlank({ html: "", log }), true, log);
+  }
+  // The two spellings, asserted against EACH OTHER rather than against a value, which is the property the
+  // contracted read exists to have and the one round 2 of #446 asked about: an apostrophe is not a reading.
+  // The question was the prepositional form, where the plain positive `is empty of text` declares — so it
+  // looked as though the contracted arm was taking a construction the plain arm exempts. It is not. The
+  // comparison a contraction owes is to `is NOT`, its own expansion, and there the two agree in 5 of 5
+  // wordings. The last row is the one that answers BLANK both ways, and the rule that decides it is neither
+  // arm's: what a double negative affirms is the SUBJECT, and `margin` names no text (the 24 subjects naming
+  // none, pinned above, move nothing). Change either arm and this block says so.
+  for (const [plain, contracted] of [
+    ["The heading is not empty of text.", "The heading isn't empty of text."],
+    ["The printed form is not void of content.", "The printed form isn't void of content."],
+    ["The heading is not unmarked of text.", "The heading isn't unmarked of text."],
+    ["The heading is not empty of any text.", "The heading isn't empty of any text."],
+    ["The margin is not blank of handwriting.", "The margin isn't blank of handwriting."],
+  ]) {
+    assert.equal(
+      declaredBlank({ html: "", log: `Page is blank. ${contracted}` }),
+      declaredBlank({ html: "", log: `Page is blank. ${plain}` }),
+      contracted,
+    );
   }
   // And the corpus, so the figures behind the choice are written down where the next change can find them:
   // over 3,747 replies with a parseable log, 153 write one of these complements and 135 of those sit inside

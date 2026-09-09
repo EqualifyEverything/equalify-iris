@@ -1839,6 +1839,12 @@ const NEGATOR = new Set("no not nor neither none nothing".split(" "));
 // present" is in the corpus). That leaves `and printing detected` exempt, which is a stilted way to
 // say a page has printing on it — and the trade is the same one the file makes everywhere: the
 // alternative refuses a wording blank pages are actually written in.
+// A NEW member of this list that takes an object has to go in `TRANSITIVE_AFFIRM` as well, and nothing here
+// will fail if it does not. `deniedAfterVerb` reads an absence complement after a linking verb only, and it
+// tells the two apart by asking `TRANSITIVE_AFFIRM` — which is a separate list, holding `bear`, `show`, `has`
+// and `carries`, none of which is here. So adding one of those four to this list alone reopens the defect
+// round 1 of #446 found (`The heading shows empty rows.` reading as a denial and shipping the rows out
+// empty), silently and in a different file's worth of distance from the gate that was supposed to stop it.
 const AFFIRMING_VERB = new Set("is are was were appear appears remain remains contain contains hold holds".split(" "));
 const QUALIFIER = new Set(
   "meaningful legible readable printed typed visible discernible apparent recognizable recognisable clear other more".split(" "),
@@ -2903,6 +2909,11 @@ function deniedAfterVerb(tokens: Word[], verb: number): boolean {
   // the ordinary adjectives for a cell, a field or a row, so `The heading contains empty rows.` read as a
   // denial and shipped a page of rows out empty (round 1 of #446). `absent`, `missing` and `nowhere` never
   // needed the gate because none of them is attributive: nothing contains missing rows.
+  //
+  // Asking the OTHER list which verbs take an object is what couples the two, and the coupling is why
+  // `AFFIRMING_VERB` carries a warning at its own definition: this gate is complete only while every
+  // object-taker in that list is also in this one. Today that is `contain contains hold holds`, all four
+  // present here. A member added there and not here is a hole this function cannot see.
   const linking = !TRANSITIVE_AFFIRM.has(tokens[verb]!.word);
   if (NEGATIVE_COMPLEMENT.has(next.word) || (linking && absenceComplement(tokens, verb + 1))) return true;
   if (!NEGATOR.has(next.word) && next.word !== "never") return false;
