@@ -3593,8 +3593,83 @@ test("a complement saying the subject holds nothing is a denial, as the negator 
   ]) {
     assert.equal(declaredBlank({ html: "", log }), true, log);
   }
+  // WHAT THE FIRST-HIT SCAN COST, and the eight rows that pin it (round 1 of #446). A negator stands where
+  // its denial begins, so the first hit was the right anchor while the vocabulary was negators alone — but a
+  // complement stands BEHIND the negator of the same sentence, and `denialAffirmations` stops its backward
+  // walk at a negator. So anchoring on `empty` in `The page is empty, nothing on it except handwriting.` put
+  // the stopped position between the anchor and the object, the exceptive was never reached, and eight
+  // wordings of the shape a real form log writes shipped a page with content on it as blank. Every denial
+  // position is tried now, in order; the position base used is still among them, so the change can only ADD
+  // an affirmation. 8 of 8 back to base's answer.
+  for (const log of [
+    "Page is blank. The page is empty, nothing on it except handwriting.",
+    "Page is blank. The form is empty, no entries except a signature at the bottom.",
+    "Page is blank. Blank page, nothing printed except a stamp.",
+    "Page is blank. The page is blank, nothing printed except a stamp.",
+    "Page is blank. The form is blank, nothing but a stamp.",
+    "Page is blank. Unmarked, no text apart from a caption.",
+    "Page is blank. Empty, nothing typed except a signature.",
+    "Page is blank. Blank, nothing but a caption.",
+  ]) {
+    assert.equal(declaredBlank({ html: "", log }), false, log);
+  }
+  // A LINKING verb only, which is the other half of what round 1 found: `deniedAfterVerb` is handed whatever
+  // verb the reach found, and half of `AFFIRMING_VERB` takes an object rather than a complement — where
+  // `empty`, `blank` and `unmarked` are the ordinary adjectives for a cell, a field or a row. So
+  // `The heading contains empty rows.` read as a denial and shipped the rows out empty. `absent` and
+  // `missing` never needed this gate because neither is attributive: nothing contains missing rows.
+  for (const log of [
+    "Page is blank. The heading contains empty rows.",
+    "Page is blank. The heading contains blank cells.",
+    "Page is blank. The table contains unmarked columns.",
+  ]) {
+    assert.equal(declaredBlank({ html: "", log }), false, log);
+  }
+  // And the linking verbs the gate keeps, so it is a statement about objects and not about the copula: the
+  // three of `AFFIRMING_VERB` that predicate over their subject read the complement exactly as `is` does.
+  for (const log of [
+    "Page is blank. The heading appears empty.",
+    "Page is blank. The heading remains empty.",
+    "Page is blank. The headings are unmarked.",
+  ]) {
+    assert.equal(declaredBlank({ html: "", log }), true, log);
+  }
+  // THE CONTRACTED SPELLING of the double negative, which is the same sentence one apostrophe over and was
+  // the losing side of it: no list in this file reads a contraction as a verb — `AFFIRMING_VERB` holds none
+  // on purpose, because `isn't visible` denies its subject — so `The heading isn't empty.` found no verb at
+  // all and came out a blank page, while `The heading is not empty.` was reported. Read at the one
+  // construction where the contraction's own negation is cancelled by the complement behind it, and WALKED
+  // to rather than read at the next token, because the subject of one of these is a noun phrase: `The
+  // printed form isn't empty.` puts the contraction two tokens along, and a one-token check stopped at
+  // `form`. The curly apostrophe is the same token — `words()` normalises it.
+  for (const log of [
+    "Page is blank. The heading isn't empty.",
+    "Page is blank. The heading isn’t empty.",
+    "Page is blank. The headings aren't blank.",
+    "Page is blank. The caption wasn't unmarked.",
+    "Page is blank. The typed entries weren't unfilled.",
+    "Page is blank. The printed form isn't void of content.",
+    "Page is blank. The heading isn't featureless.",
+  ]) {
+    assert.equal(declaredBlank({ html: "", log }), false, log);
+  }
+  // The rows that say how narrow that is. A contraction in front of anything else still denies its subject,
+  // as it always did; a subject that names no text is not reached at all; and bare `void` is out of the
+  // vocabulary contracted or not.
+  for (const log of [
+    "Page is blank. The heading isn't visible.",
+    "Page is blank. The heading isn't legible.",
+    "Page is blank. The caption isn't present.",
+    "Page is blank. The page isn't empty.",
+    "Page is blank. The sheet isn't blank.",
+    "Page is blank. The stamp isn't void.",
+  ]) {
+    assert.equal(declaredBlank({ html: "", log }), true, log);
+  }
   // And the corpus, so the figures behind the choice are written down where the next change can find them:
   // over 3,747 replies with a parseable log, 153 write one of these complements and 135 of those sit inside
-  // a blank declaration, 0 in the negated form — and NO verdict moves, on either read. The corpus cannot
-  // tell the two apart, so the wide read was chosen on the 8 rows above and not on a measured rate.
+  // a blank declaration, 0 in the negated form and 0 in the contracted one — and NO verdict moves, on either
+  // read. 1,583 of the 3,747 logs carry more than one negator, so the all-positions scan has a real
+  // population and not an empty denominator, and 0 of them move either. The corpus cannot tell the arms
+  // apart, so the wide read was chosen on the 8 pair rows above and not on a measured rate.
 });

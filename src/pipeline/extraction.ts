@@ -2660,6 +2660,31 @@ function absenceComplement(tokens: Word[], k: number): boolean {
   return word === "void" && tokens[k + 1]?.word === "of";
 }
 
+// A CONTRACTED copula is `is not` with the negation fused into the token, and no list in this file reads
+// one as a verb: `AFFIRMING_VERB` holds no contraction on purpose, because `The heading isn't visible.`
+// denies its subject and a walk that took the token would have to un-take it. That left one spelling
+// split from its twin — `The heading is not empty.` says the heading HAS something in it and reports the
+// page (the double-negative branch of `deniedAfterVerb`), while `The heading isn't empty.` said the same
+// thing and delivered the page empty, so an apostrophe decided whether the page was lost. Read here, at
+// the one construction where the contraction's own negation is cancelled by the complement behind it.
+// WALKED and not read at the next token, because the subject of one of these is a noun PHRASE: `The printed
+// form isn't empty.` and `The typed entries weren't unfilled.` put the contraction two tokens past the word
+// the affirmation read is standing on, and a one-token check saw `form` and `entries` and stopped. That is
+// the same walk `affirmingReach` does for a plain verb, and it stops where that one stops: a real affirming
+// verb ahead means the ordinary path owns the sentence and has an answer for it already, and a negator ahead
+// denies the clause the contraction is in.
+// Returns the contraction's own position, the way `affirmingReach` returns a verb's, so the evidence line
+// can quote the subject through the complement and not a fixed three words.
+const CONTRACTED_COPULA = new Set(["isn't", "aren't", "wasn't", "weren't"]);
+function contractedDoubleNegative(tokens: Word[], from: number): number {
+  for (let k = from; k < tokens.length; k++) {
+    const { word } = tokens[k]!;
+    if (CONTRACTED_COPULA.has(word)) return absenceComplement(tokens, k + 1) ? k : -1;
+    if (AFFIRMING_VERB.has(word) || NEGATOR.has(word)) return -1;
+  }
+  return -1;
+}
+
 // The complements that say something IS there, for the coordination read: `absent from the top half
 // and PRESENT at the bottom`. Overlaps `QUALIFIER` on purpose rather than reusing it — a qualifier is
 // what may stand between a verb and its noun, and half of that list (`meaningful`, `other`, `more`)
@@ -2872,7 +2897,14 @@ function denialAffirmations(tokens: Word[]): { withSubject: number[]; plain: num
 function deniedAfterVerb(tokens: Word[], verb: number): boolean {
   const next = tokens[verb + 1];
   if (next === undefined) return false;
-  if (NEGATIVE_COMPLEMENT.has(next.word) || absenceComplement(tokens, verb + 1)) return true;
+  // An absence complement is read after a LINKING verb only, and that gate is the whole difference between
+  // this list and the older one. `deniedAfterVerb` is called with whatever verb the reach found, and half of
+  // `AFFIRMING_VERB` takes an OBJECT rather than a complement — where `empty`, `blank` and `unmarked` are
+  // the ordinary adjectives for a cell, a field or a row, so `The heading contains empty rows.` read as a
+  // denial and shipped a page of rows out empty (round 1 of #446). `absent`, `missing` and `nowhere` never
+  // needed the gate because none of them is attributive: nothing contains missing rows.
+  const linking = !TRANSITIVE_AFFIRM.has(tokens[verb]!.word);
+  if (NEGATIVE_COMPLEMENT.has(next.word) || (linking && absenceComplement(tokens, verb + 1))) return true;
   if (!NEGATOR.has(next.word) && next.word !== "never") return false;
   // A negator in front of a negative complement is two denials making an affirmation: "Handwriting is
   // not absent." is a page with writing on it, and reading it as a denial would ship that page empty
@@ -2883,7 +2915,8 @@ function deniedAfterVerb(tokens: Word[], verb: number): boolean {
   // DECLARED — the `not` denied the clause and nothing looked at what it denied. That page shipped
   // empty, so this half of #442 is the expensive direction and the grid pins it.
   const after = tokens[verb + 2];
-  return after === undefined || !(NEGATIVE_COMPLEMENT.has(after.word) || absenceComplement(tokens, verb + 2));
+  if (after === undefined) return true;
+  return !(NEGATIVE_COMPLEMENT.has(after.word) || (linking && absenceComplement(tokens, verb + 2)));
 }
 
 // The noun a post-verb construction affirms — the object of `there is` or of a transitive verb — or
@@ -3141,6 +3174,18 @@ export function contentAffirmed(scope: string): string | null {
       // `printed page number`, `printed folio` — a name for text dressing the one thing on the paper
       // this pipeline never delivers (`folioAt`).
       if (modifierForm(word) && folioAt(tokens, i + 1)) continue;
+      // The contracted spelling of the double negative, read BEFORE the verb walk because the walk has no
+      // verb to find here — a contraction is in none of its lists, so `The heading isn't empty.` reached
+      // the fragment read with no verb and came out a blank page (#442). Same reading as `is not empty`,
+      // the same two words returned as the evidence, and it goes in one direction only: a statement of
+      // this shape says the subject HAS something, so the page gets reported rather than delivered empty.
+      const contracted = contractedDoubleNegative(tokens, i + 1);
+      if (contracted >= 0) {
+        return tokens
+          .slice(i, Math.min(contracted + 2, tokens.length))
+          .map((t) => t.word)
+          .join(" ");
+      }
       const verb = reach[i + 1]!;
       // No verb for this noun: the statement may still be a fragment that affirms it (#435). Read
       // before the `continue` rather than after the loop, because the guards above — the negator
@@ -3189,19 +3234,29 @@ export function contentAffirmed(scope: string): string | null {
     // ships EMPTY because "the exceptive read wants a denial it does not have". It has one now. Six
     // wordings move on that account and every one of them is a page with content going out empty —
     // `blank apart from a stamp`, `except for a signature`, `empty apart from a caption`, `unmarked
-    // except for handwriting`, and the two bare fragments. Nothing a blank page names moves with them:
+    // except for handwriting`, and the two bare fragments. No exception a blank page names moves with them:
     // dust, specks, a printed page number, a folio and a watermark all stay declared, because the
     // object walk was already the thing that decides what an exception is made OF (#439's folio rule,
-    // #193's marks).
-    const denial = tokens.findIndex(
-      (t, k) =>
-        NEGATOR.has(t.word) || t.word === "never" || NEGATIVE_COMPLEMENT.has(t.word) || absenceComplement(tokens, k),
-    );
-    if (denial >= 0) {
-      const named = affirmed.plain[denial + 1]!;
+    // #193's marks). That is a claim about the OBJECTS only — what the widening did to sentences carrying
+    // both a complement and a negator is the paragraph below, and it was a regression, not a win.
+    //
+    // EVERY denial position, and not the first one, which is what the complement made necessary. A negator
+    // stands where the denial begins, so the first hit was always the right anchor while the vocabulary was
+    // negators alone — but a complement stands BEHIND its own denial's negator: in `The page is empty,
+    // nothing on it except handwriting.` a first-hit scan anchors on `empty`, and `denialAffirmations`'
+    // backward walk is stopped at the negator standing between that anchor and the object, so `plain` is
+    // -1 there and the handwriting was never reached. Eight wordings of that shape shipped a page with
+    // content on it as blank (round 1 of #446). Trying each position in order only ever ADDS an
+    // affirmation — the position base used is still among them — so it moves a page toward being reported
+    // and never toward being lost.
+    for (let k = 0; k < tokens.length; k++) {
+      const word = tokens[k]!.word;
+      if (!(NEGATOR.has(word) || word === "never" || NEGATIVE_COMPLEMENT.has(word) || absenceComplement(tokens, k)))
+        continue;
+      const named = affirmed.plain[k + 1]!;
       if (named >= 0) {
         return tokens
-          .slice(denial, named + 1)
+          .slice(k, named + 1)
           .map((t) => t.word)
           .join(" ");
       }
