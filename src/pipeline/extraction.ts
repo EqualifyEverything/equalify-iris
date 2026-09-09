@@ -1506,16 +1506,27 @@ const NAMES_TEXT = new RegExp(String.raw`\b(?:${TEXT_NOUN})\b`, "i");
 // Wider than the participles of `TEXT_NOUN`'s own entries on purpose: a word here costs base's verdict
 // and nothing more, since the fallback IS base.
 //
-// WHAT THIS LIST IS NOT. It does not make an attributive naming writing safe, and the second review of
-// #429's fix read it as doing that. Measured against base: of 27 words already here, base declares
-// "Page is blank. Only <w> smudges are visible." blank for 27 — and for 16 the review named as missing,
-// 16. The contradiction check fires on 14 of 14 wordings that put the same name in SUBJECT position
-// ("Only handwriting smudges are visible" is a contradiction on base) and on 0 of 32 that put one in
-// this one, listed or not. So an attributive naming writing already loses its page on base, and this
-// list changes that for nothing. What it does is narrower and is the only reason it exists: it keeps the
-// slot from making base WORSE, by giving up the one extra word of reach wherever a doubt word is the
-// thing standing between this vocabulary and a declaration. base's own gap is filed as its own issue,
-// because the fix for it is in the noun list and it costs pages in wordings this slot never sees.
+// WHO READS IT, which is now two callers and was one. The marks-phrase slot reads it to keep base from
+// getting WORSE, by giving up the one extra word of reach wherever a doubt word is the thing standing
+// between this vocabulary and a declaration. The affirmation reader reads it through `affirmsText` to
+// make base BETTER, because a log naming writing with a participle was a page delivered empty while the
+// same claim in the noun form was refused (#431). The two uses want the same words for the same reason —
+// these are names for text — and the second one is why a word added here now costs more than base's
+// verdict: it can also refuse a page, so the policy below is read with `NEGATED` and `negatedInList` in
+// mind rather than as a free list.
+//
+// WHAT THE FIGURES HERE USED TO SAY, corrected because they were the reasoning behind #431 and they were
+// confounded. This paragraph read: the contradiction check fires on 14 of 14 wordings that put a name for
+// text in SUBJECT position and on 0 of 32 that put one in this one, so an attributive naming writing
+// already loses its page. The 14 all used words `TEXT_NOUN` holds and the 32 all used words it does not,
+// so the two axes moved together and the contrast measured neither — and the parenthetical offered
+// "Only handwriting smudges are visible" as an example of SUBJECT position, which is the attributive frame
+// with a listed word in it. Crossed properly, eight words per cell: subject/listed 8 of 8 refused,
+// subject/unlisted 0 of 8, attributive/listed 8 of 8, attributive/unlisted 0 of 8. The position was never
+// the axis; the list was, which is what made #431 fixable here rather than in a rule about the slot.
+// What survives unchanged is the measurement this list was actually built on: of 27 words already here,
+// base declares "Page is blank. Only <w> smudges are visible." blank for 27, and for the 16 the second
+// review of #429's fix named as missing, 16.
 //
 // WHICH WORDS, then, since the vocabulary is open and 40 of 48 attributives I could invent are admitted.
 // Three sources, each checkable, and nothing beyond them:
@@ -1940,6 +1951,35 @@ function vetoScope(log: string): string {
 // artifacts." would then have reported a blank page as lost. That is the #190 defect, and the issue
 // named it as the thing a fix must not buy.
 const AFFIRMED_NOUN = new RegExp(`^(?:${TEXT_NOUN})$`, "i");
+// A name for text in the OTHER part of speech, which is `NAMES_TEXT_FORM` above and is the same
+// vocabulary in the same senses. `TEXT_NOUN` has `handwriting`, `stamps?` and `typing` and not
+// `handwritten`, `stamped` or `cursive`, so on base "Page is blank. Only handwriting smudges are
+// visible." is a contradiction and "Page is blank. Only cursive smudges are visible." is a page
+// delivered empty (#431).
+//
+// What that gap is NOT is a gap in POSITION, which is what #431 was filed claiming and what the
+// paragraph above `NAMES_TEXT_FORM` still said until this change: the 14 wordings measured in subject
+// position all used words this list holds and the 32 in attributive position all used words it does
+// not, so the two axes moved together and the contrast between them measured the wrong one. Crossed —
+// one vocabulary against one position, eight words per cell — the answer is that the list decides and
+// the position decides nothing: subject/listed 8 of 8 refused, subject/unlisted 0 of 8,
+// attributive/listed 8 of 8, attributive/unlisted 0 of 8. `affirmingReach` already walks past an
+// intervening noun, which is why `handwriting` is read in front of `smudges`; nothing had to be taught
+// about the modifier slot, and a rule about that slot would still have delivered "cursive is visible"
+// empty.
+//
+// Read by four of the five callers that ask `AFFIRMED_NOUN`, and by the fifth on its own terms: the
+// object of a denial's preposition is where the file's note on `printed` says the error runs toward a
+// false failure notice rather than toward a glance, so there the second list is read only where the
+// object phrase ends at the word. Which caller reads what is decided at each one, because each asks a
+// different question of the word, and the reasons are at the call sites.
+//
+// `NAMES_TEXT_FORM` is boundary-tested rather than anchored so that a hyphenated compound of a word it
+// carries is read (`hand-written`, `rubber-stamped`), and that is what is wanted here too: these
+// callers hold one token, and the token a log writes is as often the compound.
+function affirmsText(word: string): boolean {
+  return AFFIRMED_NOUN.test(word) || NAMES_TEXT_FORM.test(word);
+}
 // `there is/are` puts the noun after the verb, so the subject-verb order below never sees it, and
 // "There is handwriting on the page." is the plainest of the five wordings #194 measured.
 const EXISTENTIAL = new Set("is are was were".split(" "));
@@ -2004,8 +2044,11 @@ function definiteBefore(tokens: Word[], i: number): boolean {
 }
 
 // A word that is both a name for text and something a page can BE is a participle behind a copula, and
-// there is exactly one of those: `printed` is in `TEXT_NOUN` and in `QUALIFIER` both, the same overlap
-// `exceptiveOrLocativeObject` settles for the object of a denial. "No page number IS PRINTED on the
+// there are exactly two of those: `printed`, in `TEXT_NOUN` and in `QUALIFIER` both, and `typed`, in
+// `QUALIFIER` and in `NAMES_TEXT_FORM` — which became one of these when the affirmation reader started
+// reading that list (#431), and this guard covered it with no entry of its own, because what it tests is
+// `QUALIFIER` membership rather than either name list. Same overlap `exceptiveOrLocativeObject` settles
+// for the object of a denial, on both of its branches. "No page number IS PRINTED on the
 // page itself, but the file metadata indicates this is page 4 of 25" is a denial of the page number,
 // and taking `printed` for a subject of its own handed it the next affirming verb in the sentence —
 // ten words and a `but` away, in a clause about where the number came from — which reported a blank
@@ -2030,8 +2073,11 @@ function participleAfterCopula(tokens: Word[], i: number): boolean {
 //
 // The refusal came from `printed` every time. It is in `TEXT_NOUN` for the noun sense ("printing is
 // visible") and here it is an adjective on the number, the same overlap `participleAfterCopula`
-// settles for the copula shape; the intersection of `TEXT_NOUN` and `QUALIFIER` is that one word, so
-// reading the qualifier list is a way of asking whether this subject could be an adjective at all.
+// settles for the copula shape; the intersection of `QUALIFIER` with what affirms text is that word and
+// `typed` (#431), so reading the qualifier list is a way of asking whether this subject could be an
+// adjective at all. `typed page number` needs no row of its own here for the reason `numerals` needs
+// none: the guard is `folioAt` on the words AFTER the qualifier, and which qualifier stands in front of
+// them does not change what they are.
 //
 // What is skipped is the SUBJECT, not the statement: the loop keeps reading, so "The printed page
 // number and a heading are visible." still affirms through `heading` two words later, and only a log
@@ -2181,7 +2227,13 @@ function negatedInList(tokens: Word[], i: number): boolean {
     if (NEGATOR.has(word) || word === "without") {
       return !(k + 1 < tokens.length && CONJUNCTION.has(tokens[k + 1]!.word));
     }
-    if (QUALIFIER.has(word) || CHAIN_LINK.has(word) || AFFIRMED_NOUN.test(word)) continue;
+    // Both parts of speech, and this is the caller that has to widen FIRST: the walk steps over the
+    // other members of a coordination to reach the negator that governs them all, so a list written in
+    // the attributive form — "Nothing handwritten or cursive is visible", "no typed or stamped
+    // characters" — only stays denied if this step knows those words are members too. Widening what
+    // affirms without widening this would hand the last member of a denial the verb of its own clause,
+    // which is #190's defect arriving by the back door.
+    if (QUALIFIER.has(word) || CHAIN_LINK.has(word) || affirmsText(word)) continue;
     return false;
   }
   return false;
@@ -2357,9 +2409,12 @@ function contrastAffirmed(tokens: Word[], k: number): number {
   // over the subject the caller is holding, while `but visible dust remains` says something about
   // dust, and `dust` is outside `TEXT_NOUN` for the reason #193 put it there. Without this the one
   // read that cannot see the noun class reported blank pages with scanner dust on them as failed.
-  // A name for text after the complement affirms whichever way it is read, so it passes too.
+  // A name for text after the complement affirms whichever way it is read, so it passes too — in
+  // either part of speech, since what makes this safe is that the word names text and not which form
+  // of it the log wrote. `but still visible handwritten notes` says what `but still visible
+  // handwriting` says, and `dust` is outside both lists.
   const next = tokens[j + 1];
-  if (next === undefined || complement.comma || AFTER_COMPLEMENT.has(next.word) || AFFIRMED_NOUN.test(next.word)) {
+  if (next === undefined || complement.comma || AFTER_COMPLEMENT.has(next.word) || affirmsText(next.word)) {
     return j;
   }
   return -1;
@@ -2386,6 +2441,38 @@ function exceptiveOrLocativeObject(tokens: Word[], k: number): number | null {
     // object is still ahead when there is one: `from the printed heading` affirms one word later.
     // `affirmedObjectAfter` keeps reading the word as a noun, because a match there ADDS an
     // affirmation and the error runs toward a glance; here it runs toward a false failure notice.
+    //
+    // #431's second part of speech is read here too, but not on the same terms, because this is the one
+    // caller where the `printed` shape above recurs across a whole list. Most of `NAMES_TEXT_FORM` is
+    // participles, and `in the watermarked margin`, `on the typed side`, `within the stamped border`,
+    // `from the embossed edge` are all how a blank pre-printed form or a blank verso gets described —
+    // while `!QUALIFIER.has(object)` can only cover `printed` and `typed`, the two members that list
+    // happens to hold. Refusing the whole vocabulary here would be the cheaper mistake but it is not a
+    // free one: the nouns `TEXT_NOUN` lacks and `NAMES_TEXT_FORM` carries are content by any reading —
+    // `barcode`, `watermark`, `footnote`, `monogram`, `letterhead`, `drawing`, `sketch`, `annotation`,
+    // `inscription`, `symbol` — and `nowhere except a barcode at the top` is a page with something on it.
+    //
+    // So the question this asks of the second list is the one `contrastAffirmed` asks of its complement:
+    // what does the word MODIFY. An object phrase that ENDS at the word — nothing after it, a comma, or
+    // a preposition or adverb starting the next phrase — is one where the word is the object; a word with
+    // a noun still behind it is an adjective on that noun, and `watermarked margin` is the margin. That
+    // separates `except a barcode at the top` from `in the watermarked margin` without a second list,
+    // and what it gives up is `except something handwritten`, where the noun is absent rather than
+    // present in the other form.
+    //
+    // `QUALIFIER` is excluded on THIS branch too, and it has to be because this one runs first: `typed`
+    // is in `QUALIFIER` and in `NAMES_TEXT_FORM` both, so without the exclusion `missing from the typed
+    // heading` broke where `missing from the printed heading` affirms — two wordings differing only in
+    // which of the two overlapping words they use. Skipping it costs nothing for the reason above: the
+    // real object is still ahead when there is one.
+    if (NAMES_TEXT_FORM.test(object) && !AFFIRMED_NOUN.test(object) && !QUALIFIER.has(object)) {
+      const after = tokens[m + 1];
+      if (after === undefined || tokens[m]!.comma || AFTER_COMPLEMENT.has(after.word)) {
+        if (definiteOnly && !definiteBefore(tokens, m)) break;
+        return m;
+      }
+      break;
+    }
     if (AFFIRMED_NOUN.test(object) && !QUALIFIER.has(object)) {
       if (LOCATIVE_SUBSTRATE.has(object)) break;
       if (definiteOnly && !definiteBefore(tokens, m)) break;
@@ -2446,7 +2533,12 @@ function affirmedObjectAfter(tokens: Word[], verb: number): number {
     // legible printing" are how a blank page says it, and they are the commonest of these in the
     // corpus.
     if (NEGATOR.has(word)) return -1;
-    if (AFFIRMED_NOUN.test(word)) {
+    // Both parts of speech: "There is cursive on it", "the page bears a watermark", "it shows
+    // handwritten notes" are the same affirmation as the noun-form wordings this already read, and the
+    // gap of determiners, qualifiers and counts below ends at the first word that is none of those —
+    // so without this an attributive standing where the object goes ended the walk instead of being
+    // the object.
+    if (affirmsText(word)) {
       // `image` is read by its article here as it is everywhere else in this file: "the frame
       // contains the image" is the scan being described, not a photograph on the paper.
       return LOCATIVE_SUBSTRATE.has(word) && definiteBefore(tokens, k) ? -1 : k;
@@ -2480,7 +2572,11 @@ export function contentAffirmed(scope: string): string | null {
         if (noun >= 0) return tokens.slice(i, noun + 1).map((t) => t.word).join(" ");
         continue;
       }
-      if (!AFFIRMED_NOUN.test(word) || negatedInList(tokens, i) || participleAfterCopula(tokens, i)) continue;
+      // Both parts of speech, which is #431: this is the read that delivers "Page is blank. cursive is
+      // visible." empty on base, and the one the other three exist to keep honest. `QUALIFIER` holds
+      // `typed` as well as `printed`, so the copula guard below covers the new vocabulary's one
+      // overlap with it without an entry of its own.
+      if (!affirmsText(word) || negatedInList(tokens, i) || participleAfterCopula(tokens, i)) continue;
       if (LOCATIVE_SUBSTRATE.has(word) && (definiteBefore(tokens, i) || fileNameAt(tokens, i))) continue;
       // `printed page number`, `printed folio` — a name for text dressing the one thing on the paper
       // this pipeline never delivers (`folioAt`).

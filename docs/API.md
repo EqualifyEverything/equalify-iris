@@ -1572,6 +1572,23 @@ number instead. That exemption needs no determiner in front of it — `Image fil
 `Image name is printed at the top of the sheet` refuses, so does `Image filename indicates page 14, and
 a heading is visible`, and `The image filename is illegible` is still a doubt word.
 
+What counts as naming content is a **word, not a position**. `Only handwritten smudges are visible`
+contradicts a declaration exactly as `Only handwriting smudges are visible` does, and `cursive is
+visible` as `writing is visible` — the reader holds the same vocabulary in both parts of speech, so
+which form of a name the model happened to write does not decide whether the page survives (issue
+#431). Before that it did: the noun forms were read and the participles and adjectives were not, and a
+log that named writing with one of those was a page delivered empty and reported to nobody. The one
+place the two forms are still read differently is the object of a denial's preposition, where a
+participle with a noun behind it is an adjective on that noun: `nowhere except a barcode at the top`
+refuses the declaration, `nothing legible within the stamped border` is a blank page describing its
+own pre-printed form and declares.
+
+What no form of the name reaches is a **clause with no verb in it**. `handwriting smudges only.`
+declares the page blank, and so does `cursive smudges only.`, while `handwriting smudges are present.`
+refuses — the affirmation is found by handing a name for text the verb that predicates over it, and a
+verbless fragment has none to hand it. It is a second gap on the same sentence and it is not closed
+here.
+
 They are two findings with two remedies — a doubt word means the page could not be read and wants
 a better scan, a contradiction means the agent answered with no page for a page it says has
 content on it, which wants a re-extraction — and they are read independently, so a log can carry

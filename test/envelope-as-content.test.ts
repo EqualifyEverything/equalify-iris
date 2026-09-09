@@ -1630,6 +1630,165 @@ test("a contradicted blank declaration says what the log claimed was there", () 
   );
 });
 
+// A name for text in the OTHER part of speech (#431). `TEXT_NOUN` holds `handwriting`, `stamps?` and
+// `typing` and not `handwritten`, `stamped` or `cursive`, so a log naming writing with a participle or
+// an adjective was a page delivered empty while the same claim in the noun form was refused.
+//
+// The axis is the LIST and not the POSITION, and that is the whole reason this test is a grid: #431 was
+// filed claiming the opposite, off 14 wordings in subject position that all used listed words against 32
+// in attributive position that all used unlisted ones. Two axes moved together, so the contrast measured
+// neither. Crossed, the position column is flat and the list row is not — which also means the remedy the
+// issue proposed, a rule about the modifier slot, would have left `cursive is visible` delivered empty.
+test("a name for text affirms in either part of speech, and the position was never the axis", () => {
+  // The grid. Every cell is the same eight names in the same two frames, and what moves is the list.
+  for (const word of "handwriting writing typing text print stamp signature caption".split(" ")) {
+    for (const frame of [`${word} is visible.`, `Only ${word} smudges are visible.`]) {
+      assert.equal(declaredBlank({ html: "", log: `Page is blank. ${frame}` }), false, `listed: ${frame}`);
+    }
+  }
+  for (const word of "handwritten cursive barcode typed scrawled italic watermark pencilled".split(" ")) {
+    for (const frame of [`${word} is visible.`, `Only ${word} smudges are visible.`]) {
+      assert.equal(declaredBlank({ html: "", log: `Page is blank. ${frame}` }), false, `unlisted: ${frame}`);
+    }
+  }
+  // The modifier slot needed nothing taught to it, which is what the grid's flat column means:
+  // `affirmingReach` already walks past an intervening noun, so the word in front of `smudges` is read
+  // wherever it is read at all, and the span quoted skips the noun it dressed.
+  assert.equal(
+    blankDeclaration({ html: "", log: "Page is blank. Only cursive smudges are visible." }).affirmed,
+    "cursive are visible",
+  );
+  // Each construction the reader has, in the new part of speech: the subject-verb scan, `there is`, a
+  // transitive bearer, a contrast complement, and an exceptive object.
+  for (const [log, affirmed] of [
+    ["Page is blank. There is cursive on it.", "there is cursive"],
+    ["Page is blank. The page contains a barcode.", "contains a barcode"],
+    ["Page is blank. The sheet bears handwritten notes.", "bears handwritten"],
+    ["Page is blank. Nothing typed, but handwritten notes remain.", "handwritten notes remain"],
+    ["Page is blank. Text is nowhere except a barcode at the top.", "text is nowhere except a barcode"],
+    // Boundary-tested rather than anchored, so the compound a log writes is read too — the reason
+    // `NAMES_TEXT_FORM` is `\b`-tested is the reason it is the right list to have reached for here.
+    ["Page is blank. hand-written notes are visible.", "hand-written notes are visible"],
+    ["Page is blank. Rubber-stamped lettering is visible.", "rubber-stamped lettering is visible"],
+  ] as [string, string][]) {
+    assert.equal(blankDeclaration({ html: "", log }).affirmed, affirmed, log);
+  }
+
+  // The other direction, which is the one that costs pages: a blank page's log denies these nouns as
+  // readily as a full page's affirms them, and widening what affirms without widening the walk that finds
+  // the negator would hand the last member of a denial the verb of its own clause. That is #190's defect
+  // arriving by the back door, and these two rows are the ones that fail when the walk is left narrow —
+  // measured by reverting that one call and re-running, not assumed.
+  for (const log of [
+    "Page is blank. No typed or stamped characters are present.",
+    "Page is blank. No footnotes or annotations appear.",
+    "Page is blank. No handwritten notes are visible.",
+    "Page is blank. Nothing handwritten or cursive is visible.",
+    "Page is blank. There is no barcode.",
+    "Page is blank. No watermark is present.",
+    "Page is blank. Nothing is stamped or signed.",
+    "Page is blank. The pre-printed form is empty; no handwritten entries.",
+    // And the sentences a blank page is actually written in on the corpus, which name the marks and deny
+    // the text. Unchanged, and the reason they are unchanged is that neither list has the marks
+    // vocabulary in it (#193).
+    "Page is blank. Some dust is present.",
+    "Page is blank. Only scanner dust is present.",
+    "Page is blank. Faint smudges, but visible dust remains.",
+  ]) {
+    assert.equal(declaredBlank({ html: "", log }), true, log);
+  }
+
+  // The one word the wider vocabulary shares with `QUALIFIER` is `typed`, and the two guards written for
+  // `printed` cover it without an entry of their own, because both test `QUALIFIER` membership rather than
+  // a name list: the copula guard (#220's blank page, a denial whose participle would otherwise take the
+  // verb ten words along) and the folio guard (#222's page, which prints nothing but its own number). So
+  // the pairs have to agree, and what they agree on is the answer `printed` already gave.
+  for (const [typed, printed] of [
+    ["Page is blank. The typed page number is visible.", "Page is blank. The printed page number is visible."],
+    [
+      "Page is blank. No page number is typed on the page itself, but the file metadata indicates this is page 4 of 25.",
+      "Page is blank. No page number is printed on the page itself, but the file metadata indicates this is page 4 of 25.",
+    ],
+    ["Page is blank. The heading is typed on the page.", "Page is blank. The heading is printed on the page."],
+  ] as [string, string][]) {
+    assert.equal(declaredBlank({ html: "", log: typed }), declaredBlank({ html: "", log: printed }), typed);
+  }
+  // Stated both ways round, because a pair that agrees proves nothing about which answer it agrees on.
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. The typed page number is visible." }), true);
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. The heading is typed on the page." }), false);
+});
+
+// The one caller that reads the second list on different terms, and why it has to. The object of a
+// denial's preposition is where the file's `printed` exception lives — `in the printed area of the form`,
+// `on the printed side` are how a blank pre-printed form and a blank verso get described, and taking the
+// adjective for the object reported all of them failed (#190's own truncated evidence). Most of
+// `NAMES_TEXT_FORM` is participles, so the whole shape recurs there; `!QUALIFIER.has(object)` cannot
+// cover it, because `printed` and `typed` are the only two members that list happens to hold.
+//
+// So what the word MODIFIES is the question asked, which is `contrastAffirmed`'s own device: an object
+// phrase that ends at the word is one where the word is the object, and a word with a noun still behind
+// it is an adjective on that noun. Refusing the list here outright would have been cheaper and is not
+// free — `barcode`, `watermark`, `footnote`, `monogram`, `letterhead`, `drawing`, `sketch`, `annotation`,
+// `inscription` and `symbol` are content by any reading, and `TEXT_NOUN` has none of them.
+test("an exceptive object in the second part of speech is read by what it modifies", () => {
+  // The phrase ends at the word: nothing after it, or a preposition or adverb opening the next phrase.
+  for (const [log, affirmed] of [
+    ["Page is blank. Text is nowhere except a barcode at the top.", "text is nowhere except a barcode"],
+    ["Page is blank. Printing is nowhere except a watermark.", "printing is nowhere except a watermark"],
+    ["Page is blank. Content is absent apart from a monogram here.", "content is absent apart from a monogram"],
+  ] as [string, string][]) {
+    assert.equal(blankDeclaration({ html: "", log }).affirmed, affirmed, log);
+  }
+  // A noun still behind it, so the word is an adjective on that noun and the page stays blank. These four
+  // are the rows that fail when the phrase-end guard is dropped — the guard moves them, so it is not
+  // decoration.
+  for (const log of [
+    "Page is blank. Nothing in the watermarked margin.",
+    "Page is blank. No content is present on the typed side.",
+    "Page is blank. Nothing is legible within the stamped border.",
+    "Page is blank. No text is visible from the embossed edge inward.",
+  ]) {
+    assert.equal(declaredBlank({ html: "", log }), true, log);
+  }
+  // And the ordering, which is a defect this branch had before it was pinned: it runs in FRONT of the
+  // `!QUALIFIER.has(object)` skip, so without the same exclusion on it, `typed` broke the walk where
+  // `printed` is stepped over and the noun one word later affirms. Two wordings that differ only in which
+  // of the two overlapping words they use have to agree, whatever they agree on.
+  for (const pair of [
+    ["Page is blank. A caption is missing from the typed heading.", "Page is blank. A caption is missing from the printed heading."],
+    ["Page is blank. Text is nowhere except for the typed heading.", "Page is blank. Text is nowhere except for the printed heading."],
+  ]) {
+    const [a, b] = pair as [string, string];
+    assert.equal(declaredBlank({ html: "", log: a }), false, a);
+    assert.equal(declaredBlank({ html: "", log: b }), false, b);
+  }
+  // The qualifier reading still wins where it is the only right one, which is the case the exception was
+  // written for and the case a wider list must not take back.
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. Nothing is legible in the printed area of the form." }), true);
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. Nothing is legible in the typed area of the form." }), true);
+});
+
+// What this did NOT fix, recorded so that the next round finds it written down rather than measuring it
+// again. A log naming writing in a VERBLESS fragment loses its page whichever list the word is in:
+// `affirmingReach` needs a verb to hand the noun, and there is none in `handwriting smudges only.` That
+// is a second gap on the same sentence, it is orthogonal to the vocabulary one — `handwriting` is listed
+// and still delivered empty here — and folding it in would have meant affirming off a noun with no
+// predicate anywhere, which is a different risk with a different measurement.
+test("a name for text with no verb behind it is still a page delivered empty, listed or not", () => {
+  for (const log of [
+    "Page is blank. handwriting smudges only.",
+    "Page is blank. handwriting only.",
+    "Page is blank. Only handwriting smudges.",
+    "Page is blank. cursive smudges only.",
+  ]) {
+    assert.equal(declaredBlank({ html: "", log }), true, log);
+  }
+  // The same sentence with a verb in it is the contradiction it always was, which is what makes the line
+  // above a statement about the verb and not about the noun.
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. handwriting smudges are present." }), false);
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. cursive smudges are present." }), false);
+});
+
 // --- blankness the reply STATES, rather than blankness read out of its prose (#371) ---------------
 //
 // Everything above decides whether an English sentence means "this page is empty", and five pages have
