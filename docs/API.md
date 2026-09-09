@@ -1702,17 +1702,28 @@ where the `-` spelling is rescued. The guard's premise is that a name alone *bet
 there is to read, and that holds only where the boundary behind it ended a sentence: a preceding statement
 with **no letter in it** is a marker, so the name is a list item and affirms. The corpus says which
 spellings exist rather than a marker vocabulary guessing — 73 of 3,747 replies write a `1.` list line, 2
-write a `-` one, and `1)`, `a.`, `a)` and roman numerals appear in none — and 2 of the 1,073 bare one-token
-statements on record sit behind a letterless statement, neither of them naming text, so this can only hand
-an affirmation back.
+write a `-` one, and `1)`, `a.`, `a)` and roman numerals appear in none. That test reaches a little wider
+than "a marker" on purpose: a statement the marks strip reduced to its cut mark has no letter in it either,
+so `Page is blank. Print artifacts. text` hands `text` back, which is what the pipeline did before any of
+this.
 
-The guard's own cost is a lone name with no strip behind it: `Page is blank. handwriting.` now ships
-empty. That is one wording against the five above, both sides unobserved — one-token statements are common
-on the corpus (1,129 of 3,747 replies write one) but only four name text, all in replies that make no
-blank claim, so 0 of the 204 declarations on record move. The near misses say how narrow the guard is:
-`Any text? None found.` is two tokens and reports, and `Text: none.`, `Text (none).`,
-`Text/handwriting: none detected.` and `Page is blank; no text; no images.` declared before it and still
-do. Both halves are pinned in `envelope-as-content.test.ts`.
+And a marker is not what makes a list — **the sequence is**. A model that lists a page's contents one per
+line with no marker at all has a sentence behind every line, so the rule above helps none of them:
+`Page is blank.\ntext\nimages` had the whole enumeration eaten. A run of lone names is a list and one lone
+name is a lone name, so the neighbour on either side decides, and the lettered spellings `i.` and `A.` fall
+out of the same clause, a marker that is itself a letter being a lone name too. Of the 1,073 bare one-token
+statements on record, 147 are in an enumeration by this rule — 2 by the letterless neighbour and 145 by the
+sequence — and none of the 147 names text.
+
+**The guard's cost is a shape and not a wording:** any bare one-token statement whose neighbours are
+sentences, of which `Page is blank. handwriting.` is one spelling and a **one-item list**
+(`Page is blank.\ntext`) is the other. Nothing this read can see separates that from `Blank page; text`,
+which is the thing #440 asked to have declared, so both declare and the page ships empty. Both sides are
+unobserved: one-token statements are common on the corpus (1,129 of 3,747 replies write one) but only four
+name text, all in replies that make no blank claim, so 0 of the 204 declarations on record move. The near
+misses say how narrow the guard is: `Any text? None found.` is two tokens and reports, and `Text: none.`,
+`Text (none).`, `Text/handwriting: none detected.` and `Page is blank; no text; no images.` declared before
+it and still do. Every one of these is pinned in `envelope-as-content.test.ts`.
 
 The same strip decides one more case, and there the **head noun** is what the reading turns on (issue
 #439). A log that calls the scan's own noise `print artifacts` had the mark removed and the word that was

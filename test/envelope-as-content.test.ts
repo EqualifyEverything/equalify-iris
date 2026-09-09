@@ -2388,6 +2388,26 @@ test("a blank page's own fragments are not affirmations (#435)", () => {
   assert.equal(declaredBlank({ html: "", log: "Page is blank. 3.\ntext" }), false);
   assert.equal(declaredBlank({ html: "", log: "Page is blank.\n1) text\n2) images" }), false);
   assert.equal(declaredBlank({ html: "", log: "Page is blank.\n* text\n* images" }), false);
+  // And a marker is not what makes a list — the SEQUENCE is. A model that lists a page's contents one per
+  // line with no marker at all has a sentence behind every line, so the rule above helped none of them and
+  // the guard ate the whole enumeration. A run of lone names is a list and one lone name is a lone name, so
+  // the neighbour on either side decides. `i.` and `A.` fall out of the same clause, a marker that is itself
+  // a letter being a lone name too. Raised by the review on PR #444.
+  assert.equal(declaredBlank({ html: "", log: "Page is blank.\ntext\nimages" }), false);
+  assert.equal(declaredBlank({ html: "", log: "Page is blank.\nhandwriting\nsignature" }), false);
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. Contents:\ntext\nimages" }), false);
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. i. text" }), false);
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. A. text" }), false);
+  // A ONE-ITEM list is where it stops, and the row says so rather than leaving it to be found: this is
+  // `Blank page; text` in everything this read can see, and it declares. The guard's cost is that shape and
+  // not the `handwriting.` wording.
+  assert.equal(declaredBlank({ html: "", log: "Page is blank.\ntext" }), true);
+  // The letterless-neighbour clause reaches wider than a marker, which is deliberate and pinned: a statement
+  // the marks strip reduced to `PHRASE_GONE` has no letter in it either, so the name behind it affirms. That
+  // is base's own answer for both of these, and a narrowing of that clause toward real markers would have to
+  // move them.
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. Print artifacts. text" }), false);
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. Smudges. text" }), false);
   // And the rule reaches no further than the boundary behind the name: a lone name whose preceding
   // statement is a SENTENCE still declares, which is the whole of what #440 asked for and the row the fix
   // above must not take with it.

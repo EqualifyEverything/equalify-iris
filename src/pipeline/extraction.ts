@@ -2947,7 +2947,17 @@ const FRAGMENT_CLOSER = new Set("only alone too also".split(" "));
 // right, and the corpus separates none of them (0 of 201 declarations move either way on this change).
 // `A heading at the top.` is already pinned as delivered, beside two more of its shape, in
 // `envelope-as-content.test.ts` — the pins that say a widening must defend both halves of each pair.
-function verblessAffirmation(tokens: Word[], i: number, statement: string, previous: string | undefined): number {
+// A statement holding nothing but one name, whitespace and whatever the marks strip left: what the guard
+// below fires on, and asked of a NEIGHBOUR as well, because a run of them is a list and not a lone name.
+function loneNameStatement(statement: string | undefined): boolean {
+  if (statement === undefined) return false;
+  const tokens = words(statement);
+  return (
+    tokens.length === 1 &&
+    statement.replace(/[\s\f\v]+/g, "").toLowerCase().replace(/[’]/g, "'") === tokens[0]!.word
+  );
+}
+function verblessAffirmation(tokens: Word[], i: number, statements: string[], s: number): number {
   // A statement whose whole text is the name affirms — and this read splits statements on `.`, `!`, `?`,
   // `;` and line breaks alike, so "Blank page; text", "Page is blank; images; nothing present.",
   // "Page is blank. No printed text. Images." and "Page is blank. Any text? None found." each refused
@@ -3009,12 +3019,37 @@ function verblessAffirmation(tokens: Word[], i: number, statement: string, previ
   // Keyed on "no letter" rather than on a marker vocabulary because the corpus says which spellings exist:
   // 73 of the 3,747 replies write a `1.` list line and 2 write a `-` one, while `1)`, `a.`, `a)` and roman
   // numerals appear in ZERO — so a lettered or parenthesised branch would be a guess, and the digits are
-  // the whole observed population. Latent either way: 2 of the 1,073 bare one-token statements on record sit
-  // behind a letterless statement and neither names text, so this can only hand an affirmation back.
-  // Reported by the review on PR #444.
-  const bare = statement.replace(/[\s\f\v]+/g, "").toLowerCase().replace(/[’]/g, "'") === tokens[0]!.word;
-  const marked = previous !== undefined && !/[A-Za-z]/.test(previous);
-  if (tokens.length === 1 && bare && !marked && !statement.includes("\f")) return -1;
+  // the whole observed population. (The lettered spellings `i.` and `A.` end up handled anyway, by the
+  // sequence clause below: a marker that IS a letter is itself a lone-name statement.) What that test
+  // actually catches is wider than "a marker", and the
+  // difference is worth having in writing: a statement the marks strip reduced to `PHRASE_GONE` has no
+  // letter in it either, so `Page is blank. Print artifacts. text` reads its emptied neighbour as a marker
+  // and hands `text` back. That is base's own answer for it and the safe direction, but a later narrowing of
+  // this test toward real markers would start declaring those, which is why the clause is here and not
+  // implied. Reported by the review on PR #444.
+  //
+  // AND A MARKER IS NOT WHAT MAKES A LIST — the SEQUENCE is, which is the last face of this and the one the
+  // fix above left. `Page is blank.\ntext\nimages` has no marker at all, so every line is a lone name behind
+  // a sentence and the guard ate the whole enumeration: a page that listed its own contents, shipped empty.
+  // A run of lone names is a list, and one lone name is a lone name, so the neighbour decides — and the
+  // rescues #440 exists for all survive it, because every one of them has a SENTENCE on the other side
+  // (`Page is blank; images; nothing present.`, `Page is blank. Images. No text.`) or nothing at all
+  // (`Blank page; text`). Where it cannot help is a ONE-ITEM list: `Page is blank.\ntext` is
+  // `Blank page; text` in every respect this read can see, and it declares. That is the bound, and it is the
+  // `handwriting.` cost restated at the level of the shape rather than of the wording.
+  //
+  // Which clause does the work, over the same 3,747 replies: of the 1,073 bare one-token statements on
+  // record, 147 are in an enumeration by this rule — 2 by the letterless neighbour and 145 by the sequence —
+  // and NONE of the 147 names text. So the whole guard still moves 0 of the 204 declarations, and the
+  // sequence clause is where the population actually is.
+  const statement = statements[s]!;
+  const previous = s > 0 ? statements[s - 1] : undefined;
+  const bare = loneNameStatement(statement);
+  const enumerated =
+    (previous !== undefined && !/[A-Za-z]/.test(previous)) ||
+    loneNameStatement(previous) ||
+    loneNameStatement(statements[s + 1]);
+  if (tokens.length === 1 && bare && !enumerated && !statement.includes("\f")) return -1;
   for (let k = i - 1; k >= 0; k--) {
     const { word, comma } = tokens[k]!;
     // A comma between the noun and what precedes it opens a fresh phrase, and the words behind it are
@@ -3095,7 +3130,7 @@ export function contentAffirmed(scope: string): string | null {
         // The statement's TEXT and not its tokens, because both things the guard in there asks about are
         // invisible to the tokenizer: `words()` cannot start a token on `PHRASE_GONE`, and it cannot start
         // one on a digit or a bullet either.
-        const named = verblessAffirmation(tokens, i, statement, s > 0 ? statements[s - 1] : undefined);
+        const named = verblessAffirmation(tokens, i, statements, s);
         if (named >= 0) {
           return tokens
             .slice(i, named + 1)
