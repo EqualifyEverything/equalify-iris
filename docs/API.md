@@ -3440,10 +3440,13 @@ Where the two disagree the other way — announced `1`, text reads `(a)` — not
 list is missing the `type` that would announce its letters, and the Reader prompt says the text's copy
 must **stay** until it has one. Those are the Reader prompt's two named branches, and the code's third
 state is the prompt's third case: an item whose text opens with a marker that is **neither** the announced
-one nor a different kind — announced `1`, text reads `12.` — is a clause number under the list's own
-count, which the prompt tells the Reader to leave alone and which `doubled` does not count. So the split
-here is three ways and not two, and it was worth saying, because reading the prompt as two complementary
-branches is what made `doubled` a kind test for two commits. `type`, `start` and `value` all
+one nor a different kind — announced `1`, text reads `12.` — is not one marker printed twice, so neither
+copy may be dropped and `doubled` does not count it. The prompt splits it further, because the code does
+not have to and a report does: printed markers forming **one run from an offset** are a list missing the
+`start` that would announce them and are worth reporting, while markers that are not one run with the
+list's count are the document's own clause numbering and stay in the text. So the split here is three ways
+and not two, and it was worth saying, because reading the prompt as two complementary branches is what
+made `doubled` a kind test for two commits. `type`, `start` and `value` all
 feed the announced marker, so `<ol type="a" start="3">` with an item printing `(c)` counts.
 
 An item printing a marker that **contradicts** the announced one — `(b)` on an `<ol type="a">`'s first

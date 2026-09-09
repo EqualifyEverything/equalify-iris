@@ -1173,15 +1173,27 @@ Places where a decision was left open, and where v1 intentionally stops:
   both digits: the same clause number in the other alphabet, on the side the kind test did not look at.
   `doubled` now compares the announced marker's own VALUE against the printed token, case-insensitively,
   which is what the rule always meant — an item repeating the marker it is announced with. It is also what
-  `READER_SYSTEM`'s own AGREE branch says, and reading that closely is what settles it: its examples are
+  `READER_SYSTEM`'s own SAME MARKER branch says — labelled "where the two AGREE" until the round that
+  found the branches were not complementary — and reading that closely is what settles it: its examples are
   `[List item a] (a)` and `[List item 1] (1)`, which agree in **value**, so the kind test was never the
   prompt's split but a looser thing that admitted it. The prompt's two named branches are not
   complementary either, which is the reason a kind test looked like a fit: announced `1` with `12.`
   printed is the same *kind* and a different marker, so it falls outside both, and only the prompt's
-  catch-all covered it. It is now a third case in `READER_SYSTEM` in as many words — a marker and then a
-  number, not the same content twice, leave both alone — because the Reader was reaching the right answer
-  through a prohibition rather than through a rule, and a rule stated as two branches invites reading the
-  second as everything the first is not. `docs/API.md` had the same shape of error in the
+  catch-all covered it. It is now a third case in `READER_SYSTEM` in as many words — not one marker printed
+  twice, so neither copy may be dropped — because the Reader was reaching the right answer through a
+  prohibition rather than through a rule, and a rule stated as two branches invites reading the second as
+  everything the first is not. **Writing that third case then cost a round of its own, in the way this
+  whole note keeps describing.** Its first version said "leave the list and the text exactly as they are",
+  which forbids more than the prohibition it replaced: the prohibition only barred *dropping* the text's
+  marker, while a blanket "change nothing" also barred the report `EDITOR_SYSTEM` asks for on the same
+  input (*"where the markers do not begin where the list's own count does … report it instead"*) and the
+  one the Reader is asked for a dozen lines earlier. And its reason — a reader hears "one marker and then a
+  number" — was true of the digit example and false of `[List item a] (c)`, which the branch also covers
+  and where a reader hears two letters. So the case now splits on whether the printed markers are one run
+  from an offset, which is a list missing its `start` and reportable, or are not one run with the count at
+  all, which is the document's clause numbering and stays put. **A remedy for a rule stated at the wrong
+  grain can be stated at the wrong grain itself, in both directions at once: too wide in what it forbids,
+  too narrow in what it justifies.** `docs/API.md` had the same shape of error in the
   other direction — it defined the field by kind and *illustrated* it by value, so the examples were more
   precise than the definition above them. Three rounds on one predicate, each approximation defensible
   until the next value showed up: **when a check can be stated as "the same thing twice", compare the

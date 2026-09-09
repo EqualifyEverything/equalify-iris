@@ -357,9 +357,14 @@ Estimating, a list announcing digits whose items print letters or roman numerals
 the one place that is not announced, and the repair is the other way round: the list is missing the
 type that would announce the letters, and the letters are the document's only record of what the
 page printed. Say that, and say the text's copy must stay until the list carries it. And where the
-text opens with a marker that is NEITHER of those — [List item 1] 12. Payments to the state, a
-statute's clause number sitting under the list's own count — a reader hears one marker and then a
-number, which is not the same content twice: leave the list and the text exactly as they are.
+text opens with a marker that is NEITHER of those — [List item 1] 12. Payments to the state, or
+[List item a] 12. Payments — the two markers are not one marker printed twice, whatever else they
+are, so NEVER ask for either copy to be dropped. Which of the two shapes it is may itself be worth
+reporting. Items printing one run that is consecutive from wherever it starts — 12., 13., 14. under
+a list counting 1, 2, 3 — are a list missing the start that would announce those numbers, and that
+is the report: the numbering is the document's and only start can carry it. Markers that are not one
+run with the list's own count are the document's own numbering under the list's marker, a clause
+number rather than a second copy of anything, and they belong in the item's text where they are.
 Never ask for a marker to be dropped from an item's text while the list announces a different one,
 and never ask for the list's own marker to be dropped in favour of the copy in the text — an <ol>
 stripped of its type prints 1, 2, 3, a marker no page showed. You do NOT see the source

@@ -669,9 +669,31 @@ test("every marker the Reader prompt advertises is one flatten emits", () => {
     /a marker that is NEITHER of those/.test(READER_SYSTEM),
     "the prompt states its two marker branches as if they were complementary",
   );
+  // The instruction on that case is what it must not do — drop either copy — and NOT "leave everything
+  // alone", which is the wider thing the first version said. `EDITOR_SYSTEM` sends the offset shape to a
+  // report ("where the markers do not begin where the list's own count does … report it instead"), and
+  // the Reader is asked twelve lines earlier for an announced marker that disagrees with the source
+  // page, so a blanket "change nothing and say nothing" contradicted both. The two shapes are split on
+  // whether the printed markers are one run from an offset — a missing `start` — or are not one run with
+  // the count at all, which is the document's own clause numbering.
   assert.ok(
-    /leave the list and the text exactly as they are/.test(READER_SYSTEM),
-    "the prompt names the third marker case without saying what to do about it",
+    /NEVER ask for either copy to be dropped/.test(READER_SYSTEM),
+    "the third marker case does not forbid deleting the page's only copy of a marker",
+  );
+  assert.ok(
+    /missing the start that would announce those numbers/.test(READER_SYSTEM),
+    "the Reader is told to leave a list that is missing `start`, which the editor is told to report",
+  );
+  assert.ok(
+    !/leave the list and the text exactly as they are/.test(READER_SYSTEM),
+    "the third marker case still forbids the report the editor's own precondition asks for",
+  );
+  // And the reason clause has to cover every shape the branch does. "one marker and then a number" was
+  // true of the digit example and false of `[List item a] (c)`, which is two letters, and a reason stated
+  // one grain narrower than its rule is what cost this check three rounds further down.
+  assert.ok(
+    !/a reader hears one marker and then a number/.test(READER_SYSTEM),
+    "the third case justifies itself with a digits-only reason it also applies to letters",
   );
   // Options are still content, and are separated so they cannot run together.
   assertNoTextLost(`<select><option>Platform</option><option>Design</option></select>`, "select options");
