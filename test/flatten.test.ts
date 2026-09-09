@@ -810,6 +810,24 @@ test("half of the licensed list conversion is reported and the whole of it is no
   assert.equal(listMarkers(digitsPrinted).printed, 2);
   assert.equal(listMarkers(digitsPrinted).printed_lettered, 0);
   assert.equal(listMarkerHalfEdit(digitsPrinted, stripped), null);
+  // That `null` is also why the editor's conversion licence is NOT widened to the same-kind offset run
+  // the Reader now reports. If the editor were allowed to set `start="12"` on an `<ol>` whose items print
+  // 12., 13., the DESTRUCTIVE half of that change — markers stripped with no `start` set, which deletes
+  // the document's only record of its numbering — produces the same five counts as the whole change, so
+  // this cannot tell them apart. The lettered half of the same shape IS caught, and that asymmetry is a
+  // silence to close before the licence moves, not after.
+  const offsetRun = `<ol><li>12. Payments to states</li><li>13. Reimbursed state administration</li></ol>`;
+  const offsetConverted = `<ol start="12"><li>Payments to states</li><li>Reimbursed state administration</li></ol>`;
+  assert.deepEqual(listMarkers(offsetConverted), listMarkers(stripped));
+  assert.equal(listMarkerHalfEdit(offsetRun, offsetConverted), null);
+  assert.equal(listMarkerHalfEdit(offsetRun, stripped), null);
+  assert.equal(
+    listMarkerHalfEdit(
+      `<ol type="a"><li>(c) Estimating</li><li>(d) Admin</li></ol>`,
+      `<ol type="a"><li>Estimating</li><li>Admin</li></ol>`,
+    ),
+    "text_markers_gone",
+  );
   // A conversion that is partial in BOTH directions is the state the totals cannot see: the list
   // gains its letters, the text loses SOME of its markers, and the item that kept its own is
   // announced "b" and then reads "(b)" out. `doubled` is per item, so it sees exactly that item.
@@ -868,9 +886,11 @@ test("half of the licensed list conversion is reported and the whole of it is no
   const digitsDoubled = `<ol><li>(1) Direct federal outlays</li><li>(2) Reimbursed state administration</li></ol>`;
   assert.equal(listMarkers(digitsDoubled).doubled, 2);
   assert.equal(listMarkerHalfEdit(stripped, digitsDoubled), "marker_announced_twice");
-  // Where the two DISAGREE the other way — announced "1", text reads "(a)" — nothing is doubled:
-  // that list is missing the `type` that would announce its letters, and the Reader prompt says the
-  // text's copy must STAY until it has one. Same split as the prompt's two branches.
+  // Where a DIGIT-announced list's items print letters — announced "1", text reads "(a)" — nothing is
+  // doubled: that list is missing the `type` that would announce its letters, and the Reader prompt says
+  // the text's copy must STAY until it has one. That is the prompt's second branch, which is named for
+  // this shape and not for "they disagree in kind" — a test that also covers announced "a" beside a
+  // printed "12.", where a missing `type` is not the repair.
   assert.equal(listMarkers(printed).doubled, 0);
   // Matching on KIND rather than on value left two more of the same shape, one in each alphabet. A
   // lettered list whose item prints "(i)" is a marker and a roman SUB-marker — "(a) (i) Payments" —

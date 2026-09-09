@@ -870,6 +870,17 @@ export function listMarkers(html: string): ListMarkers {
 // (a new list wherever the sequence restarts) is wrong on any list carrying `start`. The block is the
 // grain the rest of this file's loss accounting uses, and buying this one case with a duplicate
 // marker renderer is the worse trade.
+//
+// Those two are silences about edits the editor may MAKE. There is a third thing this cannot see, and
+// it is the reason `EDITOR_SYSTEM`'s conversion licence stays scoped to a sequence that begins where
+// the list's own count does. `READER_SYSTEM` reports a same-kind offset run — items printing 12., 13.
+// under a list counting 1, 2 — as a list missing its `start`, and the editor is told to report that
+// shape rather than convert it, so nothing here moves either way today. Were the licence widened to
+// let it set `start` and strip the text, the DESTRUCTIVE half of that change would be invisible:
+// markers stripped with no `start` set deletes the document's only record of its numbering, and on the
+// DIGIT half of the shape it produces the same five counts as the whole change (`printed_lettered` was
+// already 0 and stays 0), so this cannot tell them apart. The lettered half of the same shape IS
+// caught. That asymmetry is a silence to close before the licence moves, not after.
 export type ListMarkerHalfEdit = "text_markers_gone" | "marker_announced_twice";
 
 export function listMarkerHalfEdit(before: string, after: string): ListMarkerHalfEdit | null {

@@ -1209,7 +1209,19 @@ Places where a decision was left open, and where v1 intentionally stops:
   case's own new example (announced `a`, printed `12.`) and whose repair — "the list is missing the type
   that would announce the letters" — is nonsense on a list already carrying `type="a"`. Naming a branch
   by the shape its repair is true of, rather than by a property that shape happens to have, is what makes
-  "NEITHER of those" a condition and not a hope. `docs/API.md` had the same shape of error in the
+  "NEITHER of those" a condition and not a hope.
+
+  One consequence of that scoping was raised and **declined**, with the reason written down rather than
+  left implicit: the missing-`start` report names a repair `EDITOR_SYSTEM` forbids ("Never add one"), so it
+  converges as unresolved, and widening the licence to cover a same-kind consecutive run would close the
+  loop. It is not widened, because the half-edit detector cannot police the change it would license. On the
+  digit half of that shape the destructive half-edit — markers stripped, no `start` set, which deletes the
+  document's only record of its numbering — produces the SAME five counts as the whole conversion, since
+  `printed_lettered` was already 0 and stays 0; the lettered half is caught. **A licence is only as safe as
+  the check that can see its half-edits, so the check comes first and the licence second.** The report
+  itself stands: it names a defect nothing else in the document records, which is the class the
+  `[not legible]` and fidelity reports are in, and the editor's own precondition already sends that shape
+  to a report rather than a change. `docs/API.md` had the same shape of error in the
   other direction — it defined the field by kind and *illustrated* it by value, so the examples were more
   precise than the definition above them. Three rounds on one predicate, each approximation defensible
   until the next value showed up: **when a check can be stated as "the same thing twice", compare the
