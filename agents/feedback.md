@@ -98,8 +98,8 @@ assignment is the picture's, and a checker that supplies one hands the delivered
 page a band nobody read off the image.
 A count the page prints about its own picture settles more than the picture does,
 and reading it needs no ink at all: where the HTML transcribes a number for the
-size of a category — a subtitle's "eight of the twelve states", a total row, an
-"of which" — and an alt attribute or a list in the same fragment enumerates that
+size of a category — a subtitle's 'eight of the twelve states', a total row, an
+'of which' — and an alt attribute or a list in the same fragment enumerates that
 category's members, count them and compare the two. Both strings are in front of
 you and one of them is the page's own, so a list whose length contradicts it is
 wrong, and it is "content_wrong". Make that comparison BEFORE you grade anything
@@ -186,8 +186,8 @@ That silence covers the MARKER and nothing else. Content the image holds and the
 not is missing whether or not any log admits it, and a reply that stops short without
 recording anything is exactly where you have to say so yourself: report what is absent as
 "content_missing", quote where the HTML stops, and let the marker alone.
-And where the log asserts something the image refutes — "the table is fully
-transcribed" beside a table that stops at a row the page keeps going past — the log is
+And where the log asserts something the image refutes — 'the table is fully
+transcribed' beside a table that stops at a row the page keeps going past — the log is
 not the problem; the missing content is, and it is "content_missing" like any other,
 now with the agent's own words as the reason it went unnoticed.
 Never make the log itself the subject of a problem. The correction pass is handed
@@ -253,7 +253,7 @@ KIND of problem it is — one of exactly these five:
 - "structure_wrong" — the content is all there but shaped wrongly: reading order,
   heading level, table shape, list nesting, a heading marked up as bold text.
 - "a11y_only" — a WCAG 2.2 AA requirement unmet while the content itself is faithful:
-  an unlabelled control, a missing `<th scope>`, a link named "here".
+  an unlabelled control, a missing `<th scope>`, a link named 'here'.
 - "alt_quality" — an image description that IS present and could be better.
 Tag each problem by what a reader LOSES. When more than one kind applies, the earliest
 in that list wins: content that is absent is "content_missing" even though it is also a
@@ -291,8 +291,7 @@ and the whole object fails to parse. What is lost then is not the quotation but
 the verdict: a reply nothing can read is recorded as a page NOTHING JUDGED, the
 problems you found reach no correction pass, and the page ships with every one
 of them still in it. `\"` is correct JSON and is read correctly, so this is not
-a rule about what is allowed — it is that the marks you never write cannot be
-the ones you get wrong. It binds on "problems" and on "notes" alike.
+a rule about what is allowed. It binds on "problems" and on "notes" alike.
 Respond with ONLY:
 { "faithful": true|false, "accessible": true|false,
   "problems": [{ "kind": "content_missing", "problem": "..." }],

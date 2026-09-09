@@ -426,6 +426,15 @@ test("the checker is told how to quote the page's words, next to the schema it a
       '`\\"` is correct JSON and is read correctly'],
     ["it covers the problem strings and not only the notes field",
       'It binds on "problems" and on "notes" alike'],
+    // And what the task SHOWS has to agree with what it says. Three page quotations elsewhere in
+    // this same task were written with `"`, which is the style a checker imitating the prompt reaches
+    // for, and imitation is the failure the clause buys off. Pinned by their wording because the
+    // general property is not machine-checkable over the whole task: an example PROBLEM STRING
+    // quoted in prose ("this text is not on the page") is metatext about a field and legitimately
+    // carries the mark, and no regex separates that from a page word.
+    ["a count the page prints is quoted the way the clause asks", "a subtitle's 'eight of the twelve states'"],
+    ["so is a log line the image refutes", "'the table is fully transcribed' beside a table"],
+    ["and so is a page's own link text", "a link named 'here'"],
   ] as [string, string][]) {
     assert.ok(prompt.includes(needle), `agents/feedback.md no longer says: ${what}`);
   }
@@ -438,14 +447,18 @@ test("the checker is told how to quote the page's words, next to the schema it a
   const verifyHead = feedbackMd.search(/^TASK: verify$/m);
   const scopeHead = feedbackMd.search(/^TASK: scope$/m);
   assert.ok(verifyHead > 0 && clause > verifyHead && clause < scopeHead, "the clause is inside TASK: verify");
-  // The example it shows must not itself carry the mark it forbids, which is the one way this
-  // clause can teach the opposite of what it says.
+  // Nothing the clause shows may itself carry the mark it forbids, which is the one way this clause
+  // can teach the opposite of what it says. Pinned as a property of the whole slice rather than as
+  // the worked example that happens to be there today: a naming guard (`row groups "Selective`)
+  // passes any second page phrase added later with `"` around it, which teaches the same wrong
+  // thing. The two field names the clause writes are metatext about the schema and not page words,
+  // so they are the only pair allowed through — the same line the rewrite drew, where `"of which"`
+  // and a link named `"here"` became single-quoted and `"content_missing"` did not.
   const shown = feedbackMd.slice(clause, feedbackMd.indexOf("Respond with ONLY:", clause));
-  assert.equal(
-    shown.includes("row groups \"Selective"),
-    false,
-    "the worked example quotes the page with the mark the clause forbids",
-  );
+  const quoted = [...shown.matchAll(/"[^"\n]+"/g)]
+    .map(([phrase]) => phrase)
+    .filter((phrase) => phrase !== '"problems"' && phrase !== '"notes"');
+  assert.deepEqual(quoted, [], "the clause sets a quotation off with the mark it forbids");
 });
 
 test("a quoted row-group label costs the whole verdict, which is the price the clause buys off", async () => {
@@ -454,7 +467,10 @@ test("a quoted row-group label costs the whole verdict, which is the price the c
   // page ships with the defect in it. Written raw rather than through `JSON.stringify`, which
   // escapes the quotes for you — the first draft of the tests above made that mistake and asserted
   // nothing. This is the fixture the parser cannot read, and it is meant to stay unreadable:
-  // `src/util/json.ts` treats `"` before a comma as a terminator on purpose.
+  // `src/util/json.ts` treats `"` before a comma as a terminator on purpose. What that pins is
+  // today's parser, not a property worth keeping: if the value-side repair #426 asks to be measured
+  // on its own ever lands, this reply parses and these three assertions go red — and that is the
+  // repair working, not a pin lost. Rewrite them then; do not restore them.
   const lost = await verdict(rowGroups('"'));
   assert.equal(lost.unjudged, true, "the reply parsed, so this fixture no longer pins the failure");
   assert.deepEqual(lost.problems, [], "the problems this reply named do not reach `correctPage`");

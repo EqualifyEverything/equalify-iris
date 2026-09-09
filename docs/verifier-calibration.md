@@ -246,8 +246,9 @@ label are closed on the prompt side instead: `agents/feedback.md` asks the check
 words with single quotes and no `"` of its own, which costs nothing per call, where recovering them in
 the parser means reading a `"` inside a value as content — a wider rule than the one this page has just
 measured losing on all 14 replies it changed, and one that wants its own measurement.
-The direction that *does* cost something is the opposite shape — a `faithful: false` reply that omits `accessible` no longer buys a
-correction — and that page is counted rather than corrected, which is the trade made knowingly.
+The direction that *does* cost something is the opposite shape — a `faithful: false` reply that omits
+`accessible` no longer buys a correction — and that page is counted rather than corrected, which is
+the trade made knowingly.
 
 A whole class of decoy defeats both, and it is named here at its real width because it is the class the
 new field most invites: **a quoted decoy containing any string value at all**. Every reading here treats
