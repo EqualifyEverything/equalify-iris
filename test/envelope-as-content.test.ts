@@ -1751,7 +1751,8 @@ test("a name for text affirms in either part of speech, and the position was nev
   }
   // And what the discriminator must not reach, which is the whole of the #200 trade it is scoped inside: a
   // denial's own members, separated by commas exactly as two clauses are. Three or more members, or a final
-  // `or` joint, or no verb of its own behind the comma — any one of those and this is a list. The first
+  // `or` joint, or a comma on the noun itself, or no verb of its own behind the comma — any one of those and
+  // this is a list, and none of them is the joint word. The first
   // four are corpus-verbatim (the last of them #367's log), and on the 3,747 replies with a log on disk
   // this change moves none of the 204 declarations they come from.
   for (const log of [
@@ -1764,6 +1765,20 @@ test("a name for text affirms in either part of speech, and the position was nev
     // and `stamps` sits behind the same comma with the `or` in front of it. The coordination scan is what
     // sees both, and this row is corpus-verbatim.
     "Page is blank. A few specks. No writing, figures or stamps are present.",
+    // An ASYNDETIC list — members divided by bare commas with no joiner at all before the last — which is
+    // round 2 of #436's review, and the one shape whose deciding comma sits ON the affirmed noun rather than
+    // before or after it. The joint scan stops short of that comma and the coordination scan starts past it,
+    // so all five of these were reported as holes for a page with nothing on it. They are members, and a
+    // comma on the noun is now read as the coordination continuing across it.
+    "Page is blank. No printed words, lines, characters are visible.",
+    "Page is blank. No text, images, figures are visible.",
+    "Page is blank. No text, handwriting, drawings are present.",
+    "Page is blank. No writing, figures, stamps are present.",
+    "Page is blank. No printed text, images, handwriting is visible.",
+    // The same list with the first joint coordinated, which never reached the defect (the scan begins on the
+    // second comma there) and is pinned so the two paths are held apart.
+    "Page is blank. No printed words, and lines, characters are visible.",
+    "Page is blank. No printed words, lines, characters, marks are visible.",
     // No finite verb behind the joint: a fragment, so the noun is still a member. Whether a fragment
     // affirms at all is #435's question and `verblessAffirmation`'s answer, not this one's.
     "Page is blank. No printed text, and handwriting.",

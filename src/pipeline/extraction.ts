@@ -2344,6 +2344,14 @@ function negatedInList(tokens: Word[], i: number, reach: number[]): boolean {
 function secondClauseJoint(tokens: Word[], negator: number, i: number, reach: number[]): boolean {
   const verb = reach[i + 1]!;
   if (verb < 0) return false;
+  // The noun's OWN comma, which is the one token neither scan below looks at: the first stops before `i` and
+  // the second starts after it, so an ASYNDETIC list — members divided by bare commas with no joiner before
+  // the last, `No printed words, lines, characters are visible.` — presented one comma behind the noun,
+  // nothing between it and the verb, and read as a clause. A comma ON the noun is the coordination
+  // continuing across it just as surely as a comma after it (round 2 of this change's review, which found
+  // five such wordings reported as holes). The `, and` form never reached this, because there
+  // `joint + 2 === i` and the scan below already sees the comma.
+  if (tokens[i]!.comma) return false;
   let joint = -1;
   for (let k = negator; k < i; k++) {
     if (!tokens[k]!.comma) continue;
@@ -2351,8 +2359,10 @@ function secondClauseJoint(tokens: Word[], negator: number, i: number, reach: nu
     joint = k;
   }
   if (joint < 0 || joint + 1 >= tokens.length) return false;
-  // `or` and `nor` after the joint say the denial is still listing. `and` does not decide either way, and
-  // a bare comma decides nothing at all.
+  // `or` after the joint says the denial is still listing. `and` does not decide either way, and a bare
+  // comma decides nothing at all. `CONJUNCTION` holds only those two, so this line is about `or` alone:
+  // `No text, nor images are visible.` is already blank before this function is asked, because `nor` is a
+  // NEGATOR and the walk ends at it.
   const after = tokens[joint + 1]!.word;
   if (CONJUNCTION.has(after) && after !== "and") return false;
   // Whether the coordination CONTINUES ACROSS this noun, which is what a list does and a clause does not:

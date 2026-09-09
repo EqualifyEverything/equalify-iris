@@ -1747,8 +1747,9 @@ words are visible.` with the joint spliced rather than coordinated, `No clear te
 visible.` and `No printed text or images, and body text is visible.` — the log said there is writing on
 the sheet. A denial keeps all of its escape routes: three or more members (`No printed words, lines, or
 characters are visible.`), a final `or` joint (`No text, images, or other content is visible.`), a joiner
-behind its last member (`No writing, figures or stamps are present.`), or no verb behind the comma at all
-(`No printed text, and handwriting.`). The one shape this reads wrongly, stated because nothing in the
+behind its last member (`No writing, figures or stamps are present.`), a comma on the named noun itself
+even where the list has no joiner anywhere (`No printed words, lines, characters are visible.`), or no
+verb behind the comma at all (`No printed text, and handwriting.`). The one shape this reads wrongly, stated because nothing in the
 sentence distinguishes it: a **two-member** denial written `No text, and images are visible.` or
 `No text or images, document headings are visible.` is read as a clause and the blank page is reported.
 That direction is a glance; the other is a sheet of handwriting delivered empty. The second of those was
@@ -1761,9 +1762,12 @@ This replaced a rule that read the FORM of the word — a comma ended the walk o
 one of the participles #431 added — under which `and stamped words` was refused while `and printed
 words` was declared, one sentence answered by two mechanisms. That rule also refused pure denials whose
 participle member carried a comma of its own (`No inscriptions, watermarks, or logos are visible.`), so
-removing it honours those again. Over the 3,747 replies neither the new rule nor the removal moves any
-verdict; over the 300-row grid #431 was measured on, the new rule refuses all 60 second-clause rows the
-old one did and gives back the 30 denials it cost.
+removing it honours those again. Replaying every one of the 3,747 replies through both implementations
+moves no verdict — a verdict replay rather than a count of sentence shapes, because a count can only see
+the shapes its own pattern was written for, and two rounds of review found the rule's failures one shape
+past whatever had been counted; over the 300-row grid #431 was measured on, the new rule refuses all 60
+second-clause rows the old one did, refuses the 60 spliced ones, leaves every list row blank and gives
+back the 30 denials the old rule cost.
 
 It is not the only way a page with content on it is delivered empty leaving no field to act on — a
 confident wrong declaration about a page whose file says nothing is described the same way below —
