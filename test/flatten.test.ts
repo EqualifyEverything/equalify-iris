@@ -640,13 +640,23 @@ test("every marker the Reader prompt advertises is one flatten emits", () => {
   // clears `[List item a] (a)`, and leaves a list that prints 1, 2, 3 where the page printed
   // letters — a loss no gate here can see, since the marker is inside brackets. Pinned on the
   // direction rather than the sentence: reword it freely, but it must still name the text.
+  assert.match(flatten(`<ol type="a"><li>(a) Estimating</li></ol>`), /\[List item a\] \(a\) Estimating/);
   assert.ok(
-    /say which copy goes: the TEXT's/.test(READER_SYSTEM),
+    /the copy that goes is the TEXT's/.test(READER_SYSTEM),
     "the double-marker report does not say which of the two copies goes",
   );
   assert.ok(
     !/worth reporting whichever of the two the page printed/.test(READER_SYSTEM),
     "the double-marker report still leaves the two copies interchangeable",
+  );
+  // And the direction REVERSES on the shape the corpus actually has. A bare `<ol>` whose items
+  // transcribed their letters flattens to a digit beside a letter — 7 replies, one distinct list,
+  // against 0 replies where a typed list's text repeats its own marker — and there the letters are
+  // the document's only copy, so deleting them is the one repair that loses the page's markers.
+  assert.match(flatten(`<ol><li>(a) Estimating</li></ol>`), /\[List item 1\] \(a\) Estimating/);
+  assert.ok(
+    /the repair is the other way round/.test(READER_SYSTEM),
+    "the report treats a digit announced beside a printed letter as the same defect as a repeat",
   );
   // Options are still content, and are separated so they cannot run together.
   assertNoTextLost(`<select><option>Platform</option><option>Design</option></select>`, "select options");
@@ -686,6 +696,16 @@ test("every attribute flatten reads a marker from is one the editor is told to c
     assert.equal(contentCoverage(marked, bare), 1);
     assert.equal(contentCoverage(bare, marked), 1);
   }
+  // The one conversion the editor IS licensed to make has to be atomic, because each half alone is
+  // a defect: the type without the text strip announces the letter and then reads it out, and the
+  // strip without the type deletes the only copy of the letters the page printed. Both failures are
+  // states this view can show, so both belong in the same test as the rule that forbids them.
+  assert.match(flatten(`<ol type="a"><li>(a) Estimating</li></ol>`), /\[List item a\] \(a\)/);
+  assert.match(flatten(`<ol><li>Estimating</li></ol>`), /\[List item 1\] Estimating/);
+  assert.ok(
+    /That is ONE change, not two/.test(EDITOR_SYSTEM),
+    "the editor's list conversion does not say that setting the type and stripping the text are one change",
+  );
 });
 
 test("a page too deep for the recursive walk keeps its text instead of throwing", () => {

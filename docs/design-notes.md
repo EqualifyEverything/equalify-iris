@@ -1097,6 +1097,30 @@ Places where a decision was left open, and where v1 intentionally stops:
   no gate can see that either. `READER_SYSTEM` therefore says which copy goes (the text's) rather
   than reporting the duplication and leaving the direction to whoever fixes it.
 
+  **And the direction reverses on the shape that actually occurs.** Counting the corpus by whether a
+  list's marker is on the list or in its items: of the 1,075 replies with an `<ol>`, **7 have a bare
+  `<ol>` whose every item's text opens with a letter or roman marker — one distinct list, the same one
+  #334 reports — and 0 have a typed `<ol>` whose item text repeats the marker the list already
+  announces.** So the shape the "delete the text's copy" direction fires on is the one with no
+  occurrences, and the one with all of them flattens to `[List item 1] (a) Estimating`: a digit
+  announced beside a printed letter. There the letters are the document's ONLY record of what the page
+  printed, and deleting them is the single repair that loses a marker, so the rule splits on whether
+  the two markers agree in kind. Where they agree the text's copy goes; where the list announces a
+  digit and the items print letters, the list is what is missing its marker and the text must stay
+  until the list carries it.
+
+  That leaves who may repair it. Only the extractor sees the page, so the loop's default answer is
+  nobody — which would report the defect every round with no legal fix and converge it as unresolved.
+  `EDITOR_SYSTEM` gets one narrow licence instead, because this repair needs no page at all: the
+  letters are already in the document's text, so moving them onto the list adds nothing. It applies
+  only to a bare `<ol>` whose EVERY item opens with one sequence's marker, running consecutively from
+  the ordinal the list counts from, and it is atomic — set the `type` and strip the markers, or change
+  nothing. Each half alone is its own defect, which is why the rule says "one change, not two": the
+  `type` without the strip reads the letter out twice, and the strip without the `type` is the
+  deletion the paragraph above exists to prevent. A broken sequence, an unmarked item, or markers that
+  do not start where the list does all fall back to reporting it, because a list converted on a guess
+  announces a marker no page printed while one left alone still reads its letters out.
+
   And every annotation that explains *correct* markup — `[spans N columns]`,
   `[spans N rows]`, `[decorative, alt empty]` — exists because the prompt tells the Reader that an
   unexplained mismatch is a defect, and the Copy Editor is licensed to restructure tables. Adding a
