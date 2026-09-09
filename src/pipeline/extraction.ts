@@ -2310,33 +2310,61 @@ function negatedInList(tokens: Word[], i: number, reach: number[]): boolean {
 //   `No printed words, lines, or characters are visible.`  one verb, shared by three nouns  -> a list
 //   `No printed text, and handwriting is present.`         a verb on each side of the joint -> a clause
 //
-// Three things have to hold, and each one is what keeps a real denial out. The denied half must be
+// Four things have to hold, and each one is what keeps a real denial out. The denied half must be
 // VERBLESS, which `negatedInList` already guarantees — a verb is none of the words it steps over, so it
 // ends the walk before the negator is reached and this is never asked. The crossed span must hold EXACTLY
 // ONE comma, which is what separates two clauses from three or more members: every one of the 38 has two
-// commas or none. That comma must be followed by `and`, because a denial's own members are joined under
-// negation with `or` (`no text, images, or other content`) while a second clause is coordinated with `and`
-// — this is the half that is idiom rather than structure, and it is the half the corpus decides. And the
-// noun must have a verb OF ITS OWN, read off the `reach` array the caller already computed, so a fragment
-// behind a denial (`No printed text, and handwriting.`) stays a member: whether that fragment affirms is
-// #435's question, answered in `verblessAffirmation` and not here.
+// commas or none. The noun must have a verb OF ITS OWN, read off the `reach` array the caller already
+// computed, so a fragment behind a denial (`No printed text, and handwriting.`) stays a member — whether
+// that fragment affirms is #435's question, answered in `verblessAffirmation` and not here. And the
+// COORDINATION MUST NOT CONTINUE across the noun: no second conjunction and no second comma between the
+// joint and that verb.
 //
-// THE LIMIT, stated rather than smoothed: a two-member denial written with `, and` and a plural verb —
-// `No text, and images are visible.` — has this exact signature and is read here as a clause, so a
-// declaration whose log meant to deny both is refused. Nothing structural separates the two, the corpus
-// writes neither (0 of 204 declarations reach a name for text over a single comma and an `and`), and the
-// direction is the one this section chooses everywhere: that page is reported FAILED and redrawn, where
-// the mistake in the other direction ships a sheet of handwriting empty with nothing recorded (#190,
-// #371). A determiner, an `only`, a `but` or a full stop still refuse without any of this, as before.
+// The fourth is what the joint word cannot do on its own, and round 1 of this change's review is why it is
+// written down. Requiring `, and` looked like the discriminator — a denial's members are joined under
+// negation with `or` (`no text, images, or other content`) and a second clause is coordinated with `and` —
+// but a clause can be spliced on with a bare comma, `No clear text, scrawled words are visible.`, and
+// requiring the `and` shipped 16 of the 16 (word, frame) pairs in #434's grid empty that #434's bound had
+// refused. Dropping the requirement then took the LIST with it, because the second member of
+// `No printed words, lines, or characters are visible.` sits behind a single comma too. What separates
+// them is not the joint at all: the list has `or characters` still to come and the splice has nothing
+// between its noun and its verb. So `or` after the joint is refused as a joiner, `and` is allowed, a bare
+// comma decides nothing, and the coordination scan decides.
+//
+// THE LIMIT, stated rather than smoothed: a TWO-member denial with a plural verb — `No text, and images
+// are visible.`, `No text or images, document headings are visible.` — has this exact signature and is read
+// here as a clause, so a declaration whose log meant to deny both is refused. Nothing in the sentence
+// separates the two readings; the second of those was pinned as a declaration by #379 and is pinned as a
+// refusal now, because leaving it declared while `No clear text, scrawled words are visible.` is refused is
+// the vocabulary deciding again, which is the whole of what #436 asked to be closed. The corpus writes
+// neither shape — 0 of the 204 declarations move, whichever joint they use — and the direction is the one
+// this section chooses everywhere: that page is reported FAILED and redrawn, where the mistake in the other
+// direction ships a sheet of handwriting empty with nothing recorded (#190, #371). A determiner, an `only`,
+// a `but` or a full stop still refuse without any of this, as before.
 function secondClauseJoint(tokens: Word[], negator: number, i: number, reach: number[]): boolean {
-  if (reach[i + 1]! < 0) return false;
+  const verb = reach[i + 1]!;
+  if (verb < 0) return false;
   let joint = -1;
   for (let k = negator; k < i; k++) {
     if (!tokens[k]!.comma) continue;
     if (joint >= 0) return false; // two commas: members of a denial, not two halves of a sentence
     joint = k;
   }
-  return joint >= 0 && joint + 1 < tokens.length && tokens[joint + 1]!.word === "and";
+  if (joint < 0 || joint + 1 >= tokens.length) return false;
+  // `or` and `nor` after the joint say the denial is still listing. `and` does not decide either way, and
+  // a bare comma decides nothing at all.
+  const after = tokens[joint + 1]!.word;
+  if (CONJUNCTION.has(after) && after !== "and") return false;
+  // Whether the coordination CONTINUES ACROSS this noun, which is what a list does and a clause does not:
+  // another comma or another conjunction anywhere between the joint and the verb the noun reaches for.
+  // Both sides of the noun, because a list's last member has its joiner behind it (`No writing, figures or
+  // stamps are present.`) and its first has one in front (`No text, and images or figures are visible.`),
+  // and either one is the denial still listing. The `and` at the joint itself is the one this skips: that is
+  // the coordinator of the clause, and it is the only word between the comma and the noun that can be one.
+  for (let k = joint + 2; k < verb; k++) {
+    if (tokens[k]!.comma || CONJUNCTION.has(tokens[k]!.word)) return false;
+  }
+  return true;
 }
 
 // Where the verb that affirms the noun at each position is, if there is one. The scan STOPS at a negator, because a

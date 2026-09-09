@@ -1731,25 +1731,31 @@ a declaration while `only document headings are visible` and `the document headi
 contradictions — a determiner, an `only` or a verb in front of the noun ends the walk before it
 reaches the negator.
 
-A comma alone does **not** end it, and a comma plus a clause behind it does. A denial with no verb of
-its own reaches across a bare comma, so `No text or images, document headings are visible.` is read as
-one denied list and delivered as a declaration, with nothing on this line naming the heading — because
-the members of a denial are divided by bare commas exactly as two clauses are, and on the corpus the
-denials are the case that occurs: of the 204 blank declarations in the 3,747 page replies on record, 69
-have a denial reaching across a comma to a name for text and every one of them is a list. Ending the
-walk at a comma stops honouring 38 of the 204, so a fifth of every blank page on record would be
-reported as a hole (issue #436, which measured it).
+A comma alone does **not** end it, and a comma with a whole clause behind it does. A denial with no verb
+of its own reaches across a bare comma, because the members of a denial are divided by bare commas
+exactly as two clauses are, and on the corpus the denials are the case that occurs: of the 204 blank
+declarations in the 3,747 page replies on record, 69 have a denial reaching across a comma **and a
+conjunction** to a name for text and 81 across a **bare comma**, and every one of those 150 is a list.
+Ending the walk at a comma stops honouring 38 of the 204, so a fifth of every blank page on record would
+be reported as a hole (issue #436, which measured it).
 
-What does end the walk is the sentence being **two clauses**: a denial with no verb in it, one comma,
-`and`, and a name for text behind it carrying a finite verb of its own. `No printed text, and
-handwriting is present.` is refused on that, and so are `No clear text, and printed words are visible.`
-and `No printed text or images, and body text is visible.` — the log said there is writing on the sheet.
-A denial keeps all four of its escape routes: three or more members (`No printed words, lines, or
-characters are visible.`), a final `or` joint (`No text, images, or other content is visible.`), a bare
-comma with the next subject straight after it, or no verb behind the comma at all (`No printed text, and
-handwriting.`). The one shape this reads wrongly, stated because nothing in the sentence distinguishes
-it: a two-member denial written `No text, and images are visible.` is read as a clause and the blank
-page is reported. That direction is a glance; the other is a sheet of handwriting delivered empty.
+What does end the walk is the sentence being **two clauses**: a denial with no verb in it, exactly one
+comma, a name for text behind it carrying a finite verb of its own, and no further conjunction or comma
+between them — the coordination stopping is what says the second half is not another member.
+`No printed text, and handwriting is present.` is refused on that, and so are `No clear text, scrawled
+words are visible.` with the joint spliced rather than coordinated, `No clear text, and printed words are
+visible.` and `No printed text or images, and body text is visible.` — the log said there is writing on
+the sheet. A denial keeps all of its escape routes: three or more members (`No printed words, lines, or
+characters are visible.`), a final `or` joint (`No text, images, or other content is visible.`), a joiner
+behind its last member (`No writing, figures or stamps are present.`), or no verb behind the comma at all
+(`No printed text, and handwriting.`). The one shape this reads wrongly, stated because nothing in the
+sentence distinguishes it: a **two-member** denial written `No text, and images are visible.` or
+`No text or images, document headings are visible.` is read as a clause and the blank page is reported.
+That direction is a glance; the other is a sheet of handwriting delivered empty. The second of those was
+documented here as a declaration until #436 — `document` and `body` are read as modifiers, and the
+sentence was delivered — and it is refused now, because the identical sentence with `scrawled` in place
+of `document` was refused already and leaving the two apart is the vocabulary deciding which pages
+survive.
 
 This replaced a rule that read the FORM of the word — a comma ended the walk only once it had crossed
 one of the participles #431 added — under which `and stamped words` was refused while `and printed

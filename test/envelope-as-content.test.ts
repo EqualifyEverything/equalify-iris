@@ -1708,10 +1708,16 @@ test("a name for text affirms in either part of speech, and the position was nev
   // the rows below are what that difference is worth. Both frames, because the negator's own member is a
   // noun in one and a bare qualifier in the other, and only one of those leaves an `AFFIRMED_NOUN` in the
   // walk's way.
+  // BOTH JOINTS, and the second one is round 1 of #436's review: a clause can be spliced on with a bare
+  // comma, and a rule that asked for `, and` shipped all 16 of the bare-comma rows empty — verdicts the
+  // bound had got right, in the direction this file calls fatal. The joint word is not the discriminator;
+  // the coordination continuing across the noun is.
   for (const word of "stamped scrawled inscribed cursive watermarked footnotes annotations barcodes".split(" ")) {
     for (const frame of [
       `No clear text, and ${word} words are visible.`,
       `Nothing legible, and ${word} content is present.`,
+      `No clear text, ${word} words are visible.`,
+      `Nothing legible, ${word} content is present.`,
     ]) {
       assert.equal(declaredBlank({ html: "", log: `Page is blank. ${frame}` }), false, frame);
     }
@@ -1728,11 +1734,18 @@ test("a name for text affirms in either part of speech, and the position was nev
     "Page is blank. Nothing legible, and handwritten content is present.",
     "Page is blank. No printed text, and handwriting is present.",
     "Page is blank. Nothing legible, and printing is visible.",
-    // The stated limit, pinned as the cost it is: a two-member denial written with `, and` and a plural
-    // verb has the same shape as a second clause and is read as one, so this blank page is reported.
-    // Nothing in the sentence separates them, the corpus writes neither, and a reported blank page is a
-    // glance where the other direction is a sheet of handwriting delivered empty (#190, #371).
+    // The same four with the joint spliced rather than coordinated, which is the class round 1 found: the
+    // `and` was never what made them clauses.
+    "Page is blank. No clear text, printed words are visible.",
+    "Page is blank. No clear text, handwritten content is present.",
+    "Page is blank. No printed text, handwriting is present.",
+    "Page is blank. Nothing legible, printing is visible.",
+    // The stated limit, pinned as the cost it is: a two-member denial with a plural verb has the same shape
+    // as a second clause and is read as one, so this blank page is reported. Nothing in the sentence
+    // separates them, the corpus writes neither, and a reported blank page is a glance where the other
+    // direction is a sheet of handwriting delivered empty (#190, #371).
     "Page is blank. No text, and images are visible.",
+    "Page is blank. No text, images are visible.",
   ]) {
     assert.equal(declaredBlank({ html: "", log }), false, log);
   }
@@ -1746,6 +1759,11 @@ test("a name for text affirms in either part of speech, and the position was nev
     "Page is blank. No text, images, or other content is visible.",
     "Page is blank. no printed text, numbers, or content of any kind is present.",
     "Page is blank. No legible text or content, and no writing is visible.",
+    // A list whose last member carries its joiner BEHIND it, which is the shape a bare-comma joint takes
+    // for a member rather than a clause: `figures` sits behind one comma with `or stamps` still to come,
+    // and `stamps` sits behind the same comma with the `or` in front of it. The coordination scan is what
+    // sees both, and this row is corpus-verbatim.
+    "Page is blank. A few specks. No writing, figures or stamps are present.",
     // No finite verb behind the joint: a fragment, so the noun is still a member. Whether a fragment
     // affirms at all is #435's question and `verblessAffirmation`'s answer, not this one's.
     "Page is blank. No printed text, and handwriting.",
@@ -2113,21 +2131,27 @@ test("a denial reaches its noun through a noun-modifier, alone or inside a coord
   // already in the set are delivered on `main` too, and the second and third of these are — pinned here so
   // the shape cannot be read as something this change introduced.
   //
-  // The `and` is now the whole difference, and that is #436's discriminator rather than anything about
-  // these two words: a comma with a coordinator after it and a finite verb on each side is read as two
-  // clauses, and a comma with the next clause's subject straight after it is not. The first row below
-  // therefore refuses and the other two still declare — a split nobody chose when this test was written,
-  // and the reason it is pinned in two loops now instead of one.
-  assert.equal(
-    declaredBlank({ html: "", log: "Page is blank. No printed text or images, and body text is visible." }),
-    false,
-  );
+  // #436 CHANGED THE FIRST TWO OF THESE, and the change is a contract change rather than a fix to this
+  // widening: a verbless denial, one comma, and a name for text behind it with a finite verb of its own is
+  // read as two clauses now, whether the joint is `, and` or a bare comma. So the log that names a heading
+  // is reported instead of delivered empty. What decided it was not the count but the alternative: the
+  // identical sentence with `scrawled` in place of `document` was refused already, so leaving these
+  // declared kept the vocabulary deciding which pages survive, which is the defect #436 is about. On the
+  // corpus neither reading moves anything — 0 of the 204 declarations on record are this shape.
+  //
+  // The third still declares, and it is the boundary of the change rather than an exception to it: `page`
+  // and `numbers` are modifiers and `page numbers` names no text this pipeline delivers, so there is no
+  // affirming noun for the clause read to reach.
   for (const log of [
+    "Page is blank. No printed text or images, and body text is visible.",
     "Page is blank. No text or images, document headings are visible.",
-    "Page is blank. No text or images, page numbers are visible.",
   ]) {
-    assert.equal(declaredBlank({ html: "", log }), true, log);
+    assert.equal(declaredBlank({ html: "", log }), false, log);
   }
+  assert.equal(
+    declaredBlank({ html: "", log: "Page is blank. No text or images, page numbers are visible." }),
+    true,
+  );
   // And how narrow that line is, which is the other half of the same decision: one determiner, one `only`
   // or one verb in the second clause and the walk stops before the negator, as it does for every negative
   // above. The pair is what makes the branch legible — the words are the same, the reading is opposite.
