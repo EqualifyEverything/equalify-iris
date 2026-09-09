@@ -1635,8 +1635,13 @@ anchored on the denial, and that one only looks forward from the negator. Unchan
 rather than left to be re-measured.
 
 A statement that is a name for text and **nothing else** still affirms, so `Blank page; text`,
-`Blank page. Content` and `Page is blank; images; nothing present.` are blank pages reported as holes —
-the last one because its denial is in the next `;`-statement, where this read cannot reach it. A guard
+`Blank page. Content`, `Page is blank; images; nothing present.`, `Page is blank. No printed text.
+Images.` and `Page is blank. Any text? None found.` are blank pages reported as holes. Statements here
+end at a `.`, `!`, `?`, `;` or a line break alike, and in three of those the denial is in a neighbouring
+statement — ahead of the label in one, behind it in another — which this read cannot reach either way,
+the boundaries being what limit how far a subject may look for its verb. The near misses say how narrow
+the hole is: `Text: none.`, `Text (none).`, `Text/handwriting: none detected.` and `Page is blank; no
+text; no images.` all still declare the page blank. A guard
 for that (refuse when the noun is the only token) was written and taken back out, because after the
 marks strip **one token is not one word**: `Handwriting smudges.` and `Cursive smudges.` reach this read
 as a single token, their head noun having been removed upstream, and that phrase

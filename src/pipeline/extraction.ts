@@ -2676,10 +2676,15 @@ const FRAGMENT_CLOSER = new Set("only alone too also".split(" "));
 // `A heading at the top.` is already pinned as delivered, beside two more of its shape, in
 // `envelope-as-content.test.ts` — the pins that say a widening must defend both halves of each pair.
 function verblessAffirmation(tokens: Word[], i: number): number {
-  // A statement whose whole text is the name affirms, and this read splits statements on `;` and on line
-  // breaks — so "Blank page; text" and "Page is blank; images; nothing present." refuse the declaration
-  // off one word with no determiner, no count and no predicate, the second one with its denial in the
-  // next statement where nothing here can see it. Left standing, and a `tokens.length === 1` guard for
+  // A statement whose whole text is the name affirms, and this read splits statements on `.`, `!`, `?`,
+  // `;` and line breaks alike — so "Blank page; text", "Page is blank; images; nothing present.",
+  // "Page is blank. No printed text. Images." and "Page is blank. Any text? None found." all refuse the
+  // declaration off one word with no determiner, no count and no predicate. The denial is in a
+  // NEIGHBOURING statement in three of those, ahead of the label in one and behind it in another, and
+  // this read sees neither: the boundaries are what limit how far a subject may reach, so a word alone
+  // between two of them is all there is to read. `Text: none.`, `Text (none).` and
+  // `Page is blank; no text; no images.` are the near misses that keep declaring, so the hole is the
+  // one-token statement and not the label list. Left standing, and a `tokens.length === 1` guard for
   // it was written and taken back out: after the marks strip, one token is not the same thing as one
   // word. `Handwriting smudges.` and `Cursive smudges.` arrive here as a single token because `vetoScope`
   // removed the head noun, and that phrase is #435's own — six of the seven

@@ -1943,6 +1943,17 @@ test("a blank page's own fragments are not affirmations (#435)", () => {
   assert.equal(declaredBlank({ html: "", log: "Blank page; text" }), false);
   assert.equal(declaredBlank({ html: "", log: "Blank page. Content" }), false);
   assert.equal(declaredBlank({ html: "", log: "Page is blank; images; nothing present." }), false);
+  // Every boundary is one of these, `.` and `?` included, and the denial can be on either side of the
+  // label — behind it in the first, ahead of it in the second, in the answer to the question in the third.
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. No printed text. Images." }), false);
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. Images. No text." }), false);
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. Any text? None found." }), false);
+  // How narrow that hole is, which is why the pins above are a gap and not an argument for the guard:
+  // a label with its denial in the SAME statement declares, whatever punctuation joins them.
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. Text: none." }), true);
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. Text (none)." }), true);
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. Text/handwriting: none detected." }), true);
+  assert.equal(declaredBlank({ html: "", log: "Page is blank; no text; no images." }), true);
   // The other half: after the marks strip, one token is not one word. These arrive as a single token
   // because `vetoScope` removed the head noun, and the phrase is #435's own — six of the seven wordings
   // in the issue are this phrase with a predicate on the end. So the guard that fixes the three rows
