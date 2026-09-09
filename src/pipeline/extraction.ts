@@ -1557,8 +1557,20 @@ const NAMES_TEXT = new RegExp(String.raw`\b(?:${TEXT_NOUN})\b`, "i");
 // the same reason one line up, which is why `machine-printed` was caught and `pen-written` was not. `\b`
 // cannot match inside a word (`written` does not match in `rewritten`, `italic` not in `italicised`),
 // so what this admits is exactly the compound. Which is why `hand-?printed` stays in the list beside
-// `printed` and is not redundant with it: the hyphenated half of that entry is, but `handprinted` written
-// solid is a word no boundary test on `printed` can reach. Same for `hand-?written` beside `written`.
+// `printed`: `handprinted` written solid is a word no boundary test on `printed` can reach, there being no
+// boundary inside it. Same for `hand-?written` beside `written`.
+//
+// The HYPHENATED half of that entry is not redundant either, and not because it is needed — because it
+// diverges, which round 1 of #437's review measured. `qualifies("hand-printed")` is true (`\bprinted\b`
+// matches across a hyphen) and `qualifies("handprinted")` is false, so in the terminal-object read of
+// `exceptiveOrLocativeObject` the hyphenated spelling is skipped as a modifier and the solid one is read as
+// a name for text: `No content is present in the hand-printed.` declares and `...in the handprinted.` is
+// refused. The disagreement is not with the stem — `printed` and `machine-printed` both declare there — and
+// for that sentence declaring is right, since the log denies content. What the pair exposes is the other
+// side of the same read: a terminal object that is a name for text and NOT a qualifier refuses a page whose
+// log denied content, which `written`, `stamped`, `hand-written` and `handprinted` all do and all did before
+// this change. That frame is not log English (put a noun behind the modifier and all five spellings agree on
+// both arms), so it is recorded here and pinned in the tests rather than widened.
 const NAMES_TEXT_FORM =
   /\b(?:hand-?written|handwrote|written|typed|printed|typewritten|typeset|stamped|signed|initial(?:l)?ed|lettered|numbered|captioned|labell?ed|annotated|inscribed|embossed|engraved|watermarks?|watermarked|drawn|sketched|scrawled|scribbled|doodled|underlined|highlighted|illustrated|cursive|pencill?ed|penned|inked|hand-?printed|lettering|barcodes?|drawings?|sketch(?:es)?|doodles?|annotations?|inscriptions?|footnotes?|notations?|monograms?|letterheads?|logotypes?|punctuation|diacritics?|symbols?|italics?|boldface|typographic|textual|alphanumeric|numeric|numbering|stamping|signing|captioning|labell?ing|embossing|engraving|underlining|highlighting|scribbling|scrawling|watermarking|doodling|sketching|italici[sz](?:ed|ing))\b/i;
 // A name for text only affirms it where it is not NEGATED, which is the difference between "the
@@ -1748,6 +1760,19 @@ const QUALIFIER_FORM = new RegExp(String.raw`\b(?:${[...QUALIFIER].join("|")})\b
 // whether it names text, which is `affirmsText`. `printed` and `typed` are in both classes, so the two
 // answers have to move together: #437 measured 24 of 40 (bare, compound) pairs answering differently from
 // their own stem, in both directions, because this list was token-exact where the text lists are not.
+//
+// THIS READS COMPOUNDS OF ALL THIRTEEN and the pair above is two of them, which round 1 of #437's review was
+// right to ask about. Swept — 13 words x 3 prefixes x the 4 frames the three call sites own, 156 cells — the
+// compound answered differently from its own bare stem in 75 cells before this and in 0 after, and all 75
+// moved TO the stem's answer. 36 of them toward a declaration and 39 toward a refusal, so there is no safe
+// side to this and it is not a widening: it is one rule answering a sentence where two used to.
+//
+// The 36 declaring cells are one interaction, and it is a decision this file already made: a DEFINITE
+// `image` is the scan and not a thing on the page (`LOCATIVE_SUBSTRATE`), and `definiteBefore` is what finds
+// the article in front of it past the modifiers. `The legible image is visible.` declares on base; what
+// moved is that `The semi-legible image is visible.` now reaches the same read instead of stopping short of
+// the article and affirming the scan. A compound the lists do not know still stops it (`The foo-bar image is
+// visible.` is refused), so what crosses is the vocabulary and not the hyphen.
 function qualifies(word: string): boolean {
   return QUALIFIER.has(word) || QUALIFIER_FORM.test(word);
 }
@@ -2087,7 +2112,9 @@ function definiteBefore(tokens: Word[], i: number): boolean {
   let k = i - 1;
   // `qualifies` and not `QUALIFIER`, because a compound stands where its stem stands: the article in front
   // of `the machine-printed heading` is the one in front of `the printed heading`, and stopping at the
-  // compound lost the definiteness the caller is asking about.
+  // compound lost the definiteness the caller is asking about. This is the call the definite-`image` skip
+  // reads, so it is where 33 of the 75 stem/compound disagreements the sweep at `qualifies` counted lived,
+  // all of them in the frame `The <qualifier> image is visible.`
   while (k >= 0 && qualifies(tokens[k]!.word)) k--;
   return k >= 0 && DEFINITE.has(tokens[k]!.word);
 }

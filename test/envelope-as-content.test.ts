@@ -1927,6 +1927,81 @@ test("a name for text affirms in either part of speech, and the position was nev
   ]) {
     assert.equal(declaredBlank({ html: "", log }), true, log);
   }
+
+  // ALL THIRTEEN QUALIFIERS, not the two the overlap is about, because `qualifies` reads compounds of the
+  // whole list and round 1 of #437's review was right that the evidence covered two of them. Swept — 13
+  // words x 3 prefixes x the 4 frames the three call sites own, 156 cells — the compound disagreed with its
+  // own bare stem in 75 cells on base and in 0 now, and every one of the 75 moved TO the stem's answer. The
+  // split by direction is 36 toward a declaration and 39 toward a refusal, so this is not a widening with a
+  // safe side; it is the same sentence being answered by one rule instead of two.
+  for (const frame of [
+    (w: string) => `The ${w} image is visible.`,
+    (w: string) => `A caption is missing from the ${w} heading.`,
+    (w: string) => `No content is present in the ${w}.`,
+    (w: string) => `The ${w} heading is visible.`,
+  ]) {
+    for (const word of "meaningful legible readable printed typed visible discernible apparent recognizable recognisable clear other more".split(
+      " ",
+    )) {
+      for (const prefix of ["semi", "machine", "barely"]) {
+        assert.equal(
+          declaredBlank({ html: "", log: `Page is blank. ${frame(`${prefix}-${word}`)}` }),
+          declaredBlank({ html: "", log: `Page is blank. ${frame(word)}` }),
+          frame(`${prefix}-${word}`),
+        );
+      }
+    }
+  }
+  // One row per direction with the answer written down, and the control that says the walk still stops at a
+  // compound it does not recognise. The 33 declaring rows are all one interaction and it is the deliberate
+  // one: a DEFINITE `image` is the scan rather than a thing on the page (`LOCATIVE_SUBSTRATE`), and the
+  // qualifier walk in `definiteBefore` is what finds the article in front of it. `The legible image is
+  // visible.` declares on base as it does here; what changed is that the compound now reaches the same
+  // reading instead of stopping short of the article and affirming the scan.
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. The legible image is visible." }), true);
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. The semi-legible image is visible." }), true);
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. The foo-bar image is visible." }), false);
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. The rotated image is visible." }), false);
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. An image is visible." }), false);
+  // The refusing direction, same word: the object walk crosses the compound to the noun behind it, so the
+  // heading the log presupposes is read and the page is reported rather than delivered empty.
+  assert.equal(
+    declaredBlank({ html: "", log: "Page is blank. A caption is missing from the semi-legible heading." }),
+    false,
+  );
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. A caption is missing from the legible heading." }), false);
+  // THE ONE PLACE A COMPOUND STILL DISAGREES WITH ANOTHER SPELLING OF ITSELF, pinned because round 1 of the
+  // review found it and because the disagreement is not with the stem: `hand-printed` is read as a compound
+  // of `printed` and skipped, while `handprinted` written solid matches only the standalone `hand-?printed`
+  // entry and is read as a name for text. For this sentence the skipping answer is the right one — the log
+  // denies content in a region and the page is blank — so what the pair exposes is the OTHER side: a
+  // terminal object that is a name for text and not a qualifier refuses a page whose log denied content,
+  // which is what `written`, `stamped`, `hand-written` and `handprinted` all do here and did before this
+  // change. The frame is not log English (the natural wording puts a noun behind the modifier, and there all
+  // five spellings agree on both arms), so this is recorded rather than widened.
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. No content is present in the printed." }), true);
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. No content is present in the machine-printed." }), true);
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. No content is present in the hand-printed." }), true);
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. No content is present in the handprinted." }), false);
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. No content is present in the written." }), false);
+  assert.equal(declaredBlank({ html: "", log: "Page is blank. No content is present in the hand-written." }), false);
+  // And with the noun behind the modifier, which is how a log writes it: every spelling agrees, both
+  // directions, and none of these moved.
+  for (const log of [
+    "Page is blank. No content is present in the hand-printed area of the form.",
+    "Page is blank. No content is present in the handprinted area of the form.",
+    "Page is blank. Printing is nowhere except a hand-printed note at the top.",
+    "Page is blank. Printing is nowhere except a handprinted note at the top.",
+  ]) {
+    assert.equal(declaredBlank({ html: "", log }), true, log);
+  }
+  for (const log of [
+    "Page is blank. The hand-printed notes are visible.",
+    "Page is blank. The handprinted notes are visible.",
+    "Page is blank. The machine-printed notes are visible.",
+  ]) {
+    assert.equal(declaredBlank({ html: "", log }), false, log);
+  }
 });
 
 // The one caller that reads the second list on different terms, and why it has to. The object of a
