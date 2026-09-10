@@ -3545,10 +3545,10 @@ asked last, because every reason before it is keyed on a caption note and this i
 none). All four are part of the table's name going missing or being said twice, and all four are
 invisible to every other check here, which read cells, columns and rows.
 
-Three reasons rather than one because a decline is all a run log has, and they send a reader to
-different places: whether a row survived at all, the caption the merge was told to copy, or a note
-delivered in two places. They ask for the same one-sentence repair, so the split buys the log and not
-the model.
+Four reasons rather than one because a decline is all a run log has, and they send a reader to
+different places: whether a row survived at all, the caption the merge was told to copy, a note
+delivered in two places, or a note no caption ever carried and the delivered table dropped. They ask
+for the same one-sentence repair, so the split buys the log and not the model.
 
 `caption_note_lost` reads both halves' captions while rule 6's repeat set reads only the first
 half's, because those answer different questions: what the merge may **drop** is a repeat and not a
@@ -3674,11 +3674,18 @@ headers to `<td>` still loses every one of them.
 
 And last, `note_row_lost`, for the note **neither** caption ever carried. Every reason above it is keyed
 on a caption note, so on a pair whose halves printed the note only as a row there was nothing to compare
-and the whole harm the placement rule exists to remove went unseen — on the census's 12 outside-caption
-placements. That was true of the `<td>` spelling from the day the note checks went in; narrowing
-`headerCells` made it true of `<th>` too, since a lost header cell was all that had ever caught it and
-under the wrong name. It is asked last so the caption reasons keep the pairs that have a caption note to
-lose, and it compares the note's **text** and not its key: a note the merge moved from `<thead>` into
+and the harm the placement rule exists to remove had nothing looking for it — on the census's 12
+outside-caption placements.
+
+What it adds is bounded by the block the row sat in. A note row in `<tbody>` is a data row whose **label**
+is the bracketed run, so deleting it was refused all along as `labels_lost:1` — or `rows_lost` where both
+halves printed it — and still is, because both are asked first. That order is right: an answer that
+dropped the note row and three state rows should report the four and not the one. So the case this reason
+is for is the row inside the **header block**, in either spelling, where `labels` skips it and `rowFloor`
+forgives it; the `<tbody>` case deserves the same name and does not get it. What narrowing `headerCells`
+changed is that `<th>` in `<thead>` stopped being caught as a lost header **cell** — the wrong name for
+it, and the only name it had. Asked last so the caption reasons keep the pairs that have a caption note
+to lose, and compared on the note's **text** and not its key: a note the merge moved from `<thead>` into
 `<tbody>` is a relocation, a different defect, and naming it a deletion would point the repair at rule 6
 instead of at `page.md`.
 

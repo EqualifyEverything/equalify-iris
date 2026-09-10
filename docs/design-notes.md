@@ -432,8 +432,10 @@ Places where a decision was left open, and where v1 intentionally stops:
   puts it inside the `<caption>`, and a joined caption that drops it is refused as `caption_note_lost`
   or `caption_note_struck`, by whether a row still carries it; a joined table that keeps it in the
   caption *and* as a row is refused as `note_shipped_twice`; and a note **neither** caption carried,
-  printed as a row by a half and gone from the delivered table, is refused as `note_row_lost` — the
-  pair the other three cannot see, because each of them is keyed on a caption note.
+  printed inside the header block by a half and gone from the delivered table, is refused as
+  `note_row_lost` — the pair the other three cannot see, because each of them is keyed on a caption
+  note. The same note printed as a `<tbody>` row was refused all along, as `labels_lost` or `rows_lost`:
+  its label *is* the bracketed run, so the row checks see it go.
 
   `note_shipped_twice` is why the free path, where
   it imports the continued half's caption because the first half has none, also drops the first half's

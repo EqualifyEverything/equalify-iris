@@ -563,14 +563,16 @@ export function verifyJoin(pair: ContinuationPair, merged: string): string | nul
   //     which are the two harms `page.md` names.
   //
   // So a note in the title caption is owed the joined CAPTION and nothing else will do, and only a note
-  // carried by the discarded caption may be answered by a row. Three reasons rather than one, because a
+  // carried by the discarded caption may be answered by a row. Four reasons rather than one, because a
   // decline is all a run log has: `caption_note_lost` is a note in neither the joined caption nor a row
   // some half printed, `caption_note_struck` is a note gone from the caption the join was told to copy
-  // but still in the table as a row a half printed, and `note_shipped_twice` is the joined table holding
-  // one note in both places. All three point at rule 4 or rule 6 and the repair is the same sentence, so
-  // this buys the log and not the model. Which of the three a pair gets is decided by the ORDER they are
-  // asked in, below, and not by these definitions — `caption_note_struck` says "still in the table" only
-  // because the lenient check has already answered every pair where it is not.
+  // but still in the table as a row a half printed, `note_shipped_twice` is the joined table holding one
+  // note in both places, and `note_row_lost` is a note NEITHER caption carried, printed as a row and
+  // dropped — the pair the first three cannot see, since each of them is keyed on a caption note. All
+  // four point at rule 4 or rule 6 and the repair is the same sentence, so this buys the log and not the
+  // model. Which of the four a pair gets is decided by the ORDER they are asked in, below, and not by
+  // these definitions — `caption_note_struck` says "still in the table" only because the lenient check
+  // has already answered every pair where it is not.
   //
   // The title caption is the first half's, or the second half's where the first has none. That is rule
   // 4, and it is NOT the same predicate `joinInCode` branches on: this reads the caption's normalized
@@ -627,13 +629,21 @@ export function verifyJoin(pair: ContinuationPair, merged: string): string | nul
   // And last, the note neither caption ever carried: printed by a half as a row, and gone from the
   // delivered table without arriving in the caption. Every reason above is keyed on a CAPTION note —
   // `owed` and `titleNotes` are read off the halves' captions and are empty on such a pair — so the whole
-  // harm the placement rule exists to remove was invisible where the page never used a caption for it, on
-  // the corpus's 12 outside-caption placements. That was true of the `<td>` spelling from the day the note
-  // checks went in; narrowing `headerCells` a commit ago made it true of `<th>` too, because a lost header
-  // cell was all that had ever caught it, and by the wrong name. Asked LAST so the caption reasons keep
-  // the pairs that have a caption note to lose, and on the note's TEXT rather than its key: a note the
-  // merge moved from `<thead>` into `<tbody>` is a relocation, which is a different defect and not this
-  // one, and calling it a deletion would point the repair at the wrong rule.
+  // harm the placement rule exists to remove had nothing looking for it where the page never used a
+  // caption, on the corpus's 12 outside-caption placements.
+  //
+  // What it adds is bounded, and the bound is the block the row sat in. A note row in `<tbody>` is a data
+  // row whose LABEL is the bracketed run, so deleting it was already refused above — `labels_lost:1`, or
+  // `rows_lost` where both halves printed it — and it still is, because those are asked first. That is
+  // not the wrong order: an answer that dropped the note row and three state rows should report the four,
+  // not the one. So the case this reason is for is the row inside the HEADER BLOCK, where `labels` skips
+  // it and `rowFloor` forgives it, in either spelling — and it is the reason the `<tbody>` case deserves
+  // too, which it does not get. What narrowing `headerCells` a commit ago changed is that `<th>` in
+  // `<thead>` stopped being caught as a lost header cell, which was the wrong name for it and the only
+  // name it had. Asked LAST so the caption reasons keep the pairs that have a caption note to lose, and
+  // on the note's TEXT rather than its key: a note the merge moved from `<thead>` into `<tbody>` is a
+  // relocation, which is a different defect and not this one, and calling it a deletion would point the
+  // repair at the wrong rule.
   //
   // What all of this compares is a note's text, the block it sits in, which caption owed it, and whether
   // the delivered table holds it in two places at once — nothing finer. A note MOVED is invisible here,

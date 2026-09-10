@@ -908,6 +908,25 @@ test("a note neither caption carried and no row keeps is a note the merge delete
     const moved = `<table><caption>Table 9.—Revenue</caption><thead>${cols}</thead><tbody><tr><td colspan="3">${note}</td></tr>${both}</tbody></table>`;
     assert.equal(verifyJoin(pair, moved), null, cell);
   }
+
+  // And the bound on what this reason adds, which two rounds of comment overstated: only the row inside
+  // the HEADER BLOCK was ever invisible. A note row in `<tbody>` is a data row whose label is the
+  // bracketed run, so `labels_lost` and `rows_lost` answered it from the day they existed and still do,
+  // being asked first — right, because an answer that dropped this row and three state rows should report
+  // the four. The `<tbody>` case is refused under a name about a missing row label rather than the units.
+  const row = `<tr><td colspan="3">${note}</td></tr>`;
+  const plain = `<table><caption>Table 9.—Revenue</caption><thead>${cols}</thead>`;
+  const onlyFirst = onePair(
+    `${plain}<tbody>${row}${dataRow("Alabama")}${dataRow("Georgia")}</tbody></table>` +
+      `<table><caption>Table 9.—Revenue—Continued</caption><thead>${cols}</thead><tbody>${dataRow("Vermont")}</tbody></table>`,
+  );
+  const kept3 = `${plain}<tbody>${dataRow("Alabama")}${dataRow("Georgia")}${dataRow("Vermont")}</tbody></table>`;
+  assert.equal(verifyJoin(onlyFirst, kept3), "labels_lost:1");
+  const bothHalves = onePair(
+    `${plain}<tbody>${row}${dataRow("Alabama")}</tbody></table>` +
+      `<table><caption>Table 9.—Revenue—Continued</caption><thead>${cols}</thead><tbody>${row}${dataRow("Vermont")}</tbody></table>`,
+  );
+  assert.equal(verifyJoin(bothHalves, `${plain}<tbody>${both}</tbody></table>`), "rows_lost");
 });
 
 test("a note the joined table keeps in its caption and prints as a row as well is shipped twice", () => {
