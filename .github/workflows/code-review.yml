@@ -1127,11 +1127,28 @@ jobs:
               would stop being included in full.
             - Error responses that leak internals, or run-log events that lose the information
               needed to debug a failed session.
+            - **Docs prose that is not concise plain language**, on the files CONTRIBUTING.md's
+              Documentation section binds: `README.md`, anything under `docs/`, the comments in
+              `config.example.yaml`, and the prompts in `agents/`. Quote the sentence and name the
+              rule it breaks — one idea per sentence, the claim before the caveat, a number instead
+              of an adjective, a gloss on the first use of jargon, no paragraph restating the one
+              above it. Those are five of that section's six rules, and the sixth is left out on
+              purpose: whether a document earns its length is the maintainer's call, not a judgement
+              a diff supports. If you cannot quote the text and name the rule, you do not have a
+              finding — "reads long" is not one. Three instances at most, the worst ones; a list of
+              every long sentence in a long document is noise. Detail is not the target: an exact
+              number, a file path, or a caveat that saves a reader an hour all belong in. Prose in
+              files outside that set is not reviewed, and CONTRIBUTING.md is the authority if it and
+              this list ever disagree.
 
             ## Do NOT flag
 
             - Style, formatting, or naming preferences. There is no linter or formatter in this
-              repo on purpose; match the surrounding code and move on.
+              repo on purpose; match the surrounding code and move on. The docs-prose bullet above
+              is the one exception, and it is not a style rule: it is scoped to the files
+              CONTRIBUTING.md binds, and it asks whether a reader can follow the sentence, not how
+              the sentence is formatted. Inside those files, heading style, line length, Markdown
+              layout, and wording you would have chosen differently all stay out of scope.
             - "You could also do X" alternatives when the existing approach is correct.
             - Pre-existing issues the PR does not touch.
             - Anything already handled correctly in the diff. Verify before claiming.

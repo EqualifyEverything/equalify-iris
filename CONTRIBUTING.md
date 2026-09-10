@@ -90,7 +90,13 @@ What it asks for:
 
 Two things this is not. It is not a ban on detail — an exact number, a file path, or a caveat that
 saves a reader an hour all belong in. And it is not about formatting: there is no linter here, and
-the check is a maintainer reading your prose.
+nothing checks heading style, line length or word choice.
+
+**Who checks it:** the automated review, then a maintainer. On a PR touching those files the
+reviewer quotes a sentence that breaks one of the rules above and names the rule, as a
+[non-blocking note](#what-the-automated-review-will-say) — at most three, the worst ones. It is the
+only prose it comments on, and a note is not a merge gate. It does not judge whether a document
+earns its length: that is the last rule above, and it stays with the maintainer.
 
 A PR that only makes an existing doc plainer is welcome, with no code change attached.
 
@@ -120,6 +126,11 @@ Your PR gets a review from Claude in CI before a maintainer reads it
   repo on purpose. It's also told not to suggest alternatives when your approach is correct, and
   not to raise pre-existing issues your PR doesn't touch. If it does one of those anyway, that's a
   bug in the prompt — say so on the PR.
+- **One exception: docs prose.** If your PR touches `README.md`, `docs/`, `config.example.yaml`'s
+  comments or `agents/`, it checks that prose against the
+  [Documentation](#documentation) rules — quoting the sentence, naming the rule, three at most,
+  always as a non-blocking note. Not in scope even there: heading style, line length, Markdown
+  layout, or wording it would have chosen differently.
 - **`### Non-blocking notes` means "merge-ready".** A finding only blocks if something reaches it
   on input the code accepts today; real-but-unreachable findings are notes on an *approval*. You
   don't have to resolve them to merge, and you don't have to argue your way out of them.
