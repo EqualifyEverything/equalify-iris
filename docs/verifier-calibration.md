@@ -293,10 +293,14 @@ use `alt=""` to avoid redundant announcement, per the redundancy rule in the age
 correction obeyed — the shipped fragment is `<li><img alt=""> States ranking in the top 12 on personal
 income</li>`. The label names the category and the deleted alt named which pattern carries it, so what
 went is the mapping, and that page's map description still names "the dotted pattern" and "the
-cross-hatched pattern" to a reader who now has nothing to attach them to. The shield could not reach it:
+cross-hatched pattern" to a reader who now has nothing to attach them to. The container changed in that
+same pair, `<dt>` to `<li>`, and that half is not this defect: a separate problem in the same verdict said
+a *"`<dl>` with empty `<dd>` elements is malformed"* and *"would be better represented as a list or a
+table"*, which is correct and is the remedy the page took. The shield could not reach the alt half:
 it refuses the report AS INVENTED TEXT, and this report was redundancy. Censused across every round log
-on disk, 9 of 3,132 problems propose an empty alt — 7 correctly or harmlessly (a graphic omitted
-entirely, an existing `alt=""` leaving a link nameless, a doubled attribute whose second occurrence wins)
+on disk, 9 of 3,132 problems propose an empty alt — 7 correctly or harmlessly (three graphics omitted
+entirely, two existing `alt=""` leaving a link nameless, one doubled attribute whose empty second
+occurrence wins, one `<figure>`/`<figcaption>` mismatch offering "decorative" as one branch)
 and 2 proposing to empty a description the page carries nowhere else: those swatches, and a cover, where
 the one arm that complied with `agents/page.md`'s cover clause had its appearance-only alt refused
 because *"the cover text is also transcribed in the surrounding HTML"* — the transcription that same

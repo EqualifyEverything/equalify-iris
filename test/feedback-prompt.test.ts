@@ -112,11 +112,15 @@ test("the verify task will not score a described swatch as invented, or overturn
     // personal income</li>. The label names the CATEGORY and the deleted alt named which PATTERN
     // carries it, so the mapping is the half that went, and the same page's map description talks
     // about "the dotted pattern" and "the cross-hatched pattern" — names a reader can now attach to
-    // nothing. Censused across every round log on disk: 9 of 3,132 problems propose an empty alt, 7 of
-    // them correctly or harmlessly (a graphic omitted entirely, an existing alt="" leaving a link
-    // nameless, a doubled attribute), and 2 propose emptying a description the page carries nowhere
-    // else. This is the general form of both, so it is pinned by the door it closes rather than by the
-    // page it was found on.
+    // nothing. The container changed in that same pair, <dt> to <li>, and that half is NOT this
+    // defect: a separate problem in the same verdict said "a <dl> with empty <dd> elements is
+    // malformed ... would be better represented as a list or a table", which is correct and is the
+    // remedy the page took. Only the alt is at issue here. Censused across every round log on disk:
+    // 9 of 3,132 problems propose an empty alt, 7 correctly or harmlessly (three graphics omitted
+    // entirely, two existing alt="" leaving a link nameless, one doubled attribute whose empty second
+    // occurrence wins, one figure/figcaption mismatch offering "decorative" as one branch), and 2
+    // propose emptying a description the page carries nowhere else. This is the general form of both,
+    // so it is pinned by the door it closes rather than by the page it was found on.
     ["the same deletion arriving as redundancy is refused too",
       /Nor is any of the three sent back as REDUNDANT, which is the same deletion by the other door/],
     ["the swatch and its label are named as two halves of one mapping",
@@ -139,9 +143,14 @@ test("the verify task will not score a described swatch as invented, or overturn
     // The asymmetry is what makes this worth a paragraph rather than a preference. A description that
     // says too much costs a reader noise; one that is emptied costs them the content, the correction
     // pass is single-shot, and nothing downstream can tell the two apart — `page_corrected` records a
-    // page that did what it was asked.
-    ["a deletion is named as the remedy that costs a reader content",
-      /a problem whose remedy is a DELETION is the only kind that costs a reader content when it is acted on/],
+    // page that did what it was asked. Pinned from its capital, because the sentence has to stand on
+    // its own: it first read "This matters more than the other notes because a problem whose
+    // remedy...", which ranked this rule above the two reportability clauses that follow it in this
+    // same block — the "content_wrong" pin above and the falsifiable-hedge pin below, both of which
+    // exist to keep a true report coming. A comparison is the one form of this sentence that can only
+    // push reports down, and it says nothing the asymmetry does not already say.
+    ["a deletion is named as the remedy that costs a reader content, and is not ranked above the rest",
+      /A problem whose remedy is a DELETION is the only kind that costs a reader content when it is acted on/],
     // Bounded, or it would suppress the 7 correct notes in the census above: proposing alt="" stays
     // available where the contract's own decorative case is what the image falls in, which is what a
     // background wash behind a content card or an unrepresented rule-line actually is. What is refused

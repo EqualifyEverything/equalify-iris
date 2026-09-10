@@ -84,12 +84,11 @@ those: where the contract calls a cover informative and asks for an alt that
 carries the appearance beside the transcription of the words printed on it, that
 alt is the contract's answer, and the words being transcribed beside it is what
 the rule ASKED for rather than evidence the description repeats them.
-This matters more than the other notes because a problem whose remedy is a
-DELETION is the only kind that costs a reader content when it is acted on: the
-correction pass is single-shot, and what the description carried is then in no
-other element. Where a description says too much, say what it should say
-instead — never that it should be emptied — and propose alt="" only where the
-contract itself puts that image in its decorative case.
+A problem whose remedy is a DELETION is the only kind that costs a reader content
+when it is acted on: the correction pass is single-shot, and what the description
+carried is then in no other element. Where a description says too much, say what
+it should say instead — never that it should be emptied — and propose alt="" only
+where the contract itself puts that image in its decorative case.
 And where the HTML says two shades cannot be told apart in this reproduction, or
 leaves an item unclassified for that reason, that hedge is the contract being
 followed — check it against the image before contradicting it, and never replace
