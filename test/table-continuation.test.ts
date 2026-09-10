@@ -977,10 +977,33 @@ test("a note row the joined caption absorbed is not a row the merge lost", () =>
   assert.equal(verifyJoin(pair, answer(cap(), row + a + b)), null, "rule 6 literal");
   // Deleted outright, no caption note: still refused, and by the row check as before.
   assert.equal(verifyJoin(pair, answer(cap(), a + b)), "rows_lost", "deleted");
-  // The bound. Promotion buys forgiveness for the two rows the caption took and not one row more.
-  assert.equal(verifyJoin(pair, answer(cap(` ${note}`), a + b.replace(dataRow("B4"), ""))), "labels_lost:1");
+  // The bound. Promotion buys forgiveness for the two rows the caption took and not one row more, and it
+  // is the ROW check that has to hold it: the row a lossy reply drops need not have a label, and the one
+  // this leg drops does not. It cost a round to get right — the exemption was first written as an addition
+  // to `JOIN_DROPPABLE_ROWS`, which is rule 6's own repeat row, so an absorbed row was paid for twice and a
+  // real data row went with it. Both legs here passed under that reading, and `labels` saw neither.
+  const blank = `<tr><td></td><td>9</td><td>9</td></tr>`;
+  const wide = onePair(
+    `<table>${cap()}${cols}<tbody>${row}${a}${blank}</tbody></table>` +
+      `<table>${cap("—Continued")}${cols}<tbody>${row}${b}${blank}</tbody></table>`,
+  );
+  assert.equal(verifyJoin(wide, answer(cap(` ${note}`), a + blank + b + blank)), null, "promoted, nothing lost");
+  assert.equal(verifyJoin(wide, answer(cap(` ${note}`), a + blank + b)), "rows_lost", "and one unlabelled gone");
+  // A labelled row going is the same answer, since the row check is asked first and a row did go.
+  assert.equal(verifyJoin(pair, answer(cap(` ${note}`), a + b.replace(dataRow("B4"), ""))), "rows_lost");
   const lessTwo = b.replace(dataRow("B4"), "").replace(dataRow("B3"), "");
   assert.equal(verifyJoin(pair, answer(cap(` ${note}`), a + lessTwo)), "rows_lost");
+
+  // And the pair the census makes commonest, which has nothing promoted: the note in the FIRST half's
+  // caption and printed as a row by the second, where the dropped row is rule 6's repeat and the one row
+  // the floor forgives is what pays for it. The exemption must add nothing here, or this pair buys two.
+  const withNote = (extra = "") => `<caption>Table 9.—Revenue ${note}${extra}</caption>`;
+  const mixed = onePair(
+    `<table>${withNote()}${cols}<tbody>${a}${blank}</tbody></table>` +
+      `<table>${withNote("—Continued")}${cols}<tbody>${row}${b}${blank}</tbody></table>`,
+  );
+  assert.equal(verifyJoin(mixed, answer(withNote(), a + blank + b + blank)), null, "rule 6 to the letter");
+  assert.equal(verifyJoin(mixed, answer(withNote(), a + blank + b)), "rows_lost", "and one unlabelled gone");
 });
 
 test("a note the joined table keeps in its caption and prints as a row as well is shipped twice", () => {

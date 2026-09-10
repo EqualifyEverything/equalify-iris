@@ -486,10 +486,19 @@ export function verifyJoin(pair: ContinuationPair, merged: string): string | nul
   // Header-block rows are excluded because `rowFloor` nets those out through `headerDropped` already, and
   // forgiving them twice would buy a real data row's worth of slack. Bounded the same way the label
   // exemption is: a row whose text is a bracketed run the joined caption now carries, and no other.
+  //
+  // Counted as a REPLACEMENT for `JOIN_DROPPABLE_ROWS` and not an addition to it, which cost a round: that
+  // one row exists to forgive rule 6's repeat drop, so a note row the caption accounts for was already
+  // paid for once, and granting both let a pair lose a real row as well. Measured on three shapes,
+  // `labels` blind to all of them because the row that goes is an unlabelled continuation line — the
+  // census's commonest pair (note in the first half's caption, a row on the second) plus either promotion
+  // shape, each of which stopped reporting a dropped data row. So the allowance is the larger of the two
+  // and never the sum: rule 6's one row where no caption absorbed anything, and otherwise exactly the rows
+  // it did absorb.
   const absorbed = [...pair.first.noteRows, ...pair.second.noteRows].filter(
     (n) => !n.header && captionNotes(joined.caption).has(n.text),
   ).length;
-  if (joined.rows < rowFloor(pair, joined) - absorbed) return "rows_lost";
+  if (joined.rows < rowFloor(pair, joined) - Math.max(0, absorbed - JOIN_DROPPABLE_ROWS)) return "rows_lost";
   // Every label from either half, somewhere in the joined table's cells — not necessarily as a
   // first cell, because a join that adds a column legitimately moves the label along one, and a
   // guard that refuses that would refuse the repair it exists to protect.

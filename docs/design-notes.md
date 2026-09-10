@@ -438,7 +438,10 @@ Places where a decision was left open, and where v1 intentionally stops:
   its label *is* the bracketed run, so the row checks see it go. Those two checks now forgive the note
   rows the joined caption **absorbed**, which they had to learn twice: the label check first, then the row
   check, whose floor was still refusing the promotion `page.md` asks for wherever the page had printed the
-  note as a `<tbody>` row on both halves — and refusing that answer ships the halves split.
+  note as a `<tbody>` row on both halves — and refusing that answer ships the halves split. The row check
+  counts those absorbed rows *instead of* the single row its floor already forgives, not in addition: that
+  row is rule 6's repeat drop, and granting both let three shapes of reply lose an unlabelled continuation
+  line for free, which no label check can see.
 
   `note_shipped_twice` is why the free path, where
   it imports the continued half's caption because the first half has none, also drops the first half's

@@ -3536,7 +3536,9 @@ columns, so a bracketed note row printed inside the block is not one of them and
 caption as rule 6 asks costs nothing here), `rows_lost` (less the note rows the joined **caption**
 absorbed, for the same reason the label check has that exemption: a note promoted into the caption is
 content kept, and the row it stopped being is not a row lost — header-block rows excluded, since
-`rowFloor` nets those out already and forgiving them twice would buy a real data row's worth of slack),
+`rowFloor` nets those out already and forgiving them twice would buy a real data row's worth of slack, and
+counted in place of the one row `JOIN_DROPPABLE_ROWS` forgives rather than on top of it, since that row is
+rule 6's own repeat drop),
 `labels_lost:<n>` (a
 bracketed unit note the merge moved from a row into the caption counts as kept, because the label
 check reads `th,td` and would otherwise refuse the very drop rule 6 licenses), `caption_note_lost` (a
@@ -3710,9 +3712,19 @@ header-block row and refused for the `<tbody>` one as `rows_lost`, because `rowF
 through `headerDropped` while a `<tbody>` note row counts against a floor that forgives one row. The two
 answers differ in where the printed page put a row, which is nothing the merge chose and nothing a reader
 of the delivered table can see, and the refusal ships both halves split. Hence the exemption at the row
-check: the note rows the joined caption absorbed do not count as rows lost. It moves that one verdict and
-no other — a promotion that also drops a state row still reports `labels_lost:1`, two of them `rows_lost`,
-and an outright deletion is refused exactly as before, under all three names.
+check: the note rows the joined caption absorbed do not count as rows lost. An outright deletion is refused
+exactly as before under all three names, and a promotion that also drops a data row still reports one — as
+`rows_lost` now rather than `labels_lost:1`, since a row did go and the row check is asked first.
+
+Those absorbed rows **replace** `JOIN_DROPPABLE_ROWS` rather than adding to it, which took a round to see.
+That one row is there to forgive rule 6's repeat drop, so a note row the caption accounts for has already
+been paid for once, and granting both let a pair lose a real row on top: on the census's commonest pair —
+the note in the first half's `<caption>`, printed as a row by the second — a reply that dropped one
+unlabelled continuation line as well went from `rows_lost` to clean, and so did both promotion shapes. The
+label check cannot cover for it, because the row a lossy reply drops need not have a label; `rowFloor`'s
+own comment names those continuation lines as the loss it exists to catch. So the allowance is the larger
+of the two and never the sum: rule 6's one row where no caption absorbed anything, and otherwise exactly
+the rows it did absorb.
 
 What all of it compares is a note's text, the block it sits in, which caption owed it, and whether the
 delivered table holds it in two places at once — nothing finer. A note **moved** is invisible here,
