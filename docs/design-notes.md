@@ -427,8 +427,30 @@ Places where a decision was left open, and where v1 intentionally stops:
   The **merge** needs a Copy Editor call wherever the halves do not agree on what to concatenate.
   Two of the 18 pairs declare a different column count from their own first half, 13 repeat a header
   block carrying footnote-*reference* ids that an endnote links back to, and a bracketed unit note is
-  reprinted with the header and belongs in the joined table once. Only three of the editor's six
-  rules hold a judgement, though — the other three are "move these bytes and change nothing" — so the
+  reprinted with the header and belongs in the joined table once. That last figure counts the note as
+  a full-width ROW, which is how it arrived before `page.md` said where it goes; the page rule now
+  puts it inside the `<caption>`, and a joined caption that drops it is refused as `caption_note_lost`
+  or `caption_note_struck`, by whether a row still carries it; a joined table that keeps it in the
+  caption *and* as a row is refused as `note_shipped_twice`; and a note **neither** caption carried,
+  printed inside the header block by a half and gone from the delivered table, is refused as
+  `note_row_lost` — the pair the other three cannot see, because each of them is keyed on a caption
+  note. The same note printed as a `<tbody>` row was refused all along, as `labels_lost` or `rows_lost`:
+  its label *is* the bracketed run, so the row checks see it go. Those two checks now forgive the note
+  rows the joined caption **absorbed**, which they had to learn twice: the label check first, then the row
+  check, whose floor was still refusing the promotion `page.md` asks for wherever the page had printed the
+  note as a `<tbody>` row on both halves — and refusing that answer ships the halves split. The row check
+  counts those absorbed rows *instead of* the single row its floor already forgives, not in addition: that
+  row is rule 6's repeat drop, and granting both let three shapes of reply lose an unlabelled continuation
+  line for free, which no label check can see.
+
+  `note_shipped_twice` is why the free path, where
+  it imports the continued half's caption because the first half has none, also drops the first half's
+  note row that caption now repeats — otherwise the merge manufactures the doubling its own verifier
+  refuses, on a pair whose page printed the note once. It drops both spellings of that row, `<td>` and
+  `<th>`: the corpus prints each — `p068`'s `<td colspan="8">` and `p029`'s `<th>` — and a note row
+  inside the header block does not count as a header cell either way, or `header_cells_lost` would refuse
+  the editor for obeying rule 6 and ship the halves split. Only three of the
+  editor's six rules hold a judgement, though — the other three are "move these bytes and change nothing" — so the
   join is **tried in code first** and stands down wherever the judgement is real. Measured on 50
   pairs read out of already-delivered documents, 26 join with no model call and no output tokens, and
   `verifyJoin` refuses none of what the code path produces (#276). The 24 that stand down are 17
