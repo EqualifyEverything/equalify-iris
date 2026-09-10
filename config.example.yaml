@@ -166,7 +166,8 @@ providers:
   per_agent: {}
   # Run the Feedback Agent (VERIFY/CLASSIFY/TRAIN) on a DIFFERENT or stronger model
   # than the page agent, so verification doesn't share the generator's blind spots
-  # (recommended) — which is why no example below names the same model twice.
+  # (recommended) — which is why no example below puts `feedback` on the page agent's model.
+  # (`copy_editor` and `feedback` do share one below; that is fine, neither generates pages.)
   # Every key below is an agent from the list above, and that is not cosmetic: an entry
   # naming anything else is IGNORED — the call falls through to the provider's own model,
   # so the swap does not happen. This block used to offer a `table:` line; there has never
@@ -178,7 +179,7 @@ providers:
   # the id belongs there: a Bedrock model id on an OpenRouter deployment fails on every call
   # of the run. Name both when you pin a model that was measured on the other provider.
   # per_agent:
-  #   page: { provider: bedrock, model: us.openai.gpt-5.6-luna }   # the suggested page model, below
+  #   page: { provider: bedrock, model: us.openai.gpt-5.6-luna }   # suggested; needs `api: converse`
   #   copy_editor: { model: anthropic/claude-opus-4.7 }   # stronger model, same provider
   #   reader: { provider: bedrock, model: us.anthropic.claude-haiku-4-5-20251001-v1:0 }
   #   feedback: { model: anthropic/claude-opus-4.7 }
@@ -200,16 +201,25 @@ providers:
   #
   #   providers:
   #     default: bedrock
+  #     bedrock:
+  #       api: converse                             # required — see below
+  #       default_model: us.anthropic.claude-sonnet-4-6
   #     per_agent:
   #       page: { provider: bedrock, model: us.openai.gpt-5.6-luna }
   #
   # This is the one configuration with whole-run numbers behind it: 100 scanned pages end to
   # end, priced per step, in docs/cost.md — about **10.7¢ a page** (that round ran the previous
   # page model, so today's is slightly cheaper and has not been re-priced end to end). It is
-  # what the reference deployment runs. Two things about the `page` line: luna cost 15.9% less
-  # than the Kimi K2.5 it replaced on the same 100 pages and lost 0 pages where Kimi lost 2,
-  # and the `us.` prefix is required — that model is inference-profile-only on Bedrock and
-  # cannot be invoked under its bare id.
+  # what the reference deployment runs. Three things about it:
+  #
+  # - **`api: converse` is not optional here.** Left out, this block defaults to `invoke` and
+  #   sends an Anthropic-native body, which a non-Claude id rejects — every `page` call fails.
+  #   The key is block-wide: it moves every agent on this provider, not the one named.
+  # - **The `us.` prefix is part of the id.** That model is inference-profile-only on Bedrock
+  #   and cannot be invoked under its bare id.
+  # - **It is cheaper and slightly worse on accessibility.** luna cost 15.9% less than the Kimi
+  #   K2.5 it replaced on the same 100 pages and lost 0 pages where Kimi lost 2, but it is one
+  #   axe violation worse over that corpus. docs/models.md §2 says what that costs.
   #
   # Both provider blocks below name Sonnet 4.6 because every whole-run figure was measured on
   # it, and because `max_tokens` below is OUR setting and not the model's: how often a dense

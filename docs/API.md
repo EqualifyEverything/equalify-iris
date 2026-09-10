@@ -5101,8 +5101,9 @@ reached. Measured cause, and why this is code and not more prose:
 
 `agents/page.md` forbids exactly this by name
 (`never the position of the image you were given in the file`) at every prompt blob there is a
-round for, and two of three vendors did it anyway on the same document and the same blob — 6 of 88
-markers on the shipped page model, 5 of 90 on another, on the same two pages. The labels are text
+round for, and two of three vendors did it anyway on the same document and the same blob — 6 of
+`kimi-k2.5`'s 88 markers, 5 of `claude-sonnet-4-6`'s 90, on the same two pages, against 0 of 88 for
+`gpt-5.6-luna`, which is the page model deployed since 2026-09-10 (#344). The labels are text
 out of the user's own document, so like `prose_joined`'s `word_split_examples` this line stays in
 the run log on the deployment and never reaches `GET /v1/quality`.
 
@@ -5698,9 +5699,11 @@ page in 750. One of those two is `fnref-1` written twice by `gpt-5.6-luna`, the 
 since 2026-09-10 (#344), so one non-zero `ids` is the measured rate rather than a finding. Several is
 the finding: a page agent that has started writing placeholders or reusing ids, or a regression in one
 of the rules. `words` is the one of the four
-expected to be **non-zero**, and so the one with a cost line: on #334's 100-page census the shipped
-model wrote one word two ways on 4 pages of the 91 it produced, and no arm was clean, so this trigger
-buys a page call for a page that had already passed at a rate near 4%. It is the first field to read
+expected to be **non-zero**, and so the one with a cost line: on #334's 100-page census `kimi-k2.5`
+wrote one word two ways on 4 of the 92 pages it delivered, `claude-sonnet-4-6` on 3 of 91 and
+`gpt-5.6-luna` on 2 of 91 — no arm was clean. So this trigger buys a page call for a page that had
+already passed, at a rate near 4% on the highest arm measured and near 2% on `gpt-5.6-luna`, which is
+the page model deployed since 2026-09-10 (#344). It is the first field to read
 when `corrections` grows and `verify_failed` does not. `verify_failed / (pages_verified - pages_unjudged)` is the
 rejection rate; the raw counts are reported rather than the percentage, because a rate over three
 pages is not a measurement.

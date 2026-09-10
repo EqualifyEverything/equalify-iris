@@ -646,7 +646,7 @@ test("the page agent's page-break rule keeps the clauses that make it a rule", (
     ["and the reason for both halves of that is given",
       /an invented half is content no reader can check against any page, and a dropped half is text no other page will emit/],
     // The sheet is named in THIS sentence and not only in the summary four lines down, because this is
-    // the sentence the shipped model quotes back when it gets the case wrong: "kept as 'Fed-eral' per
+    // the sentence `kimi-k2.5` quotes back when it gets the case wrong: "kept as 'Fed-eral' per
     // the rule for breaks at the page edge where the other half is on a sheet not shown" — it read
     // "edge" and supplied "page edge", then applied it to a column. A distinction stated downstream of
     // where the licence is picked up is a distinction the reader has already decided without.
@@ -664,8 +664,9 @@ test("the page agent's page-break rule keeps the clauses that make it a rule", (
     // most likely to get the wrong one applied.
     ["and it is written whole, with the column's hyphen dropped",
       /a "condi-" ending one line with "tions" beginning the next is one word split to fit the column — write it whole, "conditions", and do not carry the break into the markup/],
-    // The two cases above are told apart by what the agent can SEE, and the shipped model reads that
-    // as where on the sheet the text stops. Its own log on #374's 100-page round says so twice, in
+    // The two cases above are told apart by what the agent can SEE, and `kimi-k2.5` reads that
+    // as where on the sheet the text stops. Its own log on #374's 100-page round
+    // (`runs-extract100-95ca64c`, `moonshotai.kimi-k2.5__p51-75.jsonl`) says so twice, in
     // its own words: "Sentence split across page break: 'rela-' ends left column, 'tive capacity...'
     // begins right column" calls a column a page break, and "The word 'Fed-eral' at the column break
     // was printed with a hyphen; kept as 'Fed-eral' per the rule for breaks at the page edge where
@@ -752,8 +753,9 @@ test("the page agent's footnote-role rule keeps the clauses that make it a rule"
       /Never <ol role="doc-endnotes"> directly, and never <li role="doc-endnote">/],
     // Issue #345, and the reason it goes in THIS bullet: the `<section role="doc-endnotes">`
     // example above is the pattern the models generalise from. Two of the three arms benchmarked
-    // emitted `role="doc-footnotes"` — the shipped one on 3 of the 22 occasions it had to name
-    // this role — which is that example's shape with the noun swapped, and nothing anywhere said
+    // emitted `role="doc-footnotes"` — `kimi-k2.5` on 3 of the 22 occasions it had to name this
+    // role, `gpt-5.6-luna` on 1 of 24 — which is that example's shape with the noun swapped, and
+    // nothing anywhere said
     // the plural does not exist. So the clause has to say it, within reading distance of what
     // suggests it.
     ["the plural does not exist, said flatly",
@@ -1355,7 +1357,7 @@ test("the page agent's image rule keeps the clauses that make it a rule", () => 
     ["a cover's description carries the appearance and not the words transcribed beside it",
       /What that description carries is the appearance — the colours, the layout, the shape of the type — which is the half the transcription does not carry, and not the words, which it does/],
     // #334, the last axis left on that same cover: everything above settles what an alt SAYS, and
-    // the shipped arm never got that far. On a 92-page document it returned the cover as five
+    // `kimi-k2.5` never got that far. On the 92-page document it delivered it returned the cover as five
     // paragraphs of text — no <img>, no <figure>, no alt, nothing in the "log" field — where the
     // other two arms emitted an image on 11 pages to its 10. Every word printed on the cover was
     // there, so the answer reads as complete, and the one graphic it dropped in 92 pages is the one

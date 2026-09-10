@@ -12,8 +12,8 @@
 // anchor, and a document whose numbering is merely irregular has to come back untouched.
 //
 // The reference corpus's own rows are the fixtures. Replaying this module over 61 chunks of paid
-// rounds removed 29 labels, all 29 repeating a number in the page's own filename; the shipped page
-// model's 6 and another vendor's 5 on the pinned round are the two arms #333 measured, and their
+// rounds removed 29 labels, all 29 repeating a number in the page's own filename; `kimi-k2.5`'s 6 and
+// `claude-sonnet-4-6`'s 5 on the pinned round are the two arms #333 measured, and their
 // front matter (cover, commission list, title page, `PART I`) prints no folio at all, checked
 // against the scans. The one label an earlier version of the rule removed wrongly is here too, as
 // the test named for a non-contiguous submission.
@@ -131,7 +131,7 @@ test("front matter with no printed folio: a label that is the page's own positio
 });
 
 test("a roman leak is seen, because the two numbering systems are counted apart", () => {
-  // `Page xv` on the sheet printing `PART I`, which the shipped model wrote on one round. Pooled
+  // `Page xv` on the sheet printing `PART I`, which `kimi-k2.5` wrote on one round. Pooled
   // with the arabic markers it contributes to no majority and no departure; counted as roman it is
   // a departure from the front matter's offset of 2, and its 15 is the number in its filename.
   const pages: MarkerPage[] = [

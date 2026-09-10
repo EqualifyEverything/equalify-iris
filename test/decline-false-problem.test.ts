@@ -253,7 +253,7 @@ const body = (order: number): string =>
   `<h2>Page ${order}</h2><p>page ${order} ${"content ".repeat(20)}</p>`;
 const withAlt = (order: number): string => `${body(order)}<p><img src="f.png" alt="image"></p>`;
 // `non-farm` beside `nonfarm`, which is the pair to test with rather than a made-up one: it is one of
-// the shipped model's six on #334's census, and it is a case where the printing keeps the hyphen — so
+// `kimi-k2.5`'s six on #334's census, and it is a case where the printing keeps the hyphen — so
 // a corrector saying "the page really prints both" is exactly the answer the problem invites.
 const withSplitWord = (order: number): string =>
   `${body(order)}<p>The non-farm series is here, and the nonfarm total is in the column beside it.</p>`;

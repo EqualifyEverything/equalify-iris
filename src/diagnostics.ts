@@ -354,11 +354,14 @@ export interface Diagnostics {
     // regression in one of the rules. Neither is a cost line at that rate.
     //
     // `words` is the one of the four that is expected to be NON-zero, and it is therefore the one
-    // with a cost line. On #334's 100-page census the shipped model wrote one word two ways on 4
-    // pages of 91 — and no arm was clean, where the other three arms are clean on `alt` and on the
-    // soft hyphen — so this trigger buys a page call at a rate somewhere near 4%, on pages that had
-    // already passed. That is a rate to watch rather than a number to fear at these volumes, but it
-    // is the trigger a reader should look at first when `corrections` grows without `verify_failed`.
+    // with a cost line. On #334's 100-page census `kimi-k2.5` wrote one word two ways on 4 of the 92
+    // pages it delivered, `claude-sonnet-4-6` on 3 of 91 and `gpt-5.6-luna` on 2 of 91 — no arm was
+    // clean here, where the arms are clean on `alt` and on the soft hyphen — so this trigger buys a
+    // page call on pages that had already passed, at a rate near 4% on the worst arm measured and
+    // near 2% on `gpt-5.6-luna`, the page model deployed since 2026-09-10 (#344). Naming the arm
+    // matters: the figure to expect from a run is its own page model's, not the highest measured.
+    // Either way it is a rate to watch rather than a number to fear at these volumes, and it is the
+    // trigger a reader should look at first when `corrections` grows without `verify_failed`.
     triggers: { verify: number; links: number; alt: number; ids: number; words: number; both: number };
     // What the corrector said it would NOT do, and why that is a number worth publishing rather
     // than a log line worth grepping (#373 directive 4). Before it, the corrector's only legal move

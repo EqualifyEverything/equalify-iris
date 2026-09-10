@@ -201,8 +201,8 @@ export function splitWordContradictions(html: string): SplitWord[] {
 // winner would be Iris guessing at a fact the image settles, which is exactly what `page.md:131`
 // already tells the model how to decide.
 //
-// That is not a symmetry argued for tidiness. On #334's six self-contradictions from the shipped
-// model, THREE are forms a 1962 report genuinely prints — `inter-state` (p020) and `non-farm`
+// That is not a symmetry argued for tidiness. On #334's six self-contradictions from `kimi-k2.5`,
+// THREE are forms a 1962 report genuinely prints — `inter-state` (p020) and `non-farm`
 // (p076, p078) — where the hyphenated spelling is the right one and the JOINED one is the defect.
 // So "join them" would have been the wrong instruction on half of the measured cases, and an
 // instruction to join is also how a page that legitimately prints both forms acquires a defect it

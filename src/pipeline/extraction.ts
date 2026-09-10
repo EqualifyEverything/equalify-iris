@@ -4123,7 +4123,7 @@ export const CHECKED_IN_CODE = " (Iris checked this one in code.)";
 //
 // What that would have cost is not an accounting error, it is a transcription defect in delivered
 // content: `non-farm` beside `nonfarm` and `co-operation` beside `cooperation` are forms a 1962 report
-// really prints, three of the shipped model's six census cases are of that kind, and the likeliest
+// really prints, three of `kimi-k2.5`'s six census cases are of that kind, and the likeliest
 // reading of "so fix it" on such a page is to join the two — which puts a word the page does not
 // print into the document, bought by a rule that fired on a page which had already passed.
 //
@@ -4304,8 +4304,8 @@ async function correctPage(
     // The FOURTH code-checked source is not covered by that sentence and must not be, which is why it
     // carries its own mark and gets its own line here (#334 part B). "So fix it" is true of a missing
     // link, a placeholder alt and a duplicated id; on a word written two ways it would order the model
-    // to join `non-farm` into `nonfarm` on a page that prints the hyphen — three of the shipped
-    // model's six census cases — putting a word the page does not print into delivered content, on a
+    // to join `non-farm` into `nonfarm` on a page that prints the hyphen — three of `kimi-k2.5`'s six
+    // census cases — putting a word the page does not print into delivered content, on a
     // page that had already passed. So this is the one entry in the request where the IMAGE showing
     // something else is a reason not to act, and it says so in those terms, because the paragraph
     // above spends four sentences ruling that reason out everywhere else. Stated as a split rather

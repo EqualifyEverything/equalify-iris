@@ -110,7 +110,7 @@ resolve.
 
 | agent | share of the bill, unswapped | status |
 |---|---|---|
-| `page` | **42.0%** | **two suggestions applied** — `moonshotai.kimi-k2.5` from 2026-09-02 (#312), −44.8% of the priced bill on 100 pages at a named content cost (`content_missing` on 42 pages against 15, §5); then **`us.openai.gpt-5.6-luna` from 2026-09-10** (#344, sprint-246.md §2), −15.9% of the page step again with 0 lost pages against 2, and 23.3% of subtotal rows dropped against Kimi's 34.9% — improved, not fixed, since Sonnet drops 9.6% and #324 is open on that. **Its loss is accessibility**: one axe violation worse than Kimi over the same corpus, and it passes figure pages clean by saying less about the legend (#347, §2) |
+| `page` | **42.0%** | **two suggestions applied** — `moonshotai.kimi-k2.5` from 2026-09-02 (#312), −44.8% of the priced bill on 100 pages at a named content cost (`content_missing` on 42 pages against 15, §5); then **`us.openai.gpt-5.6-luna` from 2026-09-10** (#344, sprint-246.md §2), −15.9% of the page step again with 0 lost pages against 2, and 23.3% of subtotal rows dropped against Kimi's 34.9% — improved, not fixed, since Sonnet drops 9.6% and #324 is open on that. **Its loss is accessibility by count, not by severity**: one axe violation worse than Kimi over the same corpus (4 to 3), though Kimi's 3 are all `critical` and one of luna's 4 is; and it passes figure pages clean by saying less about the legend (#347, §2) |
 | `copy_editor` | **33.1%** | **swap recommended, not yet applied** (#329) — `openai.gpt-5.6-luna` at 9.5% of the cost and *ahead* on both quality halves, once the page images the agent actually receives are attached (§4) |
 | `feedback` | 15.6% | **open** (#330) — five dispositions in one sprint, and the last two were a swap to `openai.gpt-5.6-luna` and its withdrawal by the seat that ran the round. On 45 pages the two arms tie on detection (40/45 against 39/45) and the cheap arm's extra rejections are mostly real. Total cost per page, including the correction pass a rejection triggers, favours the swap at **−44.9%** under the corrector now deployed (−50.9% under the Kimi that preceded it) and −1.3% under the incumbent one, so the price is not what leaves this open: an unbounded rate of invented defects and a verdict that rejects 44 of 45 clean pages, reproducibly on 32 of them, are (§4) |
 | `reader` | 9.3% | **declined** (#313) — 78% of the incumbent's own agreement floor at −77%, and §3 says what the 22% is |
@@ -130,8 +130,9 @@ Kimi reproduces 118 of 180 reference findings (65.6%) and the incumbent's own se
 absolute per-issue miss is **34%**. §3 gives the paired figure, which is the one that charges a swap
 for its own losses rather than for the reference's irreproducibility.
 
-The suggested `page` line is one line of `per_agent` — and applying it took three edits on the
-reference deployment, which is the paragraph under the block, not a footnote:
+The suggested `page` line is one line of `per_agent`. Applying it to the reference deployment took
+that line plus one edit outside Iris, and on a deployment configured differently it takes one more —
+the two paragraphs under the block, not a footnote:
 
 ```yaml
 providers:
@@ -149,7 +150,8 @@ not quoting a config value.
 On a deployment whose `providers.bedrock` block is Anthropic-native it is **two** lines, because
 `api: converse` is needed for a non-Claude id and that key is **block-wide** — it moves every
 agent's transport, not the one named. The reference deployment has had it set since #312, so the luna
-swap moved no agent's transport there. On AWS a third edit lives outside Iris altogether: the
+swap moved no agent's transport there. On AWS one edit lives outside Iris altogether, and that one
+the reference deployment did need: the
 instance role's IAM policy names invocable model ARNs one by one, an `INFERENCE_PROFILE` model needs
 **both** its `inference-profile/us.<id>` and `foundation-model/<id>` ARNs, and the refusal arrives as
 a runtime error on a user's upload rather than at boot — which is how #312 shipped broken for a day.
@@ -254,7 +256,16 @@ quality axes and what the change costs are in **[docs/sprint-246.md](sprint-246.
 Linted a page at a time with axe-core 4.11.4, luna is **one violation worse than Kimi over the same
 corpus** — 87 of 91 pages clean against 89 of 92 — and its four are its own: `definition-list` on
 `acir-p001` and `acir-p002`, `duplicate-id-active` on `acir-p053`, and an `aria-roles` **critical** on
-`acir-p080` ([#347](https://github.com/EqualifyEverything/equalify-iris/issues/347)). Worse, on the
+`acir-p080` ([#347](https://github.com/EqualifyEverything/equalify-iris/issues/347)).
+
+**Read that by count and by severity, because they point opposite ways.** By count luna is the worst of
+the three arms with 4 violations, against 3 each for Kimi and Sonnet. By severity Kimi is: `aria-roles`
+is the only **critical** class in all 274 delivered pages, and all three of Kimi's are that class
+(`role="doc-footnotes"`, #345) against one of luna's four. Sonnet's 3 are all `serious`. So the swap
+traded three criticals for one critical and three serious findings — one violation worse, one arm's
+worth of severity better. Neither number alone says that.
+
+Worse, on the
 nine pages carrying a shaded map or a shading key, luna's pages **passed `page_verify_ok` clean while
 asserting legend categories the page never prints** — one delivered page says the map is shaded "in
 one of three patterns" where two swatches are printed. They passed because luna assigns no state to
@@ -1181,8 +1192,10 @@ set.
   worse than Kimi on dot-leader encodings while better on the region subtotal rows §5 is about. The
   reference deployment moved to it on 2026-09-10 (#344,
   [docs/sprint-246.md](sprint-246.md) §2). **The accessibility axis is no longer unmeasured, and it is
-  where the swap loses**: linting each of the same pages alone puts luna one violation behind Kimi, and
-  on the nine map-and-key pages it passes clean by saying less about the legend (#347, §2). What a
+  where the swap loses on count**: linting each of the same pages alone puts luna one violation behind
+  Kimi, 4 to 3 — though Kimi's 3 are all `critical` and one of luna's 4 is, so severity runs the other
+  way — and on the nine map-and-key pages luna passes clean by saying less about the legend (#347, §2).
+  What a
   chart-and-image corpus would still settle is how big that is — and it is the same corpus that would
   make the specialist and `builder` rows mean anything.
 - **Re-derive the failed-spend figure after #300.** It is the one number here that is known wrong

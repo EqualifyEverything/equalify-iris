@@ -14,12 +14,13 @@
 //
 // Measured before it was built, on #334's 100-page three-arm census. The self-contradiction column —
 // the predicate implemented here, one word written both ways on one page — is non-zero on all three
-// arms: `kimi-k2.5` (shipped) 6 words on 4 pages, `claude-sonnet-4-6` 3 on 3, `gpt-5.6-luna` 2 on 2.
+// arms: `kimi-k2.5` 6 words on 4 pages, `claude-sonnet-4-6` 3 on 3, `gpt-5.6-luna` (the page model
+// deployed since 2026-09-10, #344) 2 on 2.
 // So unlike the alt rule (0 of 1,064) and the id rule (2 of 1,501), this one is EXPECTED to fire,
 // which changes what the tests below have to spend their length on: not the zero printing, but the
 // false-positive surface, since a rule that fires often is a rule whose wrong findings are bought.
 //
-// Three of the shipped model's six are `inter-state` and `non-farm` — forms a 1962 report genuinely
+// Three of `kimi-k2.5`'s six are `inter-state` and `non-farm` — forms a 1962 report genuinely
 // prints, where the hyphen is right and the JOINED spelling is the defect. That is why nothing here
 // names a winner, and why a decline on this check is a legitimate answer rather than the misuse
 // `declined.code_checked` counts. `test/decline-false-problem.test.ts` holds that half.
@@ -207,7 +208,7 @@ test("the correction request names both spellings and refuses to pick one", () =
   assert.match(sentence, /source image/, "the image is what settles it");
   // The part to preserve through any rewording. Iris knows the page contradicts itself and cannot
   // know which way the printing goes — #334 has `non-tax` and `Agri-culture` as the same shape with
-  // opposite answers, and three of the shipped model's six contradictions are forms the paper keeps
+  // opposite answers, and three of `kimi-k2.5`'s six contradictions are forms the paper keeps
   // the hyphen on — so a request naming the winner would be Iris guessing at a fact the image
   // settles, and on a page that genuinely prints both it would introduce the defect.
   assert.match(sentence, /keep the hyphen if the word itself owns one/);

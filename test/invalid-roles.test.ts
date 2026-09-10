@@ -1,9 +1,13 @@
 // Issue #345: a delivered document shipped `role="doc-footnotes"`, which is not an ARIA role at
 // all. DPUB defines `doc-footnote` for one note and `doc-endnotes` for a collection, and never a
 // plural of the first. axe reports `aria-roles` at **critical** — the only critical violation any
-// benchmarked arm produced across 274 delivered pages — the shipped page model emitted it on 3 of
-// the 22 occasions it had to name that role, and both models in the loop passed it 4 times out of
-// 4, twice on pages they had failed for other reasons and bought a correction for.
+// benchmarked arm produced across 274 delivered pages. Per arm, over the occasions each had to name
+// that role at all: `kimi-k2.5` 3 of 22, `gpt-5.6-luna` 1 of 24, `claude-sonnet-4-6` 0 of 23. Both
+// models in the loop passed it 4 times out of 4, twice on pages they had failed for other reasons and
+// bought a correction for. Naming the arms rather than "the shipped one" matters twice over: the
+// deployed page model has been `gpt-5.6-luna` since 2026-09-10 (#344), and paired on the pages where
+// both emitted a footnote list, kimi-vs-luna 3/1 is p = 0.625 — four events in total, so this orders
+// the arms by nothing. The defect is reproducible; "arm X does not do this" is not established.
 //
 // Two halves are pinned here, the same division as test/deprecated-roles.test.ts. The axe facts
 // the fix reasons from — that the name really is invalid, that the gate really does fail it at
