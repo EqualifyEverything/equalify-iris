@@ -285,6 +285,29 @@ it. Pinned in `test/feedback-prompt.test.ts`; the page-agent half, and the cover
 ordering that came with it, are in issues #347 and #351 and in
 `test/page-prompt.test.ts`.
 
+**That shield was keyed on the reason the rejection gave, so the same deletion arrived under a different
+rule.** On `acir-p073` of the same corpus the extraction emitted each legend swatch as `<dt><img
+alt="Dark solid fill"> States ranking in the top 12 on personal income</dt>`; the verify pass answered
+that *"since the adjacent `<dt>` text already conveys the meaning, these decorative swatch images should
+use `alt=""` to avoid redundant announcement, per the redundancy rule in the agent contract"*, and the
+correction obeyed — the shipped fragment is `<li><img alt=""> States ranking in the top 12 on personal
+income</li>`. The label names the category and the deleted alt named which pattern carries it, so what
+went is the mapping, and that page's map description still names "the dotted pattern" and "the
+cross-hatched pattern" to a reader who now has nothing to attach them to. The shield could not reach it:
+it refuses the report AS INVENTED TEXT, and this report was redundancy. Censused across every round log
+on disk, 9 of 3,132 problems propose an empty alt — 7 correctly or harmlessly (a graphic omitted
+entirely, an existing `alt=""` leaving a link nameless, a doubled attribute whose second occurrence wins)
+and 2 proposing to empty a description the page carries nowhere else: those swatches, and a cover, where
+the one arm that complied with `agents/page.md`'s cover clause had its appearance-only alt refused
+because *"the cover text is also transcribed in the surrounding HTML"* — the transcription that same
+clause asks for, offered as the evidence against it (issue #452). `agents/feedback.md` now refuses the
+second door too, and states the asymmetry that makes it a paragraph rather than a preference: a
+description that says too much costs a reader noise, one that is emptied costs them the content, the
+correction pass is single-shot, and `page_corrected` records a page that did what it was asked. Bounded
+so the 7 stay reportable — a description may be sent back to say something different, and `alt=""` is
+proposable only where the contract itself puts that image in its decorative case. Pinned in
+`test/feedback-prompt.test.ts`.
+
 Two of that verifier's cheapest checks need no image at all, and issue #353 is where both were
 missed on one page. The fragment's `<figcaption>` transcribed the figure's printed subtitle — *"Eight
 of the Twelve States That Shift…"* — and its `alt` attribute, ten lines above, enumerated 40 states

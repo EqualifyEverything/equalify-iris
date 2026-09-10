@@ -102,6 +102,52 @@ test("the verify task will not score a described swatch as invented, or overturn
     // withdrawn, and a verifier told only what NOT to file files nothing.
     ["what the contract does not sanction is named, so a mis-read tone stays reportable",
       /What the contract does not sanction is the tone being read off the order of the labels beside the swatch rather than off the swatch, which is frequently not the order the shades run in — a wrongly named shade is a real problem, and it is "content_wrong"/],
+    // #452, and it is #347 recurring through a different rule. The shield above is keyed on the
+    // FRAMING — "do not send it back AS INVENTED TEXT" — and the deletion arrived by the other door:
+    // on `acir-p073` the extraction emitted <dt><img alt="Dark solid fill"> States ranking in the top
+    // 12 on personal income</dt> for each of three legend swatches, the verifier answered "since the
+    // adjacent <dt> text already conveys the meaning, these decorative swatch images should use alt=""
+    // to avoid redundant announcement, per the redundancy rule in the agent contract", and the
+    // correction obeyed: the shipped fragment is <li><img alt=""> States ranking in the top 12 on
+    // personal income</li>. The label names the CATEGORY and the deleted alt named which PATTERN
+    // carries it, so the mapping is the half that went, and the same page's map description talks
+    // about "the dotted pattern" and "the cross-hatched pattern" — names a reader can now attach to
+    // nothing. Censused across every round log on disk: 9 of 3,132 problems propose an empty alt, 7 of
+    // them correctly or harmlessly (a graphic omitted entirely, an existing alt="" leaving a link
+    // nameless, a doubled attribute), and 2 propose emptying a description the page carries nowhere
+    // else. This is the general form of both, so it is pinned by the door it closes rather than by the
+    // page it was found on.
+    ["the same deletion arriving as redundancy is refused too",
+      /Nor is any of the three sent back as REDUNDANT, which is the same deletion by the other door/],
+    ["the swatch and its label are named as two halves of one mapping",
+      /The words printed beside a swatch name the category and the ink names which pattern carries it: two halves of one mapping, not a repetition/],
+    // The two rules the verdicts actually cited, each quoted the way the contract states it, because
+    // both are real rules whose FIRST clause reads as licence and whose second is the protection: a
+    // redundancy rule against repeating a printed name, and the also-carried-in-full exemption.
+    ["a redundancy rule against repeating a name keeps the detail that is only in the picture",
+      /A redundancy rule that forbids repeating the printed NAME of a thing keeps every detail that is in the picture and not in the words beside it/],
+    ["and the carried-in-full exemption is a test on the same content",
+      /an exemption for a graphic whose content the page "also carries in full beside it" is a test on the SAME content/],
+    // #452's other direction, the cover: the arm that complied with `page.md`'s cover clause got its
+    // appearance-only alt refused with "since the cover text is also transcribed in the surrounding
+    // HTML, a brief decorative alt (alt="") ... would be more appropriate". The transcription beside
+    // the image is what that clause ASKS for, so the evidence cited against the alt is the rule being
+    // followed. Named here because the general clause above did not stop it — the same reason the
+    // graphical key is named.
+    ["a cover's appearance-carrying alt is the contract's answer, not evidence of repetition",
+      /where the contract calls a cover informative and asks for an alt that carries the appearance beside the transcription of the words printed on it, that alt is the contract's answer/],
+    // The asymmetry is what makes this worth a paragraph rather than a preference. A description that
+    // says too much costs a reader noise; one that is emptied costs them the content, the correction
+    // pass is single-shot, and nothing downstream can tell the two apart — `page_corrected` records a
+    // page that did what it was asked.
+    ["a deletion is named as the remedy that costs a reader content",
+      /a problem whose remedy is a DELETION is the only kind that costs a reader content when it is acted on/],
+    // Bounded, or it would suppress the 7 correct notes in the census above: proposing alt="" stays
+    // available where the contract's own decorative case is what the image falls in, which is what a
+    // background wash behind a content card or an unrepresented rule-line actually is. What is refused
+    // is alt="" as the remedy for a description judged redundant.
+    ["with trimming left available and emptying bounded to the contract's decorative case",
+      /Where a description says too much, say what it should say instead — never that it should be emptied — and propose alt="" only where the contract itself puts that image in its decorative case/],
     ["a stated uncertainty is the contract being followed, and is checked before it is contradicted",
       /that hedge is the contract being followed — check it against the image before contradicting it/],
     ["and is never replaced by a confident assignment the verifier cannot see well enough to make",
