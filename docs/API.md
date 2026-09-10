@@ -3401,8 +3401,8 @@ appearance), `note_repeats_exceed_licence` (the join would have to drop more bra
 repeats than the row floor forgives, which is the larger of rule 6's one row and the rows the joined
 **caption** accounts for and never their sum — so a join dropping two rows the caption carries ships
 free, and one dropping two the caption does not declines here rather than handing the verification a
-table it refuses as `rows_lost`; three shapes reach it, none of them measured, and the long section
-below names them), `caption_unclear` / `no_caption_available` (the continuation
+table it refuses as `rows_lost`; two shapes reach it, neither measured, and the long section below
+names them), `caption_unclear` / `no_caption_available` (the continuation
 marker is not wholly inside one text node, so taking it off means rewriting markup; or neither
 half has a caption, which the verification requires), `content_outside_table` (a half's span
 parses to something beside its own table — the parser fosters a stray `<p>` out of a `<table>` and
@@ -3680,9 +3680,13 @@ commit apart, before the `max` that is neither.
 
 What the bound is left holding is the drop no caption accounts for — a repeat of a note the first half
 prints as a row while its caption does not — where each dropped row is just a row and declining here is
-`rows_lost` one editor call earlier. Ways past it, none of them measured: a half printing such a row twice
-itself, the mixed pair above, and **two distinct notes on one table**, which is 0 of the 769 tables in the
-round logs. That last one is a genuine over-refusal rather than a decline in the right direction: a correct
+`rows_lost` one editor call earlier. Two shapes get past it, neither measured: such a row dropped **twice**,
+which needs a half printing it twice itself, and **two distinct notes on one table**, which is 0 of the 769
+tables in the round logs. The mixed pair above is not one of them, though it is the pair the bound refused
+two commits ago and so the one a reader is likeliest to come looking for: where the first half has no
+caption of its own, that is the branch that imports the second's *with* its note, so every row the join then
+drops is covered by construction, and where it has one, the only row dropped is the second half's.
+The second shape is a genuine over-refusal rather than a decline in the right direction: a correct
 join of it exists — rule 6 to the letter, keep the first half's second note row, drop both of the second
 half's — and the floor refuses that answer too, since it licenses the caption's rows and one repeat, not
 two. So the pair ships split, from the code path and from the editor alike. Widening the floor to license a

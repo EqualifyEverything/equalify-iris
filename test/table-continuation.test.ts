@@ -849,9 +849,11 @@ test("a first half with no caption of its own has no title caption to be strict 
   // What the licence still holds: a repeat of a note the first half prints as a ROW and its caption does
   // not, so the joined caption never names it and each dropped row is a row gone. Past one, the free path
   // declines rather than handing `verifyJoin` a table it refuses as `rows_lost`, which is the same answer
-  // one editor call earlier. This is one of the three shapes that reach the bound, and none is measured;
-  // the leg below this test's own free-join legs is the pair with two distinct notes, which is the other
-  // one that matters, because there the decline is over-refusal rather than a refusal in the right way.
+  // one editor call earlier. One of the two shapes that reach the bound, neither measured; the other is the
+  // pair with two distinct notes, pinned at the end of this test, where the decline is over-refusal rather
+  // than a refusal in the right direction. The pair the free-join legs above cover reaches it in neither
+  // spelling: with no caption of its own the import covers every row dropped after it, and with one, the
+  // only row dropped is the second half's.
   const titled = `<table><caption>Table 7.—Grants</caption>${HEAD}<tbody>${noteRow(note)}${dataRow("Alabama")}</tbody></table>`;
   const twoRepeats = `<table><caption>Table 7.—Grants—Continued</caption>${HEAD}<tbody>${noteRow(note)}${noteRow(note)}${dataRow("Vermont")}</tbody></table>`;
   const overPair = onePair(titled + twoRepeats);
@@ -869,7 +871,7 @@ test("a first half with no caption of its own has no title caption to be strict 
   // The licence is asked the way `rowFloor` asks it — `max` of rule 6's one row and the rows the finished
   // caption accounts for, never the sum — because a pair dropping one COVERED row and one UNCOVERED one
   // otherwise passes here and comes back `rows_lost`, which is an editor call spent on an answer the same
-  // floor refuses again. Two distinct notes on one table, the only shape that reaches it, and 0 of the 769
+  // floor refuses again. Two distinct notes on one table — the second of the two shapes, and 0 of the 769
   // tables in the round logs have it.
   const other = "[Percentage distribution]";
   const twoNotes = onePair(
@@ -882,6 +884,17 @@ test("a first half with no caption of its own has no title caption to be strict 
   // two. So the pair ships split. Nothing measured has this shape, and the fix is a wider floor.
   const correct = `<table><caption>Table 7.—Grants ${note}</caption>${HEAD}<tbody>${noteRow(other)}${dataRow("Alabama")}${dataRow("Vermont")}</tbody></table>`;
   assert.equal(verifyJoin(twoNotes, correct), "rows_lost");
+
+  // And the other spelling of the mixed pair, which the comment above says cannot reach the bound: a first
+  // half with a caption of its own that lacks the note, printing the note as a row, against a second half
+  // carrying it in the caption AND repeating the row. No import here, so only the second half's row is
+  // dropped, which is one. Asserted rather than reasoned, because that comment is the kind that goes stale.
+  const mixedTitled = onePair(
+    titled + `<table><caption>Table 7.—Grants ${note}—Continued</caption>${HEAD}<tbody>${noteRow(note)}${dataRow("Vermont")}</tbody></table>`,
+  );
+  const mixedJoin = joinInCode(mixedTitled);
+  assert.ok("html" in mixedJoin, JSON.stringify(mixedJoin));
+  assert.equal(verifyJoin(mixedTitled, mixedJoin.html), null);
 });
 
 test("a note row inside the header block is not a header cell in either spelling", () => {

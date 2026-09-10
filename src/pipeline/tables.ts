@@ -1176,11 +1176,17 @@ export function joinInCode(pair: ContinuationPair): { html: string } | { reason:
   // and that is the worse of the two errors, because the refusal arrives as a row count after the editor
   // has been paid for an answer the same floor refuses again, and then the halves ship split. This comment
   // claimed the second could not happen, for one commit: a pair dropping one covered row and one uncovered
-  // one passed a licence that counted only the uncovered ones. Ways past the bound, none of them measured
-  // — a half printing such a row twice itself, a mixed pair whose first half prints the note as a row while
-  // the second prints it in both places, and two distinct notes on one table, which is 0 of the 769 tables
-  // in the round logs. On the last of those a correct join exists and this declines it, and the editor's
-  // answer would be refused too: the floor licenses the caption's rows and ONE repeat, not two.
+  // one passed a licence that counted only the uncovered ones. Two shapes get past the bound, neither
+  // measured — an UNCOVERED note row dropped twice, which needs a half printing such a row twice itself,
+  // and two distinct notes on one table, which is 0 of the 769 tables in the round logs. On the second a
+  // correct join exists and this declines it, and the editor's answer would be refused too: the floor
+  // licenses the caption's rows and ONE repeat, not two.
+  //
+  // The mixed pair — first half printing the note as a row, second carrying it in its caption AND repeating
+  // the row — cannot reach this, though it is the pair the bound refused two commits ago. Where the first
+  // half has no caption, that is the branch above which imports the second's WITH its note, so every row
+  // dropped afterwards is covered by construction; where it has one, only the second half's row is dropped,
+  // which is one. Named here because it is the shape a reader is likeliest to come looking for.
   const keptNotes = captionNotes(ftab.querySelector("caption")?.textContent ?? "");
   const covered = notesDropped.filter((t) => keptNotes.has(t)).length;
   if (notesDropped.length > Math.max(JOIN_DROPPABLE_ROWS, covered)) {
