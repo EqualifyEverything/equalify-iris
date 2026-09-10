@@ -1326,6 +1326,36 @@ test("the page agent's image rule keeps the clauses that make it a rule", () => 
     // rules still disagree on a cover — describe it, but do not say what the page has already said.
     ["a cover's description carries the appearance and not the words transcribed beside it",
       /What that description carries is the appearance — the colours, the layout, the shape of the type — which is the half the transcription does not carry, and not the words, which it does/],
+    // #334, the last axis left on that same cover: everything above settles what an alt SAYS, and
+    // the shipped arm never got that far. On a 92-page document it returned the cover as five
+    // paragraphs of text — no <img>, no <figure>, no alt, nothing in the "log" field — where the
+    // other two arms emitted an image on 11 pages to its 10. Every word printed on the cover was
+    // there, so the answer reads as complete, and the one graphic it dropped in 92 pages is the one
+    // this rule names. The gap is structural rather than a model's inattention: the clauses above
+    // are reachable only once an <img> exists, and the sole sentence telling this agent to EMIT one
+    // is the mark example below, scoped to a logo, a masthead or a wordmark — a graphic ON the page,
+    // never a page that IS one.
+    //
+    // A code detector was measured and refused instead: 425 of 2,634 replies with no <img> carry a
+    // log naming a picture, across 133 pages, and the matched text is the CORRECT answer for a
+    // decorative cover described in words — a check on it would fire on right answers. Review
+    // cannot recover it either, since axe has no element to find a missing attribute on and the
+    // Reader Agent never sees the sheet. Which leaves the prompt, as with #432 and #447.
+    ["ruling a cover informative is not finished until the image is emitted",
+      /That description only exists where there is an <img> to hang it on, so ruling a cover informative is only half the answer: emit the graphic as well/],
+    ["a page whose design is the content is an <img> carrying the appearance, beside the transcription",
+      /A page whose design IS the content — a cover, a title page, a designed divider — is emitted as an <img> whose alt carries the appearance, beside the <h1> and <p> elements that transcribe the words printed on it/],
+    ["and it takes the same named placeholder src and log line a logo takes",
+      /with a placeholder src naming the page and the graphic \(src="page-1-cover\.png"\) recorded in the "log" field exactly as a logo's is/],
+    // Why this one is worth spelling out rather than leaving to the imperative: the words are all
+    // present, so the omission is invisible in the fragment and in the log. A model with no clause
+    // telling it a design was there to lose has nothing to check its own answer against.
+    ["the failure is named as the one that reads as complete",
+      /what ships transcribes every word and reads as complete, while the colours, the banner and the shape of the type are gone with nothing in the HTML and nothing in the "log" field saying the page had a design at all/],
+    // And the bound, because over-firing here costs an invented <img> on every page that was laid
+    // out with any care at all — 92 of them on the document above.
+    ["a page of words in ordinary type is text and carries no image",
+      /a page of words set in ordinary type is text however carefully it is laid out, and carries no <img>/],
     ["a heading beside an image does not make it decorative",
       /Sitting beside a heading that names the section does not make an image decorative/],
     ["an image that is hard to describe is described as far as it can be, and logged",

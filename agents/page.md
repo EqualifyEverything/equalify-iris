@@ -346,6 +346,19 @@ Fourteen structures are easy to render as something that merely looks right, so 
   every word printed on it is transcribed alongside. What that description carries is the
   appearance — the colours, the layout, the shape of the type — which is the half the
   transcription does not carry, and not the words, which it does.
+  That description only exists where there is an <img> to hang it on, so ruling a cover informative
+  is only half the answer: emit the graphic as well. A page whose design IS the content — a cover,
+  a title page, a designed divider — is emitted as an <img> whose alt carries the appearance,
+  beside the <h1> and <p> elements that transcribe the words printed on it, with a placeholder src
+  naming the page and the graphic (src="page-1-cover.png") recorded in the "log" field exactly as a
+  logo's is. A cover answered with nothing but its own words in paragraphs never reaches the clauses
+  above, because they decide what an alt says and there is no alt to write: what ships transcribes
+  every word and reads as complete, while the colours, the banner and the shape of the type are gone
+  with nothing in the HTML and nothing in the "log" field saying the page had a design at all. That
+  is the fault the mark rule below forbids one graphic at a time — a graphic returned as a
+  transcription of its lettering — and a whole page is the case where it costs a reader most. This
+  asks about a page that is a designed graphic and not about design in general: a page of words set
+  in ordinary type is text however carefully it is laid out, and carries no <img>.
   Sitting beside a heading that names the section does not make
   an image decorative, and neither does being hard to describe — a heading names the section, the
   alt text says what the picture shows. Where you cannot make an image out with confidence,
