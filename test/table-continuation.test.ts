@@ -834,11 +834,35 @@ test("a first half with no caption of its own has no title caption to be strict 
   const withId = `<table>${HEAD}<tbody><tr><td colspan="3" id="p7-units">${note}</td></tr>${dataRow("Alabama")}</tbody></table>`;
   assert.deepEqual(joinInCode(onePair(withId + second)), { reason: "id_would_be_lost" });
 
-  // And past rule 6's licence of ONE dropped repeat the free path declines here rather than handing
-  // `verifyJoin` a table it would refuse as `rows_lost` — a reason about rows for a note the caption
-  // still holds. Reachable only where a half prints the note twice itself, which nothing has measured.
+  // Two rows carrying the note — the first half's and the second half's — with the imported caption
+  // carrying it too. That is two drops against rule 6's licence of ONE, and it used to decline; it joins
+  // now, because the licence is counted over the drops the joined CAPTION cannot answer for and this
+  // caption answers for both. Declining it was buying an editor call to reach the table already in hand.
   const twice = `<table><caption>Table 7.—Grants ${note}—Continued</caption>${HEAD}<tbody>${noteRow(note)}${dataRow("Vermont")}</tbody></table>`;
-  assert.deepEqual(joinInCode(onePair(first + twice)), { reason: "note_repeats_exceed_licence" });
+  const twicePair = onePair(first + twice);
+  const twiceJoin = joinInCode(twicePair);
+  assert.ok("html" in twiceJoin, JSON.stringify(twiceJoin));
+  assert.equal(verifyJoin(twicePair, twiceJoin.html), null);
+  assert.equal([...twiceJoin.html.matchAll(/In millions/g)].length, 1, twiceJoin.html);
+  assert.ok(twiceJoin.html.includes(dataRow("Alabama")) && twiceJoin.html.includes(dataRow("Vermont")));
+
+  // What the licence still holds: a repeat of a note the first half prints as a ROW and its caption does
+  // not, so the joined caption never names it and each dropped row is a row gone. Past one, the free path
+  // declines rather than handing `verifyJoin` a table it refuses as `rows_lost`, which is the same answer
+  // one editor call earlier. Reachable only where a half prints the note twice itself — nothing measured.
+  const titled = `<table><caption>Table 7.—Grants</caption>${HEAD}<tbody>${noteRow(note)}${dataRow("Alabama")}</tbody></table>`;
+  const twoRepeats = `<table><caption>Table 7.—Grants—Continued</caption>${HEAD}<tbody>${noteRow(note)}${noteRow(note)}${dataRow("Vermont")}</tbody></table>`;
+  const overPair = onePair(titled + twoRepeats);
+  assert.deepEqual(joinInCode(overPair), { reason: "note_repeats_exceed_licence" });
+  // And that decline is not a taste: the table it would have produced is refused, by the row check.
+  const wouldBe = `<table><caption>Table 7.—Grants</caption>${HEAD}<tbody>${noteRow(note)}${dataRow("Alabama")}${dataRow("Vermont")}</tbody></table>`;
+  assert.equal(verifyJoin(overPair, wouldBe), "rows_lost");
+  // One repeat of the same shape stays free, so the bound is what moved and not the case.
+  const oneRepeat = `<table><caption>Table 7.—Grants—Continued</caption>${HEAD}<tbody>${noteRow(note)}${dataRow("Vermont")}</tbody></table>`;
+  const okPair = onePair(titled + oneRepeat);
+  const okJoin = joinInCode(okPair);
+  assert.ok("html" in okJoin, JSON.stringify(okJoin));
+  assert.equal(verifyJoin(okPair, okJoin.html), null);
 });
 
 test("a note row inside the header block is not a header cell in either spelling", () => {
@@ -927,6 +951,36 @@ test("a note neither caption carried and no row keeps is a note the merge delete
       `<table><caption>Table 9.—Revenue—Continued</caption><thead>${cols}</thead><tbody>${row}${dataRow("Vermont")}</tbody></table>`,
   );
   assert.equal(verifyJoin(bothHalves, `${plain}<tbody>${both}</tbody></table>`), "rows_lost");
+});
+
+test("a note row the joined caption absorbed is not a row the merge lost", () => {
+  // The promotion `page.md` wants, from a `<tbody>` note row both halves printed: the note goes into the
+  // caption once and its two rows stop existing. `rowFloor` counted them gone and answered `rows_lost` —
+  // the wrong name, and refusing the EDITOR's answer ships both halves split, which is what the whole
+  // note block has been paying rounds to stop doing. The label check twelve lines further on already
+  // forgave this exact move; the row check had no equivalent. It does now, bounded the same way, and the
+  // slack must not extend one row past the ones the caption took: the last two legs are why.
+  const note = "[Percentage distribution]";
+  const cols = `<thead><tr><th scope="col">Col 1</th><th scope="col">Col 2</th><th scope="col">Col 3</th></tr></thead>`;
+  const row = `<tr><td colspan="3">${note}</td></tr>`;
+  const a = ["A1", "A2", "A3", "A4"].map((l) => dataRow(l)).join("");
+  const b = ["B1", "B2", "B3", "B4"].map((l) => dataRow(l)).join("");
+  const cap = (extra = "") => `<caption>Table 9.—Revenue${extra}</caption>`;
+  const answer = (capText: string, body: string) => `<table>${capText}${cols}<tbody>${body}</tbody></table>`;
+  const pair = onePair(
+    `<table>${cap()}${cols}<tbody>${row}${a}</tbody></table>` +
+      `<table>${cap("—Continued")}${cols}<tbody>${row}${b}</tbody></table>`,
+  );
+
+  assert.equal(verifyJoin(pair, answer(cap(` ${note}`), a + b)), null, "promoted into the caption");
+  // Rule 6 to the letter — keep the first half's row, drop the repeat — was accepted before and still is.
+  assert.equal(verifyJoin(pair, answer(cap(), row + a + b)), null, "rule 6 literal");
+  // Deleted outright, no caption note: still refused, and by the row check as before.
+  assert.equal(verifyJoin(pair, answer(cap(), a + b)), "rows_lost", "deleted");
+  // The bound. Promotion buys forgiveness for the two rows the caption took and not one row more.
+  assert.equal(verifyJoin(pair, answer(cap(` ${note}`), a + b.replace(dataRow("B4"), ""))), "labels_lost:1");
+  const lessTwo = b.replace(dataRow("B4"), "").replace(dataRow("B3"), "");
+  assert.equal(verifyJoin(pair, answer(cap(` ${note}`), a + lessTwo)), "rows_lost");
 });
 
 test("a note the joined table keeps in its caption and prints as a row as well is shipped twice", () => {

@@ -435,7 +435,10 @@ Places where a decision was left open, and where v1 intentionally stops:
   printed inside the header block by a half and gone from the delivered table, is refused as
   `note_row_lost` — the pair the other three cannot see, because each of them is keyed on a caption
   note. The same note printed as a `<tbody>` row was refused all along, as `labels_lost` or `rows_lost`:
-  its label *is* the bracketed run, so the row checks see it go.
+  its label *is* the bracketed run, so the row checks see it go. Those two checks now forgive the note
+  rows the joined caption **absorbed**, which they had to learn twice: the label check first, then the row
+  check, whose floor was still refusing the promotion `page.md` asks for wherever the page had printed the
+  note as a `<tbody>` row on both halves — and refusing that answer ships the halves split.
 
   `note_shipped_twice` is why the free path, where
   it imports the continued half's caption because the first half has none, also drops the first half's

@@ -478,7 +478,18 @@ export function verifyJoin(pair: ContinuationPair, merged: string): string | nul
   // leaves it inert, which is the right answer for a pair with no header cells to lose.
   const blocks = [pair.first.headerCells, pair.second.headerCells].filter((n) => n > 0);
   if (blocks.length > 0 && joined.headerCells < Math.min(...blocks)) return "header_cells_lost";
-  if (joined.rows < rowFloor(pair, joined)) return "rows_lost";
+  // Less the rows the joined CAPTION absorbed. A note row promoted into the caption is a row that
+  // stopped existing, and `rowFloor` counts it gone — so on a pair whose halves both printed the note as
+  // a `<tbody>` row, an answer carrying it into the caption once was refused as `rows_lost`, and refusing
+  // the editor's answer ships both halves split. The label check twelve lines down already has this
+  // exemption for the same move, on the same reasoning, and this is the count `rowFloor` needs to see it.
+  // Header-block rows are excluded because `rowFloor` nets those out through `headerDropped` already, and
+  // forgiving them twice would buy a real data row's worth of slack. Bounded the same way the label
+  // exemption is: a row whose text is a bracketed run the joined caption now carries, and no other.
+  const absorbed = [...pair.first.noteRows, ...pair.second.noteRows].filter(
+    (n) => !n.header && captionNotes(joined.caption).has(n.text),
+  ).length;
+  if (joined.rows < rowFloor(pair, joined) - absorbed) return "rows_lost";
   // Every label from either half, somewhere in the joined table's cells — not necessarily as a
   // first cell, because a join that adds a column legitimately moves the label along one, and a
   // guard that refuses that would refuse the repair it exists to protect.
@@ -1026,9 +1037,10 @@ export function joinInCode(pair: ContinuationPair): { html: string } | { reason:
   // because the next pass would otherwise pair the joined table with the table BEFORE it, forever.
   const fcap = ftab.querySelector("caption");
   const scap = stab.querySelector("caption");
-  // How many bracketed note rows this join drops as repeats, counted across both halves and checked
-  // against rule 6's licence after the append below.
-  let notesDropped = 0;
+  // Which bracketed note rows this join drops as repeats, across both halves, checked against rule 6's
+  // licence after the append below. The TEXTS and not a count, because whether the joined caption ends up
+  // carrying the note decides whether `verifyJoin` sees a row lost or a note promoted.
+  const notesDropped: string[] = [];
   if (fcap !== null) {
     if (!stripMarker(fcap)) return { reason: "caption_unclear" };
   } else {
@@ -1050,7 +1062,8 @@ export function joinInCode(pair: ContinuationPair): { html: string } | { reason:
     // own row against a caption it did not print.
     const importedNotes = captionNotes(made.textContent ?? "");
     for (const row of frows) {
-      if (!isUnitNoteRow(row) || !importedNotes.has(normalizeCell(row.textContent ?? ""))) continue;
+      const text = normalizeCell(row.textContent ?? "");
+      if (!isUnitNoteRow(row) || !importedNotes.has(text)) continue;
       // Both spellings of the row are dropped, `<td>` and `<th>`, and the note reasons below are what
       // judges the result. This needed `read`'s `headerCells` to stop counting a note row's `<th>` as a
       // header cell first: `header_cells_lost` is asked before any note reason, so while it did, dropping
@@ -1063,7 +1076,7 @@ export function joinInCode(pair: ContinuationPair): { html: string } | { reason:
       // surviving markup is a reading of the table, which is rule 2's case for the editor.
       if (idsIn(row).length > 0) return { reason: "id_would_be_lost" };
       row.remove();
-      notesDropped += 1;
+      notesDropped.push(text);
     }
   }
 
@@ -1133,7 +1146,7 @@ export function joinInCode(pair: ContinuationPair): { html: string } | { reason:
       // something about the continued rows, and both keeping it mid-table and dropping it change how
       // the table reads.
       if (fNotes.has(normalizeCell(row.textContent ?? ""))) {
-        notesDropped += 1;
+        notesDropped.push(normalizeCell(row.textContent ?? ""));
         continue;
       }
       return { reason: "note_repeat_unclear" };
@@ -1142,12 +1155,19 @@ export function joinInCode(pair: ContinuationPair): { html: string } | { reason:
   }
 
   // Rule 6 licenses dropping A repeat, and `JOIN_DROPPABLE_ROWS` is the one row `verifyJoin`'s floor
-  // forgives for it. Past that, this path would hand its own verifier a table refused as `rows_lost` — a
-  // reason about rows, for a note the joined caption still carries — so the pair is declined here where
-  // the reason can say what it is. Two ways to reach it, neither measured: a half that prints the note
-  // twice itself, and a mixed pair whose first half prints it as a row while the second prints it in both
-  // places. Declining is the same answer `verifyJoin` would have given, one editor call earlier.
-  if (notesDropped > JOIN_DROPPABLE_ROWS) return { reason: "note_repeats_exceed_licence" };
+  // forgives for it — over the drops the joined CAPTION does not answer for. A row whose note the finished
+  // caption carries is forgiven at the `rows_lost` site by name, because a note promoted into the caption
+  // is content kept rather than a row lost, so counting those here would decline a pair this path's own
+  // verifier accepts, and past the licence that buys an editor call and ships the halves SPLIT wherever
+  // the call declines. What the bound is left holding is the drop no caption can account for: a repeat of
+  // a note the first half prints as a ROW while its caption does not, where the row that vanishes is just
+  // a row. Two ways past it, neither measured — a half printing such a row twice itself, and a mixed pair
+  // whose first half prints the note as a row while the second prints it in both places. There, declining
+  // is still the same answer `verifyJoin` would give, one editor call earlier.
+  const keptNotes = captionNotes(ftab.querySelector("caption")?.textContent ?? "");
+  if (notesDropped.filter((t) => !keptNotes.has(t)).length > JOIN_DROPPABLE_ROWS) {
+    return { reason: "note_repeats_exceed_licence" };
+  }
 
   // Both id checks, off the FINISHED table, in one traversal.
   //
