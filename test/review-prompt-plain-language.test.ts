@@ -47,6 +47,15 @@ function codeSpans(text: string): string[] {
 
 // A file or a directory, however it is spelled. `docs/ci.md` matches as a file and not also as a
 // directory, because the lookahead requires the slash to end the token.
+//
+// The limit, stated here because it is where someone would reach for a wider regex: a path is
+// recognised by a known extension or by a trailing slash, so a scope member written as a bare word —
+// "anything under agents or src" — is invisible. Both readers below accept an empty result, so that
+// one shape passes. It is deliberately not widened to bare words: `docs` and `agents` occur as
+// ordinary English in every region this file reads ("Docs prose that is not concise plain
+// language"), so matching them would fail on prose that binds nothing, and a pin that cries wolf
+// gets deleted. Reaching the gap needs a commit that widens the scope AND spells the new member
+// without a slash; the shape that actually went wrong here — a copied list of paths — is caught.
 const PATH_RE = /\b[A-Za-z0-9_.-]+\.(?:md|ya?ml|ts|tsx|json|sh|mjs)\b|\b[a-z0-9_.-]+\/(?![/\w])/g;
 
 // Path-like tokens that are NOT inside a code span, minus CONTRIBUTING.md itself.
@@ -122,11 +131,44 @@ function bullet(text: string, containing: string): string {
   return hit[0]!;
 }
 
+// The four regions that state the scope. Named once each, because the last test compares them as a
+// set and a region sliced twice is a region that can drift between two assertions.
+function promptProseBullet(): string {
+  return bullet(section(reviewPrompt(), "Should flag"), "Docs prose that is not concise plain language");
+}
+
+// CONTRIBUTING.md's Documentation section, OPENING paragraph only, ended by `\n\n`: that paragraph is
+// where the requirement states what it covers, and the rest of the section is free to name a file as
+// an example without binding it.
+function contributingBinding(): string {
+  const text = readFileSync(CONTRIBUTING, "utf8");
+  const start = text.indexOf("\n## Documentation\n");
+  assert.notEqual(start, -1, "CONTRIBUTING.md still has a `## Documentation` section");
+  const afterHeading = text.slice(start + "\n## Documentation\n".length);
+  const binding = afterHeading.slice(0, afterHeading.indexOf("\n\n", afterHeading.indexOf("\n") + 1));
+  assert.ok(binding.length > 0, "and that section still opens with a paragraph");
+  return binding;
+}
+
+function contributingReviewBullet(): string {
+  return bullet(readFileSync(CONTRIBUTING, "utf8"), "One exception: docs prose");
+}
+
+// The one numbered step in docs/ci.md that describes this check, `4.` to `5.`. Read as a step rather
+// than by searching for a sentence: a copy of the file set is what is being pinned, and a search that
+// misses would pass on an empty match.
+function ciDocStep(): string {
+  const text = readFileSync(CI_DOC, "utf8");
+  const start = text.indexOf("\n4. Checks docs prose");
+  assert.notEqual(start, -1, "docs/ci.md still describes the docs-prose check as review step 4");
+  const rest = text.slice(start + 1);
+  const end = rest.indexOf("\n5. ");
+  assert.notEqual(end, -1, "and step 5 still follows it");
+  return rest.slice(0, end);
+}
+
 test("the reviewer's docs-prose rule is scoped to the files CONTRIBUTING.md binds", () => {
-  const prose = bullet(
-    section(reviewPrompt(), "Should flag"),
-    "Docs prose that is not concise plain language",
-  );
+  const prose = promptProseBullet();
   // Equality, not `includes` per path. A missing path is a scope contributors are promised and the
   // reviewer never applies; an extra one is a scope nothing in CONTRIBUTING.md justifies, and only
   // an exact comparison catches the second.
@@ -165,16 +207,7 @@ test("the prompt's do-not-flag-style rule names the docs-prose exception", () =>
 });
 
 test("CONTRIBUTING.md's Documentation section binds the same files the prompt does", () => {
-  const text = readFileSync(CONTRIBUTING, "utf8");
-  const start = text.indexOf("\n## Documentation\n");
-  assert.notEqual(start, -1, "CONTRIBUTING.md still has a `## Documentation` section");
-  // The section's OPENING paragraph, not the whole section: that paragraph is where the requirement
-  // states what it covers, and the rest of the section is free to name a file as an example without
-  // binding it. `\n\n` ends it.
-  const afterHeading = text.slice(start + "\n## Documentation\n".length);
-  const binding = afterHeading.slice(0, afterHeading.indexOf("\n\n", afterHeading.indexOf("\n") + 1));
-  assert.ok(binding.length > 0, "and that section still opens with a paragraph");
-
+  const binding = contributingBinding();
   assert.deepEqual(
     codeSpans(binding),
     BOUND_FILES,
@@ -191,7 +224,7 @@ test("CONTRIBUTING.md's Documentation section binds the same files the prompt do
 // as all of them. A partial copy is the failure — four lists agreeing today and a widening commit
 // updating three of them leaves this bullet promising the old, narrower scope.
 test("CONTRIBUTING.md's automated-review bullet does not keep its own copy of the scope", () => {
-  const item = bullet(readFileSync(CONTRIBUTING, "utf8"), "One exception: docs prose");
+  const item = contributingReviewBullet();
   // Backticked or not, unlike every other assertion here. This is the one that accepts an EMPTY
   // result, so reading only code spans would pass on exactly the shape it guards: a list re-added as
   // prose — "if your PR touches README.md, docs/, config.example.yaml or agents/" — yields no spans
@@ -215,17 +248,7 @@ test("CONTRIBUTING.md's automated-review bullet does not keep its own copy of th
 });
 
 test("docs/ci.md describes the same scope it documents", () => {
-  const text = readFileSync(CI_DOC, "utf8");
-  // The one numbered step that describes this check, `4.` to `5.`. Read as a step rather than by
-  // searching for a sentence: a third copy of the file set is the thing being pinned, and a search
-  // that misses would pass on an empty match.
-  const start = text.indexOf("\n4. Checks docs prose");
-  assert.notEqual(start, -1, "docs/ci.md still describes the docs-prose check as review step 4");
-  const rest = text.slice(start + 1);
-  const end = rest.indexOf("\n5. ");
-  assert.notEqual(end, -1, "and step 5 still follows it");
-  const step = rest.slice(0, end);
-
+  const step = ciDocStep();
   assert.deepEqual(
     codeSpans(step),
     BOUND_FILES,
@@ -233,4 +256,28 @@ test("docs/ci.md describes the same scope it documents", () => {
       `here that the prompt does not enforce is a promise nothing keeps:\n${step}`,
   );
   assertNoBarePaths(step, "docs/ci.md's step 4");
+});
+
+// `PATH_RE`'s comment justifies not matching bare words by claiming that `docs` and `agents` appear as
+// ordinary English in every region this file reads. That is a claim about four documents, not about
+// the regex, so it is checked here rather than asserted in a comment. If it stops being true, widening
+// the regex becomes the better trade and this comment should not be what talks the next reader out of
+// it — the test failing is the signal to reconsider, and the residual gap it leaves (a scope member
+// spelled with no slash and no extension) is stated on `PATH_RE` itself.
+test("PATH_RE ignores bare words for a reason that is still true of every region it reads", () => {
+  const regions: [string, string][] = [
+    ["the prompt's docs-prose bullet", promptProseBullet()],
+    ["CONTRIBUTING.md's Documentation section", contributingBinding()],
+    ["CONTRIBUTING.md's automated-review bullet", contributingReviewBullet()],
+    ["docs/ci.md's step 4", ciDocStep()],
+  ];
+  for (const [where, region] of regions) {
+    const prose = region.replace(/`[^`\n]+`/g, " ");
+    assert.match(
+      prose,
+      /\b(docs|agents)\b/i,
+      `${where} still uses "docs" or "agents" as an ordinary word outside a code span, which is why ` +
+        `PATH_RE requires a slash or an extension. If no region does any more, widen it:\n${prose}`,
+    );
+  }
 });
