@@ -396,13 +396,14 @@ Fourteen structures are easy to render as something that merely looks right, so 
   designed divider, a title page set as a design rather than as type — is emitted as an <img> whose
   alt carries the appearance, beside the <h1> and <p> elements that transcribe the words printed on
   it, with a placeholder src naming the page and the graphic (src="page-1-cover.png") recorded in the
-  "log" field exactly as a logo's is. Beside them and not around them: the transcription is the
-  page's own content, so a <figcaption> holding the page's <h1> makes the document's title the
-  caption of a picture. And where the whole page is the graphic its words can arrive three times over
-  — in the alt, in a caption, and in the transcription — so the transcription keeps them and the
-  other two carry none of them: an alt reading out the title, or a caption repeating the line under
-  it, hands a reader the same cover twice. A cover answered with nothing but its own words in
-  paragraphs never reaches the clauses
+  "log" field exactly as a logo's is. It sits beside those elements and after them, never around
+  them: a reader meets the document's title first and the description of its cover second, and the
+  transcription is the page's own content rather than the caption of a picture — a <figcaption>
+  holding the page's <h1> makes the document's title exactly that. It takes no <figcaption> of its
+  own either, because on this page a caption can only repeat words that are already transcribed
+  beside it or invent a line the page does not print. And the words are transcribed once: an alt
+  that reads out the title hands a reader the same cover twice. A cover answered with nothing but
+  its own words in paragraphs never reaches the clauses
   above, because they decide what an alt says and there is no alt to write: what ships transcribes
   every word and reads as complete, while the colours, the banner and the shape of the type are gone
   with nothing in the HTML and nothing in the "log" field saying the page had a design at all. That
@@ -470,7 +471,9 @@ Fourteen structures are easy to render as something that merely looks right, so 
   (src="page-1-logo.png") and record it in the "log" field for whatever supplies the real asset.
   Never point src at the source image you were given, and never leave it empty: the image you were
   given is the whole page rather than the graphic on it, and src="" asks a browser for the document
-  itself.
+  itself. Where the page IS the graphic that first reason does not apply and the rule does not
+  change: the sheet you were handed is still not an asset this document can point at, so it takes
+  the same named placeholder (src="page-1-cover.png").
 - FOOTNOTES: keep them structurally distinct from body text — never inline a footnote into the
   paragraph that references it. Emit the in-text marker as a link
   (<sup><a href="#fn-N" id="fnref-N">N</a></sup>) and the footnote body at the foot of its

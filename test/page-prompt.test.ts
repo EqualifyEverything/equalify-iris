@@ -1384,14 +1384,24 @@ test("the page agent's image rule keeps the clauses that make it a rule", () => 
     // "Beside" is the whole of the structural instruction, and the one arm that DID emit the cover
     // read it as containment: the entire page went inside a <figure> with the document's <h1> inside
     // the <figcaption>. That is a worse document than the omission in one respect — the title of the
-    // publication is no longer a heading — so the word is spelled out rather than left to carry it.
-    ["the transcription sits beside the image and not inside a caption of it",
-      /Beside them and not around them: the transcription is the page's own content, so a <figcaption> holding the page's <h1> makes the document's title the caption of a picture/],
-    // The doubling this paragraph itself creates: the same arm's alt was 422 characters reproducing
+    // publication is no longer a heading — so the word is spelled out rather than left to carry it,
+    // in all three of the ways that shape can go wrong: around, before, and captioned.
+    ["the image sits beside the transcription and after it, never around it",
+      /It sits beside those elements and after them, never around them: a reader meets the document's title first and the description of its cover second/],
+    ["and the page's own <h1> is never the caption of that image",
+      /a <figcaption> holding the page's <h1> makes the document's title exactly that/],
+    // The caption is refused outright rather than regulated, because on this page there is nothing
+    // for one to say: every word is transcribed beside it, so a caption either repeats those words or
+    // invents a line the page does not print, and both are already faults elsewhere in this bullet. A
+    // rule allowing a caption "that carries none of the printed words" leaves exactly the invented
+    // one, which is why it is not phrased that way.
+    ["the image on such a page takes no caption at all, and the reason it cannot have one",
+      /It takes no <figcaption> of its own either, because on this page a caption can only repeat words that are already transcribed beside it or invent a line the page does not print/],
+    // The doubling this paragraph itself creates: the same arm's alt was 414 characters reproducing
     // every printed word, beside a figcaption repeating them, and its `page_correction_recheck` came
-    // back ok: true — so nothing downstream refuses it. Three surfaces, one of them the words'.
-    ["the words are transcribed once, and neither the alt nor a caption repeats them",
-      /its words can arrive three times over — in the alt, in a caption, and in the transcription — so the transcription keeps them and the other two carry none of them/],
+    // back ok: true — so nothing downstream refuses it.
+    ["the words are transcribed once, and the alt does not read them out",
+      /the words are transcribed once: an alt that reads out the title hands a reader the same cover twice/],
     ["and it takes the same named placeholder src and log line a logo takes",
       /with a placeholder src naming the page and the graphic \(src="page-1-cover\.png"\) recorded in the "log" field exactly as a logo's is/],
     // Why this one is worth spelling out rather than leaving to the imperative: the words are all
@@ -1524,6 +1534,13 @@ test("the page agent's image rule keeps the clauses that make it a rule", () => 
     // file this agent has a name for is the whole page it was given.
     ["src is neither the source page image nor empty",
       /Never point src at the source image you were given, and never leave it empty/],
+    // And the first of those two reasons stops being true on the page the cover clause above adds:
+    // where the page IS the graphic, "the image you were given is the whole page rather than the
+    // graphic on it" no longer distinguishes the two, so an agent reasoning from the stated reason
+    // could conclude that pointing src at the sheet it was handed is right there. The rule is
+    // unchanged and the reason it survives on is different, which is why it is written down.
+    ["and the reason it survives where the page itself is the graphic",
+      /Where the page IS the graphic that first reason does not apply and the rule does not change: the sheet you were handed is still not an asset this document can point at, so it takes the same named placeholder \(src="page-1-cover\.png"\)/],
     // The redundancy rule above and this example pull against each other on a letterhead,
     // where the company name is printed in type beside the mark: read together they would
     // license alt="logo" on the one image whose entire content is that name.
