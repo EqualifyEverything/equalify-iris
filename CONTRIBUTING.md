@@ -126,11 +126,11 @@ Your PR gets a review from Claude in CI before a maintainer reads it
   repo on purpose. It's also told not to suggest alternatives when your approach is correct, and
   not to raise pre-existing issues your PR doesn't touch. If it does one of those anyway, that's a
   bug in the prompt — say so on the PR.
-- **One exception: docs prose.** If your PR touches `README.md`, `docs/`, `config.example.yaml`'s
-  comments or `agents/`, it checks that prose against the
-  [Documentation](#documentation) rules — quoting the sentence, naming the rule, three at most,
-  always as a non-blocking note. Not in scope even there: heading style, line length, Markdown
-  layout, or wording it would have chosen differently.
+- **One exception: docs prose.** On a PR touching the files the [Documentation](#documentation)
+  section covers, it checks prose against those rules — quoting the sentence, naming the rule, three
+  at most, always as a non-blocking note. The list of files lives in that section only, so this
+  bullet cannot fall out of date with it. Not in scope even there: heading style, line length,
+  Markdown layout, or wording it would have chosen differently.
 - **`### Non-blocking notes` means "merge-ready".** A finding only blocks if something reaches it
   on input the code accepts today; real-but-unreachable findings are notes on an *approval*. You
   don't have to resolve them to merge, and you don't have to argue your way out of them.

@@ -148,6 +148,21 @@ test("CONTRIBUTING.md's Documentation section binds the same files the prompt do
   );
 });
 
+// The fourth place a reader meets this scope, and the one a contributor is likeliest to read: the
+// bullet under CONTRIBUTING.md's "What the automated review will say". It now points at the
+// Documentation section instead of repeating the list, which is why this test allows NO paths as well
+// as all of them. A partial copy is the failure — four lists agreeing today and a widening commit
+// updating three of them leaves this bullet promising the old, narrower scope.
+test("CONTRIBUTING.md's automated-review bullet does not keep its own copy of the scope", () => {
+  const item = bullet(readFileSync(CONTRIBUTING, "utf8"), "One exception: docs prose");
+  const paths = codeSpans(item).filter((s) => s.includes("/") || s.includes("."));
+  assert.ok(
+    paths.length === 0 || JSON.stringify(paths) === JSON.stringify(BOUND_FILES),
+    `this bullet either names no files or names all of BOUND_FILES. It names ${paths.join(", ")}, ` +
+      `which is a partial copy of the scope — the shape that goes stale when the set widens:\n${item}`,
+  );
+});
+
 test("docs/ci.md describes the same scope it documents", () => {
   const text = readFileSync(CI_DOC, "utf8");
   // The one numbered step that describes this check, `4.` to `5.`. Read as a step rather than by
