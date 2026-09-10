@@ -624,12 +624,23 @@ export function verifyJoin(pair: ContinuationPair, merged: string): string | nul
   // count refused an EDITOR answer that carried the note into the caption exactly as rule 6 asks, and
   // there the price is not one call, it is both halves shipped split.
   //
+  // And last, the note neither caption ever carried: printed by a half as a row, and gone from the
+  // delivered table without arriving in the caption. Every reason above is keyed on a CAPTION note —
+  // `owed` and `titleNotes` are read off the halves' captions and are empty on such a pair — so the whole
+  // harm the placement rule exists to remove was invisible where the page never used a caption for it, on
+  // the corpus's 12 outside-caption placements. That was true of the `<td>` spelling from the day the note
+  // checks went in; narrowing `headerCells` a commit ago made it true of `<th>` too, because a lost header
+  // cell was all that had ever caught it, and by the wrong name. Asked LAST so the caption reasons keep
+  // the pairs that have a caption note to lose, and on the note's TEXT rather than its key: a note the
+  // merge moved from `<thead>` into `<tbody>` is a relocation, which is a different defect and not this
+  // one, and calling it a deletion would point the repair at the wrong rule.
+  //
   // What all of this compares is a note's text, the block it sits in, which caption owed it, and whether
-  // the delivered table holds it in two places at once — nothing finer. A note moved within one block is
-  // invisible here, and so is a `<td>` note row delivered as a `<th>` one: `page.md` forbids both
-  // spellings of the row, but the note in them has not been lost, and none of these reasons is the right
-  // one to refuse a table over — which is now true of the two spellings on every path here, and was not
-  // for one commit. A refusal of the EDITOR's answer ships both halves split, so a reason
+  // the delivered table holds it in two places at once — nothing finer. A note MOVED is invisible here,
+  // within one block or between them, and so is a `<td>` note row delivered as a `<th>` one: `page.md`
+  // forbids both spellings of the row, but the note in them has not been lost, and none of these reasons
+  // is the right one to refuse a table over — which is now true of the two spellings on every path here,
+  // and was not for one commit. A refusal of the EDITOR's answer ships both halves split, so a reason
   // that names the wrong defect buys a split table and points the repair at the wrong rule.
   const printedAsRow = new Set([...pair.first.noteRows, ...pair.second.noteRows].map(noteKey));
   const joinedNoteRows = [...tables[0].querySelectorAll("tr")]
@@ -643,6 +654,9 @@ export function verifyJoin(pair: ContinuationPair, merged: string): string | nul
   const titleNotes = captionNotes(pair.first.caption !== "" ? pair.first.caption : pair.second.caption);
   if ([...titleNotes].some((n) => !inCaption.has(n))) return "caption_note_struck";
   if (joinedNoteRows.some((n) => inCaption.has(n.text))) return "note_shipped_twice";
+  const stillThere = new Set([...inCaption, ...joinedNoteRows.map((n) => n.text)]);
+  const printedTexts = [...pair.first.noteRows, ...pair.second.noteRows].map((n) => n.text);
+  if (printedTexts.some((t) => !stillThere.has(t))) return "note_row_lost";
   return null;
 }
 

@@ -3338,8 +3338,9 @@ reprinted with the header and belongs in the joined table once. Those figures we
 `page.md` decided where the note goes: it now asks for the note inside the `<caption>`, so the shape
 the merge meets should shift from a repeated full-width row to a repeated caption, and rule 6's
 forgiveness of the promoted row should get rarer rather than staying at the rate measured here.
-Either way the note has to survive the merge exactly once — as a row it is held by the label and row
-checks, and in the caption by `caption_note_lost`, `caption_note_struck` and `note_shipped_twice`.
+Either way the note has to survive the merge exactly once — in the caption by `caption_note_lost`,
+`caption_note_struck` and `note_shipped_twice`, and as a row by `note_row_lost`, since the label and
+row checks read cells and forgive one dropped row and neither can see which row it was.
 
 Where one of those judgements is real the merge is a Copy Editor call (`copy_editor_table_join.md`
 in the agent ledger); where it is not — three of the editor's six rules are "move these bytes and
@@ -3537,10 +3538,12 @@ bracketed unit note the merge moved from a row into the caption counts as kept, 
 check reads `th,td` and would otherwise refuse the very drop rule 6 licenses), `caption_note_lost` (a
 note EITHER half's caption carried is in neither the joined caption nor a row some half printed),
 `caption_note_struck` (a note still in the table, as a row a half printed in the place it printed it,
-and missing only from the caption rule 4 says to **copy**) and `note_shipped_twice` (the joined table
-holds one note in its caption **and** as a row). All three are part of the table's name going missing
-or being said twice, and all three are invisible to every other check here, which read cells, columns
-and rows.
+and missing only from the caption rule 4 says to **copy**), `note_shipped_twice` (the joined table
+holds one note in its caption **and** as a row) and `note_row_lost` (a note **neither** caption
+carried, printed by a half as a row, gone from the delivered table and not in the caption either —
+asked last, because every reason before it is keyed on a caption note and this is the pair that has
+none). All four are part of the table's name going missing or being said twice, and all four are
+invisible to every other check here, which read cells, columns and rows.
 
 Three reasons rather than one because a decline is all a run log has, and they send a reader to
 different places: whether a row survived at all, the caption the merge was told to copy, or a note
@@ -3669,13 +3672,23 @@ the same count refused an **editor** answer that obeyed rule 6, where the price 
 halves shipped split. What the count exists for survives, because a reply that flattened the real column
 headers to `<td>` still loses every one of them.
 
+And last, `note_row_lost`, for the note **neither** caption ever carried. Every reason above it is keyed
+on a caption note, so on a pair whose halves printed the note only as a row there was nothing to compare
+and the whole harm the placement rule exists to remove went unseen — on the census's 12 outside-caption
+placements. That was true of the `<td>` spelling from the day the note checks went in; narrowing
+`headerCells` made it true of `<th>` too, since a lost header cell was all that had ever caught it and
+under the wrong name. It is asked last so the caption reasons keep the pairs that have a caption note to
+lose, and it compares the note's **text** and not its key: a note the merge moved from `<thead>` into
+`<tbody>` is a relocation, a different defect, and naming it a deletion would point the repair at rule 6
+instead of at `page.md`.
+
 What all of it compares is a note's text, the block it sits in, which caption owed it, and whether the
-delivered table holds it in two places at once — nothing finer. A note moved within one block is
-invisible here, and so is a `<td>` note row delivered as a `<th>` one: `page.md` forbids both
-spellings, but the note in them has not been lost and none of the reasons above is the right one to
-refuse a table over. That now holds for both spellings on every path through this stage, which it did
-not for one commit. Refusing the **editor's** answer ships both halves split, so a reason naming the
-wrong defect buys a split table and points the repair at the wrong rule.
+delivered table holds it in two places at once — nothing finer. A note **moved** is invisible here,
+within one block or between them, and so is a `<td>` note row delivered as a `<th>` one: `page.md`
+forbids both spellings, but the note in them has not been lost and none of the reasons above is the
+right one to refuse a table over. That now holds for both spellings on every path through this stage,
+which it did not for one commit. Refusing the **editor's** answer ships both halves split, so a reason
+naming the wrong defect buys a split table and points the repair at the wrong rule.
 
 Both bracket widths are read, ASCII and fullwidth, and the parenthesised spelling is not — a check
 demanding every parenthesised run survive would demand the survival of `(continued`, which rule 4

@@ -877,6 +877,39 @@ test("a note row inside the header block is not a header cell in either spelling
   }
 });
 
+test("a note neither caption carried and no row keeps is a note the merge deleted", () => {
+  // The pair whose halves printed the note ONLY as a row: every other note reason is keyed on a caption
+  // note, so `owed` and `titleNotes` are empty here and the whole harm the placement rule exists to
+  // remove was invisible — on the corpus's 12 outside-caption placements. True of `<td>` from the day
+  // the note checks went in, and of `<th>` from the commit that stopped counting a note row's cell as a
+  // header cell, which was the only thing that had ever caught it and by the wrong name.
+  const note = "[Percentage distribution]";
+  const cols = `<tr><th scope="col">Col 1</th><th scope="col">Col 2</th><th scope="col">Col 3</th></tr>`;
+  const both = `${dataRow("Alabama")}${dataRow("Vermont")}`;
+
+  for (const cell of [`<td colspan="3">${note}</td>`, `<th colspan="3">${note}</th>`]) {
+    const head = `<thead>${cols}<tr>${cell}</tr></thead>`;
+    const a = `<table><caption>Table 9.—Revenue</caption>${head}<tbody>${dataRow("Alabama")}</tbody></table>`;
+    const b = `<table><caption>Table 9.—Revenue—Continued</caption>${head}<tbody>${dataRow("Vermont")}</tbody></table>`;
+    const pair = onePair(a + b);
+    assert.doesNotMatch(pair.first.caption + pair.second.caption, /\[/, "the fixture has a caption note");
+    assert.equal(pair.first.noteRows.length, 1, "the fixture's half did not print the note as a row");
+
+    const gone = `<table><caption>Table 9.—Revenue</caption><thead>${cols}</thead><tbody>${both}</tbody></table>`;
+    assert.equal(verifyJoin(pair, gone), "note_row_lost", cell);
+    // The three answers that are not a deletion, and none of them may be called one. Rule 6's promotion
+    // into the caption is the answer the prompt asks for; the row kept where the halves had it is the
+    // pair where nothing moved; and a note moved out of `<thead>` into `<tbody>` is a RELOCATION, which
+    // this must not name — the reason would send the repair at rule 6 instead of at `page.md`.
+    const promoted = `<table><caption>Table 9.—Revenue ${note}</caption><thead>${cols}</thead><tbody>${both}</tbody></table>`;
+    assert.equal(verifyJoin(pair, promoted), null, cell);
+    const asRow = `<table><caption>Table 9.—Revenue</caption>${head}<tbody>${both}</tbody></table>`;
+    assert.equal(verifyJoin(pair, asRow), null, cell);
+    const moved = `<table><caption>Table 9.—Revenue</caption><thead>${cols}</thead><tbody><tr><td colspan="3">${note}</td></tr>${both}</tbody></table>`;
+    assert.equal(verifyJoin(pair, moved), null, cell);
+  }
+});
+
 test("a note the joined table keeps in its caption and prints as a row as well is shipped twice", () => {
   // Rule 6 says of the second half's repeat "drop it, and do not also copy it in under rule 1", and
   // nothing read that half of the rule. Every check here treated a note row as an EXCUSE for a note
