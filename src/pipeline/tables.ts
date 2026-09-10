@@ -1177,10 +1177,15 @@ export function joinInCode(pair: ContinuationPair): { html: string } | { reason:
   // has been paid for an answer the same floor refuses again, and then the halves ship split. This comment
   // claimed the second could not happen, for one commit: a pair dropping one covered row and one uncovered
   // one passed a licence that counted only the uncovered ones. Two shapes get past the bound, neither
-  // measured — an UNCOVERED note row dropped twice, which needs a half printing such a row twice itself,
-  // and two distinct notes on one table, which is 0 of the 769 tables in the round logs. On the second a
-  // correct join exists and this declines it, and the editor's answer would be refused too: the floor
-  // licenses the caption's rows and ONE repeat, not two.
+  // measured — an UNCOVERED note row dropped twice, which needs the CONTINUED half printing such a row twice
+  // itself, and two distinct notes on one table, which is 0 of the 769 tables in the round logs. On the
+  // second a correct join exists and this declines it, and the editor's answer would be refused too: the
+  // floor licenses the caption's rows and ONE repeat, not two.
+  //
+  // Not the FIRST half: this counts DROPS, and a first-half duplicate is never one. With a caption of its
+  // own nothing in `frows` is removed at all; without one, the import carries the second's note, so the
+  // removal above is gated on `importedNotes` and every drop it makes is covered. Both spellings pinned
+  // free, alongside the mixed pair, for the same reason that one is.
   //
   // The mixed pair — first half printing the note as a row, second carrying it in its caption AND repeating
   // the row — cannot reach this, though it is the pair the bound refused two commits ago. Where the first

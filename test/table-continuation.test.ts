@@ -895,6 +895,25 @@ test("a first half with no caption of its own has no title caption to be strict 
   const mixedJoin = joinInCode(mixedTitled);
   assert.ok("html" in mixedJoin, JSON.stringify(mixedJoin));
   assert.equal(verifyJoin(mixedTitled, mixedJoin.html), null);
+
+  // And the half that has to do the repeating for shape 1 is the CONTINUED one, which the comment above
+  // said as "a half" for one commit. The bound counts DROPS, and a first half printing the note row twice
+  // never supplies two: with a caption of its own, nothing in its rows is dropped at all, and with none,
+  // the import carries the second's note so both drops are covered. Both spellings pinned, because a
+  // reader chasing this reason out of a run log who builds it off the first half finds a free join.
+  const firstTwiceTitled = onePair(
+    `<table><caption>Table 7.—Grants</caption>${HEAD}<tbody>${noteRow(note)}${noteRow(note)}${dataRow("Alabama")}</tbody></table>` +
+      oneRepeat,
+  );
+  const firstTwiceJoin = joinInCode(firstTwiceTitled);
+  assert.ok("html" in firstTwiceJoin, JSON.stringify(firstTwiceJoin));
+  assert.equal(verifyJoin(firstTwiceTitled, firstTwiceJoin.html), null);
+  const firstTwiceBare = onePair(
+    `<table>${HEAD}<tbody>${noteRow(note)}${noteRow(note)}${dataRow("Alabama")}</tbody></table>` + second,
+  );
+  const bareJoin = joinInCode(firstTwiceBare);
+  assert.ok("html" in bareJoin, JSON.stringify(bareJoin));
+  assert.equal(verifyJoin(firstTwiceBare, bareJoin.html), null);
 });
 
 test("a note row inside the header block is not a header cell in either spelling", () => {

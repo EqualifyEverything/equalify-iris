@@ -3681,8 +3681,11 @@ commit apart, before the `max` that is neither.
 What the bound is left holding is the drop no caption accounts for — a repeat of a note the first half
 prints as a row while its caption does not — where each dropped row is just a row and declining here is
 `rows_lost` one editor call earlier. Two shapes get past it, neither measured: such a row dropped **twice**,
-which needs a half printing it twice itself, and **two distinct notes on one table**, which is 0 of the 769
-tables in the round logs. The mixed pair above is not one of them, though it is the pair the bound refused
+which needs the **continued** half printing it twice itself, and **two distinct notes on one table**, which
+is 0 of the 769 tables in the round logs. Not the first half printing it twice — this bound counts drops, and
+a first-half duplicate is never one: with a caption of its own nothing in the first half's rows is removed,
+and without one the import carries the second's note, so every drop the removal makes is covered.
+The mixed pair above is not one of them either, though it is the pair the bound refused
 two commits ago and so the one a reader is likeliest to come looking for: where the first half has no
 caption of its own, that is the branch that imports the second's *with* its note, so every row the join then
 drops is covered by construction, and where it has one, the only row dropped is the second half's.
