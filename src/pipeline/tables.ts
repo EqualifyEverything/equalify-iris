@@ -397,6 +397,11 @@ To decline: { "html": null, "log": "why", "declined": true }`;
 // repeat: two rows may legitimately carry the same label" — so anything past this is a merge losing
 // content. A document that legitimately repeats more than one such row is refused and ships split,
 // with `rows_lost` in the log saying so, which is the direction this stage errs in everywhere else.
+//
+// This is the floor's allowance where the joined CAPTION accounts for nothing. Where it carries the
+// note, `verifyJoin` counts the rows it absorbed instead of this one — never as well as, since this row
+// is the same drop — and `joinInCode`'s licence asks the same `max`. So the number of note rows a join
+// may drop is one, or the number the caption took, whichever is larger. Both sites say why.
 const JOIN_DROPPABLE_ROWS = 1;
 // How many rows a sound join may lose to the duplicated header, which is the rest of the floor. It
 // cannot be assumed to be one half's block — rule 3 asks for the structure that describes the rows,

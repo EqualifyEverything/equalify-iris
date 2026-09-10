@@ -3397,11 +3397,12 @@ continued page opens with a bracketed unit note the first half does not carry, s
 reprint rule 6 licenses dropping — "carry" reads the first half's note ROWS **and** its caption,
 because `page.md` asks for the note in the `<caption>` and the two halves need not agree on where
 they print it; the reverse is not a repeat, since a note only the continued half carries is a first
-appearance), `note_repeats_exceed_licence` (the join would have to drop **more than one** bracketed
-note row as a repeat, which is past what the row floor forgives — so it declines here rather than
-handing the verification a table it refuses as `rows_lost`, a reason about rows for a note the joined
-caption still carries; reachable only where a half prints the note twice itself, which the census has
-never seen), `caption_unclear` / `no_caption_available` (the continuation
+appearance), `note_repeats_exceed_licence` (the join would have to drop more bracketed note rows as
+repeats than the row floor forgives, which is the larger of rule 6's one row and the rows the joined
+**caption** accounts for and never their sum — so a join dropping two rows the caption carries ships
+free, and one dropping two the caption does not declines here rather than handing the verification a
+table it refuses as `rows_lost`; three shapes reach it, none of them measured, and the long section
+below names them), `caption_unclear` / `no_caption_available` (the continuation
 marker is not wholly inside one text node, so taking it off means rewriting markup; or neither
 half has a caption, which the verification requires), `content_outside_table` (a half's span
 parses to something beside its own table — the parser fosters a stray `<p>` out of a `<table>` and

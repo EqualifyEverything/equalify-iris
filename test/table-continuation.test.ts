@@ -849,7 +849,9 @@ test("a first half with no caption of its own has no title caption to be strict 
   // What the licence still holds: a repeat of a note the first half prints as a ROW and its caption does
   // not, so the joined caption never names it and each dropped row is a row gone. Past one, the free path
   // declines rather than handing `verifyJoin` a table it refuses as `rows_lost`, which is the same answer
-  // one editor call earlier. Reachable only where a half prints the note twice itself — nothing measured.
+  // one editor call earlier. This is one of the three shapes that reach the bound, and none is measured;
+  // the leg below this test's own free-join legs is the pair with two distinct notes, which is the other
+  // one that matters, because there the decline is over-refusal rather than a refusal in the right way.
   const titled = `<table><caption>Table 7.—Grants</caption>${HEAD}<tbody>${noteRow(note)}${dataRow("Alabama")}</tbody></table>`;
   const twoRepeats = `<table><caption>Table 7.—Grants—Continued</caption>${HEAD}<tbody>${noteRow(note)}${noteRow(note)}${dataRow("Vermont")}</tbody></table>`;
   const overPair = onePair(titled + twoRepeats);
