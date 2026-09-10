@@ -110,7 +110,7 @@ resolve.
 
 | agent | share of the bill, unswapped | status |
 |---|---|---|
-| `page` | **42.0%** | **two suggestions applied** — `moonshotai.kimi-k2.5` from 2026-09-02 (#312), −44.8% of the priced bill on 100 pages at a named content cost (`content_missing` on 42 pages against 15, §5); then **`us.openai.gpt-5.6-luna` from 2026-09-10** (#344, sprint-246.md §2), −15.9% of the page step again with 0 lost pages against 2, and 23.3% of subtotal rows dropped against Kimi's 34.9% — improved, not fixed, since Sonnet drops 9.6% and #324 is open on that |
+| `page` | **42.0%** | **two suggestions applied** — `moonshotai.kimi-k2.5` from 2026-09-02 (#312), −44.8% of the priced bill on 100 pages at a named content cost (`content_missing` on 42 pages against 15, §5); then **`us.openai.gpt-5.6-luna` from 2026-09-10** (#344, sprint-246.md §2), −15.9% of the page step again with 0 lost pages against 2, and 23.3% of subtotal rows dropped against Kimi's 34.9% — improved, not fixed, since Sonnet drops 9.6% and #324 is open on that. **Its loss is accessibility**: one axe violation worse than Kimi over the same corpus, and it passes figure pages clean by saying less about the legend (#347, §2) |
 | `copy_editor` | **33.1%** | **swap recommended, not yet applied** (#329) — `openai.gpt-5.6-luna` at 9.5% of the cost and *ahead* on both quality halves, once the page images the agent actually receives are attached (§4) |
 | `feedback` | 15.6% | **open** (#330) — five dispositions in one sprint, and the last two were a swap to `openai.gpt-5.6-luna` and its withdrawal by the seat that ran the round. On 45 pages the two arms tie on detection (40/45 against 39/45) and the cheap arm's extra rejections are mostly real. Total cost per page, including the correction pass a rejection triggers, favours the swap at **−44.9%** under the corrector now deployed (−50.9% under the Kimi that preceded it) and −1.3% under the incumbent one, so the price is not what leaves this open: an unbounded rate of invented defects and a verdict that rejects 44 of 45 clean pages, reproducibly on 32 of them, are (§4) |
 | `reader` | 9.3% | **declined** (#313) — 78% of the incumbent's own agreement floor at −77%, and §3 says what the 22% is |
@@ -249,6 +249,22 @@ against Kimi's $6.1201** and **0 pages lost against 2**. The reference deploymen
 first-pass acceptance comparison the recommendation was filed on re-ran at **McNemar p=0.6636**, a
 coin flip — so cost and robustness are the whole of what was acted on. The round, its six disagreeing
 quality axes and what the change costs are in **[docs/sprint-246.md](sprint-246.md) §2 and §3**.
+
+**What the applied swap does not buy is accessibility equivalence, and that is the exposure it adds.**
+Linted a page at a time with axe-core 4.11.4, luna is **one violation worse than Kimi over the same
+corpus** — 87 of 91 pages clean against 89 of 92 — and its four are its own: `definition-list` on
+`acir-p001` and `acir-p002`, `duplicate-id-active` on `acir-p053`, and an `aria-roles` **critical** on
+`acir-p080` ([#347](https://github.com/EqualifyEverything/equalify-iris/issues/347)). Worse, on the
+nine pages carrying a shaded map or a shading key, luna's pages **passed `page_verify_ok` clean while
+asserting legend categories the page never prints** — one delivered page says the map is shaded "in
+one of three patterns" where two swatches are printed. They passed because luna assigns no state to
+any legend entry: it says less, so there is less to fail, and a page nobody corrects is a page that
+cost less. Neither the −15.9% nor the acceptance comparison can see that. #347 finds defects on all
+three arms and no arm is uniformly better — luna is the only one that transcribes `acir-p077`'s
+printed legend heading — but this is the axis on which the swap is a loss. One more consequence worth
+pricing: after it, the pinned Sonnet checker is **63.8% of the page step's cost, against 51.8% under
+Kimi**, which makes the checker the largest single line item and is #365's target.
+
 Everything below this paragraph is the 11-page round, and it neither knew about that third model nor
 could have separated it.
 
@@ -1164,9 +1180,11 @@ set.
   pinned: **−15.9% and 0 lost pages against 2**, first-pass acceptance a coin flip (p=0.6636), and
   worse than Kimi on dot-leader encodings while better on the region subtotal rows §5 is about. The
   reference deployment moved to it on 2026-09-10 (#344,
-  [docs/sprint-246.md](sprint-246.md) §2). What a chart-and-image corpus would still settle is the
-  accessibility axis — and it is the same corpus that would make the specialist and `builder` rows
-  mean anything.
+  [docs/sprint-246.md](sprint-246.md) §2). **The accessibility axis is no longer unmeasured, and it is
+  where the swap loses**: linting each of the same pages alone puts luna one violation behind Kimi, and
+  on the nine map-and-key pages it passes clean by saying less about the legend (#347, §2). What a
+  chart-and-image corpus would still settle is how big that is — and it is the same corpus that would
+  make the specialist and `builder` rows mean anything.
 - **Re-derive the failed-spend figure after #300.** It is the one number here that is known wrong
   rather than merely old.
 - **`copy_editor` is 33.1% unswapped, 28.8% after the `page` swap, and its own swap is now

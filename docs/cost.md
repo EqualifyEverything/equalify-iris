@@ -10,7 +10,8 @@ anywhere in Iris's code, so each deployment decides what it pays ([models.md](mo
   accepts images.
 - **About 10.7¢ a page** for the suggested configuration — Sonnet 4.6 on every agent with GPT-5.6
   luna on `page`. That is the one setup benchmarked end to end, and the rest of this page is where
-  the number comes from.
+  the number comes from. A price is not the whole decision: [models.md §2](models.md) names what the
+  current page model costs on accessibility, which nothing in this document can show.
 
 **10.7¢ a page.** Measured 2026-09-02 over 100 scanned pages — round `runs-postswap-312`, total
 **$10.7106**. That is the configuration deployed on that date, priced end to end. The page model

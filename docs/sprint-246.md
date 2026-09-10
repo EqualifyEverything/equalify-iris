@@ -99,8 +99,8 @@ axis of #324.
 **"Worst on 4 of the first 7" is the post-correction count, which matters because two of those seven
 are the axes §9 records as having been mis-scored for this same model.** Two of the seat's detectors
 keyed on the tag immediately after `<p>`/`<li>` and so read `0` for a model that wraps inline content
-in `<em>`/`<strong>` — the shipped one. #344 publishes the census with "the corrected figures are the
-ones above", and both corrections went **against** the shipped model, so the 4 is the number after
+in `<em>`/`<strong>` — Kimi. #344 publishes the census with "the corrected figures are the
+ones above", and both corrections went **against** Kimi, so the 4 is the number after
 its two false zeros were removed, not before. A reader checking §2 against §9 should find those two
 axes already rescored.
 
@@ -112,7 +112,7 @@ page agent returning a **complete** envelope; what failed was the checker, whose
 was logged as an extraction failure. That is
 [#368](https://github.com/EqualifyEverything/equalify-iris/issues/368), fixed on main in `05d5982`,
 which names this same page. **Corrected: kimi 2, sonnet 0, luna 0** — so on this axis the arm not
-recommended is tied with the one that is, and the shipped model is alone in the column. Both of
+recommended is tied with the one that is, and Kimi is alone in the column. Both of
 kimi's survive the re-read as genuine page-agent failures (`acir-p050`, `acir-p086`). The same
 correction reclassifies sonnet's $0.5091 of failed spend from page-agent waste to **pinned-checker**
 waste, which is #365's finding arriving from the other direction.
