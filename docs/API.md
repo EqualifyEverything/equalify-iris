@@ -3334,7 +3334,13 @@ The merge is not a plain concatenation, because the halves do not
 always agree on what to concatenate: in the reference corpus two of 18 pairs declare a different
 column count from their own first half, 13 carry footnote-reference ids in the repeated header
 block that an endnote links back to, and a bracketed unit note ("[In millions of dollars]") is
-reprinted with the header and belongs in the joined table once.
+reprinted with the header and belongs in the joined table once. Those figures were read before
+`page.md` decided where the note goes: it now asks for the note inside the `<caption>`, so the shape
+the merge meets should shift from a repeated full-width row to a repeated caption, and rule 6's
+forgiveness of the promoted row should get rarer rather than staying at the rate measured here.
+Either way the note has to survive the merge exactly once — in the caption by `caption_note_lost`,
+`caption_note_struck` and `note_shipped_twice`, and as a row by `note_row_lost`, since the label and
+row checks read cells and forgive one dropped row and neither can see which row it was.
 
 Where one of those judgements is real the merge is a Copy Editor call (`copy_editor_table_join.md`
 in the agent ledger); where it is not — three of the editor's six rules are "move these bytes and
@@ -3388,7 +3394,15 @@ continued page is wider than the first half already is, so appending it would pu
 header block that does not describe them — reached where the continued page reprinted no header at
 all, which is the case the header comparison above cannot see), `note_repeat_unclear` (the
 continued page opens with a bracketed unit note the first half does not carry, so it is not the
-reprint rule 6 licenses dropping), `caption_unclear` / `no_caption_available` (the continuation
+reprint rule 6 licenses dropping — "carry" reads the first half's note ROWS **and** its caption,
+because `page.md` asks for the note in the `<caption>` and the two halves need not agree on where
+they print it; the reverse is not a repeat, since a note only the continued half carries is a first
+appearance), `note_repeats_exceed_licence` (the join would have to drop more bracketed note rows as
+repeats than the row floor forgives, which is the larger of rule 6's one row and the rows the joined
+**caption** accounts for and never their sum — so a join dropping two rows the caption carries ships
+free, and one dropping two the caption does not declines here rather than handing the verification a
+table it refuses as `rows_lost`; two shapes reach it, neither measured, and the long section below
+names them), `caption_unclear` / `no_caption_available` (the continuation
 marker is not wholly inside one text node, so taking it off means rewriting markup; or neither
 half has a caption, which the verification requires), `content_outside_table` (a half's span
 parses to something beside its own table — the parser fosters a stray `<p>` out of a `<table>` and
@@ -3515,10 +3529,257 @@ halves not to be one table, `no_output` for a reply with no HTML in it, `truncat
 and overflows on a body nested a few hundred thousand levels deep, which is reachable because
 `anchors.ts` delivers a page past 500 levels as written; the document then ships exactly as it
 arrived rather than failing the phase, the way the lint one step later reports its own overflow as
-`@lint-unavailable`), or one of the verification failures — `not_one_table`, `no_caption`,
-`still_continued`, `columns_lost`, `header_cells_lost` (the merged header block came back as
-`<td>`, which axe does not report and which would have removed the header association from the one
-table this stage exists to improve), `rows_lost`, `labels_lost:<n>`.
+`@lint-unavailable`), or one of the verification failures, in the order they are checked —
+`not_one_table`, `no_caption`, `still_continued`, `columns_lost`, `header_cells_lost` (the merged
+header block came back as `<td>`, which axe does not report and which would have removed the header
+association from the one table this stage exists to improve — counted over the cells that describe
+columns, so a bracketed note row printed inside the block is not one of them and carrying it into the
+caption as rule 6 asks costs nothing here), `rows_lost` (less the note rows the joined **caption**
+absorbed, for the same reason the label check has that exemption: a note promoted into the caption is
+content kept, and the row it stopped being is not a row lost — header-block rows excluded, since
+`rowFloor` nets those out already and forgiving them twice would buy a real data row's worth of slack, and
+counted in place of the one row `JOIN_DROPPABLE_ROWS` forgives rather than on top of it, since that row is
+rule 6's own repeat drop),
+`labels_lost:<n>` (a
+bracketed unit note the merge moved from a row into the caption counts as kept, because the label
+check reads `th,td` and would otherwise refuse the very drop rule 6 licenses), `caption_note_lost` (a
+note EITHER half's caption carried is in neither the joined caption nor a row some half printed),
+`caption_note_struck` (a note still in the table, as a row a half printed in the place it printed it,
+and missing only from the caption rule 4 says to **copy**), `note_shipped_twice` (the joined table
+holds one note in its caption **and** as a row) and `note_row_lost` (a note **neither** caption
+carried, printed by a half as a row, gone from the delivered table and not in the caption either —
+asked last, because every reason before it is keyed on a caption note and this is the pair that has
+none). All four are part of the table's name going missing or being said twice, and all four are
+invisible to every other check here, which read cells, columns and rows.
+
+Four reasons rather than one because a decline is all a run log has, and they send a reader to
+different places: whether a row survived at all, the caption the merge was told to copy, a note
+delivered in two places, or a note no caption ever carried and the delivered table dropped. They ask
+for the same one-sentence repair, so the split buys the log and not the model.
+
+`caption_note_lost` reads both halves' captions while rule 6's repeat set reads only the first
+half's, because those answer different questions: what the merge may **drop** is a repeat and not a
+first appearance, while what the joined caption must still **say** includes a note printed over the
+continued half. Keyed on the first half alone it was a silent loss on the free path — `joinInCode`
+keeps the first half's caption and discards the second's — and `p049`/`p050` are a measured pair of
+that shape. A refusal costs one editor call rather than the table: the pair goes on to the Copy
+Editor, whose rule 4 asks for the note either half's caption carries.
+
+Rule 6's repeat set also ignores the block, where `caption_note_lost` compares it, and that is the same
+distinction and not two readers disagreeing about one fact: whether the second half is printing the
+same note **again** turns on the note, which is the same note wherever the printer set it, while
+whether the merge **kept or moved** it turns on the place, because the place is the harm.
+
+A note counts as kept in the joined caption, or — where the caption that carried it is the one rule 4
+**discards**, which the paragraph after next is about — as a note row one of the halves **printed** as
+a row in that same part of the table, header block or body. Reading the caption alone refused the mirror of
+the pair rule 6 joins for free — the note a ROW on the first half and a caption note on the second,
+where the row survives the merge and nothing is lost. Reading any note row in the answer is the
+opposite hole: a note that arrived in a caption and left as a row has been demoted into the phantom
+row `page.md` forbids, `<thead>`-closing form included, and counting it as proof of keeping would
+clear exactly that. `joinInCode` never demotes, so the shape is the Copy Editor's — rule 6's "belongs
+once, at the top" can be read as licence for the row while rule 4 asks for the caption, and rule 6 now
+says so.
+
+Rule 6's condition for dropping the repeat row is the caption the editor is **writing**, not the half
+that printed the note. It used to read "where the first half already carries that note in its caption",
+which is false of the pair whose first half has no caption at all: rule 4 puts the note in the joined
+caption because the continued half's caption carried it, the first half's note row repeats it, and no
+sentence said to drop that row. Rules 4 and 6 together asked for the shape `note_shipped_twice` refuses
+— a refusal the prompt could not avoid, which is a permanent decline rather than a repair. Pinned in
+`test/table-continuation.test.ts`, both routes to the caption and the forbidden direction with them.
+
+The distinction is on the pair: each half records the bracketed note rows it printed — over every row
+and not over its labels, because a label list drops header rows and a note row printed inside
+`<thead>` is one, the `p068` shape the census counts — **and the block it printed each one in.** Both
+facts, because matching on the text alone failed the other way round, and on the pair the census makes
+likeliest: the note in the first half's caption (56 of the 77 arm-pages, the placement `page.md` asks
+for) and printed as a `<thead>` row by the second (1 of the 12 outside the caption). A merge that
+struck the caption note and delivered it as a `<tbody>` cell of data matched the second half's text
+and cleared — the same demotion, with the caption no longer naming the units and a reader moving by
+row meeting them as data.
+
+A row precedent excuses only one of the two captions, though, and reading it as excusing both left the
+same demotion clearing in the commoner spelling — the note in the first half's caption and printed as a
+**body** row by the second, which the block comparison cannot see because the delivered row and the
+printed row sit in the same block. Of the twelve notes printed outside a caption, seven are a `<th>` row
+and two a `<td>` row against two closing `<thead>`, so that is the likelier mixed pair of the two.
+
+The two shapes are mirror images and were being read as one. A note in the caption rule 4 **discards**
+goes with a duplicate caption being dropped whole, while the row stands in the half and the block that
+printed it: nothing moved, and that is the pair rule 6 joins for free — for free whether or not the first
+half has a caption of its own, which took a round to make true. A note in the caption the join is
+**built on** is different — the surviving caption has been edited, text struck out of the one caption
+rule 4 says to copy, and the other half having printed the same note as a row does not make that a move
+of nothing. So a note in the title caption is owed the joined caption and nothing else will do, and only
+a note the discarded caption carried may be answered by a row. The title caption is the first half's, or
+the second half's where the first has none, which is rule 4.
+
+That is **not** the same predicate `joinInCode` branches on, and stating the two as one would be the
+fourth comment on this check to claim an invariant it does not hold. The verification reads the
+caption's normalized **text**; `joinInCode` asks whether the caption **element** is there. They part
+over one shape — a first half whose `<caption>` holds markup and no text — where `joinInCode` keeps
+that empty caption and imports nothing, so the merged caption normalizes to `""` and `no_caption`
+answers the pair before any note check runs; on the editor's path, falling to the second half's caption
+is what rule 4 asks for anyway. No outcome turns on the difference.
+
+The lenient half is asked **first**, and that ordering is what makes each reason mean something. A note
+in neither the joined caption nor an excusable row is gone from the delivered table, which is
+`caption_note_lost`; `caption_note_struck` is then left saying the one thing the lenient half cannot
+refuse — the note is still in the table, as a row a half printed where it printed it, and missing only
+from the copied caption. That is the demotion, and nothing else reaches the line. Asked the other way
+round, the strict half answered first for every pair whose note simply vanished and reported a
+striking-out on pairs where nothing was struck.
+
+Which also makes the free path's reach here derivable rather than asserted. The only thing that can
+remove text from the copied title caption is the marker strip, and it eats a run introduced by `—`,
+`–`, `-` or `(` — so `caption_note_struck` on a code join would need the printed note to **contain**
+the continuation marker (`[In millions of dollars—Continued]`) and a half to have printed that same
+run as a row to get it past the lenient half. Absent that shape, the free path copies the caption
+verbatim minus the marker and every note in it survives by construction, so this reason is the
+editor's.
+
+Then the same doubling from the other side: a note the joined caption keeps **and** emits as a row.
+Rule 6 says drop the repeat and do not also copy it in under rule 1, and nothing here read that half of
+it — a printed row is only ever an **excuse** for a note missing from the caption, so a note row
+excusing nothing was never looked at. A reader moving by row still meets the units as a cell of data,
+which is the harm `page.md` names, with the caption merely also correct. No half's printing excuses it:
+the check is on the delivered table, because one note once is what both rule 6 and `page.md` ask for and
+a doubled note is the phantom row whichever page printed it.
+
+That last reason can refuse a **free** join, and what it may refuse there had to be narrowed to one
+shape nothing has measured: a half that printed the note in its caption **and** as a row of its own,
+which `joinInCode` carries through because it drops repeats and not a first appearance printed twice.
+That pair goes to the editor, whose rule 6 asks for exactly the table this wants, so the refusal is
+satisfiable rather than a dead end, and it is left unexempted on purpose — an exemption for "the page
+printed it twice" is a distinction drawn on no measured pair, since the census has the note in a caption
+on 56 arm-pages and outside one on 12, and never both on one page.
+
+What it must **not** refuse for free is the doubling the merge itself makes, and at first it did. Where
+the first half has no caption, the code path imports the second half's **with** its note (rule 4's
+`no_caption_available` exception) and used to keep the first half's note row beside it — both placements
+the census's measured ones, so a pair whose page printed the note once bought an editor call and shipped
+split wherever that call declined or failed. Fixed where it is made rather than by an exemption here:
+the imported caption now names the units, so the first half's row saying the same thing is the repeat
+rule 6 licenses dropping, and it is dropped there. Two limits on that drop, both in the code path so the
+reason can name them — a row carrying an **id** declines as `id_would_be_lost`, since where a footnote
+anchor belongs on the surviving markup is rule 2's reading for the editor; and more than one dropped
+repeat in one join declines as `note_repeats_exceed_licence`, because past that the verification would
+answer `rows_lost` — a reason about rows for a note the caption still carries.
+
+That second limit is asked the way the row floor asks it — the larger of rule 6's one row and the rows the
+finished **caption** accounts for, never their sum — because the two have to agree about the same table. A
+row whose note the caption carries is a note promoted rather than a row lost, and the row check forgives it
+by name (below), so counting it against the licence declines a pair this path's own verifier accepts: the
+one the two-drop bound used to refuse is ordinary, the first half printing the note as a row with no
+caption of its own, the second printing it in **both** places, so the import carries the note and two rows
+repeating it go — rule 6's own answer, refused for being it twice. Counting it as free on **top** is the
+opposite error and the worse one, because the pair then joins and comes back `rows_lost`: an editor paid
+for an answer the same floor refuses again, and then the halves ship split. Both readings were shipped, one
+commit apart, before the `max` that is neither.
+
+What the bound is left holding is the drop no caption accounts for — a repeat of a note the first half
+prints as a row while its caption does not — where each dropped row is just a row and declining here is
+`rows_lost` one editor call earlier. Two shapes get past it, neither measured: such a row dropped **twice**,
+which needs the **continued** half printing it twice itself, and **two distinct notes on one table**, which
+is 0 of the 769 tables in the round logs. Not the first half printing it twice — this bound counts drops, and
+a first-half duplicate is never one: with a caption of its own nothing in the first half's rows is removed,
+and without one the import carries the second's note, so every drop the removal makes is covered.
+The mixed pair above is not one of them either, though it is the pair the bound refused
+two commits ago and so the one a reader is likeliest to come looking for: where the first half has no
+caption of its own, that is the branch that imports the second's *with* its note, so every row the join then
+drops is covered by construction, and where it has one, the only row dropped is the second half's.
+The second shape is a genuine over-refusal rather than a decline in the right direction: a correct
+join of it exists — rule 6 to the letter, keep the first half's second note row, drop both of the second
+half's — and the floor refuses that answer too, since it licenses the caption's rows and one repeat, not
+two. So the pair ships split, from the code path and from the editor alike. Widening the floor to license a
+repeat per distinct note is the fix, and it is not worth doing against no measured pair.
+
+Both spellings of that repeat row are dropped, `<td>` and `<th>`, and that took `header_cells_lost`
+being asked on the right cells first. A bracketed note row inside the header block is **not** a header
+cell — `read`'s `headerCells` skips it whichever tag it used — because rule 6 tells the editor to carry
+that note into the caption once and print no row for it, so counting its `<th colspan>` made the check
+refuse the answer the prompt asks for. On the corpus's own ink: of the two phantom `<thead>` rows the
+census located, `p068` spells it `<td colspan="8">` and `p029` spells it `<th>`, and 6 of the 8 across
+every round log are `<th>`. Guarding the free path's drop instead — leaving a `<th>` note row in place
+so the reason came out as `note_shipped_twice` — treated this as the code path's problem, and it is not:
+the same count refused an **editor** answer that obeyed rule 6, where the price is not one call but both
+halves shipped split. What the count exists for survives, because a reply that flattened the real column
+headers to `<td>` still loses every one of them.
+
+And last, `note_row_lost`, for the note **neither** caption ever carried. Every reason above it is keyed
+on a caption note, so on a pair whose halves printed the note only as a row there was nothing to compare
+and the harm the placement rule exists to remove had nothing looking for it — on the census's 12
+outside-caption placements.
+
+What it adds is bounded by the block the row sat in. A note row in `<tbody>` is a data row whose **label**
+is the bracketed run, so deleting it was refused all along as `labels_lost:1` — or `rows_lost` where both
+halves printed it — and still is, because both are asked first. That order is right: an answer that
+dropped the note row and three state rows should report the four and not the one. So the case this reason
+is for is the row inside the **header block**, in either spelling, where `labels` skips it and `rowFloor`
+forgives it; the `<tbody>` case deserves the same name and does not get it. What narrowing `headerCells`
+changed is that `<th>` in `<thead>` stopped being caught as a lost header **cell** — the wrong name for
+it, and the only name it had. Asked last so the caption reasons keep the pairs that have a caption note
+to lose, and compared on the note's **text** and not its key: a note the merge moved from `<thead>` into
+`<tbody>` is a relocation, a different defect, and naming it a deletion would point the repair at rule 6
+instead of at `page.md`.
+
+The block decided **deletion**, and for one commit it also decided the answer `page.md` wants. Promotion
+into the caption — the note in the caption once, the rows it was printed as gone — was accepted for the
+header-block row and refused for the `<tbody>` one as `rows_lost`, because `rowFloor` nets header rows out
+through `headerDropped` while a `<tbody>` note row counts against a floor that forgives one row. The two
+answers differ in where the printed page put a row, which is nothing the merge chose and nothing a reader
+of the delivered table can see, and the refusal ships both halves split. Hence the exemption at the row
+check: the note rows the joined caption absorbed do not count as rows lost. An outright deletion is refused
+exactly as before under all three names, and a promotion that also drops a data row still reports one — as
+`rows_lost` now rather than `labels_lost:1`, since a row did go and the row check is asked first.
+
+Those absorbed rows **replace** `JOIN_DROPPABLE_ROWS` rather than adding to it, which took a round to see.
+That one row is there to forgive rule 6's repeat drop, so a note row the caption accounts for has already
+been paid for once, and granting both let a pair lose a real row on top: on the census's commonest pair —
+the note in the first half's `<caption>`, printed as a row by the second — a reply that dropped one
+unlabelled continuation line as well went from `rows_lost` to clean, and so did both promotion shapes. The
+label check cannot cover for it, because the row a lossy reply drops need not have a label; `rowFloor`'s
+own comment names those continuation lines as the loss it exists to catch. So the allowance is the larger
+of the two and never the sum: rule 6's one row where no caption absorbed anything, and otherwise exactly
+the rows it did absorb.
+
+What all of it compares is a note's text, the block it sits in, which caption owed it, and whether the
+delivered table holds it in two places at once — nothing finer. A note **moved** is invisible here,
+within one block or between them, and so is a `<td>` note row delivered as a `<th>` one: `page.md`
+forbids both spellings, but the note in them has not been lost and none of the reasons above is the
+right one to refuse a table over. That now holds for both spellings on every path through this stage,
+which it did not for one commit. Refusing the **editor's** answer ships both halves split, so a reason
+naming the wrong defect buys a split table and points the repair at the wrong rule.
+
+Both bracket widths are read, ASCII and fullwidth, and the parenthesised spelling is not — a check
+demanding every parenthesised run survive would demand the survival of `(continued`, which rule 4
+requires dropped. So a parenthesised note (6 of the 68 delimited notes in the reference corpus) and
+a note printed with no delimiter at all (3 arm-pages) can still go missing without this seeing it.
+
+The rest is stated as a property rather than a list of cases, because the list was written twice and
+was short both times: **a note the merge kept in any form this cannot see reads as a note lost.** It
+matches a run's exact characters and looks only in a caption or a note row, so a rewritten
+delimiter, a reworded note or a note moved elsewhere in the table all refuse. Each refusal is safe —
+the pair declines and both halves ship — and each costs a join that lost nothing, which is the
+reason the match is not loosened instead: a looser one would forgive the drops this exists to catch.
+
+It is a shape test and not a reading, so what it owes is every bracketed run in either caption and
+not only a note of measure. A caption carrying `[Sheet 2 of 3]` is owed too, and two captions
+carrying different runs — `[In millions of dollars]` against `[In thousands]` — can be satisfied by
+no joined caption that does not invent, so that pair declines for good and reports the loss rather
+than the units disagreement that actually happened. Left that way on purpose: every caption bracket
+in the reference corpus is a note of measure, so a reason for the disagreement would be a
+distinction drawn on no measured pair.
+
+The order is only which reason a failed pair reports, since every one of them refuses the join, and
+the four note reasons are last on purpose: a merge that dropped the note *and* lost rows should say
+`rows_lost`, because the note is the cheapest of these losses and would otherwise mask the dearest.
+Among the four the order is lost, then struck, then doubled, then `note_row_lost` — least specific
+first, as the paragraphs above set out, so that each reason names what actually happened to the note
+rather than the first condition that happens to hold. `note_row_lost` is last of all because it is
+the only one of the four keyed on a row rather than a caption, so it would otherwise answer for pairs
+whose captions can say something more exact about the same note.
 
 The document keeps **both halves byte for byte**, so every failure here delivers the output the
 pipeline had before this stage existed, which is what makes the merge safe to ask a model for at

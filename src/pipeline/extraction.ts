@@ -221,17 +221,26 @@ were never shown. Where your page opens in the middle of a sentence — or in th
 nothing more. Do not supply the words you judge came before it, do not recast the fragment into a
 sentence that reads whole, and do not leave it out because it reads broken: an invented half is
 content no reader can check against any page, and a dropped half is text no other page will emit.
-Keep the printing as it stands, hyphen included, where the page breaks a word at its edge. A word
+Keep the printing as it stands, hyphen included, where the page breaks a word at the edge of the
+SHEET and the half that finishes it is on a page you were not shown. A word
 the paper broke at the end of a LINE is the opposite case, and what tells them apart is what you can
 see: both halves of a line break are printed on your page, so a "condi-" ending one line with
 "tions" beginning the next is one word split to fit the column — write it whole, "conditions", and do
-not carry the break into the markup. A hyphen the word itself owns survives that join: "well-" above
-"being" is "well-being" and not "wellbeing", "public-" above "sector" is "public-sector". Where you
-cannot tell whose hyphen it is, keep it — a hyphen too many is a printing some page might have, and
+not carry the break into the markup. What decides it is whether both halves are in front of you, and
+never where on the sheet the text stops. A page set in two columns stops its text at the foot of the
+left column and takes it up again at the head of the right, so a "rela-" ending the left column and a
+"tive capacity" opening the right is a line break and not a page turn: both halves are on your page,
+and the word is "relative". A word stacked down a narrow column head is that same case seen sideways
+— "Con-" over "struc-" over "tion" is one word broken twice to fit the column, and the head is
+"Construction", with no <br> standing in for the lines it was printed on. A hyphen the word itself
+owns survives that join: "well-" above "being" is "well-being" and not "wellbeing", "public-" above
+"sector" is "public-sector". Where you cannot tell whose hyphen it is, keep it — a hyphen too many is
+a printing some page might have, and
 two words run into one is a word no page printed. Only a break whose other half is on a sheet you
-cannot see is kept as printed. The one thing to add is the fact itself, in the "log" field — that
-this page opens mid-sentence, or ends mid-sentence, with the few words at the edge quoted — because only a pass holding both halves can
-join them, and your log is what tells it there is a join to be made.
+cannot see is kept as printed: the sheet, not the column. The one thing to add is the fact itself, in
+the "log" field — that this page opens mid-sentence, or ends mid-sentence, with the few words at the
+edge quoted — because only a pass holding both halves can join them, and your log is what tells it
+there is a join to be made.
 
 A page with nothing on it is a page you can answer completely. Return "html" as an empty string and
 say in the "log" field that the page is blank — that is the whole answer, and it is a correct one:
@@ -651,7 +660,14 @@ Fourteen structures are easy to render as something that merely looks right, so 
   the page's doing, and one table out of forty wearing an <h2> is the sign the wrapper is yours. You
   are shown one page, so where the rest of the document is not in front of you, decide it on what this
   page prints — a title over a table is a caption, a heading that opens a section with a table inside
-  it is a heading — and say in the "log" field which you took it to be.
+  it is a heading — and say in the "log" field which you took it to be. The title is not always the
+  whole of what the page prints over a table: a note of measure set under it — "[In millions of
+  dollars]", "[Percentage distribution]", "[Per capita as a percent of U.S. average]" — is part of
+  that name too, and goes inside the same <caption> after the title, delimiters as printed. It is not
+  a row of the table. A <td> holding it invents a cell of data the page never printed, a <th> holding
+  it names a column that does not exist, and either way a reader moving by row or by column meets the
+  units as though they were data. It is what every figure under it is to be read in, so a table whose
+  name arrives without it hands a reader the numbers and nothing to read them in.
 - NUMBERS THE PAGE SHOWS: the numbers on a numbered list, or down the item column of a parts
   table, are content. Transcribe the sequence exactly and never tidy it: do not renumber to close
   a gap, and do not drop or alter a number that appears twice — a table that reads 1, 2, 5, 5, 6
