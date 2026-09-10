@@ -110,7 +110,7 @@ resolve.
 
 | agent | share of the bill, unswapped | status |
 |---|---|---|
-| `page` | **42.0%** | **two suggestions applied** — `moonshotai.kimi-k2.5` from 2026-09-02 (#312), −44.8% of the priced bill on 100 pages at a named content cost (`content_missing` on 42 pages against 15, §5); then **`us.openai.gpt-5.6-luna` from 2026-09-10** (#344, sprint-246.md §2), −15.9% of the page step again with 0 lost pages against 2, and 23.3% of subtotal rows dropped against Kimi's 34.9% — improved, not fixed, since Sonnet drops 9.6% and #324 is open on that. **Its loss is accessibility by count, not by severity**: one axe violation worse than Kimi over the same corpus (4 to 3), though Kimi's 3 are all `critical` and one of luna's 4 is; and it passes figure pages clean by saying less about the legend (#347, §2) |
+| `page` | **42.0%** | **two suggestions applied** — `moonshotai.kimi-k2.5` from 2026-09-02 (#312), −44.8% of the priced bill on 100 pages at a named content cost (`content_missing` on 42 pages against 15, §5); then **`us.openai.gpt-5.6-luna` from 2026-09-10** (#344, sprint-246.md §2), −15.9% of the page step again with 0 lost pages against 2, and 23.3% of subtotal rows dropped against Kimi's 34.9% — improved, not fixed, since Sonnet drops 9.6% and #324 is open on that. **Its loss is accessibility, and the axe count is not the firm part of it**: 4 violations to Kimi's 3, but Kimi's 3 are all `critical` to luna's 1, and 2 of luna's 4 are a mis-formed `<dl>` on pages that ask for one — a rule an arm scores 0 on by emitting no `<dl>` at all. What is not in doubt: it passes figure pages clean by saying less about the legend (#347, §2) |
 | `copy_editor` | **33.1%** | **swap recommended, not yet applied** (#329) — `openai.gpt-5.6-luna` at 9.5% of the cost and *ahead* on both quality halves, once the page images the agent actually receives are attached (§4) |
 | `feedback` | 15.6% | **open** (#330) — five dispositions in one sprint, and the last two were a swap to `openai.gpt-5.6-luna` and its withdrawal by the seat that ran the round. On 45 pages the two arms tie on detection (40/45 against 39/45) and the cheap arm's extra rejections are mostly real. Total cost per page, including the correction pass a rejection triggers, favours the swap at **−44.9%** under the corrector now deployed (−50.9% under the Kimi that preceded it) and −1.3% under the incumbent one, so the price is not what leaves this open: an unbounded rate of invented defects and a verdict that rejects 44 of 45 clean pages, reproducibly on 32 of them, are (§4) |
 | `reader` | 9.3% | **declined** (#313) — 78% of the incumbent's own agreement floor at −77%, and §3 says what the 22% is |
@@ -268,13 +268,24 @@ that class (`role="doc-footnotes"`, #345) against one of luna's four. Sonnet's 3
 the swap traded three criticals for one critical and three serious findings — one violation worse, one
 arm's worth of severity better. Neither number alone says that.
 
-**And Sonnet's 3 are the cost of doing the right thing**, which is the third reason not to rank arms by
-this count. All three are `definition-list` on legend pages (`p092`, `p093`, `p095`), and Sonnet fails
-there **because** it is the only arm that gave the legend the list structure `agents/page.md` asks for.
-Kimi emits no `<dl>` on any figure page; luna emits none either. An arm that skips the structure
-scores 0 on the rule that governs it.
+**And 5 of the 10 violations are the cost of attempting a structure**, which is the third reason not to
+rank arms by this count. All 5 are `definition-list`, and `definition-list` can only fire
+on a `<dl>` that exists, so an arm scores 0 on it by emitting no `<dl>` at all. Neither Kimi nor luna
+emits one on any figure page, which is why Sonnet's 3 — all `definition-list`, all on legend pages
+(`p092`, `p093`, `p095`) — are Sonnet's alone: it is the only arm that gave the legend the list
+structure `agents/page.md` asks for.
 
-**The finding that is worse than either reading of the axe count** is on the nine pages carrying a
+**That reading has to be applied to luna's two as well, and it moves the count in the deployed model's
+favour.** `acir-p001` and `acir-p002` are not figure pages: the cover printing `M — 16` and a date, and
+the commission-members page. `agents/page.md` asks for a `<dl>` on both. So luna emitted a `<dl>` there
+and mis-formed it — the same shape as Sonnet's, and the same credit. Discount all 5 and the standings
+are luna **2** (`duplicate-id-active` on `p053`, the `aria-roles` critical on `p080`), Kimi **3**,
+Sonnet **0** — the opposite order to the raw count above. **We are not publishing that as the
+headline**, because a mis-formed `<dl>` still reaches a reader as a broken list whatever it was
+attempting, and because the three cuts already disagree. Read the count as too crude to settle this axis
+in either direction, and the map-and-key finding below as the part that is not in doubt.
+
+**The finding that is worse than any reading of the axe count** is on the nine pages carrying a
 shaded map or a shading key, where luna's pages **passed `page_verify_ok` clean while asserting legend
 categories the page never prints** — one delivered page says the map is shaded "in
 one of three patterns" where two swatches are printed. They passed because luna assigns no state to
@@ -1201,9 +1212,10 @@ set.
   worse than Kimi on dot-leader encodings while better on the region subtotal rows §5 is about. The
   reference deployment moved to it on 2026-09-10 (#344,
   [docs/sprint-246.md](sprint-246.md) §2). **The accessibility axis is no longer unmeasured, and it is
-  where the swap loses on count**: linting each of the same pages alone puts luna one violation behind
-  Kimi, 4 to 3 — though Kimi's 3 are all `critical` and one of luna's 4 is, so severity runs the other
-  way — and on the nine map-and-key pages luna passes clean by saying less about the legend (#347, §2).
+  where the swap loses — but not on the count**: linting each of the same pages alone puts luna one
+  violation behind Kimi, 4 to 3, and every other cut of those 10 violations disagrees (severity, class,
+  and which of them are the cost of attempting a `<dl>` at all — §2). The part not in doubt is that on
+  the nine map-and-key pages luna passes clean by saying less about the legend (#347, §2).
   What a
   chart-and-image corpus would still settle is how big that is — and it is the same corpus that would
   make the specialist and `builder` rows mean anything.
