@@ -166,8 +166,7 @@ providers:
   per_agent: {}
   # Run the Feedback Agent (VERIFY/CLASSIFY/TRAIN) on a DIFFERENT or stronger model
   # than the page agent, so verification doesn't share the generator's blind spots
-  # (recommended) — which is why the `page:` line here routes rather than upgrades. An
-  # example naming one model on both would illustrate the pairing away.
+  # (recommended) — which is why no example below names the same model twice.
   # Every key below is an agent from the list above, and that is not cosmetic: an entry
   # naming anything else is IGNORED — the call falls through to the provider's own model,
   # so the swap does not happen. This block used to offer a `table:` line; there has never
@@ -179,7 +178,7 @@ providers:
   # the id belongs there: a Bedrock model id on an OpenRouter deployment fails on every call
   # of the run. Name both when you pin a model that was measured on the other provider.
   # per_agent:
-  #   page: bedrock                                 # one agent on the other provider, at ITS model
+  #   page: { provider: bedrock, model: us.openai.gpt-5.6-luna }   # the suggested page model, below
   #   copy_editor: { model: anthropic/claude-opus-4.7 }   # stronger model, same provider
   #   reader: { provider: bedrock, model: us.anthropic.claude-haiku-4-5-20251001-v1:0 }
   #   feedback: { model: anthropic/claude-opus-4.7 }
@@ -187,33 +186,58 @@ providers:
   # split across a page break — so they cannot be put on different models. Which model is
   # worth putting on which agent, with the prices each was measured at: docs/models.md.
 
-  # WHICH MODEL. Both provider blocks below name Sonnet 4.6, because it is the model
-  # every number this project publishes about a WHOLE RUN was measured on. The reference
-  # deployment has served every capability with it for as long as there is a record — its
-  # own config notes the earlier move off Opus 4.7 as a latency change — so the per-page
-  # cost figures and the quality baseline are all Sonnet's. Cheaper models HAVE been
-  # measured per agent, though not evenly — seven arms on `page`, four on `reader`, none
-  # on the other three. One swap measured no net loss (`page`) and one is a priced trade
-  # (`reader`, 78% of the incumbent's own agreement floor for −77%): which model to put
-  # on which agent, and what each is worth, is docs/models.md.
+  # WHICH MODELS TO RUN. Iris has no model defaults — nothing in its code names a model, so
+  # what a deployment writes here is the whole answer. Two starting points, both real:
   #
-  # That matters past tidiness because `max_tokens` below is OUR setting and not the
-  # model's: how often a dense page overruns that ceiling, and the shrink floor and
-  # section headroom that decide what happens when one does, were all sized against
-  # how this model behaves at it. A stronger model is a supported choice costing no
-  # code change (see per_agent above) — it is just not one those thresholds were
-  # tuned for. It also moves the long edge `GET /v1/limits` and the upload hint
-  # PUBLISH, since that number follows the model generation (see image_limits below).
-  # Only what is published: the long edge is advice about downscaling and rejects
-  # nothing, and the two limits an upload is actually refused by do not follow the
-  # model at all.
+  # **$0 — self-hosted.** Point the `openrouter` block's `base_url` below at a local ollama /
+  # vLLM / llama.cpp server and set `default_model` to what it serves. That adapter — not the
+  # bedrock one — is the OpenAI-compatible one, so it is the block to reuse. Iris speaks
+  # `POST /chat/completions`, so nothing else changes and there is no per-token bill. The
+  # agents that read page images need a model that accepts images. No round has measured this
+  # path: it costs nothing and promises nothing.
   #
-  # Checked against the deployment 2026-08-26.
+  # **The suggested setup — Sonnet 4.6 everywhere, GPT-5.6 luna on `page`:**
+  #
+  #   providers:
+  #     default: bedrock
+  #     per_agent:
+  #       page: { provider: bedrock, model: us.openai.gpt-5.6-luna }
+  #
+  # This is the one configuration with whole-run numbers behind it: 100 scanned pages end to
+  # end, priced per step, in docs/cost.md — about **10.7¢ a page** (that round ran the previous
+  # page model, so today's is slightly cheaper and has not been re-priced end to end). It is
+  # what the reference deployment runs. Two things about the `page` line: luna cost 15.9% less
+  # than the Kimi K2.5 it replaced on the same 100 pages and lost 0 pages where Kimi lost 2,
+  # and the `us.` prefix is required — that model is inference-profile-only on Bedrock and
+  # cannot be invoked under its bare id.
+  #
+  # Both provider blocks below name Sonnet 4.6 because every whole-run figure was measured on
+  # it, and because `max_tokens` below is OUR setting and not the model's: how often a dense
+  # page overruns that ceiling, and the shrink floor and section headroom that decide what
+  # happens when one does, were sized against how Sonnet behaves at it. Another model is a
+  # supported choice costing no code change (see per_agent above) — it is just not one those
+  # thresholds were tuned for. It also moves the long edge `GET /v1/limits` and the upload hint
+  # publish, since that number follows the model generation (see image_limits below). Only what
+  # is published: the long edge is advice about downscaling and rejects nothing, and the two
+  # limits an upload is actually refused by do not follow the model at all.
+  #
+  # Cheaper models have been measured per agent, unevenly — seven arms on `page`, four on
+  # `reader`, none on the other three. docs/models.md has every measurement and what each model
+  # is worth on which agent.
+  #
+  # Checked against the deployment 2026-09-10.
 
   # OpenRouter model IDs are `vendor/model` slugs (dot-versioned). Full list:
   # https://openrouter.ai/models
   openrouter:
     api_key: ${OPENROUTER_API_KEY}
+    # Any OpenAI-compatible endpoint works here, which is the $0 path above: give a local
+    # server its own URL and whatever model it serves. Keep this block's NAME — `openrouter`
+    # and `bedrock` are the only two names Iris can build a provider for — and keep `api_key`
+    # set to something non-empty, since startup refuses an empty one whether the endpoint
+    # checks it or not.
+    #   base_url: http://localhost:11434/v1        # ollama
+    #   default_model: qwen2.5-vl:7b               # must accept images for the page agent
     base_url: https://openrouter.ai/api/v1
     default_model: anthropic/claude-sonnet-4.6
     # Output-token ceiling per call. A dense page (a full-page table or form) is

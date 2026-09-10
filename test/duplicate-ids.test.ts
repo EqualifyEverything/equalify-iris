@@ -10,8 +10,10 @@
 //
 // Measured before it was built, over every page reply on disk (1,501 fragments, 1,421 carrying an
 // id, no model call): 2 duplicate an id within themselves, both footnotes — `fnref-1` twice on
-// `gpt-5.6-luna`, `numbering-note-1`/`-2` on `nova-2-lite` — and 0 of 328 on the deployed page model
-// `kimi-k2.5`. So the rule fires on roughly one page in 750 and on none at all today, which is why
+// `gpt-5.6-luna`, `numbering-note-1`/`-2` on `nova-2-lite` — and 0 of 328 on `kimi-k2.5`, the page
+// model deployed when this was measured. #344 has since moved `page` to `gpt-5.6-luna` (2026-09-10),
+// so the arm that produced a hit is the one now running. The rule fires on roughly one page in 750,
+// which is why
 // the tests below spend most of their length on the half that carries information: what must NOT be
 // flagged, and the zero printing with a denominator so a reader can tell "no page duplicated an id"
 // from "the check never ran".
@@ -351,8 +353,9 @@ test("a page that fails its check AND duplicates an id is one correction, trigge
 test("a run whose ids are all unique reports the zero with its denominator", async () => {
   await withTemp(async (dir) => {
     const events: Event[] = [];
-    // The instrument this rule needs most, because it fires on nothing the deployed model writes:
-    // 0 of 328 page replies on `kimi-k2.5`. A field appearing only when it fires cannot tell "no
+    // The instrument this rule needs most, because it fires on almost nothing: 2 hits in 1,501 page
+    // replies, 0 of the 328 on `kimi-k2.5` and one of the two on the `gpt-5.6-luna` deployed since
+    // #344. A field appearing only when it fires cannot tell "no
     // page duplicated an id" from "this run predates the check", and `ids_checked` is what makes
     // the zero a measurement rather than a silence.
     //

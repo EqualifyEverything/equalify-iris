@@ -345,11 +345,13 @@ export interface Diagnostics {
     // call with no verify failure behind it, so a consumer reading `verify_failed` as the number of
     // extra page calls undercounts by all four.
     //
-    // `alt` and `ids` are both expected to be 0 on a healthy run, and that is the point of
-    // counting them: the alt rule flags nothing in Iris's own output (0 of 1,064 alts across the
-    // bench corpus) and the id rule flags 2 of 1,501 page replies, none of them from the model
-    // deployed today, so a non-zero is either a page agent that has started writing placeholders
-    // or reusing ids, or a regression in one of the rules. Neither is a cost line at that rate.
+    // `alt` and `ids` are both expected to be 0 on most runs, and that is the point of counting
+    // them: the alt rule flags nothing in Iris's own output (0 of 1,064 alts across the bench
+    // corpus) and the id rule flags 2 of 1,501 page replies — about one page in 750. One of those
+    // two is `fnref-1` twice on `gpt-5.6-luna`, which #344 made the deployed page model on
+    // 2026-09-10, so a single non-zero `ids` is now the measured rate rather than a signal. Several
+    // is the signal: a page agent that has started writing placeholders or reusing ids, or a
+    // regression in one of the rules. Neither is a cost line at that rate.
     //
     // `words` is the one of the four that is expected to be NON-zero, and it is therefore the one
     // with a cost line. On #334's 100-page census the shipped model wrote one word two ways on 4

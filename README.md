@@ -277,9 +277,10 @@ Full copy-pasteable bash/curl walkthrough of every endpoint: **[docs/API.md](doc
 To prove the endpoints work end-to-end (mock GitHub + mock model, no credentials needed):
 `./test/e2e.sh`.
 
-Which model to run each agent on and what each one costs: **[docs/models.md](docs/models.md)**. What
-the whole pipeline costs a page — **10.7 cents, broken down by step**:
-**[docs/cost.md](docs/cost.md)**. How it got there — **19.4 cents when the model-selection sprint
+Which model to run each agent on and what each one costs: **[docs/models.md](docs/models.md)**. No
+model is named in Iris's code, so the price is a config choice: **nothing per token against a
+self-hosted open-weight model, or about 10.7 cents a page for the suggested setup, which is the one
+benchmarked end to end.** Broken down by step: **[docs/cost.md](docs/cost.md)**. How it got there — **19.4 cents when the model-selection sprint
 started, 10.7 measured after two lines of config and no code change** — with the recommended approach
 for every step and the evidence under each one:
 **[docs/sprint-246.md](docs/sprint-246.md)**.

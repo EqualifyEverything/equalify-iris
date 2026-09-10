@@ -12,10 +12,12 @@ import { decodeEntities } from "../util/html.ts";
 //
 // It also fires where the soft-hyphen strip does not. `stripSoftHyphens` covers the INVISIBLE break
 // (U+00AD), which on #334's 100-page three-arm census is 63 occurrences on 9 pages from one arm and
-// **zero from the model Iris ships**. This check's own column on that census — the self-contradiction
-// column, one word written both ways on one page, which is the predicate implemented below and not
-// the wider "retained visible hyphen" count beside it — is non-zero on all three arms:
-// `kimi-k2.5` (shipped) 6 words on 4 pages, `claude-sonnet-4-6` 3 on 3, `gpt-5.6-luna` 2 on 2. Same
+// **zero from `kimi-k2.5`** — the page model of the day. (`gpt-5.6-luna` has been the deployed one
+// since 2026-09-10, #344, and that census's soft-hyphen count for it is not quoted here.) This
+// check's own column on that census — the self-contradiction column, one word written both ways on
+// one page, which is the predicate implemented below and not the wider "retained visible hyphen"
+// count beside it — is non-zero on all three arms:
+// `kimi-k2.5` 6 words on 4 pages, `claude-sonnet-4-6` 3 on 3, `gpt-5.6-luna` 2 on 2. Same
 // clause of `agents/page.md`, and unlike the strip, no arm is clean on it:
 //
 // > a "condi-" ending one line with "tions" beginning the next is one word split to fit the column

@@ -771,8 +771,8 @@ in code because renaming one end of the pair is how this defect gets worse: `hre
 reaches the first copy, and a rename that leaves the reference behind turns a wrong target into a
 dangling one — and only the agent that wrote the page knows which sentence meant which note.
 Measured over every page reply in 32 bench run directories (1,501 fragments, 1,421 of them carrying
-an id), 2 duplicate an id within themselves, both of them footnote ids, and 0 of the 328 written by
-the model deployed today (issue #373).
+an id), 2 duplicate an id within themselves, both of them footnote ids — one of the two on
+`gpt-5.6-luna`, which has been the deployed page model since 2026-09-10 (issues #373 and #344).
 
 Recovering a link never costs a page its structure, and neither does replacing a placeholder or
 renumbering an id. When a page passed its fidelity check and is re-rendered only to attach a link,
@@ -2178,8 +2178,8 @@ across those fragments carry a usable `id`, and how many of those ids are used m
 pages sharing an id is not a defect at this point, since `namespaceAnchors` prefixes each page at
 assembly, and pooling the document's ids into one set would report that fix as a failure once per
 page. Present at zero on every run, and it matters more here than for the alts: this rule fires on
-2 of 1,501 measured page replies and on none at all from the model deployed today, so a field that
-appeared only when it fired would be indistinguishable from the check not running.
+2 of 1,501 measured page replies, one of them on the model deployed today, so a field that appeared
+only when it fired would be indistinguishable from the check not running.
 
 Read off the parsed tree, so markup the HTML parser discards — an orphan `<td>`, anything inside a
 comment — owns no id: an over-collected id would be a phantom duplicate, and on this path that
@@ -2496,12 +2496,12 @@ second arm and not the image. So it is free and exact on the same terms as a dro
 
 It also fires where the strip does not, and on **every** arm rather than one. On #334's 100-page
 three-arm census the soft-hyphen column is 63 occurrences on 9 pages from `claude-sonnet-4-6` and
-zero from the model Iris ships; this check's own column there — one word written both ways on one
-page, the predicate above, not the wider count of retained visible hyphens beside it — is
-`kimi-k2.5` (shipped) **6 words on 4 pages**, `claude-sonnet-4-6` 3 on 3, `gpt-5.6-luna` 2 on 2.
+zero from `kimi-k2.5`, the page model of the day; this check's own column there — one word written
+both ways on one page, the predicate above, not the wider count of retained visible hyphens beside it
+— is `kimi-k2.5` **6 words on 4 pages**, `claude-sonnet-4-6` 3 on 3, `gpt-5.6-luna` 2 on 2.
 
 The problem it raises does **not** say which spelling to keep, and that is deliberate to a degree
-the census measures: three of the shipped model's six are `inter-state` and `non-farm`, forms a 1962
+the census measures: three of Kimi's six are `inter-state` and `non-farm`, forms a 1962
 report genuinely prints, so on half the measured cases the hyphen is right and the joined spelling
 is the defect. "Join them" would have been the wrong instruction there, and on a page that
 legitimately prints both forms it is how a defect gets introduced. Only the agent holding the image
@@ -5692,10 +5692,12 @@ re-rendered too when the code finds a link the model dropped, and that costs the
 and lost a link, `alt` a page that passed and described an image with a placeholder (#290), `ids` a page
 that passed and used one `id` on two elements (#373), `words` a page that passed and wrote one word two
 ways (#334), `both` one with more than one of those. `alt` and
-`ids` are both expected to be 0 on a healthy run, and that is the point of counting them: the alt rule
-flags nothing this pipeline writes and the id rule flags 2 of 1,501 measured page replies, none of them
-from the model deployed today, so a non-zero is either a page agent that has started writing
-placeholders or reusing ids, or a regression in one of the rules. `words` is the one of the four
+`ids` are both expected to be 0 on most runs, and that is the point of counting them: the alt rule
+flags nothing this pipeline writes, and the id rule flags 2 of 1,501 measured page replies — about one
+page in 750. One of those two is `fnref-1` written twice by `gpt-5.6-luna`, the page model deployed
+since 2026-09-10 (#344), so one non-zero `ids` is the measured rate rather than a finding. Several is
+the finding: a page agent that has started writing placeholders or reusing ids, or a regression in one
+of the rules. `words` is the one of the four
 expected to be **non-zero**, and so the one with a cost line: on #334's 100-page census the shipped
 model wrote one word two ways on 4 pages of the 91 it produced, and no arm was clean, so this trigger
 buys a page call for a page that had already passed at a rate near 4%. It is the first field to read
