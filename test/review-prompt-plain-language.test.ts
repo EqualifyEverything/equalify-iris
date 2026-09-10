@@ -35,10 +35,45 @@ const CI_DOC = join(ROOT, "docs", "ci.md");
 // code under a prose rule.
 const BOUND_FILES = ["`README.md`", "`agents/`", "`config.example.yaml`", "`docs/`"];
 
+// The same set without its backticks, for the one place that has to recognise a path written as
+// plain prose.
+const BOUND_BARE = BOUND_FILES.map((s) => s.replaceAll("`", "")).sort();
+
 // Every inline code span, sorted, deduplicated. Both lists are prose, so this reads what a
 // contributor reads rather than a structure neither file has.
 function codeSpans(text: string): string[] {
   return [...new Set(text.match(/`[^`\n]+`/g) ?? [])].sort();
+}
+
+// A file or a directory, however it is spelled. `docs/ci.md` matches as a file and not also as a
+// directory, because the lookahead requires the slash to end the token.
+const PATH_RE = /\b[A-Za-z0-9_.-]+\.(?:md|ya?ml|ts|tsx|json|sh|mjs)\b|\b[a-z0-9_.-]+\/(?![/\w])/g;
+
+// Path-like tokens that are NOT inside a code span, minus CONTRIBUTING.md itself.
+//
+// This exists because every assertion below compares CODE SPANS, and a path written without
+// backticks is invisible to all of them: a fifth path added as prose leaves a four-span list that
+// `deepEqual` still accepts, while the reviewer reads the sentence and enforces five. So rather than
+// teach each comparison to read prose — which would then have to tell a scope member apart from a
+// mention — every one of these regions is required to keep its paths in backticks, and a bare one
+// fails with a message saying to backtick it.
+//
+// CONTRIBUTING.md is excluded by name: it is the authority these regions cite, it is never a member
+// of the set, and the citation is what makes the scope traceable.
+function barePaths(text: string): string[] {
+  const outsideSpans = text.replace(/`[^`\n]+`/g, " ");
+  const hits = [...new Set(outsideSpans.match(PATH_RE) ?? [])];
+  return hits.filter((t) => t !== "CONTRIBUTING.md").sort();
+}
+
+// Assert a region keeps its paths where the code-span comparisons can see them.
+function assertNoBarePaths(region: string, where: string): void {
+  assert.deepEqual(
+    barePaths(region),
+    [],
+    `${where} spells every path as an inline code span. A bare path is invisible to the set ` +
+      `comparison in this test, so a widening written as prose would pass — backtick it:\n${region}`,
+  );
 }
 
 function reviewPrompt(): string {
@@ -101,6 +136,7 @@ test("the reviewer's docs-prose rule is scoped to the files CONTRIBUTING.md bind
     `the docs-prose bullet's file set matches BOUND_FILES exactly. If this widening is intended, ` +
       `edit BOUND_FILES and CONTRIBUTING.md's Documentation section in the same commit:\n${prose}`,
   );
+  assertNoBarePaths(prose, "the prompt's docs-prose bullet");
   // Without a quotable anchor the finding is unfalsifiable, and an unfalsifiable style note is the
   // thing the rule below exists to keep out of reviews.
   assert.match(
@@ -146,6 +182,7 @@ test("CONTRIBUTING.md's Documentation section binds the same files the prompt do
       `section as the authority, so a path added here widens what the reviewer enforces — which is ` +
       `a change to make deliberately, in the same commit as BOUND_FILES and the prompt:\n${binding}`,
   );
+  assertNoBarePaths(binding, "CONTRIBUTING.md's Documentation section");
 });
 
 // The fourth place a reader meets this scope, and the one a contributor is likeliest to read: the
@@ -155,11 +192,25 @@ test("CONTRIBUTING.md's Documentation section binds the same files the prompt do
 // updating three of them leaves this bullet promising the old, narrower scope.
 test("CONTRIBUTING.md's automated-review bullet does not keep its own copy of the scope", () => {
   const item = bullet(readFileSync(CONTRIBUTING, "utf8"), "One exception: docs prose");
-  const paths = codeSpans(item).filter((s) => s.includes("/") || s.includes("."));
+  // Backticked or not, unlike every other assertion here. This is the one that accepts an EMPTY
+  // result, so reading only code spans would pass on exactly the shape it guards: a list re-added as
+  // prose — "if your PR touches README.md, docs/, config.example.yaml or agents/" — yields no spans
+  // at all. The others compare four spans for equality and fail when a path loses its backticks.
+  const paths = [...new Set([...(item.replaceAll("`", "").match(PATH_RE) ?? [])])]
+    .filter((t) => t !== "CONTRIBUTING.md")
+    .sort();
   assert.ok(
-    paths.length === 0 || JSON.stringify(paths) === JSON.stringify(BOUND_FILES),
+    paths.length === 0 || JSON.stringify(paths) === JSON.stringify(BOUND_BARE),
     `this bullet either names no files or names all of BOUND_FILES. It names ${paths.join(", ")}, ` +
       `which is a partial copy of the scope — the shape that goes stale when the set widens:\n${item}`,
+  );
+  // Naming no files is only safe while the bullet says where the list does live. Without this, the
+  // pointer could be deleted and the assertion above would still pass on a bullet that promises a
+  // scope check and names no scope at all.
+  assert.match(
+    item,
+    /\(#documentation\)/,
+    `and it links the Documentation section, which is where the list it does not repeat lives:\n${item}`,
   );
 });
 
@@ -181,4 +232,5 @@ test("docs/ci.md describes the same scope it documents", () => {
     `docs/ci.md's step 4 names exactly BOUND_FILES. This is the copy a deployer reads, so a path ` +
       `here that the prompt does not enforce is a promise nothing keeps:\n${step}`,
   );
+  assertNoBarePaths(step, "docs/ci.md's step 4");
 });

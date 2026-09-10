@@ -128,9 +128,9 @@ Your PR gets a review from Claude in CI before a maintainer reads it
   bug in the prompt — say so on the PR.
 - **One exception: docs prose.** On a PR touching the files the [Documentation](#documentation)
   section covers, it checks prose against those rules — quoting the sentence, naming the rule, three
-  at most, always as a non-blocking note. The list of files lives in that section only, so this
-  bullet cannot fall out of date with it. Not in scope even there: heading style, line length,
-  Markdown layout, or wording it would have chosen differently.
+  at most, always as a non-blocking note. The list of files lives in that section, not in this
+  bullet, so this bullet cannot fall out of date with it. Not in scope even there: heading style,
+  line length, Markdown layout, or wording it would have chosen differently.
 - **`### Non-blocking notes` means "merge-ready".** A finding only blocks if something reaches it
   on input the code accepts today; real-but-unreachable findings are notes on an *approval*. You
   don't have to resolve them to merge, and you don't have to argue your way out of them.
