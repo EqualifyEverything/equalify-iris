@@ -271,9 +271,9 @@ arm's worth of severity better. Neither number alone says that.
 **And 5 of the 10 violations are the cost of attempting a structure**, which is the third reason not to
 rank arms by this count. All 5 are `definition-list`, and `definition-list` can only fire
 on a `<dl>` that exists, so an arm scores 0 on it by emitting no `<dl>` at all. Neither Kimi nor luna
-emits one on any figure page, which is why Sonnet's 3 — all `definition-list`, all on legend pages
-(`p092`, `p093`, `p095`) — are Sonnet's alone: it is the only arm that gave the legend the list
-structure `agents/page.md` asks for.
+emits one on any figure page, which is why Sonnet's 3 land where they do — all `definition-list`, on
+three legend pages no other arm fails (`p092`, `p093`, `p095`): it is the only arm that gave the legend
+the list structure `agents/page.md` asks for.
 
 **That reading has to be applied to luna's two as well, and it moves the count in the deployed model's
 favour.** `acir-p001` and `acir-p002` are not figure pages: the cover printing `M — 16` and a date, and
@@ -282,8 +282,9 @@ and mis-formed it — the same shape as Sonnet's, and the same credit. Discount 
 are luna **2** (`duplicate-id-active` on `p053`, the `aria-roles` critical on `p080`), Kimi **3**,
 Sonnet **0** — the opposite order to the raw count above. **We are not publishing that as the
 headline**, because a mis-formed `<dl>` still reaches a reader as a broken list whatever it was
-attempting, and because the three cuts already disagree. Read the count as too crude to settle this axis
-in either direction, and the map-and-key finding below as the part that is not in doubt.
+attempting, and because two of the three cuts reverse the raw order while the class cut only softens it.
+Read the count as too crude to settle this axis in either direction, and the map-and-key finding below as
+the part that is not in doubt.
 
 **The finding that is worse than any reading of the axe count** is on the nine pages carrying a
 shaded map or a shading key, where luna's pages **passed `page_verify_ok` clean while asserting legend
@@ -1213,8 +1214,9 @@ set.
   reference deployment moved to it on 2026-09-10 (#344,
   [docs/sprint-246.md](sprint-246.md) §2). **The accessibility axis is no longer unmeasured, and it is
   where the swap loses — but not on the count**: linting each of the same pages alone puts luna one
-  violation behind Kimi, 4 to 3, and every other cut of those 10 violations disagrees (severity, class,
-  and which of them are the cost of attempting a `<dl>` at all — §2). The part not in doubt is that on
+  violation behind Kimi, 4 to 3, and two other cuts of those 10 violations **reverse** that order —
+  severity, and which of them are the cost of attempting a `<dl>` at all — while a third, by class, only
+  softens it (§2). The part not in doubt is that on
   the nine map-and-key pages luna passes clean by saying less about the legend (#347, §2).
   What a
   chart-and-image corpus would still settle is how big that is — and it is the same corpus that would
