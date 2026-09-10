@@ -1371,8 +1371,27 @@ test("the page agent's image rule keeps the clauses that make it a rule", () => 
     // Reader Agent never sees the sheet. Which leaves the prompt, as with #432 and #447.
     ["ruling a cover informative is not finished until the image is emitted",
       /That description only exists where there is an <img> to hang it on, so ruling a cover informative is only half the answer: emit the graphic as well/],
+    // The enumeration is keyed on the DESIGN and not on the page's role, because the role is what
+    // the measured counter-case shares: on the same document `acir-p003` is the title page, the
+    // cover's words set in plain capitals on white, and all three arms emit no <img> there and all
+    // three are RIGHT — the appearance carries nothing the transcription does not. A list reading
+    // "a cover, a title page, a designed divider" makes three arms wrong on that page and asks a
+    // model to describe black type on white, which is where an unspecified case turns into
+    // invention. So "a title page" is pinned only in its qualified form, and the plain one is
+    // pinned to the bound at the end of the paragraph.
     ["a page whose design is the content is an <img> carrying the appearance, beside the transcription",
-      /A page whose design IS the content — a cover, a title page, a designed divider — is emitted as an <img> whose alt carries the appearance, beside the <h1> and <p> elements that transcribe the words printed on it/],
+      /A page whose design IS the content — a cover, a designed divider, a title page set as a design rather than as type — is emitted as an <img> whose alt carries the appearance, beside the <h1> and <p> elements that transcribe the words printed on it/],
+    // "Beside" is the whole of the structural instruction, and the one arm that DID emit the cover
+    // read it as containment: the entire page went inside a <figure> with the document's <h1> inside
+    // the <figcaption>. That is a worse document than the omission in one respect — the title of the
+    // publication is no longer a heading — so the word is spelled out rather than left to carry it.
+    ["the transcription sits beside the image and not inside a caption of it",
+      /Beside them and not around them: the transcription is the page's own content, so a <figcaption> holding the page's <h1> makes the document's title the caption of a picture/],
+    // The doubling this paragraph itself creates: the same arm's alt was 422 characters reproducing
+    // every printed word, beside a figcaption repeating them, and its `page_correction_recheck` came
+    // back ok: true — so nothing downstream refuses it. Three surfaces, one of them the words'.
+    ["the words are transcribed once, and neither the alt nor a caption repeats them",
+      /its words can arrive three times over — in the alt, in a caption, and in the transcription — so the transcription keeps them and the other two carry none of them/],
     ["and it takes the same named placeholder src and log line a logo takes",
       /with a placeholder src naming the page and the graphic \(src="page-1-cover\.png"\) recorded in the "log" field exactly as a logo's is/],
     // Why this one is worth spelling out rather than leaving to the imperative: the words are all
@@ -1384,6 +1403,12 @@ test("the page agent's image rule keeps the clauses that make it a rule", () => 
     // out with any care at all — 92 of them on the document above.
     ["a page of words in ordinary type is text and carries no image",
       /a page of words set in ordinary type is text however carefully it is laid out, and carries no <img>/],
+    // Named concretely, because the abstract bound above did not reach the case that produced it:
+    // the counter-case is a title page carrying the SAME WORDS as a cover that does owe an image, in
+    // the same document, and "ordinary type" alone leaves a model to decide whether a title page is
+    // ever ordinary.
+    ["and a plainly set title page is that page and not a second cover",
+      /a title page printing the cover's own words in plain capitals on white is that page, not a second cover/],
     ["a heading beside an image does not make it decorative",
       /Sitting beside a heading that names the section does not make an image decorative/],
     ["an image that is hard to describe is described as far as it can be, and logged",
