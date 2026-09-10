@@ -253,11 +253,21 @@ test("CONTRIBUTING.md's automated-review bullet does not keep its own copy of th
   const paths = [...new Set([...(item.replaceAll("`", "").match(PATH_RE) ?? [])])]
     .filter((t) => t !== "CONTRIBUTING.md")
     .sort();
-  assert.ok(
-    paths.length === 0 || JSON.stringify(paths) === JSON.stringify(BOUND_BARE),
-    `this bullet either names no files or names all of BOUND_FILES. It names ${paths.join(", ")}, ` +
-      `which is a partial copy of the scope — the shape that goes stale when the set widens:\n${item}`,
-  );
+  if (paths.length > 0 && JSON.stringify(paths) !== JSON.stringify(BOUND_BARE)) {
+    // Two different failures, and calling both "a partial copy" sends a reader hunting for a missing
+    // member that is right there. "README.md, docs/, config.example.yaml or agents" names every bound
+    // path and spells one of them without its trailing slash; the set is complete and the spelling is
+    // what fails.
+    const names = (xs: string[]): string => JSON.stringify(xs.map((x) => x.replace(/\/$/, "")).sort());
+    assert.fail(
+      names(paths) === names(BOUND_BARE)
+        ? `this bullet names every bound path but spells at least one without its trailing slash ` +
+            `(${paths.join(", ")} against ${BOUND_BARE.join(", ")}). Nothing is missing — add the ` +
+            `slash, which is how the other three copies of this set are written:\n${item}`
+        : `this bullet either names no files or names all of BOUND_FILES. It names ${paths.join(", ")}, ` +
+            `which is a partial copy of the scope — the shape that goes stale when the set widens:\n${item}`,
+    );
+  }
   // Naming no files is only safe while the bullet says where the list does live. Without this, the
   // pointer could be deleted and the assertion above would still pass on a bullet that promises a
   // scope check and names no scope at all.
@@ -283,10 +293,14 @@ test("docs/ci.md describes the same scope it documents", () => {
 // regex, so it is checked here rather than asserted in a comment — a comment should not be what talks
 // the next reader out of changing it.
 //
-// Per word, and in both directions. An `assert.match(/\b(docs|agents)\b/)` would pass on either and so
-// could not report that one half had become false: `docs` is bare in 4 of 4 regions and `agents` in 0 of
-// 4, which is what licenses matching one and not the other. Each direction fails with the change it
-// licenses — narrow the regex, or widen it.
+// Per word, and in both directions, because an `assert.match(/\b(docs|agents)\b/)` passes on either and
+// so cannot report that one half has become false. `docs` is bare in 4 of 4 regions today and `agents`
+// in 0 of 4, which is what licenses matching one and not the other.
+//
+// The two halves are pinned differently, and the asymmetry is the point rather than an oversight. One
+// region is enough to keep `docs` OUT; one region is enough to keep `agents` IN only until that region
+// changes. So the `docs` half is existential and the `agents` half universal, and each fails with the
+// change its own quantifier licenses.
 test("PATH_RE's bare-word list still matches how these four documents use those words", () => {
   const regions: [string, string][] = [
     ["the prompt's docs-prose bullet", promptProseBullet()],
@@ -294,21 +308,32 @@ test("PATH_RE's bare-word list still matches how these four documents use those 
     ["CONTRIBUTING.md's automated-review bullet", contributingReviewBullet()],
     ["docs/ci.md's step 4", ciDocStep()],
   ];
+  const outsideSpans = (region: string): string => region.replace(/`[^`\n]+`/g, " ");
+
+  // Existential, deliberately. Bare `docs` has to stay out of PATH_RE while ANY region uses it as an
+  // ordinary word, because `assertNoBarePaths` would then report "backtick it" on that region — checked
+  // rather than reasoned about: adding `\b[Dd]ocs\b` to PATH_RE today fails tests 1, 3 and 5 exactly
+  // that way. A per-region version of this assertion would therefore print the wrong remedy the moment
+  // the FIRST region was reworded, telling a reader to make a change that reddens three other tests.
+  const withBareDocs = regions.filter(([, region]) => /\bdocs\b/i.test(outsideSpans(region)));
+  assert.ok(
+    withBareDocs.length > 0,
+    `at least one of these ${regions.length} regions uses "docs" as an ordinary word outside a code ` +
+      `span, which is why PATH_RE does not match it: the match would fire on prose that binds nothing, ` +
+      `and a pin that cries wolf gets deleted. None does any more, so adding \`\\b[Dd]ocs\\b\` to ` +
+      `PATH_RE is now safe and closes another part of the bare-word gap.`,
+  );
+
+  // Universal, and for the opposite reason: one bare use is enough to make this match cry wolf.
   for (const [where, region] of regions) {
-    const prose = region.replace(/`[^`\n]+`/g, " ");
-    assert.match(
-      prose,
-      /\bdocs\b/i,
-      `${where} still uses "docs" as an ordinary word outside a code span, which is why PATH_RE does ` +
-        `NOT match it: a pin that fires on prose binding nothing gets deleted. If no region uses it ` +
-        `that way any more, add it to PATH_RE:\n${prose}`,
-    );
     assert.doesNotMatch(
-      prose,
+      outsideSpans(region),
       /\bagents\b/i,
       `${where} still keeps "agents" inside a code span or writes the singular "agent", which is why ` +
-        `PATH_RE DOES match it bare. If a region starts using it as an ordinary word, that match ` +
-        `begins crying wolf and has to come out:\n${prose}`,
+        `PATH_RE DOES match it bare. Two things reach this, and they want opposite fixes: a region ` +
+        `has started using "agents" as an ordinary word, in which case the match has to come out of ` +
+        `PATH_RE — or a scope list spells \`agents/\` without its trailing slash, in which case add ` +
+        `the slash and leave PATH_RE alone. The failing text says which:\n${outsideSpans(region)}`,
     );
   }
 });
