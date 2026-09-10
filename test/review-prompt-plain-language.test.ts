@@ -14,18 +14,32 @@ import { parse } from "yaml";
 // matches indentation that is not part of the string, and would also match a copy of the sentence
 // in a comment where it binds nothing.
 //
-// CONTRIBUTING.md is in here too because it is where the rules are stated for humans and the
-// prompt only restates them. The two lists of bound files are what drift: a future PR that adds a
-// documented directory to one and not the other leaves the reviewer enforcing a different scope
-// than the one contributors are told about, and nothing else in this repo would notice.
+// CONTRIBUTING.md and docs/ci.md are in here too. CONTRIBUTING.md is where the rules are stated for
+// humans and the prompt only restates them; docs/ci.md is where this workflow's behaviour is
+// documented. Three copies of one file set is what drifts: a PR that adds a documented directory to
+// one and not the others leaves the reviewer enforcing a different scope than the one contributors
+// are told about, and nothing else in this repo would notice.
 const ROOT = join(import.meta.dirname, "..");
 const WORKFLOW = join(ROOT, ".github", "workflows", "code-review.yml");
 const CONTRIBUTING = join(ROOT, "CONTRIBUTING.md");
+const CI_DOC = join(ROOT, "docs", "ci.md");
 
-// The file set CONTRIBUTING.md's Documentation section binds. Each is spelled as the inline code
-// span both documents use, because that spelling is what a reader matches on — and a bare `docs`
-// would match the word in prose.
-const BOUND_FILES = ["`README.md`", "`docs/`", "`config.example.yaml`", "`agents/`"];
+// The file set CONTRIBUTING.md's Documentation section binds, spelled as the inline code span both
+// documents use — a bare `docs` would match the word in prose.
+//
+// Pinned here as well as compared between the two files, and that is the point: the comparison
+// alone is a LOWER bound, so a PR adding a path to both lists at once widens what the reviewer
+// enforces with nothing failing. The prompt names CONTRIBUTING.md as the authority, so that
+// section is the enforced scope at PR head, and widening it should be a deliberate edit to this
+// line rather than a side effect of a docs change. Adding a code directory here would put runtime
+// code under a prose rule.
+const BOUND_FILES = ["`README.md`", "`agents/`", "`config.example.yaml`", "`docs/`"];
+
+// Every inline code span, sorted, deduplicated. Both lists are prose, so this reads what a
+// contributor reads rather than a structure neither file has.
+function codeSpans(text: string): string[] {
+  return [...new Set(text.match(/`[^`\n]+`/g) ?? [])].sort();
+}
 
 function reviewPrompt(): string {
   const doc = parse(readFileSync(WORKFLOW, "utf8")) as {
@@ -78,13 +92,15 @@ test("the reviewer's docs-prose rule is scoped to the files CONTRIBUTING.md bind
     section(reviewPrompt(), "Should flag"),
     "Docs prose that is not concise plain language",
   );
-  for (const file of BOUND_FILES) {
-    assert.ok(
-      prose.includes(file),
-      `the docs-prose bullet names ${file}. A file set stated in CONTRIBUTING.md and not here is ` +
-        `a scope the contributor is promised and the reviewer never applies:\n${prose}`,
-    );
-  }
+  // Equality, not `includes` per path. A missing path is a scope contributors are promised and the
+  // reviewer never applies; an extra one is a scope nothing in CONTRIBUTING.md justifies, and only
+  // an exact comparison catches the second.
+  assert.deepEqual(
+    codeSpans(prose),
+    BOUND_FILES,
+    `the docs-prose bullet's file set matches BOUND_FILES exactly. If this widening is intended, ` +
+      `edit BOUND_FILES and CONTRIBUTING.md's Documentation section in the same commit:\n${prose}`,
+  );
   // Without a quotable anchor the finding is unfalsifiable, and an unfalsifiable style note is the
   // thing the rule below exists to keep out of reviews.
   assert.match(
@@ -113,19 +129,41 @@ test("the prompt's do-not-flag-style rule names the docs-prose exception", () =>
 });
 
 test("CONTRIBUTING.md's Documentation section binds the same files the prompt does", () => {
-  const documentation = (() => {
-    const text = readFileSync(CONTRIBUTING, "utf8");
-    const start = text.indexOf("\n## Documentation\n");
-    assert.notEqual(start, -1, "CONTRIBUTING.md still has a `## Documentation` section");
-    const rest = text.slice(start + 1);
-    const end = rest.indexOf("\n## ", 1);
-    return end === -1 ? rest : rest.slice(0, end);
-  })();
-  for (const file of BOUND_FILES) {
-    assert.ok(
-      documentation.includes(file),
-      `CONTRIBUTING.md's Documentation section names ${file}. The prompt enforces this list, so a ` +
-        `file dropped here is one the reviewer keeps flagging with no stated rule behind it`,
-    );
-  }
+  const text = readFileSync(CONTRIBUTING, "utf8");
+  const start = text.indexOf("\n## Documentation\n");
+  assert.notEqual(start, -1, "CONTRIBUTING.md still has a `## Documentation` section");
+  // The section's OPENING paragraph, not the whole section: that paragraph is where the requirement
+  // states what it covers, and the rest of the section is free to name a file as an example without
+  // binding it. `\n\n` ends it.
+  const afterHeading = text.slice(start + "\n## Documentation\n".length);
+  const binding = afterHeading.slice(0, afterHeading.indexOf("\n\n", afterHeading.indexOf("\n") + 1));
+  assert.ok(binding.length > 0, "and that section still opens with a paragraph");
+
+  assert.deepEqual(
+    codeSpans(binding),
+    BOUND_FILES,
+    `CONTRIBUTING.md's Documentation section binds exactly BOUND_FILES. The prompt treats this ` +
+      `section as the authority, so a path added here widens what the reviewer enforces — which is ` +
+      `a change to make deliberately, in the same commit as BOUND_FILES and the prompt:\n${binding}`,
+  );
+});
+
+test("docs/ci.md describes the same scope it documents", () => {
+  const text = readFileSync(CI_DOC, "utf8");
+  // The one numbered step that describes this check, `4.` to `5.`. Read as a step rather than by
+  // searching for a sentence: a third copy of the file set is the thing being pinned, and a search
+  // that misses would pass on an empty match.
+  const start = text.indexOf("\n4. Checks docs prose");
+  assert.notEqual(start, -1, "docs/ci.md still describes the docs-prose check as review step 4");
+  const rest = text.slice(start + 1);
+  const end = rest.indexOf("\n5. ");
+  assert.notEqual(end, -1, "and step 5 still follows it");
+  const step = rest.slice(0, end);
+
+  assert.deepEqual(
+    codeSpans(step),
+    BOUND_FILES,
+    `docs/ci.md's step 4 names exactly BOUND_FILES. This is the copy a deployer reads, so a path ` +
+      `here that the prompt does not enforce is a promise nothing keeps:\n${step}`,
+  );
 });
