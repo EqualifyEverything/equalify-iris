@@ -71,6 +71,29 @@ while being short. See #405.
 The demo page must stay accessible — it's audited with the project's own axe-core lint and
 should report **0 violations**.
 
+## Documentation
+
+**Docs here are written in concise plain language. That is a requirement, not a preference.** It
+covers `README.md`, everything under `docs/`, the comments in `config.example.yaml`, and the agent
+prompts in `agents/` — every one of them is read by someone deciding whether to trust Iris with a
+document, and the prompts are read by a model as well.
+
+What it asks for:
+
+- **One idea per sentence.** If a sentence needs a second read, split it.
+- **The claim first, the caveat after.** Never the reverse.
+- **A number instead of an adjective.** "About 11¢ a page" beats "cost-effective". Anything you
+  assert about behaviour should be checkable against code, a test, or a named benchmark round.
+- **No jargon without a gloss on first use**, and no new term where a plain one exists.
+- **No repetition.** A paragraph that restates the one above it gets deleted, not softened.
+- **Shorter over completer.** A page nobody finishes documents nothing.
+
+Two things this is not. It is not a ban on detail — an exact number, a file path, or a caveat that
+saves a reader an hour all belong in. And it is not about formatting: there is no linter here, and
+the check is a maintainer reading your prose.
+
+A PR that only makes an existing doc plainer is welcome, with no code change attached.
+
 ## Pull requests
 
 - Branch from `main`, keep PRs focused, and describe the change + how you tested it.

@@ -4109,7 +4109,7 @@ export interface Declination {
 // A suffix on the entry rather than a section heading over each group, because the groups are
 // numbered as one sequence for the decline to cite and a heading between them invites the model to
 // renumber from 1 inside each. 33 characters, on the problems this run raised in code — 2 of 1,501
-// page replies for the id rule, none from the deployed model.
+// page replies for the id rule, one of them from the model deployed since 2026-09-10 (#344).
 export const CHECKED_IN_CODE = " (Iris checked this one in code.)";
 
 // The split-word problem's mark (#334 part B), and it is a DIFFERENT STRING from the one above
@@ -4123,7 +4123,7 @@ export const CHECKED_IN_CODE = " (Iris checked this one in code.)";
 //
 // What that would have cost is not an accounting error, it is a transcription defect in delivered
 // content: `non-farm` beside `nonfarm` and `co-operation` beside `cooperation` are forms a 1962 report
-// really prints, three of the shipped model's six census cases are of that kind, and the likeliest
+// really prints, three of `kimi-k2.5`'s six census cases are of that kind, and the likeliest
 // reading of "so fix it" on such a page is to join the two — which puts a word the page does not
 // print into the document, bought by a rule that fired on a page which had already passed.
 //
@@ -4304,8 +4304,8 @@ async function correctPage(
     // The FOURTH code-checked source is not covered by that sentence and must not be, which is why it
     // carries its own mark and gets its own line here (#334 part B). "So fix it" is true of a missing
     // link, a placeholder alt and a duplicated id; on a word written two ways it would order the model
-    // to join `non-farm` into `nonfarm` on a page that prints the hyphen — three of the shipped
-    // model's six census cases — putting a word the page does not print into delivered content, on a
+    // to join `non-farm` into `nonfarm` on a page that prints the hyphen — three of `kimi-k2.5`'s six
+    // census cases — putting a word the page does not print into delivered content, on a
     // page that had already passed. So this is the one entry in the request where the IMAGE showing
     // something else is a reason not to act, and it says so in those terms, because the paragraph
     // above spends four sentences ruling that reason out everywhere else. Stated as a split rather
@@ -6037,9 +6037,9 @@ export async function runExtraction(ctx: PipelineContext): Promise<ExtractionRes
     // asked after any correction, so a non-zero `ids_duplicated` is a duplicate this step could not
     // repair, and present at zero on every run because a rule that fires on almost nothing is only
     // visible as a zero that prints. It fires on less than the alt rule does — 2 of 1,501 page
-    // replies across every round on disk, and 0 of 328 on the model deployed today — so a field
-    // appearing only when it fires would leave a reader unable to tell "no page duplicated an id"
-    // from "this run predates the check".
+    // replies across every round on disk, one of them on `gpt-5.6-luna`, the page model deployed
+    // since 2026-09-10 (#344) — so a field appearing only when it fires would leave a reader unable
+    // to tell "no page duplicated an id" from "this run predates the check".
     //
     // Counted per FRAGMENT and summed, which is the only count this rule can make: a collision
     // between two pages is not a defect here, `namespaceAnchors` fixes it at assembly, and pooling

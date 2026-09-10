@@ -4,11 +4,18 @@
 // The delivered document announced "Page 52" at the head of the sheet that prints 38. `agents/page.md`
 // forbids exactly this, by name, in one sentence — "use the number the page shows (iv, 5, A-3), never
 // the position of the image you were given in the file" (:99) — and has forbidden it at every prompt
-// blob there is a round for. It happened anyway on 6 of 88 markers on the shipped page model and 5 of
-// 90 on another vendor's, on the same document and the same blob, while a third vendor scored 0; both
-// failing arms did it on the same two pages. Two vendors violating one specific sentence is not a
-// sentence problem, so this is not answered with more prose. It is answered here because the marker is
-// the one thing on a page whose number Iris can check for itself, with no model call and no image.
+// blob there is a round for. It happened anyway on 6 of `moonshotai.kimi-k2.5`'s 88 markers and 5 of
+// `claude-sonnet-4-6`'s 90, on the same document and the same blob, while `gpt-5.6-luna` scored 0 of
+// 88; both failing arms did it on the same two pages (acir-p052, acir-p070). Two vendors violating one
+// specific sentence is not a sentence problem, so this is not answered with more prose. It is answered
+// here because the marker is the one thing on a page whose number Iris can check for itself, with no
+// model call and no image.
+//
+// **The arm that scored 0 is the one deployed now** — #344 moved `page` to `gpt-5.6-luna` on
+// 2026-09-10, and this check was built against the two arms that fail. It is not dead code: kimi and
+// Sonnet are both still configurable, luna's 0 is one round and not a property, and luna's single
+// marker defect on that census is a different one this module does not touch (`Page M-16` on the
+// cover, the series number read as a folio).
 //
 // **The number is checkable because Iris is the one who supplied it.** The page agent is handed
 // `filename: acir-p052.png, page 2 of 25` in its user message (extraction.ts), so there are exactly two

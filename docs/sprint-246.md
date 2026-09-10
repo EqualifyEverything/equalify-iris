@@ -43,7 +43,7 @@ recommendation, and naming them is cheaper than a reader finding them.
 
 | step | share of bill | recommendation | measured on | disposition |
 |---|---|---|---|---|
-| **`page`** (extract) | 42.0% | **switch `kimi-k2.5` → `gpt-5.6-luna` — on cost and lost pages, not on quality** | #344: **−15.9% per 100 pages** ($6.1201 → $5.1496) and **0 lost pages against 2**. First-pass acceptance is a wash: 29.7% against 26.7%, paired **McNemar p=0.6636** | open, needs a person (#344) |
+| **`page`** (extract) | 42.0% | **switch `kimi-k2.5` → `gpt-5.6-luna` — on cost and lost pages, not on quality** | #344: **−15.9% per 100 pages** ($6.1201 → $5.1496) and **0 lost pages against 2**. First-pass acceptance is a wash: 29.7% against 26.7%, paired **McNemar p=0.6636** | **applied 2026-09-10** (#344) |
 | **`correct`** + **`feedback`** (2nd pass and the checker that triggers it) | **62–85% of the extraction step, together** | **no model change. Three code-and-prompt fixes instead** | #369 (writing the missing rules down removes ~1/7 of it); #324 (one defect ranks 2nd of 22 causes); #365 (69% of the checker's output is discarded and billed) | model settled; open #369, #324, #365 |
 | **`copy_editor`** | 33.1% | **switch → `gpt-5.6-luna`, −26.1%** | **`runs-editor-2` only** — 21 of 23 provable defect instances against 12, at 9.5% of the cost. `runs-editor-1` ranked the same two the *other* way and is superseded: it withheld the page images Iris attaches, so it measured a different agent | #329 closed **unapplied**, needs a person |
 | **`reader`** | 9.3% | **keep the incumbent.** The prompt fix already shipped | #303 shipped (−19%, the largest proportional per-step drop of the sprint); the Kimi swap loses **34 findings the incumbent's own repeat keeps, 7 of them high severity** | #313, declined — correctly |
@@ -66,8 +66,10 @@ $0.8010 (`edit`) + $2.4673 (`edit_section`) + $1.4734 (failed) = $4.7417, plus $
 the per-step reading and 33.1% is the agent's whole bill; neither needs correcting, and a figure
 quoting either owes the word *step* or *agent* beside it.
 
-**Two decisions need a person: #344 and #329.** Both are measured; neither is an agent's to apply.
-**#324 is a third, and it is live in production right now**, which makes it the urgent one.
+**#344 was applied on 2026-09-10; #329 still needs a person.** Both were measured here, and applying
+one was a decision taken outside this document. **#324 is a third, and it is live in production right
+now**, which makes it the urgent one — the #344 swap improves its axis (23.3% of subtotal rows dropped
+against Kimi's 34.9%) without closing it, since the unswapped Sonnet drops 9.6%.
 
 ## 2. The page step is one decision across two issues
 
@@ -97,8 +99,8 @@ axis of #324.
 **"Worst on 4 of the first 7" is the post-correction count, which matters because two of those seven
 are the axes §9 records as having been mis-scored for this same model.** Two of the seat's detectors
 keyed on the tag immediately after `<p>`/`<li>` and so read `0` for a model that wraps inline content
-in `<em>`/`<strong>` — the shipped one. #344 publishes the census with "the corrected figures are the
-ones above", and both corrections went **against** the shipped model, so the 4 is the number after
+in `<em>`/`<strong>` — Kimi. #344 publishes the census with "the corrected figures are the
+ones above", and both corrections went **against** Kimi, so the 4 is the number after
 its two false zeros were removed, not before. A reader checking §2 against §9 should find those two
 axes already rescored.
 
@@ -110,7 +112,7 @@ page agent returning a **complete** envelope; what failed was the checker, whose
 was logged as an extraction failure. That is
 [#368](https://github.com/EqualifyEverything/equalify-iris/issues/368), fixed on main in `05d5982`,
 which names this same page. **Corrected: kimi 2, sonnet 0, luna 0** — so on this axis the arm not
-recommended is tied with the one that is, and the shipped model is alone in the column. Both of
+recommended is tied with the one that is, and Kimi is alone in the column. Both of
 kimi's survive the re-read as genuine page-agent failures (`acir-p050`, `acir-p086`). The same
 correction reclassifies sonnet's $0.5091 of failed spend from page-agent waste to **pinned-checker**
 waste, which is #365's finding arriving from the other direction.
@@ -125,14 +127,14 @@ the most correction spend — luna is **2.43x worse** than the model Iris ran be
 acceptance the price ranking and the quality ranking are opposites**, and the dearest arm is the
 best.
 
-**A revert to sonnet buys 34.9% → 9.6% on the subtotal rows, not → 0**, and the price of the revert
-depends on which arm you are reverting *from*, which is worth stating because the two multiples
-differ by a fifth:
+**A revert to sonnet buys 9.6% on the subtotal rows, not 0**, and both the gap it closes and the
+price depend on which arm you are reverting *from* — worth stating because the two multiples differ
+by a fifth:
 
 | revert | subtotal rows dropped | extraction bill |
 |---|---|---|
-| from the shipped `kimi-k2.5` | 34.9% → 9.6% | **2.06x** ($6.1201 → $12.5991) |
-| from the recommended `gpt-5.6-luna` | 23.3% → 9.6% | **2.45x** ($5.1496 → $12.5991) |
+| from `kimi-k2.5`, shipped to 2026-09-10 | 34.9% → 9.6% | **2.06x** ($6.1201 → $12.5991) |
+| from `gpt-5.6-luna`, shipped since | 23.3% → 9.6% | **2.45x** ($5.1496 → $12.5991) |
 
 **No model gets the subtotal rows right, which is the sprint's own headline arriving at the page
 step: the durable fix is the free artifact check in #324, not a model choice.** A region subtotal row
@@ -149,8 +151,8 @@ so a page-only swap is priced with verification still at incumbent rates. All th
 | page model | $/100 pages submitted | verify + correct | its share | first pass accepted | pages lost | page only, no checker |
 |---|---|---|---|---|---|---|
 | `claude-sonnet-4-6` | **$12.5991** | $7.7925 | 62% | 37/90 = **41.1%** | **0** † | $4.8066 |
-| `kimi-k2.5` (shipped) | **$6.1201** | $4.5953 | 75% | 24/90 = **26.7%** | **2** | $1.5249 |
-| `gpt-5.6-luna` (recommended) | **$5.1496** | $4.3772 | **85%** | 27/91 = **29.7%** | **0** | $0.7724 |
+| `kimi-k2.5` (shipped when this ran) | **$6.1201** | $4.5953 | 75% | 24/90 = **26.7%** | **2** | $1.5249 |
+| `gpt-5.6-luna` (shipped since 2026-09-10) | **$5.1496** | $4.3772 | **85%** | 27/91 = **29.7%** | **0** | $0.7724 |
 
 **`verify + correct` is one column for two steps and the round does not split it.** It is the
 checker's calls plus the correction passes they trigger, and that is why §1 gives `correct` and
@@ -326,10 +328,11 @@ That document is per-agent, older, and still the right place for call sites, the
 edit fails, and every round before `runs-extract100-95ca64c`. Three of its claims are narrowed here
 and one open question in it is answered:
 
-- **`page` is swapped and live on `kimi-k2.5`, and the recommendation is now to move again**, to
-  `gpt-5.6-luna`, on cost and lost pages (§2). models.md §8 carries luna on `page` as "a live
-  question" needing a corpus with charts; on the corpus that exists it has now been measured at 100
-  pages, and what is still unmeasured is the chart case, not the price.
+- **`page` moved twice, and models.md's `kimi-k2.5` is the first move, not the current one.** The
+  second is `gpt-5.6-luna`, recommended here on cost and lost pages (§2) and applied on 2026-09-10.
+  models.md §8 carries luna on `page` as "a live question" needing a corpus with charts; on the corpus
+  that exists it has now been measured at 100 pages, and what is still unmeasured is the chart case,
+  not the price.
 - **models.md §2's 11-page page-agent table is not a quality result**, which it says of itself; §2
   and §3 here are the 100-page rounds that superseded it.
 - **`feedback` is carried as `open` there and as "keep the model" here, and both mean do not swap
@@ -347,10 +350,12 @@ and one open question in it is answered:
 **Needing a person's decision, in order of urgency:**
 
 - **#324** — the shipped page swap is live and priced: −44.8% of the bill against region subtotal rows
-  dropped from statistical tables. A revert is **two** config lines, not one (#312 set
+  dropped from statistical tables. A revert to Sonnet is **two** config lines, not one (#312 set
   `providers.per_agent.page` *and* `providers.bedrock.api: converse`, which is block-wide), and it
-  buys 34.9% → 9.6%, not → 0.
-- **#344** — swap the page agent to `gpt-5.6-luna`, on cost and lost pages.
+  buys 9.6%, not 0. It is a smaller gap than when this was written: #344 moved `page` off Kimi, so the
+  rate to revert *from* is now luna's **23.3%** rather than Kimi's 34.9%.
+- **#344** — swap the page agent to `gpt-5.6-luna`, on cost and lost pages. **Applied 2026-09-10.**
+  Reverting it restores Kimi; reverting to Sonnet is #324's ask, above.
 - **#329** — closed, but its copy-editor swap is unapplied.
 
 **The three largest levers, all prompt or code rather than model spend:** #369, #324's free check,

@@ -574,10 +574,11 @@ function referencesIn(document: Document): string[] {
 // Measured before it was written, over every page reply on disk in the benchmark's round logs
 // (1,501 fragments, 1,421 of them carrying an id, no model call): **2** fragments duplicate an id
 // within themselves, both of them a footnote — `fnref-1` twice on `gpt-5.6-luna`, and
-// `numbering-note-1`/`-2` on `nova-2-lite`. On the deployed page model (`kimi-k2.5`) it is 0 of
-// 328, and on `sonnet` 0 of 469. So this buys a correction on roughly one page in 750 and none at
-// all on the model Iris ships today — the reason to have it is #344, which proposes swapping the
-// page agent to the one arm that produced a hit.
+// `numbering-note-1`/`-2` on `nova-2-lite`. On `kimi-k2.5` it is 0 of 328, and on `sonnet` 0 of 469.
+// So this buys a correction on roughly one page in 750. It used to be none at all on the deployed
+// model, and that is no longer true: #344 moved the page agent to `gpt-5.6-luna` on 2026-09-10, so
+// the one arm that produced a hit is the one now running. A single non-zero here is the measured
+// rate, not evidence of a regression.
 // `ids` comes back with the duplicates because a count of duplicates is not readable without its
 // denominator: 0 duplicates on a page that carries no ids at all says nothing about this rule, and
 // 0 on a page carrying 40 says something (`alts_checked` in extraction.ts is the same pair for the

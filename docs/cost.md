@@ -1,7 +1,26 @@
 # What Iris costs
 
+**Between nothing and about 11¢ a page, and which one is a config choice.** No model is named
+anywhere in Iris's code, so each deployment decides what it pays ([models.md](models.md)):
+
+- **$0 per token.** Point the `openrouter` provider block's `base_url` at a self-hosted
+  open-weight model — ollama, vLLM, llama.cpp — and there is no model bill at all. You pay for the
+  machine and nothing else. Two caveats: **no round in this document measures that path**, so
+  nothing here says what it produces, and the agents that read page images need a model that
+  accepts images.
+- **About 10.7¢ a page** for the suggested configuration — Sonnet 4.6 on every agent with GPT-5.6
+  luna on `page`. That is the priced end of the range, and the rest of this page is where the number
+  comes from. One qualifier travels with it: the round that produced it ran the **previous** page
+  model, so the suggested setup itself has never been priced end to end, and it is a little cheaper
+  than the total below. A price is also not the whole decision — [models.md §2](models.md) names
+  what the current page model costs on accessibility, which nothing in this document can show.
+
 **10.7¢ a page.** Measured 2026-09-02 over 100 scanned pages — round `runs-postswap-312`, total
-**$10.7106**. That is the configuration deployed on that date, priced end to end. A **round** here
+**$10.7106**. That is the configuration deployed on that date, priced end to end. The page model
+has changed once since: on 2026-09-10 the reference deployment moved `page` from Kimi K2.5 to
+GPT-5.6 luna (#344), measured 15.9% cheaper on that step's own bill. So the live configuration is
+a little cheaper than the table below and **has not been re-priced end to end** — the three rows
+naming `kimi-k2.5` are what this round ran. A **round** here
 is one captured run of a fixed corpus through the pipeline, kept with its own logs and prices — not
 a round of the review loop, which is the other thing that word means in this repo
 ([README § Terms](../README.md#terms)).
@@ -67,9 +86,11 @@ to.
 
 ## What could change it
 
-**#324** and **#344** are both live proposals to change the page model, and either moves the
-`extract`, `correct` and `failed` rows. **#329**'s copy-editor swap is measured at −26.1% and
-unapplied. The three largest levers left are not model choices at all: **#369**, **#324**'s free
+**#344** has already changed the page model, which moves the `extract`, `correct` and `failed` rows
+by an amount only a fresh round can give: this round's own page steps summed to $2.6098, and the
+15.9% that swap measured was against a different round's, so the two cannot be subtracted.
+**#324** is a live proposal on the same three rows. **#329**'s copy-editor swap is measured at
+−26.1% and unapplied. The three largest levers left are not model choices at all: **#369**, **#324**'s free
 artifact check, and **#365**. Each carries its own price and its own evidence; this document does not
 restate them.
 

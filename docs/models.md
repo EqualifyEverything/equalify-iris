@@ -7,6 +7,17 @@ it cost" — the outcome of the model-selection sprint tracked in
 [#246](https://github.com/EqualifyEverything/equalify-iris/issues/246) and reported in
 [#311](https://github.com/EqualifyEverything/equalify-iris/issues/311).
 
+**Every model here is a suggestion, not a default.** Iris names no model in its own code:
+`resolveAgentModel` reads the config and nothing else. A deployment decides, and one that sets no
+`per_agent` model gets its provider block's `default_model`. Where a suggestion has been applied to
+the reference deployment this document says so and dates it — that is a fact about one YAML file, not
+about this repo.
+
+**The suggested setup is the paid end of a range that starts at zero.** Point
+`providers.openrouter.base_url` at a self-hosted open-weight model and Iris costs nothing per token
+(§1). No round here measures that, so nothing below says what it produces. The suggested setup is the
+one that has been benchmarked. [docs/cost.md](cost.md) gives both prices.
+
 **The sprint's final answer is newer than this document, and it is in two files.**
 **[docs/cost.md](cost.md)** is the price sheet — what a page costs, broken down by pipeline step. The
 reasoning behind it is **[docs/sprint-246.md](sprint-246.md)**, which is organised by *step* rather
@@ -14,8 +25,8 @@ than by agent and carries the last round of the sprint (`runs-extract100-95ca64c
 at 100 pages each) that nothing here is measured on. Read cost.md for the price, sprint-246.md for
 what to do and why, and this one for how the knob works, what each agent's calls are, and the rounds
 before that one. Where they differ, **sprint-246.md §7 names the three claims here it narrows and the
-one open question it answers** — the largest being that `page`, swapped and live on `moonshotai.kimi-k2.5`
-below, now has a further swap recommended on top of it.
+one open question it answers** — the largest being the `page` agent, where the `moonshotai.kimi-k2.5`
+suggestion below has since been superseded by a further one that has now been applied.
 
 `round`, `block` and `verdict` all mean something specific in this repo, and
 [README § Terms](../README.md#terms) defines them. Most of what follows is about **benchmark**
@@ -25,20 +36,28 @@ which is what the copy editor patches; a mapping in the config file, such as the
 a group of rows in one of the tables.
 
 Four of the five agents have a cheaper model in play, and no two of the four are at the same stage.
-**One was applied, one was declined, one is recommended and waiting on a decision, and one went back
-to open after the seat that ran its round withdrew the recommendation** — and none of the four was
-the same kind of decision.
+**One has had two suggestions applied, one was declined, one is suggested and waiting on a decision,
+and one went back to open after the seat that ran its round withdrew its recommendation** — and none
+of the four was the same kind of decision.
 
-- **`page` is swapped and live.** `moonshotai.kimi-k2.5` has served the reference deployment's page
-  agent since 2026-09-02
-  ([#312](https://github.com/EqualifyEverything/equalify-iris/issues/312)). On 11 hard pages it
-  measured at-or-better on cost, word recall, first-pass rate and three of the judge's four defect
-  kinds (§2). On **100 pages of the live deployment** it measures **−44.8% of the priced model bill**
-  and a content loss the small round could not see. Iris's own unchanged verifier reports
-  `content_missing` on **42 pages against the incumbent's 15**, and the specific thing missing is
-  the regional subtotal rows of statistical tables
-  ([#324](https://github.com/EqualifyEverything/equalify-iris/issues/324), §5). Whether that trade
-  is acceptable is a judgement about what a deployment is for; it is not settled here.
+- **`page` — two suggestions applied, and the reference deployment runs the second.**
+  `us.openai.gpt-5.6-luna` has served its page agent since **2026-09-10**
+  ([#344](https://github.com/EqualifyEverything/equalify-iris/issues/344)), replacing the
+  `moonshotai.kimi-k2.5` that served it from 2026-09-02
+  ([#312](https://github.com/EqualifyEverything/equalify-iris/issues/312)).
+  Kimi's case was 11 hard pages at-or-better on cost, word recall, first-pass rate and three of the
+  judge's four defect kinds (§2), then **−44.8% of the priced model bill** on 100 pages at a content
+  cost the small round could not see: Iris's own unchanged verifier reported `content_missing` on
+  **42 pages against the incumbent's 15**, specifically the regional subtotal rows of statistical
+  tables ([#324](https://github.com/EqualifyEverything/equalify-iris/issues/324), §5).
+  luna's case is **−15.9% of the page step's whole bill** on the same corpus and **0 lost pages
+  against 2**, and it improves that same subtotal axis rather than inheriting it — 34.9% of a 146-row
+  ceiling dropped against 23.3%. It does not settle it: the unswapped Sonnet drops **9.6%**, so on
+  that axis the three arms rank the reverse of their price, and #324 stays open on exactly that.
+  **The quality edge #344 was filed on did not reproduce and is withdrawn there** (a second round put
+  the same paired comparison at McNemar p=0.6636); what carried was cost and robustness. Whether the
+  trade either swap makes is acceptable is a judgement about what a deployment is for, and it is not
+  settled here.
 - **`reader` was declined.** It was the cheapest defensible cut on paper — 78% of the incumbent's
   own agreement floor for 77% less money — and the decision went the other way once the loss was
   broken out by kind
@@ -59,9 +78,10 @@ the same kind of decision.
   and adjudicating the pages where the two disagree found the cheap model's extra rejections were
   mostly **real defects the incumbent passed**. Then the unit turned out to be wrong: **a verify
   verdict is not a deliverable**, it triggers one correction pass billed to whichever model runs
-  `page`, and the cheap verifier rejects far more pages. Priced that way the swap is **−50.9% of the
-  total cost per page judged under the corrector actually deployed, and −1.3% under the incumbent
-  one** — the same swap worth 1% or 51% according to a price that is not the verifier's. On the
+  `page`, and the cheap verifier rejects far more pages. Priced that way the swap is **−44.9% of the
+  total cost per page under the corrector now deployed, and −1.3% under the incumbent one** — the same
+  swap worth 1% or 45% according to a price that is not the verifier's. (§4's table shows −50.9%,
+  which is the same reading under Kimi, the corrector deployed until 2026-09-10.) On the
   verify line *alone* it is −71% under both and decides nothing (§7's eighth limit). Both measured
   corrector prices sit under the **$0.0644/pass** that would reverse it, **so the price favours the
   swap and the price is not what is holding it up.** Two things are. First, the cheap verifier invents
@@ -79,7 +99,7 @@ has made two model calls in the whole sprint, both of them on the swapped deploy
 **Every figure here names the benchmark round it came from**, because some of them are stale by
 design and several are superseded outright — §6 says which. **"The incumbent" below means the
 unswapped Sonnet-4.6 baseline every round was measured against** — not the reference deployment as it
-stands today, whose `page` agent has run on `moonshotai.kimi-k2.5` since 2026-09-02. The phrase does
+stands today, whose `page` agent has run on `us.openai.gpt-5.6-luna` since 2026-09-10. The phrase does
 not mean `config.example.yaml` as shipped either: that file's `providers.default` is `openrouter`, so its
 capabilities resolve to `anthropic/claude-sonnet-4.6`, and the Bedrock id
 `us.anthropic.claude-sonnet-4-6` is only the `bedrock` block's default. Same model generation, two providers and two ids — a
@@ -90,9 +110,9 @@ resolve.
 
 | agent | share of the bill, unswapped | status |
 |---|---|---|
-| `page` | **42.0%** | **swapped and live since 2026-09-02** (#312) — −44.8% of the priced bill measured on 100 pages, at a named content cost: `content_missing` on 42 pages against 15 (§5). A **further** swap, to `openai.gpt-5.6-luna`, is recommended on a later round and waiting on a person: −15.9% again and 0 lost pages against 2 (#344, sprint-246.md §2) |
+| `page` | **42.0%** | **two suggestions applied** — `moonshotai.kimi-k2.5` from 2026-09-02 (#312), −44.8% of the priced bill on 100 pages at a named content cost (`content_missing` on 42 pages against 15, §5); then **`us.openai.gpt-5.6-luna` from 2026-09-10** (#344, sprint-246.md §2), −15.9% of the page step again with 0 lost pages against 2, and 23.3% of subtotal rows dropped against Kimi's 34.9% — improved, not fixed, since Sonnet drops 9.6% and #324 is open on that. **Its loss is accessibility, and the axe count is not the firm part of it**: 4 violations to Kimi's 3, but Kimi's 3 are all `critical` to luna's 1, and 2 of luna's 4 are a mis-formed `<dl>` on pages that ask for one — a rule an arm scores 0 on by emitting no `<dl>` at all. What is not in doubt: it passes figure pages clean by saying less about the legend (#347, §2) |
 | `copy_editor` | **33.1%** | **swap recommended, not yet applied** (#329) — `openai.gpt-5.6-luna` at 9.5% of the cost and *ahead* on both quality halves, once the page images the agent actually receives are attached (§4) |
-| `feedback` | 15.6% | **open** (#330) — five dispositions in one sprint, and the last two were a swap to `openai.gpt-5.6-luna` and its withdrawal by the seat that ran the round. On 45 pages the two arms tie on detection (40/45 against 39/45) and the cheap arm's extra rejections are mostly real. Total cost per page, including the correction pass a rejection triggers, favours the swap at **−50.9%** under the deployed corrector and −1.3% under the incumbent one, so the price is not what leaves this open: an unbounded rate of invented defects and a verdict that rejects 44 of 45 clean pages, reproducibly on 32 of them, are (§4) |
+| `feedback` | 15.6% | **open** (#330) — five dispositions in one sprint, and the last two were a swap to `openai.gpt-5.6-luna` and its withdrawal by the seat that ran the round. On 45 pages the two arms tie on detection (40/45 against 39/45) and the cheap arm's extra rejections are mostly real. Total cost per page, including the correction pass a rejection triggers, favours the swap at **−44.9%** under the corrector now deployed (−50.9% under the Kimi that preceded it) and −1.3% under the incumbent one, so the price is not what leaves this open: an unbounded rate of invented defects and a verdict that rejects 44 of 45 clean pages, reproducibly on 32 of them, are (§4) |
 | `reader` | 9.3% | **declined** (#313) — 78% of the incumbent's own agreement floor at −77%, and §3 says what the 22% is |
 | `builder` | 0% | 0 in this round, **not zero any more**: it ran twice on the swapped deployment, at about $0.04 a call (§4) |
 | specialists | 0% | still 0 calls, and §4 says why that is a fact about `agents_dir` rather than about the corpus |
@@ -110,18 +130,32 @@ Kimi reproduces 118 of 180 reference findings (65.6%) and the incumbent's own se
 absolute per-issue miss is **34%**. §3 gives the paired figure, which is the one that charges a swap
 for its own losses rather than for the reference's irreproducibility.
 
-The applied swap is one line of `per_agent` — and on the reference deployment it took two, which is
-the paragraph under the block, not a footnote:
+The suggested `page` line is one line of `per_agent`. Applying it to the reference deployment took
+that line plus one edit outside Iris, and on a deployment configured differently it takes one more —
+the two paragraphs under the block, not a footnote:
 
 ```yaml
 providers:
   per_agent:
-    page: { provider: bedrock, model: moonshotai.kimi-k2.5 }
+    page: { provider: bedrock, model: us.openai.gpt-5.6-luna }
 ```
+
+**The `us.` prefix is part of the id and not decoration.** `openai.gpt-5.6-luna` is offered only as a
+cross-region inference profile — `aws bedrock list-foundation-models` reports its
+`inferenceTypesSupported` as `INFERENCE_PROFILE` with no `ON_DEMAND` — so the bare id cannot be
+called at all. `moonshotai.kimi-k2.5` was the other way round: `ON_DEMAND`, invoked bare, no prefix.
+The tables further down that label an arm `openai.gpt-5.6-luna` or `gpt-5.6-luna` are naming a model,
+not quoting a config value.
 
 On a deployment whose `providers.bedrock` block is Anthropic-native it is **two** lines, because
 `api: converse` is needed for a non-Claude id and that key is **block-wide** — it moves every
-agent's transport, not the one named. §1 has the rest of the ways this edit goes wrong.
+agent's transport, not the one named. The reference deployment has had it set since #312, so the luna
+swap moved no agent's transport there. On AWS one edit lives outside Iris altogether, and that one
+the reference deployment did need: the
+instance role's IAM policy names invocable model ARNs one by one, an `INFERENCE_PROFILE` model needs
+**both** its `inference-profile/us.<id>` and `foundation-model/<id>` ARNs, and the refusal arrives as
+a runtime error on a user's upload rather than at boot — which is how #312 shipped broken for a day.
+§1 has the rest of the ways this edit goes wrong.
 
 ## 1. The knob, and the ways it fails
 
@@ -154,12 +188,31 @@ disk and the valid set is therefore open. Afterwards, diagnostics names the mode
 
 **A model id belongs to a provider, and nothing checks that it belongs to yours.** An override
 that sets only `model:` keeps `providers.default` and passes the id through as written
-(`resolveAgentModel` again). `moonshotai.kimi-k2.5` is a **Bedrock** id, so that one line on a
-deployment whose default provider is OpenRouter sends it to OpenRouter, which does not have it.
-That one fails loudly rather than silently — but it fails on every call of the run, so it is worth
-not writing. Both snippets in this document name `provider:` as well as `model:` for that reason,
-and they name it even where the deployment's default is already `bedrock`: the line then says which
-price sheet its numbers came from.
+(`resolveAgentModel` again). `us.openai.gpt-5.6-luna` is a **Bedrock** id, so that one line on a
+deployment whose default provider is OpenRouter sends it to OpenRouter, which does not have it under
+that name. That one fails loudly rather than silently — but it fails on every call of the run, so it
+is worth not writing. Both snippets in this document name `provider:` as well as `model:` for that
+reason, and they name it even where the deployment's default is already `bedrock`: the line then says
+which price sheet its numbers came from.
+
+**An id can also be right for your provider and still uncallable as written.** On Bedrock a model is
+offered on-demand, as a cross-region inference profile, or both, and the two are addressed
+differently: an `INFERENCE_PROFILE`-only model must be named with its `us.` prefix and refuses the
+bare id, while an `ON_DEMAND` model is called bare. Neither Iris nor the config schema knows which
+kind an id is, so this surfaces as a provider error on every call. `aws bedrock
+list-foundation-models --query 'modelSummaries[?modelId==`<id>`].inferenceTypesSupported'` answers it
+before the run. On AWS there is one further gate Iris cannot see at all: the calling role's IAM policy
+may enumerate invocable model ARNs, and an inference-profile model needs both ARN shapes granted.
+
+**The provider does not have to be a paid one.** `providers.openrouter.base_url` replaces the
+OpenRouter endpoint, and that adapter speaks OpenAI-compatible `POST /chat/completions`
+(`src/providers/openrouter.ts`), so pointing it at a local ollama, vLLM or llama.cpp server runs Iris
+on self-hosted open-weight models at no per-token cost. Keep the block's name: `openrouter` and
+`bedrock` are the only two names `ProviderRouter.build` can construct, so a `local:` block is an
+"unknown provider" error rather than a third adapter. Two caveats: **no round in this document ran
+that way**, so nothing here predicts what it produces, and the agents that read page images need a
+model that accepts images — `providers/imageLimits.ts` falls back to conservative guesses for any
+model it has no published limits for, and says so once at boot.
 
 **How to tell afterwards whether the swap happened.** Diagnostics reports `models` per agent —
 `by_agent.<agent>.models` names the model ids that answered that agent's calls (`GET
@@ -184,20 +237,68 @@ structural reason in §4 rather than for want of a corpus. Note that `/v1/qualit
 
 ## 2. `page` — the largest line on the bill
 
-**`page` (42.0%) — swapped and live, and whether it stays is still open
-([#324](https://github.com/EqualifyEverything/equalify-iris/issues/324)).** The 11-page round below
-is what the decision was taken on; §5 is the 100-page round that priced it afterwards and found the
-content cost the small round could not see. Read both before revisiting it.
+**`page` (42.0%) — applied twice, and whether the model is settled is still open
+([#324](https://github.com/EqualifyEverything/equalify-iris/issues/324)).** The 11-page round below is
+what the *first* decision was taken on; §5 is the 100-page round that priced it afterwards and found
+the content cost the small round could not see. Read both before revisiting it, and read the two
+paragraphs beneath this one first, because neither round below knows about the model deployed now.
 
-**A third round has since put a third model on this agent, and it is the one to act on.**
+**A third round put a third model on this agent, and it has since been applied.**
 `runs-extract100-95ca64c` ran `claude-sonnet-4-6`, `moonshotai.kimi-k2.5` and `openai.gpt-5.6-luna`
-over 100 pages each with the checker pinned to the incumbent on every arm, and it recommends moving
-again — to `gpt-5.6-luna`, at **$5.1496 per 100 pages against the shipped model's $6.1201** and **0
-pages lost against 2**. It also withdraws the quality half of that case: the first-pass acceptance
-comparison the recommendation was filed on re-ran at **McNemar p=0.6636**, a coin flip. The whole
-round, its six disagreeing quality axes and what the recommendation costs are in
-**[docs/sprint-246.md](sprint-246.md) §2 and §3**. Everything below this paragraph is the 11-page round, and it
-neither knew about that third model nor could have separated it.
+over 100 pages each with the checker pinned to the incumbent on every arm, at **$5.1496 per 100 pages
+against Kimi's $6.1201** and **0 pages lost against 2**. The reference deployment moved to
+`us.openai.gpt-5.6-luna` on 2026-09-10 (#344). It also withdraws the quality half of that case: the
+first-pass acceptance comparison the recommendation was filed on re-ran at **McNemar p=0.6636**, a
+coin flip — so cost and robustness are the whole of what was acted on. The round, its six disagreeing
+quality axes and what the change costs are in **[docs/sprint-246.md](sprint-246.md) §2 and §3**.
+
+**What the applied swap does not buy is accessibility equivalence, and that is the exposure it adds.**
+Linted a page at a time with axe-core 4.11.4, luna is **one violation worse than Kimi over the same
+corpus** — 87 of 91 pages clean against 89 of 92. Its four are `definition-list` on `acir-p001` and
+`acir-p002`, `duplicate-id-active` on `acir-p053`, and an `aria-roles` **critical** on `acir-p080`
+([#347](https://github.com/EqualifyEverything/equalify-iris/issues/347)). No other arm fails any of
+those pages — Kimi's three are `p017`/`p020`/`p029`, Sonnet's `p092`/`p093`/`p095` — but by **class**
+only one of the four is luna's alone. `acir-p080` is a `role="doc-footnotes"` hit, which is all three
+of Kimi's; `definition-list` is Sonnet's whole count too; `duplicate-id-active` is luna's own.
+
+**Read that by count and by severity, because they point opposite ways.** By count luna is the worst of
+the three arms with 4 violations, against 3 each for Kimi and Sonnet. By severity Kimi is the worst:
+`aria-roles` is the only **critical** class in all 274 delivered pages, and all three of Kimi's are
+that class (`role="doc-footnotes"`, #345) against one of luna's four. Sonnet's 3 are all `serious`. So
+the swap traded three criticals for one critical and three serious findings — one violation worse, one
+arm's worth of severity better. Neither number alone says that.
+
+**And 5 of the 10 violations are the cost of attempting a structure**, which is the third reason not to
+rank arms by this count. All 5 are `definition-list`, and `definition-list` can only fire
+on a `<dl>` that exists, so an arm scores 0 on it by emitting no `<dl>` at all. Neither Kimi nor luna
+emits one on any figure page, which is why Sonnet's 3 land where they do — all `definition-list`, on
+three legend pages no other arm fails (`p092`, `p093`, `p095`): it is the only arm that gave the legend
+the list structure `agents/page.md` asks for.
+
+**That reading has to be applied to luna's two as well, and it moves the count in the deployed model's
+favour.** `acir-p001` and `acir-p002` are not figure pages: the cover printing `M — 16` and a date, and
+the commission-members page. `agents/page.md` asks for a `<dl>` on both. So luna emitted a `<dl>` there
+and mis-formed it — the same shape as Sonnet's, and the same credit. Discount all 5 and the standings
+are luna **2** (`duplicate-id-active` on `p053`, the `aria-roles` critical on `p080`), Kimi **3**,
+Sonnet **0** — the opposite order to the raw count above. **We are not publishing that as the
+headline**, because a mis-formed `<dl>` still reaches a reader as a broken list whatever it was
+attempting, and because two of the three cuts reverse the raw order while the class cut only softens it.
+Read the count as too crude to settle this axis in either direction, and the map-and-key finding below as
+the part that is not in doubt.
+
+**The finding that is worse than any reading of the axe count** is on the nine pages carrying a
+shaded map or a shading key, where luna's pages **passed `page_verify_ok` clean while asserting legend
+categories the page never prints** — one delivered page says the map is shaded "in
+one of three patterns" where two swatches are printed. They passed because luna assigns no state to
+any legend entry: it says less, so there is less to fail, and a page nobody corrects is a page that
+cost less. Neither the −15.9% nor the acceptance comparison can see that. #347 finds defects on all
+three arms and no arm is uniformly better — luna is the only one that transcribes `acir-p077`'s
+printed legend heading — but this is the axis on which the swap is a loss. One more consequence worth
+pricing: after it, the pinned Sonnet checker is **63.8% of the page step's cost, against 51.8% under
+Kimi**, which makes the checker the largest single line item and is #365's target.
+
+Everything below this paragraph is the 11-page round, and it neither knew about that third model nor
+could have separated it.
 
 `runs-extract-ad3e7a6`: 7 models × 11 deliberately hard pages, Iris at `ad3e7a6` with a clean
 tree, `agents/page.md` at `635267ac32bb`, `agents/feedback.md` at `b4b2d3cac40f`, judge pinned to
@@ -672,7 +773,7 @@ $0.0607 an earlier revision published (#330, and §6):
 | `openai.gpt-5.6-luna` alone | 86.7% | 85.2% | $0.0086 | $0.0527 | **$0.0613** | **−1.3%** | $0.2769 |
 | union — either rejects | **97.8%** | 88.9% | $0.0382 | $0.0550 | **$0.0932** | +50.0% | $0.4033 |
 | intersection — both reject | 77.8% | 48.9% | $0.0382 | $0.0303 | **$0.0685** | +10.2% | $0.5385 |
-| corrector = `moonshotai.kimi-k2.5`, **$0.0100/pass — what `page` has run since #312/#324** | | | | | | | |
+| corrector = `moonshotai.kimi-k2.5`, **$0.0100/pass — what `page` ran from #312 to #344** | | | | | | | |
 | incumbent alone | 88.9% | 52.6% | $0.0296 | $0.0053 | **$0.0349** | — | $0.2549 |
 | `openai.gpt-5.6-luna` alone | 86.7% | 85.2% | $0.0086 | $0.0085 | **$0.0171** | **−50.9%** | **$0.0773** |
 | union | **97.8%** | 88.9% | $0.0382 | $0.0089 | **$0.0471** | +35.1% | $0.2037 |
@@ -700,10 +801,11 @@ under the deployed one. Across four corrector prices and both input sets, the ch
 - **$0.0619** and the superseded **$0.0607** for `claude-sonnet-4-6` (`runs-extract100-frozen` and
   `runs-extract100-1`, §6);
 - **$0.0100** for `moonshotai.kimi-k2.5`, the 3-page probe §6 flags;
-- **$0.0137** for `openai.gpt-5.6-luna` as the page agent, from #330's blob-matched table. That is a
-  corrector nobody is running, included because it is the only *cheap* corrector price that has been
-  blob-matched where the $0.0100 probe has not. At it the swap is −44.9% on this document's inputs and
-  −48.1% on #330's.
+- **$0.0137** for `openai.gpt-5.6-luna` as the page agent, from #330's blob-matched table. **This is
+  now the deployed corrector** (#344, 2026-09-10), and it is also the better-sourced of the two cheap
+  prices: blob-matched, where the $0.0100 is a 3-page probe. At it the swap is −44.9% on this
+  document's inputs and −48.1% on #330's — so **−44.9% is the figure to quote for the deployment that
+  exists**, and the −50.9% below it is the old one.
 
 The sign has
 never been the uncertain part; only the size, and the size is set by an agent that is not under test.
@@ -724,8 +826,9 @@ is `(incumbent − challenger) ÷ $pass` and percent-cheaper is `(incumbent − 
 the two coincide whenever a correction pass costs about what a page costs in total — $0.0619 against
 $0.0622 and $0.0631 here. The sonnet corrector is exactly that case, and is why 4.5 points and
 −4.5% are the same digits. **The mechanisms do not convert; on this corrector the answers nearly do.**
-That is a fair reading of the sonnet arm, and it is not the deployed one. `page` has run
-`moonshotai.kimi-k2.5` since #312, and on the cheap corrector both readings agree that **no reachable
+That is a fair reading of the sonnet arm, and it is not the deployed one. `page` has run a cheap
+corrector since #312 — Kimi to 2026-09-10, `us.openai.gpt-5.6-luna` since — and on the cheap
+corrector both readings agree that **no reachable
 rejection rate makes the verify swap unprofitable**: the challenger would have to trigger corrections on
 more than 100% of pages. So the cost case does not decline this swap under the deployment that exists,
 and declining it on a price computed for a corrector nobody is running would repeat the mistake this
@@ -818,7 +921,7 @@ same corpus, paired document by document, one before the swap and one on the swa
 | | $/page | 100 pages | vs unswapped |
 |---|---|---|---|
 | unswapped — `runs-bystep-now`, `3749f54` | $0.1940 | $19.3951 | — |
-| **`page` on kimi-k2.5 — `runs-postswap-312`, live deployment** | **$0.1071** | **$10.7106** | **−44.8%** |
+| **`page` on kimi-k2.5 — `runs-postswap-312`, the deployment from #312 to #344** | **$0.1071** | **$10.7106** | **−44.8%** |
 
 Per agent, each priced at its own model's rate — the swap is confirmed **inside** the round from
 `by_agent[].models` (§1) rather than assumed, with all 165 `page` calls answered by
@@ -1103,15 +1206,21 @@ set.
   never doubted.** Two pages shipped after `page_correction_failed` in the post-swap round, one of
   them the page whose six missing subtotal rows the verifier had described in words. That is a
   reporting gap independent of any model choice.
-- **`gpt-5.6-luna` on `page` has since been measured at 100 pages, and it is now the
-  recommendation.** On the 11 pages below it was 30% cheaper than Kimi, tied it on both content
-  kinds, and was declined on an accessibility count of 10-vs-7. `runs-extract100-95ca64c` put both
-  on 100 pages with the checker pinned: **−15.9% and 0 lost pages against 2**, first-pass acceptance
-  a coin flip (p=0.6636), and worse than Kimi on dot-leader encodings while better on the region
-  subtotal rows §5 is about. That is #344, and applying it is a person's decision
-  ([docs/sprint-246.md](sprint-246.md) §2). What a chart-and-image corpus would still settle is the
-  accessibility axis — and it is the same corpus that would make the specialist and `builder` rows
-  mean anything.
+- **`gpt-5.6-luna` on `page` was measured at 100 pages and has since been applied.** On the 11 pages
+  below it was 30% cheaper than Kimi, tied it on both content kinds, and was declined on an
+  accessibility count of 10-vs-7. `runs-extract100-95ca64c` put both on 100 pages with the checker
+  pinned: **−15.9% and 0 lost pages against 2**, first-pass acceptance a coin flip (p=0.6636), and
+  worse than Kimi on dot-leader encodings while better on the region subtotal rows §5 is about. The
+  reference deployment moved to it on 2026-09-10 (#344,
+  [docs/sprint-246.md](sprint-246.md) §2). **The accessibility axis is no longer unmeasured, and it is
+  where the swap loses — but not on the count**: linting each of the same pages alone puts luna one
+  violation behind Kimi, 4 to 3, and two other cuts of those 10 violations **reverse** that order —
+  severity, and which of them are the cost of attempting a `<dl>` at all — while a third, by class, only
+  softens it (§2). The part not in doubt is that on
+  the nine map-and-key pages luna passes clean by saying less about the legend (#347, §2).
+  What a
+  chart-and-image corpus would still settle is how big that is — and it is the same corpus that would
+  make the specialist and `builder` rows mean anything.
 - **Re-derive the failed-spend figure after #300.** It is the one number here that is known wrong
   rather than merely old.
 - **`copy_editor` is 33.1% unswapped, 28.8% after the `page` swap, and its own swap is now
