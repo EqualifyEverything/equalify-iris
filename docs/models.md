@@ -254,20 +254,29 @@ quality axes and what the change costs are in **[docs/sprint-246.md](sprint-246.
 
 **What the applied swap does not buy is accessibility equivalence, and that is the exposure it adds.**
 Linted a page at a time with axe-core 4.11.4, luna is **one violation worse than Kimi over the same
-corpus** — 87 of 91 pages clean against 89 of 92 — and its four are its own: `definition-list` on
-`acir-p001` and `acir-p002`, `duplicate-id-active` on `acir-p053`, and an `aria-roles` **critical** on
-`acir-p080` ([#347](https://github.com/EqualifyEverything/equalify-iris/issues/347)).
+corpus** — 87 of 91 pages clean against 89 of 92. Its four are `definition-list` on `acir-p001` and
+`acir-p002`, `duplicate-id-active` on `acir-p053`, and an `aria-roles` **critical** on `acir-p080`
+([#347](https://github.com/EqualifyEverything/equalify-iris/issues/347)). No other arm fails any of
+those pages — Kimi's three are `p017`/`p020`/`p029`, Sonnet's `p092`/`p093`/`p095` — but by **class**
+only one of the four is luna's alone. `acir-p080` is a `role="doc-footnotes"` hit, which is all three
+of Kimi's; `definition-list` is Sonnet's whole count too; `duplicate-id-active` is luna's own.
 
 **Read that by count and by severity, because they point opposite ways.** By count luna is the worst of
-the three arms with 4 violations, against 3 each for Kimi and Sonnet. By severity Kimi is: `aria-roles`
-is the only **critical** class in all 274 delivered pages, and all three of Kimi's are that class
-(`role="doc-footnotes"`, #345) against one of luna's four. Sonnet's 3 are all `serious`. So the swap
-traded three criticals for one critical and three serious findings — one violation worse, one arm's
-worth of severity better. Neither number alone says that.
+the three arms with 4 violations, against 3 each for Kimi and Sonnet. By severity Kimi is the worst:
+`aria-roles` is the only **critical** class in all 274 delivered pages, and all three of Kimi's are
+that class (`role="doc-footnotes"`, #345) against one of luna's four. Sonnet's 3 are all `serious`. So
+the swap traded three criticals for one critical and three serious findings — one violation worse, one
+arm's worth of severity better. Neither number alone says that.
 
-Worse, on the
-nine pages carrying a shaded map or a shading key, luna's pages **passed `page_verify_ok` clean while
-asserting legend categories the page never prints** — one delivered page says the map is shaded "in
+**And Sonnet's 3 are the cost of doing the right thing**, which is the third reason not to rank arms by
+this count. All three are `definition-list` on legend pages (`p092`, `p093`, `p095`), and Sonnet fails
+there **because** it is the only arm that gave the legend the list structure `agents/page.md` asks for.
+Kimi emits no `<dl>` on any figure page; luna emits none either. An arm that skips the structure
+scores 0 on the rule that governs it.
+
+**The finding that is worse than either reading of the axe count** is on the nine pages carrying a
+shaded map or a shading key, where luna's pages **passed `page_verify_ok` clean while asserting legend
+categories the page never prints** — one delivered page says the map is shaded "in
 one of three patterns" where two swatches are printed. They passed because luna assigns no state to
 any legend entry: it says less, so there is less to fail, and a page nobody corrects is a page that
 cost less. Neither the −15.9% nor the acceptance comparison can see that. #347 finds defects on all
