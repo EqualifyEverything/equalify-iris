@@ -45,18 +45,25 @@ function codeSpans(text: string): string[] {
   return [...new Set(text.match(/`[^`\n]+`/g) ?? [])].sort();
 }
 
-// A file or a directory, however it is spelled. `docs/ci.md` matches as a file and not also as a
-// directory, because the lookahead requires the slash to end the token.
+// A file or a directory, however it is spelled: a known extension, a trailing slash, or the bare word
+// `agents`. `docs/ci.md` matches as a file and not also as a directory, because the lookahead requires
+// the slash to end the token.
 //
-// The limit, stated here because it is where someone would reach for a wider regex: a path is
-// recognised by a known extension or by a trailing slash, so a scope member written as a bare word —
-// "anything under agents or src" — is invisible. Both readers below accept an empty result, so that
-// one shape passes. It is deliberately not widened to bare words: `docs` and `agents` occur as
-// ordinary English in every region this file reads ("Docs prose that is not concise plain
-// language"), so matching them would fail on prose that binds nothing, and a pin that cries wolf
-// gets deleted. Reaching the gap needs a commit that widens the scope AND spells the new member
-// without a slash; the shape that actually went wrong here — a copied list of paths — is caught.
-const PATH_RE = /\b[A-Za-z0-9_.-]+\.(?:md|ya?ml|ts|tsx|json|sh|mjs)\b|\b[a-z0-9_.-]+\/(?![/\w])/g;
+// Bare `docs` is deliberately NOT matched, and that asymmetry is measured rather than assumed. Stripped
+// of their code spans, the four regions this file reads use `docs` as an ordinary word in 4 of 4 —
+// starting with the prompt's own "Docs prose that is not concise plain language" — and `agents` in 0 of
+// 4, where it appears only inside `agents/` or as the singular "agent prompts". So matching bare `docs`
+// would fire on prose that binds nothing and the pin would be deleted by the first person it annoyed,
+// while matching bare `agents` costs nothing. Both halves of that measurement are asserted below, in
+// both directions, so a document that starts using `agents` as English fails a test instead of quietly
+// making this regex wrong.
+//
+// The limit that remains, stated because this is where someone reaches for a wider regex: a scope
+// member with no extension, no slash and no name this regex knows — "anything under src" — is
+// invisible, and both readers accept an empty result. Reaching it needs a commit that widens the scope
+// AND spells the new member that way.
+const PATH_RE =
+  /\b[A-Za-z0-9_.-]+\.(?:md|ya?ml|ts|tsx|json|sh|mjs)\b|\b[a-z0-9_.-]+\/(?![/\w])|\b[Aa]gents\b/g;
 
 // Path-like tokens that are NOT inside a code span, minus CONTRIBUTING.md itself.
 //
@@ -133,8 +140,13 @@ function bullet(text: string, containing: string): string {
 
 // The four regions that state the scope. Named once each, because the last test compares them as a
 // set and a region sliced twice is a region that can drift between two assertions.
+//
+// None of these locators may contain `docs` or `agents`. The last test asserts how those two words are
+// used in each region, and a locator carrying one means rewording a region trips the locator FIRST —
+// so the failure arrives as "step 4 is missing" instead of as the reconsider-the-regex message that
+// test exists to print. Three of the four read that way before this was noticed.
 function promptProseBullet(): string {
-  return bullet(section(reviewPrompt(), "Should flag"), "Docs prose that is not concise plain language");
+  return bullet(section(reviewPrompt(), "Should flag"), "that is not concise plain language");
 }
 
 // CONTRIBUTING.md's Documentation section, OPENING paragraph only, ended by `\n\n`: that paragraph is
@@ -151,7 +163,7 @@ function contributingBinding(): string {
 }
 
 function contributingReviewBullet(): string {
-  return bullet(readFileSync(CONTRIBUTING, "utf8"), "One exception: docs prose");
+  return bullet(readFileSync(CONTRIBUTING, "utf8"), "One exception:");
 }
 
 // The one numbered step in docs/ci.md that describes this check, `4.` to `5.`. Read as a step rather
@@ -159,12 +171,21 @@ function contributingReviewBullet(): string {
 // misses would pass on an empty match.
 function ciDocStep(): string {
   const text = readFileSync(CI_DOC, "utf8");
-  const start = text.indexOf("\n4. Checks docs prose");
-  assert.notEqual(start, -1, "docs/ci.md still describes the docs-prose check as review step 4");
+  const start = text.indexOf("\n4. Checks ");
+  assert.notEqual(start, -1, "docs/ci.md still describes this check as review step 4");
   const rest = text.slice(start + 1);
   const end = rest.indexOf("\n5. ");
   assert.notEqual(end, -1, "and step 5 still follows it");
-  return rest.slice(0, end);
+  const step = rest.slice(0, end);
+  // The locator above is deliberately word-free, so it would select whatever step 4 happens to be if
+  // the steps were reordered. This is what keeps it honest, and it names the rule rather than the
+  // subject so that it is not itself a locator carrying `docs`.
+  assert.match(
+    step,
+    /plain-language requirement/,
+    `and step 4 is still the one describing the plain-language check, not a renumbered neighbour:\n${step}`,
+  );
+  return step;
 }
 
 test("the reviewer's docs-prose rule is scoped to the files CONTRIBUTING.md binds", () => {
@@ -258,13 +279,15 @@ test("docs/ci.md describes the same scope it documents", () => {
   assertNoBarePaths(step, "docs/ci.md's step 4");
 });
 
-// `PATH_RE`'s comment justifies not matching bare words by claiming that `docs` and `agents` appear as
-// ordinary English in every region this file reads. That is a claim about four documents, not about
-// the regex, so it is checked here rather than asserted in a comment. If it stops being true, widening
-// the regex becomes the better trade and this comment should not be what talks the next reader out of
-// it — the test failing is the signal to reconsider, and the residual gap it leaves (a scope member
-// spelled with no slash and no extension) is stated on `PATH_RE` itself.
-test("PATH_RE ignores bare words for a reason that is still true of every region it reads", () => {
+// Which bare words `PATH_RE` may match is a measurement of these four documents, not a property of the
+// regex, so it is checked here rather than asserted in a comment — a comment should not be what talks
+// the next reader out of changing it.
+//
+// Per word, and in both directions. An `assert.match(/\b(docs|agents)\b/)` would pass on either and so
+// could not report that one half had become false: `docs` is bare in 4 of 4 regions and `agents` in 0 of
+// 4, which is what licenses matching one and not the other. Each direction fails with the change it
+// licenses — narrow the regex, or widen it.
+test("PATH_RE's bare-word list still matches how these four documents use those words", () => {
   const regions: [string, string][] = [
     ["the prompt's docs-prose bullet", promptProseBullet()],
     ["CONTRIBUTING.md's Documentation section", contributingBinding()],
@@ -275,9 +298,17 @@ test("PATH_RE ignores bare words for a reason that is still true of every region
     const prose = region.replace(/`[^`\n]+`/g, " ");
     assert.match(
       prose,
-      /\b(docs|agents)\b/i,
-      `${where} still uses "docs" or "agents" as an ordinary word outside a code span, which is why ` +
-        `PATH_RE requires a slash or an extension. If no region does any more, widen it:\n${prose}`,
+      /\bdocs\b/i,
+      `${where} still uses "docs" as an ordinary word outside a code span, which is why PATH_RE does ` +
+        `NOT match it: a pin that fires on prose binding nothing gets deleted. If no region uses it ` +
+        `that way any more, add it to PATH_RE:\n${prose}`,
+    );
+    assert.doesNotMatch(
+      prose,
+      /\bagents\b/i,
+      `${where} still keeps "agents" inside a code span or writes the singular "agent", which is why ` +
+        `PATH_RE DOES match it bare. If a region starts using it as an ordinary word, that match ` +
+        `begins crying wolf and has to come out:\n${prose}`,
     );
   }
 });
