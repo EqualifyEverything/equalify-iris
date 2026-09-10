@@ -3666,16 +3666,26 @@ anchor belongs on the surviving markup is rule 2's reading for the editor; and m
 repeat in one join declines as `note_repeats_exceed_licence`, because past that the verification would
 answer `rows_lost` — a reason about rows for a note the caption still carries.
 
-That second limit is counted over the drops the joined **caption** cannot answer for, which is not the
-same as counting drops. A row whose note the finished caption carries is a note promoted rather than a
-row lost, and the row check forgives it by name (below), so counting it against the licence would decline
-a pair this path's own verifier accepts — and past the licence the price is an editor call, and both
-halves split wherever that call declines. The pair the two-drop bound used to refuse is an ordinary one:
-the first half printing the note as a row with no caption of its own, the second printing it in **both**
-places, so the import carries the note and two rows repeating it go. Rule 6's own answer, refused for
-being it twice. What the bound is left holding is the drop no caption accounts for — a repeat of a note
-the first half prints as a row while its caption does not — where each dropped row is just a row, the
-verification would still answer `rows_lost`, and declining here is that answer one editor call earlier.
+That second limit is asked the way the row floor asks it — the larger of rule 6's one row and the rows the
+finished **caption** accounts for, never their sum — because the two have to agree about the same table. A
+row whose note the caption carries is a note promoted rather than a row lost, and the row check forgives it
+by name (below), so counting it against the licence declines a pair this path's own verifier accepts: the
+one the two-drop bound used to refuse is ordinary, the first half printing the note as a row with no
+caption of its own, the second printing it in **both** places, so the import carries the note and two rows
+repeating it go — rule 6's own answer, refused for being it twice. Counting it as free on **top** is the
+opposite error and the worse one, because the pair then joins and comes back `rows_lost`: an editor paid
+for an answer the same floor refuses again, and then the halves ship split. Both readings were shipped, one
+commit apart, before the `max` that is neither.
+
+What the bound is left holding is the drop no caption accounts for — a repeat of a note the first half
+prints as a row while its caption does not — where each dropped row is just a row and declining here is
+`rows_lost` one editor call earlier. Ways past it, none of them measured: a half printing such a row twice
+itself, the mixed pair above, and **two distinct notes on one table**, which is 0 of the 769 tables in the
+round logs. That last one is a genuine over-refusal rather than a decline in the right direction: a correct
+join of it exists — rule 6 to the letter, keep the first half's second note row, drop both of the second
+half's — and the floor refuses that answer too, since it licenses the caption's rows and one repeat, not
+two. So the pair ships split, from the code path and from the editor alike. Widening the floor to license a
+repeat per distinct note is the fix, and it is not worth doing against no measured pair.
 
 Both spellings of that repeat row are dropped, `<td>` and `<th>`, and that took `header_cells_lost`
 being asked on the right cells first. A bracketed note row inside the header block is **not** a header

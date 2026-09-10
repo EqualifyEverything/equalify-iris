@@ -1164,17 +1164,21 @@ export function joinInCode(pair: ContinuationPair): { html: string } | { reason:
   }
 
   // Rule 6 licenses dropping A repeat, and `JOIN_DROPPABLE_ROWS` is the one row `verifyJoin`'s floor
-  // forgives for it — over the drops the joined CAPTION does not answer for. A row whose note the finished
-  // caption carries is forgiven at the `rows_lost` site by name, because a note promoted into the caption
-  // is content kept rather than a row lost, so counting those here would decline a pair this path's own
-  // verifier accepts, and past the licence that buys an editor call and ships the halves SPLIT wherever
-  // the call declines. What the bound is left holding is the drop no caption can account for: a repeat of
-  // a note the first half prints as a ROW while its caption does not, where the row that vanishes is just
-  // a row. Two ways past it, neither measured — a half printing such a row twice itself, and a mixed pair
-  // whose first half prints the note as a row while the second prints it in both places. There, declining
-  // is still the same answer `verifyJoin` would give, one editor call earlier.
+  // forgives for it. Asked the way the floor asks it — `max` of that one row and the rows the finished
+  // CAPTION accounts for, never their sum — because the two have to agree about the same table. A row whose
+  // note the caption carries is forgiven at the `rows_lost` site by name, so counting it here would decline
+  // a pair this path's own verifier accepts; counting it as free on TOP produces one the verifier refuses,
+  // and that is the worse of the two errors, because the refusal arrives as a row count after the editor
+  // has been paid for an answer the same floor refuses again, and then the halves ship split. This comment
+  // claimed the second could not happen, for one commit: a pair dropping one covered row and one uncovered
+  // one passed a licence that counted only the uncovered ones. Ways past the bound, none of them measured
+  // — a half printing such a row twice itself, a mixed pair whose first half prints the note as a row while
+  // the second prints it in both places, and two distinct notes on one table, which is 0 of the 769 tables
+  // in the round logs. On the last of those a correct join exists and this declines it, and the editor's
+  // answer would be refused too: the floor licenses the caption's rows and ONE repeat, not two.
   const keptNotes = captionNotes(ftab.querySelector("caption")?.textContent ?? "");
-  if (notesDropped.filter((t) => !keptNotes.has(t)).length > JOIN_DROPPABLE_ROWS) {
+  const covered = notesDropped.filter((t) => keptNotes.has(t)).length;
+  if (notesDropped.length > Math.max(JOIN_DROPPABLE_ROWS, covered)) {
     return { reason: "note_repeats_exceed_licence" };
   }
 

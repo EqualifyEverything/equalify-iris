@@ -863,6 +863,23 @@ test("a first half with no caption of its own has no title caption to be strict 
   const okJoin = joinInCode(okPair);
   assert.ok("html" in okJoin, JSON.stringify(okJoin));
   assert.equal(verifyJoin(okPair, okJoin.html), null);
+
+  // The licence is asked the way `rowFloor` asks it — `max` of rule 6's one row and the rows the finished
+  // caption accounts for, never the sum — because a pair dropping one COVERED row and one UNCOVERED one
+  // otherwise passes here and comes back `rows_lost`, which is an editor call spent on an answer the same
+  // floor refuses again. Two distinct notes on one table, the only shape that reaches it, and 0 of the 769
+  // tables in the round logs have it.
+  const other = "[Percentage distribution]";
+  const twoNotes = onePair(
+    `<table><caption>Table 7.—Grants ${note}</caption>${HEAD}<tbody>${noteRow(other)}${dataRow("Alabama")}</tbody></table>` +
+      `<table><caption>Table 7.—Grants ${note}—Continued</caption>${HEAD}<tbody>${noteRow(note)}${noteRow(other)}${dataRow("Vermont")}</tbody></table>`,
+  );
+  assert.deepEqual(joinInCode(twoNotes), { reason: "note_repeats_exceed_licence" });
+  // And the residue, pinned rather than described: the correct join of that pair — rule 6 to the letter,
+  // every data row kept — is refused, because the floor licenses the caption's rows and ONE repeat, not
+  // two. So the pair ships split. Nothing measured has this shape, and the fix is a wider floor.
+  const correct = `<table><caption>Table 7.—Grants ${note}</caption>${HEAD}<tbody>${noteRow(other)}${dataRow("Alabama")}${dataRow("Vermont")}</tbody></table>`;
+  assert.equal(verifyJoin(twoNotes, correct), "rows_lost");
 });
 
 test("a note row inside the header block is not a header cell in either spelling", () => {
