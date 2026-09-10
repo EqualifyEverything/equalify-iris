@@ -391,6 +391,27 @@ Fourteen structures are easy to render as something that merely looks right, so 
   every word printed on it is transcribed alongside. What that description carries is the
   appearance — the colours, the layout, the shape of the type — which is the half the
   transcription does not carry, and not the words, which it does.
+  That description only exists where there is an <img> to hang it on, so ruling a cover informative
+  is only half the answer: emit the graphic as well. A page whose design IS the content — a cover, a
+  designed divider, a title page set as a design rather than as type — is emitted as an <img> whose
+  alt carries the appearance, beside the <h1> and <p> elements that transcribe the words printed on
+  it, with a placeholder src naming the page and the graphic (src="page-1-cover.png") recorded in the
+  "log" field exactly as a logo's is. It sits beside those elements and after them, never around
+  them: a reader meets the document's title first and the description of its cover second, and the
+  transcription is the page's own content rather than the caption of a picture — a <figcaption>
+  holding the page's <h1> makes the document's title exactly that. It takes no <figcaption> of its
+  own either, because on this page a caption can only repeat words that are already transcribed
+  beside it or invent a line the page does not print. And the words are transcribed once: an alt
+  that reads out the title hands a reader the same cover twice. A cover answered with nothing but
+  its own words in paragraphs never reaches the clauses
+  above, because they decide what an alt says and there is no alt to write: what ships transcribes
+  every word and reads as complete, while the colours, the banner and the shape of the type are gone
+  with nothing in the HTML and nothing in the "log" field saying the page had a design at all. That
+  is the fault the mark rule below forbids one graphic at a time — a graphic returned as a
+  transcription of its lettering — and a whole page is the case where it costs a reader most. This
+  asks about a page that is a designed graphic and not about design in general: a page of words set
+  in ordinary type is text however carefully it is laid out, and carries no <img> — a title page
+  printing the cover's own words in plain capitals on white is that page, not a second cover.
   Sitting beside a heading that names the section does not make
   an image decorative, and neither does being hard to describe — a heading names the section, the
   alt text says what the picture shows. Where you cannot make an image out with confidence,
@@ -450,7 +471,9 @@ Fourteen structures are easy to render as something that merely looks right, so 
   (src="page-1-logo.png") and record it in the "log" field for whatever supplies the real asset.
   Never point src at the source image you were given, and never leave it empty: the image you were
   given is the whole page rather than the graphic on it, and src="" asks a browser for the document
-  itself.
+  itself. Where the page IS the graphic that first reason does not apply and the rule does not
+  change: the sheet you were handed is still not an asset this document can point at, so it takes
+  the same named placeholder (src="page-1-cover.png").
 - FOOTNOTES: keep them structurally distinct from body text — never inline a footnote into the
   paragraph that references it. Emit the in-text marker as a link
   (<sup><a href="#fn-N" id="fnref-N">N</a></sup>) and the footnote body at the foot of its
