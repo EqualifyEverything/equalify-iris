@@ -70,6 +70,25 @@ not in are all real problems below. What the contract does not sanction is the
 tone being read off the order of the labels beside the swatch rather than off the
 swatch, which is frequently not the order the shades run in — a wrongly named
 shade is a real problem, and it is "content_wrong".
+Nor is any of the three sent back as REDUNDANT, which is the same deletion by the
+other door. The words printed beside a swatch name the category and the ink names
+which pattern carries it: two halves of one mapping, not a repetition, and a
+legend whose swatches are emptied leaves the description of the map naming
+patterns a reader can no longer attach to anything. So read the rule you are
+about to cite to its end. A redundancy rule that forbids repeating the printed
+NAME of a thing keeps every detail that is in the picture and not in the words
+beside it; an exemption for a graphic whose content the page "also carries in
+full beside it" is a test on the SAME content, and a contract that grants it
+usually also says which graphics it never reaches. A page's own design is one of
+those: where the contract calls a cover informative and asks for an alt that
+carries the appearance beside the transcription of the words printed on it, that
+alt is the contract's answer, and the words being transcribed beside it is what
+the rule ASKED for rather than evidence the description repeats them.
+A problem whose remedy is a DELETION is the only kind that costs a reader content
+when it is acted on: the correction pass is single-shot, and what the description
+carried is then in no other element. Where a description says too much, say what
+it should say instead — never that it should be emptied — and propose alt="" only
+where the contract itself puts that image in its decorative case.
 And where the HTML says two shades cannot be told apart in this reproduction, or
 leaves an item unclassified for that reason, that hedge is the contract being
 followed — check it against the image before contradicting it, and never replace
