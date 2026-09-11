@@ -635,8 +635,15 @@ A 200 carries one extra field, and the login is the *deployment's* account rathe
 
 Check for `anonymous` rather than comparing logins: it is the only thing that distinguishes the two
 modes, so a client that ignores it will greet a visitor by the bot's name and file their feedback as
-the bot without either of them knowing. The key is **absent** for a signed-in user, not `false`. What
-anonymous callers give up is listed under [List sessions](#list-sessions) and in
+the bot without either of them knowing. The key is **absent** for an ordinary signed-in user, not
+`false`.
+
+It means "this request resolved to the account the operator configured as
+`github.anonymous_token`", which is *not* the same as "this request sent no token". A caller
+presenting that account's own token gets `anonymous: true` as well, and everything on this page that
+follows from the flag — including the `403` on [List sessions](#list-sessions) — follows for them
+too. There is one shared identity, and this is how you tell you are it. What anonymous callers give
+up is listed under [List sessions](#list-sessions) and in
 [github-auth.md](github-auth.md#anonymous-access-a-demo-you-turn-on).
 
 ## Create a session (upload images)

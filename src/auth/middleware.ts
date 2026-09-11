@@ -2,7 +2,7 @@ import type { Request, Response, NextFunction } from "express";
 import type { IrisConfig } from "../config.ts";
 import { anonymousToken } from "../config.ts";
 import type { Store, UserRecord } from "../store/db.ts";
-import { fetchUser } from "./github.ts";
+import { fetchUser, isRejectedCredential } from "./github.ts";
 import { sendError } from "../routes/errors.ts";
 
 // Request augmented with the resolved user + their GitHub token.
@@ -129,12 +129,30 @@ export function makeAuthMiddleware(store: Store, cfg: IrisConfig) {
   //
   // Memoized rather than re-resolved because a token's account cannot change and config
   // does not hot-reload, so this costs ONE extra `GET /user` per process (none at all on
-  // a deployment with the key unset). A resolution FAILURE is deliberately not cached:
-  // it means the guard cannot be applied, and a transient GitHub outage must not switch
-  // it off for the rest of the process. The cost of that choice is one failed lookup per
-  // authenticated request while GitHub is unreachable, which is bounded and does not
-  // fail the request.
+  // a deployment with the key unset).
   let anonUserId: number | undefined;
+  // A FAILURE to resolve it is memoized only when GitHub REJECTED the credential (401).
+  // The two cases are not alike and the difference is not about how long they last:
+  //
+  //   - A 401 is a final answer about a configured value, and config does not hot-reload,
+  //     so retrying it cannot produce a different result before the restart that would
+  //     clear this flag anyway. Retrying forever is what the first version did, and its
+  //     cost is not bounded by an outage: a mistyped or revoked token is a permanent
+  //     state, so EVERY authenticated request paid an extra uncached `GET /user` (issued
+  //     with no timeout) for the life of the process — including requests whose own token
+  //     was a cache hit and would otherwise have made no outbound call at all.
+  //   - A 403 (rate limit), a 5xx or a thrown fetch says GitHub could not answer, not
+  //     that the answer is no. Latching on those would switch the guard off for the rest
+  //     of the process over a blip, so they are retried.
+  //
+  // Latching is safe here in a way that is worth stating, because "stop applying a guard"
+  // normally is not: a credential GitHub rejects cannot serve an anonymous request either
+  // — that path calls the same `fetchUser` and 401s — so while this flag is set, no new
+  // session can reach the shared identity. And it changes nothing for sessions created
+  // BEFORE the token broke: an unresolved anonymous id fails the comparison below
+  // whether the failure was memoized or retried, so both versions serve that account's
+  // own list identically. The flag only stops re-asking a question with a fixed answer.
+  let anonRejected = false;
   return async function auth(req: AuthedRequest, res: Response, next: NextFunction): Promise<void> {
     const header = req.header("authorization") ?? "";
     const match = header.match(/^Bearer\s+(.+)$/i);
@@ -206,15 +224,17 @@ export function makeAuthMiddleware(store: Store, cfg: IrisConfig) {
           // Free: this request just resolved the anonymous credential itself.
           anonUserId = userId;
           req.anonymous = true;
+        } else if (anonUserId === undefined && anonRejected) {
+          // Already known to be unusable — no lookup, and no flag. See `anonRejected`.
         } else {
           try {
             anonUserId ??= await resolveUserId(anonToken);
-          } catch {
+          } catch (e) {
             // The deployment's own credential is unusable (revoked, mistyped, GitHub
             // down). Swallowed here on purpose: it is not this caller's fault and must
             // not turn their working request into a 401. The operator's signal is that
             // every anonymous request 401s, plus the boot warning that the key is set.
-            // Left unmemoized so the next request retries.
+            if (isRejectedCredential(e)) anonRejected = true;
           }
           if (anonUserId === userId) req.anonymous = true;
         }

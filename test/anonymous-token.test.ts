@@ -49,6 +49,10 @@ const ANON_TOKEN = "gho_anon_demo";
 const ANON_USER = { id: 4242, login: "iris-demo-bot" };
 const USER_TOKEN = "gho_real_person";
 const REAL_USER = { id: 909, login: "a-real-person" };
+// A token GitHub cannot answer ABOUT, as distinct from one it rejects. Both leave the
+// anonymous identity unresolved and both must leave a signed-in caller working, but only
+// one of them is a final answer — see `anonRejected` in auth/middleware.ts.
+const UNANSWERABLE_TOKEN = "gho_github_is_having_a_day";
 
 // A GitHub that knows exactly two tokens, so "the anonymous credential was validated" and
 // "the caller's own token was validated" are distinguishable, and anything else 401s.
@@ -60,6 +64,8 @@ async function mockGitHub(): Promise<{ base: string; close: () => void; calls: (
     const auth = req.header("authorization") ?? "";
     if (auth === `Bearer ${ANON_TOKEN}`) return void res.json(ANON_USER);
     if (auth === `Bearer ${USER_TOKEN}`) return void res.json(REAL_USER);
+    // Deliberately a 5xx and not a 401: a status that says "ask again later".
+    if (auth === `Bearer ${UNANSWERABLE_TOKEN}`) return void res.status(502).json({ message: "Bad gateway" });
     res.status(401).json({ message: "Bad credentials" });
   });
   const server = app.listen(0);
@@ -343,19 +349,48 @@ test("resolving the shared identity costs one lookup and does not break a signed
   }
 });
 
-test("an unusable shared credential does not 401 a signed-in caller", async () => {
+test("a REJECTED shared credential is asked about once, not once per request", async () => {
   // The failure mode the lookup above introduces if it is not contained: the deployment's
   // own credential is revoked or mistyped, so resolving it throws — on a request that has
-  // nothing to do with it. A caller's working token must not fail because the operator's
-  // is broken. The operator's signal is that anonymous requests 401, plus the boot warning.
+  // nothing to do with it. Two things have to be true at once, and they pull in opposite
+  // directions: a caller's working token must not fail because the operator's is broken,
+  // AND the failed lookup must not repeat forever. A mistyped config value is not a blip;
+  // it is a permanent state, so retrying it charges every authenticated request an extra
+  // uncached `GET /user` for the life of the process — including requests whose own token
+  // is a cache hit and would otherwise make no outbound call at all. Round 2 of #458.
   const h = await harness("gho_operator_typo");
   try {
     assert.equal(await h.fetch("/v1/me", { authorization: `Bearer ${USER_TOKEN}` }).then((r) => r.status), 200);
-    // Retried rather than latched off: a transient outage must not disable the guard for
-    // the rest of the process, so each such request pays one failed lookup.
+    assert.equal(h.ghCalls(), 2, "the caller's token, and one attempt at the shared credential");
     assert.equal(await h.fetch("/v1/me", { authorization: `Bearer ${USER_TOKEN}` }).then((r) => r.status), 200);
-    // And the mode itself is simply unusable, which is the operator's cue.
+    assert.equal(h.ghCalls(), 2, "asked GitHub again about a credential it had already rejected");
+    // Latching is only safe because a rejected credential cannot serve an anonymous
+    // request either — so while the flag is set, nothing new can reach the shared identity
+    // for the guard to have protected. That is this assertion, not a separate concern.
     assert.equal(await h.fetch("/v1/me").then((r) => r.status), 401);
+    // The guard is off rather than misapplied: the signed-in caller is still not anonymous.
+    const me = (await h.fetch("/v1/me", { authorization: `Bearer ${USER_TOKEN}` }).then((r) => r.json())) as {
+      anonymous?: boolean;
+    };
+    assert.equal("anonymous" in me, false);
+  } finally {
+    h.close();
+  }
+});
+
+test("a shared credential GitHub cannot answer about is retried, not latched off", async () => {
+  // The other half, and the reason the memoization above is keyed on 401 alone. A 502 (or a
+  // 5xx, a 403 rate limit, a thrown fetch) says GitHub could not answer, not that the
+  // answer is no — and the credential behind it may be perfectly good, still serving
+  // anonymous sessions the moment GitHub recovers. Latching there would switch the guard
+  // off for the rest of the process over a blip, which is the session list this PR exists
+  // to close. So this one pays the repeated lookup, on purpose.
+  const h = await harness(UNANSWERABLE_TOKEN);
+  try {
+    assert.equal(await h.fetch("/v1/me", { authorization: `Bearer ${USER_TOKEN}` }).then((r) => r.status), 200);
+    assert.equal(h.ghCalls(), 2, "the caller's token, and one attempt at the shared credential");
+    assert.equal(await h.fetch("/v1/me", { authorization: `Bearer ${USER_TOKEN}` }).then((r) => r.status), 200);
+    assert.equal(h.ghCalls(), 3, "gave up on a credential GitHub had merely failed to answer about");
   } finally {
     h.close();
   }
