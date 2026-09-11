@@ -203,13 +203,40 @@ export async function pollDeviceFlow(
   return { status: "pending", error: json.error ?? "authorization_pending" };
 }
 
+// A failure from `fetchUser`, carrying the HTTP status as a FIELD as well as in the
+// message. The status is what tells a permanent answer from a transient one — 401 means
+// GitHub rejected the credential and will keep rejecting it, while a 5xx, a 403 rate
+// limit or a thrown fetch is worth retrying — and a caller that has to decide must not
+// have to parse the prose to do it. (`installHintFor` in github/issue.ts refuses the same
+// text matching for the same reason: a message can carry a number that came from
+// somewhere else entirely.)
+export type UserLookupError = Error & { status: number };
+
+// Whether an error from `fetchUser` is GitHub REJECTING the credential, as opposed to
+// being unable to answer about it. Only 401: a 403 is a rate limit or a policy block, a
+// 5xx is GitHub's problem, and a network failure has no status at all — none of those say
+// the token is bad, so none of them are safe to treat as a final answer.
+export function isRejectedCredential(e: unknown): boolean {
+  return (e as { status?: number } | null)?.status === 401;
+}
+
+// The one place a `fetchUser` failure is constructed. Exported because a caller that has
+// CACHED one of these answers has to reproduce it exactly rather than compose its own
+// message — the difference between a cached rejection and a fresh one must not be visible
+// in a response, and a second copy of this string is a second thing to keep in step.
+export function userLookupError(status: number): UserLookupError {
+  const err = new Error(`github user lookup failed: ${status}`) as UserLookupError;
+  err.status = status;
+  return err;
+}
+
 // Identify the GitHub user behind a token. Login is signup: there is no separate
 // registration step.
 export async function fetchUser(token: string, apiBase: string): Promise<GitHubUser> {
   const res = await fetch(`${apiBase}/user`, {
     headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "User-Agent": "equalify-iris" },
   });
-  if (!res.ok) throw new Error(`github user lookup failed: ${res.status}`);
+  if (!res.ok) throw userLookupError(res.status);
   const json = (await res.json()) as { id: number; login: string };
   return { id: json.id, login: json.login };
 }

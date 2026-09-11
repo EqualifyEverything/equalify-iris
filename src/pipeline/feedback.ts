@@ -7,7 +7,7 @@ import { ACCESSIBILITY_REQUIREMENTS } from "./accessibility.ts";
 import { loadImage, type InputImage, type PipelineContext } from "./context.ts";
 import { flatten } from "./flatten.ts";
 import { knownPages, pageIndex } from "./pageindex.ts";
-import { createAgentUpdateIssue, installHintFor } from "../github/issue.ts";
+import { createAgentUpdateIssue, installHintFor, type FilingCredential } from "../github/issue.ts";
 import { lessonSlug, recordExample, type CorrectionExample, type LessonKind } from "./memory.ts";
 import type { FixtureCase } from "./regression.ts";
 import type { PipelineStep } from "../providers/index.ts";
@@ -1063,7 +1063,16 @@ export async function proposeAgentUpdatesFromFeedback(
   // identity, which is why authenticating with GitHub is required.
   // `github.issue_token` overrides the attribution to a bot account. No-op without
   // any token, so local runs still keep the proposal in agent-updates.md.
-  const usingServiceToken = Boolean(ctx.cfg.github.issue_token);
+  // Which credential is used decides what a 403 means, so it is recorded rather than
+  // re-derived at the failure. Three cases, not two: `issue_token` wins when set, an
+  // anonymous session files with the config PAT that served it, and everyone else files
+  // as themselves. The first two are config PATs whose access has nothing to do with the
+  // GitHub App installation — see `installHintFor`.
+  const credential: FilingCredential = ctx.cfg.github.issue_token
+    ? "service"
+    : ctx.anonymousSession
+      ? "anonymous"
+      : "user";
   const token = ctx.cfg.github.issue_token || ctx.githubToken;
   if (token) {
     // What the issue is titled and therefore deduped by. Prefer the recorded lesson's
@@ -1106,7 +1115,7 @@ export async function proposeAgentUpdatesFromFeedback(
       ctx.log.event("agent_update_issue_failed", {
         agent: proposal.agent_name,
         error: (e as Error)?.message ?? String(e),
-        ...installHintFor(e, { usingServiceToken }),
+        ...installHintFor(e, { credential }),
       });
     }
   } else {

@@ -189,7 +189,44 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
   // and repeats rows at tie boundaries (see store.listSessions). The cursor is
   // therefore compound, and an unparseable one is a 400 rather than being
   // compared as a string, which used to silently hand back page one forever.
+  //
+  // This is the ONE route `github.anonymous_token` closes, and the reason is the word
+  // "this user's" above. Ownership here is `github_user_id` and nothing else (see
+  // `ownedSession`), so on a deployment serving every anonymous caller with one
+  // credential, "this user's sessions" is every anonymous visitor's sessions — a
+  // stranger's uploaded document, listed by id to whoever asks next. Refused rather
+  // than filtered, because there is nothing to filter on: the request carries no
+  // property that distinguishes one anonymous caller from another, and inventing one
+  // (an address, a cookie) would be a second, weaker identity pretending to be
+  // ownership.
+  //
+  // `req.anonymous` is keyed on the identity reached and not on the missing header, which
+  // is what makes this guard cover the caller who holds the shared account's token and
+  // presents it normally. That caller is why the flag is not simply "sent no credential":
+  // ownership cannot tell them from a visitor, so neither can this.
+  //
+  // What anonymous callers keep is every other route: a session is reachable by its own
+  // id, which is `ses_` + a ULID — 80 random bits, so it is a capability rather than a
+  // guess. That is a real narrowing of the guarantee and it is why this mode is off by
+  // default and warned about at boot.
   r.get("/", (req: AuthedRequest, res) => {
+    if (req.anonymous) {
+      // One reason, two remedies, because two different callers land here: a visitor with
+      // no token, and whoever holds the account this deployment uses as its anonymous
+      // credential. Telling the second to "sign in" would be useless advice — they are
+      // signed in, and that is exactly the problem — so the message names both.
+      sendError(
+        res,
+        403,
+        "anonymous_session_list",
+        "This deployment serves callers with no GitHub token as one shared identity, and this request " +
+          "resolves to that identity, so it cannot tell whose sessions are whose and will not list them. " +
+          "Use the session id returned by POST /v1/sessions. If you are signed in and seeing this, your " +
+          "account is the one configured as github.anonymous_token: a session list needs an account this " +
+          "deployment does not share, or sign in with a different one.",
+      );
+      return;
+    }
     // One rule for every unusable value: fall back to the default. Written as
     // `Math.max(parseInt(x) || 20, 1)` it was two rules — `?limit=0` is falsy so
     // it became 20, while `?limit=-1` clamped to 1 — so two equally invalid
@@ -373,7 +410,17 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
     // Queue the pipeline; clients poll GET /v1/sessions/{id}. The session stays
     // in the `queued` status it was created with until a slot frees up, so a
     // client polling sees queued -> running -> ready_for_review.
-    enqueueRun({ cfg, store, sessionId, maxReviewIterations: maxIter, githubToken: req.token });
+    // `anonymousSession` travels with the token because the two answer one question
+    // together: what the run files with, and whose credential that is. A filing failure is
+    // diagnosed from the pair (see `installHintFor`).
+    enqueueRun({
+      cfg,
+      store,
+      sessionId,
+      maxReviewIterations: maxIter,
+      githubToken: req.token,
+      anonymousSession: req.anonymous,
+    });
 
     res.status(201).json({
       session_id: record.session_id,
@@ -492,6 +539,7 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
       maxReviewIterations: s.iterations_max,
       feedback,
       githubToken: req.token,
+      anonymousSession: req.anonymous,
     });
     // Report what actually happened. Under the run cap a re-run waits, and
     // saying "running" then would make a queued session look hung. Both report

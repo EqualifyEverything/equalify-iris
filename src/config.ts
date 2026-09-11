@@ -132,6 +132,22 @@ export interface IrisConfig {
     // account erases that attribution. Set it only when a deployment cannot file as
     // its users — e.g. an org policy that forbids it.
     issue_token?: string;
+    // OPTIONAL credential that serves callers who send NO `Authorization` header at
+    // all, instead of refusing them. Off by default: with it unset, a token is
+    // required on every call and there is no anonymous access.
+    //
+    // Set it and the deployment has a demo mode — a visitor can convert a document
+    // without a GitHub account. What that costs is not obvious, so it is stated at
+    // boot (anonymousTokenWarning) and in three places in the docs: every anonymous
+    // caller is the SAME user as far as the store is concerned, so session ownership
+    // stops separating them (routes/sessions.ts refuses the session LIST for them —
+    // including to this account itself, since the refusal is keyed on the identity a
+    // request reaches and not on whether it sent a header), their uploads are counted by
+    // address rather than by user (util/requestLimits.ts), and their feedback is filed
+    // under this credential's account rather than their own. It therefore wants a
+    // DEDICATED account: the only way that token could list its own sessions is a rule
+    // that lists every anonymous visitor's to whoever holds it.
+    anonymous_token?: string;
   };
   providers: {
     default: string;
@@ -667,6 +683,50 @@ export function bundledAppWarning(clientId: string, upstreamRepo: string): strin
     `user, logged once per run as agent_issue_failed. Either register your own GitHub App (device flow enabled, ` +
     `user-token expiry off) and install it on ${slug ?? "your upstream_repo"}, then set github.client_id to its ` +
     `id — or ask Equalify to install the bundled app there, and ignore this.`
+  );
+}
+
+/**
+ * The deployment's anonymous credential, or undefined when it has none.
+ *
+ * One function because two callers have to agree on what "set" means, and an unset
+ * `${IRIS_ANONYMOUS_TOKEN}` expands to `""` rather than disappearing (see `expandEnv`), so
+ * "present in the YAML" is not the test. Whitespace is trimmed for the same reason: the
+ * auth middleware would reject `"  "` as a credential, and a boot warning that announced
+ * anonymous access while every anonymous request 401s would send an operator looking for
+ * the bug in the wrong half of the system.
+ */
+export function anonymousToken(cfg: IrisConfig): string | undefined {
+  return cfg.github.anonymous_token?.trim() || undefined;
+}
+
+// A boot-time line for `github.anonymous_token`, or undefined when it is unset.
+//
+// Not a defect and not a misconfiguration — an operator who set this key asked for it,
+// so this is a statement of what it turned off rather than a complaint. It is here
+// because every consequence is invisible from the outside: the service answers 200 to
+// callers with no credential, which is the intended behaviour and is also
+// indistinguishable from the credential-required deployment right up to the point
+// where a stranger's document is involved.
+//
+// Warned at every boot rather than once at first use, because "is anonymous access on"
+// is a property of the deployment an operator reads in the log, and the alternative
+// place to notice it is a visitor's session appearing under a bot account.
+//
+// Deliberately does NOT name the credential, not even truncated: this is the one config
+// value that is a live GitHub token for a real account, and a boot log is copied into
+// issues.
+export function anonymousTokenWarning(anonymousToken: string | undefined): string | undefined {
+  if (!anonymousToken) return undefined;
+  return (
+    `github.anonymous_token is set, so this deployment serves callers who send no Authorization header ` +
+    `instead of refusing them. Four consequences, all deliberate and none visible from outside: every ` +
+    `anonymous caller is the same user in the database, so GET /v1/sessions refuses them (a shared owner ` +
+    `would list strangers' documents) and a session is reachable only by its own unguessable id; that ` +
+    `refusal is keyed on the identity, so this credential's own account gets it too, signed in or not — ` +
+    `use an account no person needs, because the alternative is a token that lists every visitor's ` +
+    `uploads; their uploads are rate limited by address, not per user; and their feedback is filed under ` +
+    `this credential's account, not theirs. Unset it to require a token on every call.`
   );
 }
 

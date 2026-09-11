@@ -128,9 +128,21 @@ export function clientKey(req: Request): string {
 // The upload limiter sits behind the auth middleware, so the user is resolved and there
 // is no need to infer them from the header. Falls back to clientKey for the same reason
 // it exists — a router mounted without auth in a test must still get a key.
+//
+// An ANONYMOUS request is the exception, and it has to be: `github.anonymous_token`
+// resolves every caller who sent no credential to ONE user record, so keying on the
+// user id would put the whole internet in a single bucket of `upload_per_minute` and
+// the first visitor of the minute would spend everyone's. Those requests key by
+// address instead — the same fallback `clientKey` uses for an unvalidated bearer, and
+// for the same reason: it is the only thing left that distinguishes callers.
+//
+// Note that the general limiter needs no such branch. It runs BEFORE auth and keys on
+// the bearer token or the address, and an anonymous request has no bearer token to key
+// on, so it already lands in an address bucket.
 function userKey(req: Request): string {
-  const user = (req as AuthedRequest).user;
-  return user ? `u:${user.github_user_id}` : clientKey(req);
+  const authed = req as AuthedRequest;
+  if (authed.anonymous) return clientKey(req);
+  return authed.user ? `u:${authed.user.github_user_id}` : clientKey(req);
 }
 
 const passThrough: RequestHandler = (_req, _res, next) => next();

@@ -535,11 +535,19 @@ including why a green run that declines to file is the expected result on a youn
 
 ## Authenticate (get a token)
 
-GitHub is the only auth mechanism, and a GitHub token is **required** on every API call —
-there is no anonymous mode, no API key and no second SSO provider. That is a design decision, not
-a gap: your token is what files your session's feedback back to the shared agent library, under
-your own GitHub identity. Using Iris and improving it for the next person are the same act.
-If you would rather not contribute, this is not the service to run.
+GitHub is the only auth mechanism, and by default a GitHub token is **required** on every API
+call — there is no API key and no second SSO provider. That is a design decision, not a gap: your
+token is what files your session's feedback back to the shared agent library, under your own GitHub
+identity. Using Iris and improving it for the next person are the same act. If you would rather not
+contribute, this is not the service to run.
+
+An operator can open a **demo mode** (`github.anonymous_token`) in which calls with no
+`Authorization` header at all are served as the deployment's own account. It is off unless they set
+it, and where it is on the trade is explicit: no session list, upload limits by address instead of
+per user, and feedback credited to the deployment rather than to you. To find out which kind of
+deployment you are talking to, call `GET /v1/me` with no token — 200 with `anonymous: true` means
+anonymous calls work here, 401 means you need to sign in below. Full operator detail is in
+[github-auth.md](github-auth.md#anonymous-access-a-demo-you-turn-on).
 
 By default the service uses a **bundled GitHub App** — you don't create or configure anything;
 just run the device flow below and approve in your browser.
@@ -606,6 +614,37 @@ curl -s -H "$AUTH" "$BASE/me"
 ```
 `upstream_repo` is where this deployment files your contributions. There is no `fork_repo` field:
 contributions are filed as issues, so no fork is ever created.
+
+**This is also the probe for anonymous access.** Call it with no `Authorization` header:
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' "$BASE/me"   # 200 = anonymous allowed, 401 = token required
+```
+
+A 200 carries one extra field, and the login is the *deployment's* account rather than yours:
+
+```json
+{
+  "github_login": "iris-demo-bot",
+  "github_user_id": 4242,
+  "upstream_repo": "https://github.com/example/iris",
+  "defaults": { "max_review_iterations": 3 },
+  "anonymous": true
+}
+```
+
+Check for `anonymous` rather than comparing logins: it is the only thing that distinguishes the two
+modes, so a client that ignores it will greet a visitor by the bot's name and file their feedback as
+the bot without either of them knowing. The key is **absent** for an ordinary signed-in user, not
+`false`.
+
+It means "this request resolved to the account the operator configured as
+`github.anonymous_token`", which is *not* the same as "this request sent no token". A caller
+presenting that account's own token gets `anonymous: true` as well, and everything on this page that
+follows from the flag — including the `403` on [List sessions](#list-sessions) — follows for them
+too. There is one shared identity, and this is how you tell you are it. What anonymous callers give
+up is listed under [List sessions](#list-sessions) and in
+[github-auth.md](github-auth.md#anonymous-access-a-demo-you-turn-on).
 
 ## Create a session (upload images)
 
@@ -6317,6 +6356,19 @@ curl -s -H "$AUTH" "$BASE/sessions?status=ready_for_review"
 `0`, negative, fractional, non-numeric — is the default, not an error: one rule, so two
 equally invalid values can't get page sizes differing by a factor of twenty.
 
+**This is the one endpoint an anonymous caller cannot use.** Where the operator has set
+`github.anonymous_token`, a request with no token gets `403 anonymous_session_list` here while every
+other endpoint serves it. A list is "the caller's sessions", ownership is the GitHub user id, and
+every anonymous caller shares one — so the honest answer is a refusal rather than a page of documents
+belonging to whoever used the demo before you. Keep the `session_id` that `POST /v1/sessions`
+returned; polling, output, feedback and close all work with it.
+
+The refusal is on the identity the request reaches, not on the absence of a header, so it also
+applies to a token **for the shared account itself**. If you are signed in and see this, your account
+is the one configured as `github.anonymous_token` — sign in with another, and see
+[github-auth.md](github-auth.md#anonymous-access-a-demo-you-turn-on) for why that
+account is meant to be one nobody uses.
+
 Paginate by passing `cursor=<next_cursor>` **verbatim** — it encodes both halves of the
 sort key (`created_at|session_id`), because `created_at` alone is not unique: sessions
 created in the same millisecond tie on it, and paging on a non-unique key skips and
@@ -6411,6 +6463,10 @@ A deployment can set `github.issue_token` to a service-account PAT to file every
 account instead. That is **not recommended** and it is off by default: it erases the attribution
 that is the point of the design. Use it only where an org policy forbids filing as users.
 
+An **anonymous** session (`github.anonymous_token`, off by default) has no user to credit, so its
+contributions are filed under the deployment's account. If you want your name on what your session
+teaches the library, sign in.
+
 ## Errors
 
 All errors share one shape:
@@ -6419,7 +6475,9 @@ All errors share one shape:
 ```
 Common codes: `unauthorized` (401), `session_not_found` (404), `invalid_state` (409),
 `invalid_request` (400), `rate_limited` (429, carries `Retry-After` — see
-[Rate limits](#rate-limits-how-often-you-may-ask)), `upload_too_large` (413).
+[Rate limits](#rate-limits-how-often-you-may-ask)), `upload_too_large` (413),
+`anonymous_session_list` (403, only on [`GET /v1/sessions`](#list-sessions), and only where the
+operator turned anonymous access on).
 
 A run that fails reports why in the `error` field of `GET /v1/sessions/{id}`. One worth
 recognizing:

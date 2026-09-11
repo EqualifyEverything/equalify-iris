@@ -1,7 +1,9 @@
 # GitHub sign-in, for operators
 
-Iris has one identity provider and it is not optional: every request carries a user's GitHub token,
-and that token is what files the session's contributions under that user's own name. The
+Iris has one identity provider: by default every request carries a user's GitHub token, and that
+token is what files the session's contributions under that user's own name. There is no second
+provider and no API key — the only way to serve callers without a token is the demo mode in
+[`github.anonymous_token`](#anonymous-access-a-demo-you-turn-on), which is off unless you set it. The
 [README](../README.md#github-is-the-only-sso-layer-and-tokens-are-required) says why. This file is
 the part you need to *deploy* it — registering your own app, what a private upstream can and cannot
 do, and what to do with a database from an older build.
@@ -40,6 +42,36 @@ session produced it — the whole reason users authorize at all instead of the a
 PAT and every issue is filed under that bot account instead of under the user who produced it. It is
 off by default because it erases the attribution that is the point of the design. Use it only where
 a deployment genuinely cannot file as its users — an org policy that forbids it, say.
+
+## Anonymous access: a demo you turn on
+
+Set `github.anonymous_token` to a token for a **dedicated** GitHub account and a caller who sends
+**no** `Authorization` header is served as that account instead of refused. Unset — the default — a
+token is required on every call. The reason to turn it on is a visitor who wants to see Iris work on
+one page before deciding whether to sign in. Make it an account no person signs in with: the row
+below on the shared identity says why.
+
+Four things it costs, and Iris prints them at every boot so they are not a surprise later:
+
+| What changes | Why |
+| --- | --- |
+| `GET /v1/sessions` answers **403 `anonymous_session_list`** | Ownership is the GitHub user id and nothing else, so every anonymous visitor is the same owner. Listing "their" sessions would hand one visitor another's document. A session is still reachable at `GET /v1/sessions/{id}` with the id `POST /v1/sessions` returned. |
+| **That account** gets the same 403, signed in or not | The refusal is keyed on the identity a request reaches, not on whether it sent a header, so presenting this token as an ordinary `Bearer` is refused too. The alternative is not a convenience: it would make the token a key to every visitor's uploads, with no server access needed. This is the cost of a shared identity, so a dedicated account pays it and nobody notices. |
+| Uploads are counted per **address**, not per user | One shared account keyed per user would make `upload_per_minute` a single bucket for every anonymous caller on the internet, and the symptom is a deployment that looks healthy and is permanently rate limited. |
+| Feedback is filed under **that** account | An anonymous session has no user to credit. This is the attribution the default protects, so a deployment that cares about it should leave the key blank. A 403 while filing names `github.anonymous_token` in its `hint`, because the GitHub App's installation cannot be the cause. |
+
+Two details worth knowing before you deploy it:
+
+- **A broken token is still refused.** The fallback serves callers who present *nothing*. A request
+  with `Bearer <expired>` or a non-Bearer header gets a 401, because a client that is trying to be
+  someone should see its own sign-in fail, not be moved silently into a shared account.
+- **The credential is validated like any other**, with the same `GET /user` and the same 5-minute
+  cache. A revoked or mistyped value there does not produce a phantom user — it makes every anonymous
+  request 401, and the failure is in the boot log rather than the caller's response.
+
+Clients detect the mode by calling `GET /v1/me` with no token: **200** with `anonymous: true` means
+anonymous use is allowed here, **401** means it is not. That answer cannot go stale, because it is
+the same code path a real anonymous request takes.
 
 ## Registering your own app
 

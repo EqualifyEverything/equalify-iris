@@ -14,9 +14,10 @@ Three constraints shape the whole design, and the code is written to hold them:
   model provider, database, object store — is replaceable by configuration, and the defaults
   (SQLite + local filesystem) need nothing hosted. That is also why in-process work is
   budgeted rather than assumed: see the concurrency and request-limit knobs below.
-- **GitHub, deliberately not replaceable.** GitHub is the only sign-in, and a token is
-  required on every call, because that token is what files each session's contributions under
-  the user's own name. There is no anonymous mode and no opt-out —
+- **GitHub, deliberately not replaceable.** GitHub is the only sign-in, and by default a token
+  is required on every call, because that token is what files each session's contributions under
+  the user's own name. One config key opens a demo mode where callers who send no token share the
+  deployment's own account, and it costs them their session list and their credit —
   [why](#github-is-the-only-sso-layer-and-tokens-are-required).
 
 ---
@@ -224,8 +225,8 @@ from the environment at startup; changes require a restart.
 
 ### GitHub is the only SSO layer, and tokens are required
 
-There is no anonymous mode, no API key, and no second identity provider. Every request carries a
-user's GitHub token, and that token is what files the session's feedback back to the shared agent
+There is no API key and no second identity provider. By default every request carries a user's
+GitHub token, and that token is what files the session's feedback back to the shared agent
 library — as an issue, under that user's own GitHub identity.
 
 **That is the sustainability model, not an implementation detail.** The agents in
@@ -234,6 +235,31 @@ could consume the service without contributing would be taking from a library no
 Requiring GitHub auth is how using Iris and improving it become the same act, and how each
 contribution is credited to the person who produced it. If you would rather your users not
 contribute, this is not the service to deploy.
+
+**The one exception is a demo, and you have to turn it on.** Set `github.anonymous_token` to a
+token for a **dedicated** GitHub account — one no person signs in with — and callers who send **no**
+`Authorization` header are served as that account instead of refused. Leave it unset — the default —
+and there is no anonymous access at all. It exists so a visitor can try Iris on one page before
+deciding to sign in.
+
+What it costs, all of it deliberate and none of it visible to the caller unless you tell them:
+
+- **No session list.** Ownership is the GitHub user ID and nothing else, so every anonymous
+  visitor is the same owner. `GET /v1/sessions` therefore refuses them with `403
+  anonymous_session_list` rather than listing strangers' documents. A session is still reachable
+  by its own ID, which is what `POST /v1/sessions` returns.
+- **That account loses its own session list too.** The refusal is on the identity, not on the
+  shape of the request, so signing in as it — or presenting its token as an ordinary `Bearer` —
+  gets the same 403. It has to be an account you do not use, because the alternative is worse:
+  if holding that token bought a session list, whoever holds it reads every visitor's uploads.
+- **Upload limits by address, not by user.** One shared account would otherwise be one
+  `upload_per_minute` bucket for the whole internet.
+- **Feedback filed under that account.** An anonymous session's issues are filed as it, not as
+  the visitor, which is exactly the credit the default is protecting.
+
+A request that sends a *broken* token is still refused — the fallback is for callers who present
+nothing, not for ones whose sign-in failed. Iris warns at boot whenever the key is set, and
+`GET /v1/me` answers `anonymous: true` so a client can tell which mode it is in.
 
 **A user's token is never written to disk.** It arrives in the `Authorization` header, is used in
 memory for the request and for the run it authorizes, and is gone when the run ends. There is no
@@ -252,6 +278,8 @@ from an earlier build — the two config changes that can stop a working deploym
 All endpoints are under `/v1` and (except auth, health, stats and limits) require
 `Authorization: Bearer <github_token>`. `/v1/quality` is the one exception in the other
 direction: it takes a bearer token too, but its own shared secret rather than a GitHub one.
+Where `github.anonymous_token` is set, a request with no header at all is served as the
+deployment's account — except `GET /v1/sessions`, which refuses it.
 
 | Method & path | Purpose |
 | --- | --- |
@@ -263,8 +291,8 @@ direction: it takes a bearer token too, but its own shared secret rather than a 
 | `GET  /v1/auth/github/callback` | OAuth callback → returns access token |
 | `POST /v1/auth/github/device` | Begin device flow (CLI clients) |
 | `POST /v1/auth/github/device/poll` | Poll device flow (send `{ "device_code": ... }`) |
-| `GET  /v1/me` | Current GitHub user + config |
-| `GET  /v1/sessions` | List the caller's sessions |
+| `GET  /v1/me` | Current GitHub user + config (also answers whether anonymous use is allowed) |
+| `GET  /v1/sessions` | List the caller's sessions (never anonymous — see the demo mode above) |
 | `POST /v1/sessions` | Create a session, upload images and/or PDFs (`multipart/form-data`) |
 | `GET  /v1/sessions/{id}` | Poll status |
 | `GET  /v1/sessions/{id}/output` | Fetch the HTML when ready |

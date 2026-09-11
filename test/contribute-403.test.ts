@@ -43,7 +43,7 @@ type Failure = { status: number; body?: string; headers?: Record<string, string>
 function makeCtx(
   dir: string,
   failure: Failure,
-  opts: { issueToken?: string; draftError?: Error } = {},
+  opts: { issueToken?: string; draftError?: Error; anonymousSession?: boolean } = {},
 ): { ctx: PipelineContext; rec: Rec } {
   const agentsDir = join(dir, "agents");
   const inputDir = join(dir, "input");
@@ -53,7 +53,8 @@ function makeCtx(
   const rec: Rec = { events: [] };
   const ctx = {
     sessionId: "ses_test",
-    githubToken: "gho_user",
+    githubToken: opts.anonymousSession ? "gho_deployment_anon" : "gho_user",
+    anonymousSession: opts.anonymousSession,
     images: [{ name: "page-001.png", order: 1, path: join(inputDir, "page-001.png") }],
     cfg: {
       github: {
@@ -96,7 +97,7 @@ function makeCtx(
 
 async function contribute(
   failure: Failure,
-  opts: { issueToken?: string; draftError?: Error } = {},
+  opts: { issueToken?: string; draftError?: Error; anonymousSession?: boolean } = {},
 ): Promise<Record<string, unknown>> {
   const dir = mkdtempSync(join(tmpdir(), "iris-403-"));
   const { ctx, rec } = makeCtx(dir, failure, opts);
@@ -231,6 +232,23 @@ test("a service-token 403 blames the PAT, not the app's installation", async () 
   assert.match(hint, /installation is not involved/, "left the reader to wonder about the app");
 });
 
+test("an anonymous session's 403 blames the anonymous PAT and bounds the damage", async () => {
+  // Third credential, and it was reported as the FIRST one until #458 round 1: a session
+  // served by `github.anonymous_token` has no signed-in user, but `issue_token` is unset
+  // too, so the old two-valued flag read `usingServiceToken: false` and sent the operator
+  // to re-install a GitHub App whose installation cannot affect this call at all.
+  const data = await contribute({ status: 403, body: "Resource not accessible by personal access token" }, {
+    anonymousSession: true,
+  });
+  const hint = String(data.hint ?? "");
+  assert.match(hint, /github\.anonymous_token/, "named neither the credential that failed nor its key");
+  assert.doesNotMatch(hint, /issue_token/, "blamed the service token, which is not set here");
+  assert.doesNotMatch(hint, /Install the app/, "told the operator to install the app for a PAT failure");
+  // How much is broken decides how urgently this is read, and here it is the narrow
+  // case: signed-in users file with their own tokens and are untouched.
+  assert.match(hint, /signed-in users are unaffected/, "left the blast radius as broad as an issue_token failure");
+});
+
 test("a 403 that only says so in its message is NOT treated as a GitHub failure", async () => {
   // The message fallback used to exist for a re-wrapped Octokit throw. It cost
   // more than it bought: a provider error is a plain
@@ -260,7 +278,7 @@ test("a thrown non-object cannot make the diagnosis itself throw", async () => {
   // `failed` (the orchestrator's outer catch). Cheap to make impossible.
   for (const thrown of [null, undefined, "just a string", 403]) {
     assert.equal(
-      installHintFor(thrown, { usingServiceToken: false }),
+      installHintFor(thrown, { credential: "user" }),
       undefined,
       `threw or hinted for ${JSON.stringify(thrown)}`,
     );
