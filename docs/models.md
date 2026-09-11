@@ -462,8 +462,9 @@ Those last three kinds are exactly what the
 editor and `tables.ts` exist to act on, so they are not a cosmetic loss.
 
 **The deciding reason is not the price, though.** A bad `page` extraction moves five counters a
-deployment already records — `pages_verify_failed`, `pages_unreadable`, `reextracts`,
-`corrections_refused`, `model_mismatch` — so a swap there fails loudly. **A reader that misses a
+deployment already records — the run log's `page_verify_failed`, and `/v1/quality`'s
+`structural_defect_rate`, `markup_unbalanced_rate`, `table_no_body_rate` and `unresolved_rate` — so a
+swap there fails loudly. **A reader that misses a
 finding moves nothing**: the document converts, the editor has nothing to act on, and the loss
 exists only against a run nobody made. That asymmetry is why the cheaper agent with the bigger
 prize was swapped and the cheaper agent with the smaller prize was not, and it would hold at 90%
