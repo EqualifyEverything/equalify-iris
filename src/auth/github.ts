@@ -24,9 +24,12 @@
 //
 // Two operator-visible consequences of there being one token:
 //
-//   - Every issue is filed under this account. Iris credits the human who prompted a
-//     contribution in the issue body instead (see src/github/issue.ts), because a token
-//     cannot act as somebody else.
+//   - Every issue is filed under this account, and NOBODY IS CREDITED. Neither body carries
+//     a human identifier — see the two builders in src/github/issue.ts: what identifies a
+//     contribution is the session id. On the feedback path the user's own words are quoted
+//     verbatim, which is a trace of a person, not an attribution of one. Do not read this
+//     as licence to put a `@name` in a body: issue.ts wraps user text in a code span
+//     precisely so a name inside it cannot notify anyone.
 //   - A fine-grained PAT EXPIRES, and nothing here refreshes it. The day it lapses, every
 //     request 401s with "could not authenticate to GitHub" and the fix is a new token in
 //     config. GitHub emails the token's owner before that happens; there is no in-process

@@ -6408,9 +6408,9 @@ filer without push access — which is most filers here:
   fixtures. The title carries a short slug of the lesson as well as the agent, and the issue body
   carries the lesson, how many sessions have reported it, and your feedback verbatim.
 
-Both are filed with **your** token, so the issue carries your GitHub identity and the credit is
-yours. There is no PR/fork flow: `/close` returns no `prs_opened` and
-requests accept no `skip_prs`.
+Both are filed with the deployment's own token, not yours — you do not have one, and what that costs
+is spelled out at the end of this section. There is no PR/fork flow: `/close` returns no `prs_opened`
+and requests accept no `skip_prs`.
 
 Both dedupe against an open issue with the same title, found by searching GitHub — a new agent
 suggestion skips, an agent improvement **comments on the existing issue** with your session and the

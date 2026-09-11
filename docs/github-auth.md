@@ -120,8 +120,10 @@ on the wire, and the hint says so rather than blaming one.
 ## What happens to a token
 
 Yours is in your config and your environment; treat it like any other server secret. Nothing else
-about it is stored: there is no `github_token` column and no token file, so a stolen copy of
-`data/iris.sqlite` is a list of GitHub user ids and logins, not GitHub access.
+about it is stored: there is no `github_token` column and no token file. A stolen copy of
+`data/iris.sqlite` is not GitHub access. What it does hold is one GitHub user id and login — your
+deployment's own, since that is the only row the `users` table ever gets — plus the session history,
+which is the part worth protecting.
 
 There is no per-user token to rotate, cache or purge, and no user-facing revocation story — because
 no user ever authorized anything. Revoke at github.com and restart.

@@ -815,8 +815,8 @@ export class Store {
       -- persisted (see UserRecord above); fork_repo belonged to an earlier
       -- fork-and-PR design, which was never built and is not going to be --
       -- contributions are filed as issues under this deployment's single
-      -- identity, and the human who prompted one is credited in the body
-      -- rather than as its author (see github/issue.ts).
+      -- identity, and nobody is credited: what a body identifies is the
+      -- session, not a person (see github/issue.ts).
       CREATE TABLE IF NOT EXISTS users (
         github_user_id INTEGER PRIMARY KEY,
         github_login TEXT NOT NULL,
