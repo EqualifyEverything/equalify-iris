@@ -130,6 +130,8 @@ There is no per-user token to rotate, cache or purge, and no user-facing revocat
 no user ever authorized anything. Revoke at github.com and restart.
 
 Rotating the token for the **same** account changes nothing in the database. Pointing it at a
-**different** account does: sessions are listed by the account that owns them, so history from the
-old account stays in `data/iris.sqlite` but stops appearing in `GET /v1/sessions`. It is not deleted,
-and pointing the config back restores the listing.
+**different** account costs you the old account's sessions — not just in the list. Every per-session
+route checks the owner, so a session id you still hold answers `404 session_not_found`: you cannot
+fetch the converted document, its logs or its diagnostics. The rows are still in
+`data/iris.sqlite`, nothing is deleted, and pointing the config back at the first account makes them
+reachable again. Export anything you need before switching.

@@ -112,8 +112,20 @@ function sessionSummary(s: SessionRecord) {
   };
 }
 
-// Owned-by-caller lookup. Returns undefined (caller sends 404) when missing or
-// owned by another user, so a token cannot probe others' sessions.
+// Owned-by-this-deployment lookup. Returns undefined (caller sends 404) when the session is
+// missing or belongs to a different account.
+//
+// It is NOT a guard between callers any more, and reading it as one is the mistake: there is
+// one identity, no caller presents a credential, and every session this deployment created
+// belongs to it — so anyone holding a session id reaches that session, deliberately (see the
+// reachability note on `GET /v1/sessions` below). The id-mismatch branch has one live cause, an
+// operator repointing `github.token` at a different GitHub account: the old account's rows
+// stay in the database and stop being reachable, and pointing it back restores them. Pinned in
+// test/one-identity.test.ts and documented in docs/github-auth.md, because from outside it
+// looks like the sessions were destroyed.
+//
+// Every per-session route funnels through here, so this is the single place that decision is
+// made — do not re-derive it at a call site.
 function ownedSession(store: Store, id: string, userId: number): SessionRecord | undefined {
   const s = store.getSession(id);
   if (!s || s.github_user_id !== userId) return undefined;

@@ -8,6 +8,7 @@ import type { AddressInfo } from "node:net";
 import { Store } from "../src/store/db.ts";
 import { makeAuthMiddleware, __identityResolved, __resetIdentity } from "../src/auth/middleware.ts";
 import { meRouter } from "../src/routes/me.ts";
+import { sessionsRouter } from "../src/routes/sessions.ts";
 import { apiToken, githubToken, identityWarning, loadConfig } from "../src/config.ts";
 import type { IrisConfig } from "../src/config.ts";
 
@@ -43,9 +44,10 @@ async function mockGitHub(): Promise<{
   calls: () => number;
   reply: (r: GhReply) => void;
   delay: (ms: number) => void;
+  account: (u: { id: number; login: string }) => void;
   close: () => void;
 }> {
-  const state = { calls: 0, reply: "user" as GhReply, delay: 0 };
+  const state = { calls: 0, reply: "user" as GhReply, delay: 0, account: GH_USER };
   const app = express();
   app.get("/user", async (_req, res) => {
     state.calls++;
@@ -61,7 +63,7 @@ async function mockGitHub(): Promise<{
       res.status(500).json({ message: "Server Error" });
       return;
     }
-    res.json(GH_USER);
+    res.json(state.account);
   });
   const server = app.listen(0);
   await new Promise((r) => server.once("listening", r));
@@ -74,6 +76,12 @@ async function mockGitHub(): Promise<{
     delay: (ms) => {
       state.delay = ms;
     },
+    // Which account the PAT belongs to. Changing it is how an operator repointing
+    // `github.token` at a different GitHub account looks from in here — the only way this
+    // deployment's identity can ever change.
+    account: (u) => {
+      state.account = u;
+    },
     close: () => server.close(),
   };
 }
@@ -83,6 +91,8 @@ interface Deployment {
   calls: () => number;
   reply: (r: GhReply) => void;
   delay: (ms: number) => void;
+  account: (u: { id: number; login: string }) => void;
+  store: Store;
   close: () => void;
 }
 
@@ -91,7 +101,7 @@ interface Deployment {
 // resolved. `token: null` builds the config a `validateConfig` refuses, to check what a
 // deployment does when it was started some other way.
 async function deploy(
-  opts: { gate?: string; token?: string | null; breakStore?: string } = {},
+  opts: { gate?: string; token?: string | null; breakStore?: string; sessions?: boolean } = {},
 ): Promise<Deployment> {
   __resetIdentity();
   const dir = mkdtempSync(join(tmpdir(), "iris-identity-"));
@@ -113,11 +123,18 @@ async function deploy(
     },
     server: opts.gate === undefined ? {} : { api_token: opts.gate },
     defaults: { max_review_iterations: 3 },
+    // Only read when `sessions` mounts the real router: `new Paths(cfg)` dereferences
+    // storage, and `resolveImageLimits(cfg)` reads providers.
+    storage: { data_dir: dir, agents_dir: dir, database: join(dir, "iris.sqlite") },
+    providers: { default: "openrouter", openrouter: { api_key: "k", default_model: "m" } },
   } as unknown as IrisConfig;
 
   const app = express();
   app.use(makeAuthMiddleware(store, cfg));
   app.use("/v1/me", meRouter(cfg));
+  // Off by default. Most tests here need the cheapest route that forces the identity to
+  // resolve; only the repoint test needs a route that filters BY that identity.
+  if (opts.sessions) app.use("/v1/sessions", sessionsRouter(cfg, store));
   const server = app.listen(0);
   await new Promise((r) => server.once("listening", r));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -126,6 +143,8 @@ async function deploy(
     calls: gh.calls,
     reply: gh.reply,
     delay: gh.delay,
+    account: gh.account,
+    store,
     close: () => {
       server.close();
       gh.close();
@@ -480,6 +499,41 @@ test("the boot line says what one identity costs, and never prints the credentia
   // definition of "set" lives (see the test above).
   assert.equal(identityWarning(undefined, false), undefined);
   assert.equal(identityWarning(githubToken({ github: { token: "   " } } as unknown as IrisConfig), false), undefined);
+});
+
+test("after a repoint the old account's session id no longer reaches its session", async () => {
+  // The store-level test below shows the row survives. This one is about what an OPERATOR
+  // meets, which is a route, and the difference matters: `docs/github-auth.md` tells them a
+  // repoint costs them the LISTING, and the honest version is that the id stops working —
+  // `ownedSession` gates every per-session route, so a session id they still hold answers
+  // 404 rather than fetching the document it converted.
+  //
+  // One route is enough because all six go through that one function; six pins would be the
+  // right answer only if there were six guards.
+  const d = await deploy({ sessions: true });
+  try {
+    // Resolve the identity first, so the session is created as the account the deployment
+    // is actually running as rather than as a number chosen here.
+    const me = (await (await d.get("/v1/me")).json()) as { github_user_id: number };
+    d.store.createSession({ session_id: "s-1", github_user_id: me.github_user_id, image_count: 1, iterations_max: 1 });
+    assert.equal((await d.get("/v1/sessions/s-1")).status, 200, "the owning account could not read its own session");
+
+    // The repoint. `__resetIdentity` is the restart: config does not hot-reload, so an
+    // operator changing `github.token` always gets a fresh process.
+    d.account({ id: 5150, login: "second-account" });
+    __resetIdentity();
+    const after = await d.get("/v1/sessions/s-1");
+    assert.equal(after.status, 404, "a session from the old account was still reachable by id");
+    assert.equal((await errorOf(after)).code, "session_not_found");
+
+    // Back again, which is the remedy the docs give. Without this the 404 above could just
+    // as well be a session the repoint destroyed.
+    d.account(GH_USER);
+    __resetIdentity();
+    assert.equal((await d.get("/v1/sessions/s-1")).status, 200, "pointing the token back did not restore the session");
+  } finally {
+    d.close();
+  }
 });
 
 test("pointing the deployment at a different GitHub account hides the old sessions without deleting them", () => {
