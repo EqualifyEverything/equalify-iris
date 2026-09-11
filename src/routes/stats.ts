@@ -12,7 +12,8 @@ export const DEFAULT_TTL_MS = 60_000;
  *
  * Unauthenticated on purpose: it exists so the browser app (and anyone else who
  * wants to say it) can report how many document pages have been made accessible
- * without asking a visitor to sign in first. Every field is a deployment-wide
+ * without holding a token. The browser app holds none: there is no sign-in anywhere in
+ * Iris, and it has no `server.api_token`. Every field is a deployment-wide
  * aggregate — see `Store.publicStats` for what is deliberately absent, which is
  * the part of this endpoint that needs guarding as it changes.
  *

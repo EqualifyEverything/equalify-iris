@@ -205,9 +205,9 @@ pass "the agents it can route are not named among them"
 echo "==> 1b. GET /v1/limits (what an upload may be, no token)"
 # Deliberately WITHOUT "${AUTH[@]}": the browser app states the file limits on its upload
 # step, and someone deciding whether a scan is small enough should not need the deployment's
-# shared token to find out — so this endpoint sits above the auth middleware and stays
+# shared token to find out — so this endpoint is never handed the auth middleware and stays
 # reachable even on a gated deployment like this one. Step 2 establishes that /v1/me and
-# /v1/sessions do not.
+# /v1/sessions are, which is the whole of what the token covers.
 #
 # Asserted as a shape, not as today's numbers — every value here is resolved from the
 # configured model and provider, and this run's config is not the deployment's. What
@@ -421,9 +421,10 @@ fragmarks=$(jq -r '[.[].innerHtml | capture("Page marker (?<n>[0-9]+)").n] | @cs
   || fail "fragment order" "order=$fragorder markers=$fragmarks"
 
 echo "==> 7b. GET /v1/stats (public tally, no token)"
-# Deliberately WITHOUT "${AUTH[@]}": this endpoint is mounted above the auth
-# middleware so the browser app can show the tally to a visitor who has not signed
-# in, and step 2 has already established that everything else 401s without a token.
+# Deliberately WITHOUT "${AUTH[@]}": this endpoint is never handed the auth
+# middleware, so the browser app can show the tally on a deployment it holds no token
+# for. Step 2 established that /v1/me and /v1/sessions 401 without one; this route and
+# the three other ungated ones are what the token does not cover.
 # Exactly one 3-page session has completed at this point.
 #
 # The count is asserted only here, not again after the feedback rounds below: the

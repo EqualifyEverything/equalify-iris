@@ -19,8 +19,10 @@ function json(res, status, obj) {
 }
 
 // ---- Mock GitHub (api.github.com) ----
-// `GET /user` is the only route, and everything else falls through to a 404 naming the
-// path. Iris's whole GitHub surface is that call (auth/github.ts) plus issue search,
+// `GET /user` is the only GitHub route, and everything else falls through to a 404 naming
+// the path. (`GET /__user_lookups` below is also served, but it is this mock's own
+// instrument — no such path exists on api.github.com and Iris never calls it.)
+// Iris's whole GitHub surface is that call (auth/github.ts) plus issue search,
 // create and comment (github/issue.ts) — it files issues, and never forks, branches,
 // commits a file or opens a pull request.
 //

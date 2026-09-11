@@ -409,7 +409,7 @@
     });
 
     // ----- Public tally: pages Iris has made accessible -----
-    // GET /v1/stats is mounted above the auth middleware, so it answers even on a deployment
+    // GET /v1/stats is never handed the auth middleware, so it answers even on a deployment
     // this page cannot otherwise use.
     // Silent on every failure by design: the point is to celebrate a number, and a
     // zero, a NaN or an error message in its place is worse than no line at all.
@@ -515,8 +515,9 @@
     loadTally();
 
     // ----- Upload limits: what this deployment accepts -----
-    // GET /v1/limits is mounted above the auth middleware too, and it has to be: the limits
-    // belong on the upload step, which is where someone is choosing a file.
+    // GET /v1/limits is ungated too, and it has to be: the limits belong on the upload step,
+    // which is where someone is choosing a file. What makes it ungated is that the auth
+    // middleware is attached to /v1/me and /v1/sessions only, not where its mount line sits.
     //
     // Everything published here is derived server-side from the vision model in use
     // (src/providers/imageLimits.ts). The page states nothing about formats or sizes
