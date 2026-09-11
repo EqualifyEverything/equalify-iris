@@ -130,14 +130,18 @@ There is no per-user token to rotate, cache or purge, and no user-facing revocat
 no user ever authorized anything. Revoke at github.com and restart.
 
 Rotating the token for the **same** account changes nothing in the database. Pointing it at a
-**different** account costs you the old account's sessions — not just in the list. Every per-session
-route checks the owner, so a session id you still hold answers `404 session_not_found`: you cannot
-fetch the converted document, its logs or its diagnostics. The rows are still in
-`data/iris.sqlite`, nothing is deleted, and pointing the config back at the first account makes them
-reachable again.
+**different** account strands the old account's sessions. Every per-session route checks the owner, so
+a session id you still hold answers `404 session_not_found` — all of it, not just the listing:
 
-You lose a write as well as the reads. `POST /v1/sessions/{id}/close` is checked the same way, and it
-is the only thing that removes a session's temporary files — so a stranded session cannot be closed
-either: no fixture capture, and its tmp tree sits on disk until you point the config back. **Close
-anything you have finished with before switching accounts.** That captures the fixtures and frees the
-disk; exporting the documents alone does neither.
+| What you lose | Why it matters |
+| --- | --- |
+| Status, document, logs, diagnostics | All four reads 404, so you cannot even check what a session's state was, let alone fetch the HTML it produced. |
+| `POST /{id}/feedback` | A session waiting at `ready_for_review` cannot be iterated on — the review loop stops. |
+| `POST /{id}/close` | No fixture capture, and the session's temporary files stay on disk. `close` is the only thing that removes them. |
+
+Nothing is deleted. The rows are still in `data/iris.sqlite`, and pointing the config back at the
+first account makes them reachable again — but only reachable: the tmp trees go when someone actually
+closes those sessions, not when you switch back.
+
+So: **close anything you have finished with before switching accounts**, and finish anything mid-review
+first. Exporting the documents does neither.
