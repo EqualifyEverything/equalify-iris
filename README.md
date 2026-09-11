@@ -359,7 +359,9 @@ accessibility barrier — in the app or in the HTML it produces? Please open an
 PRs get an automated review before a human reads them — see
 [Automated code review](docs/ci.md#automated-code-review) for what it looks at and, more usefully,
 what it deliberately does **not** flag (style, formatting, naming, "you could also do X",
-pre-existing issues your PR doesn't touch).
+pre-existing issues your PR doesn't touch). One exception: it does check docs prose against
+CONTRIBUTING.md's [plain-language requirement](CONTRIBUTING.md#documentation), always as a
+non-blocking note. Editing this file is in scope.
 
 ## License
 
