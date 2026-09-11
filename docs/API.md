@@ -448,8 +448,8 @@ curl -s -H "Authorization: Bearer $IRIS_QUALITY_TOKEN" "$BASE/quality?days=30"
   carry this signal and still stop at `clean`, and that pairing is this rate working as intended. The
   shape to worry about is a rise in this rate beside a rise in `cap` — an editor demoting headings
   every round, with nothing else in its replies, spends the whole budget and the document is delivered
-  as it entered, with its issues in `@unresolved`. That is a statement about `EDITOR_SYSTEM`
-  (`src/pipeline/review.ts`) or the model behind it, not about the budget: raising `max_review_iterations` buys more of the same
+  as it entered, with its issues in `@unresolved`. That is a statement about the Copy Editor's
+  system prompt (`EDITOR_SYSTEM` in `src/pipeline/review.ts`) or the model behind it, not about the budget: raising `max_review_iterations` buys more of the same
   round. A rise with no `cap` beside it is the cheap case — the demoted blocks were handed back and the
   rest of each reply was delivered — and can also be the two known false positives: a heading correctly
   re-expressed as a `<label>`, `<caption>`, `<dt>` or `<th>`, or a reprinted title dropped in a way that
