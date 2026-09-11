@@ -28,7 +28,8 @@ OPEN_LOG=/tmp/iris-e2e-open.log
 OPEN_BASE="http://localhost:$OPEN_PORT/v1"
 # Shared secret for GET /v1/quality (step 11c). Deliberately NOT the same value as
 # API_TOKEN below: the tally's caller is a CI job, which should not hold the secret that
-# opens every session's document, and step 11c checks the separation both ways.
+# opens every session's document. Step 11c checks that neither value opens the other's
+# route.
 QUALITY_TOKEN=e2e-quality-token
 # The shared secret gating /v1 (server.api_token). Set here so the script exercises a
 # CLOSED deployment: the gate is optional, and a run with it unset would never check that
@@ -1250,8 +1251,8 @@ echo "==> 11c. GET /v1/quality (the tally the weekly quality-report workflow rea
 # recordRunSignals, which is a silent failure that makes the tally read BETTER.
 QAUTH=(-H "Authorization: Bearer $QUALITY_TOKEN")
 
-# The guard first. This endpoint sits above the auth middleware, so `quality_token` is
-# the only thing in front of it.
+# The guard first. The auth middleware is never attached to this route (src/index.ts), so
+# `quality_token` is the only thing in front of it.
 code=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/quality")
 [ "$code" = "401" ] && pass "no token => 401" || fail "quality" "unauthenticated request got $code, expected 401"
 code=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer wrong-token" "$BASE/quality")
@@ -1263,11 +1264,18 @@ code=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer wrong-to
 code=$(curl -s -o /dev/null -w '%{http_code}' "${AUTH[@]}" "$BASE/quality")
 [ "$code" = "401" ] && pass "the API token is not a quality token (401)" \
   || fail "quality" "server.api_token was accepted on /quality ($code)"
+# And the separation the other way round, which is the half a reader of the comment above
+# would assume was covered: the tally's token must not open the rest of the API. `auth`
+# compares `server.api_token` and nothing else (src/auth/middleware.ts), so a workflow's
+# credential reaches the tally and stops there.
+code=$(curl -s -o /dev/null -w '%{http_code}' "${QAUTH[@]}" "$BASE/me")
+[ "$code" = "401" ] && pass "the quality token is not an API token (401 on /me)" \
+  || fail "quality" "server.quality_token was accepted on /me ($code)"
 
-# And the other direction of the same separation: this deployment IS gated (API_TOKEN is
-# set), and the tally still answers with only `quality_token`. That is what the docs
-# promise the weekly workflow — closing a deployment must not silently stop the quality
-# report — and it holds because the endpoint is mounted above the gate.
+# Then the tally itself, on a deployment that IS gated (API_TOKEN is set): it answers with
+# only `quality_token`. That is what the docs promise the weekly workflow — closing a
+# deployment must not silently stop the quality report — and it holds because `auth` is
+# attached per route and was never attached to this one.
 q=$(curl -s "${QAUTH[@]}" "$BASE/quality")
 # `!= null` rather than truthiness: `documents` is 0 on a deployment that has
 # converted nothing, and 0 is falsy in jq, so `.documents and …` would report a

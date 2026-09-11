@@ -92,23 +92,24 @@ app.get("/v1/health", (_req, res) => res.json({ status: "ok", service: "equalify
 // the event loop with synchronous SQLite reads.
 app.use("/v1", generalRateLimit(cfg));
 
-// The public tally of pages converted (aggregate-only, no per-session detail). The
-// browser app reads it to report how many pages Iris has made accessible, and it is
-// mounted here, above the auth middleware, so it still answers where the operator set
-// `server.api_token` — a page count is not something a shared secret should be needed for.
+// The public tally of pages converted (aggregate-only, no per-session detail). The browser
+// app reads it to report how many pages Iris has made accessible, and it is not handed the
+// `auth` middleware below, so it still answers where the operator set `server.api_token` —
+// a page count is not something a shared secret should be needed for.
 app.use("/v1/stats", statsRouter(store));
 
-// What this deployment accepts for an upload (no user data). Above the auth middleware
-// for the same reason as the tally, plus one of its own: the browser app states the file
-// limits on the upload step, and someone deciding whether a scan is small enough should
-// not need the deployment's shared token to find out.
+// What this deployment accepts for an upload (no user data). Ungated for the same reason as
+// the page tally above, plus one of its own: the browser app states the file limits on the
+// upload step, and someone deciding whether a scan is small enough should not need the
+// deployment's shared token to find out.
 app.use("/v1/limits", limitsRouter(cfg));
 
-// The deployment-wide quality tally, read by the weekly quality-report workflow. Mounted
-// above the auth middleware because it carries its own guard, `server.quality_token` —
-// and it has to answer on a GATED deployment, because the CI job holds that token and not
-// `server.api_token` (config.ts's `quality_token` argues why they are separate). Answers
-// 404 until it is set.
+// The deployment-wide quality tally, read by the weekly quality-report workflow. It carries
+// its own guard, `server.quality_token`, and answers 404 until that is set.
+//
+// It is not handed `auth` either, which is what keeps it answering on a GATED deployment:
+// the CI job holds `quality_token` and not `server.api_token` (config.ts's `quality_token`
+// argues why they are separate).
 app.use("/v1/quality", qualityRouter(store, cfg.server));
 
 // The browser app is the front door, served at the root (unauthenticated; it
@@ -124,6 +125,15 @@ app.get("/demo", (_req, res) => res.redirect(302, "/"));
 // Everything else runs as this deployment's GitHub account, and is refused if that
 // account cannot be resolved. If `server.api_token` is set, the caller must also present
 // it — see auth/middleware.ts, which asks those two questions separately.
+//
+// `auth` is attached PER ROUTE, on the two mounts below and nowhere else. That, and not its
+// position in this file, is what leaves /v1/health, /v1/stats, /v1/limits and /v1/quality
+// reachable on a gated deployment: nothing stands in front of them because nothing was put
+// there, and moving any of those lines below these two would not change it.
+//
+// Read top to bottom the order looks load-bearing, and for one middleware it is — the rate
+// limiter above is mounted on the whole of `/v1`. So /v1/health being registered above THAT
+// is a real decision (see its own comment) and the four mounts sitting above `auth` is not.
 const auth = makeAuthMiddleware(store, cfg);
 app.use("/v1/me", auth, meRouter(cfg));
 app.use("/v1/sessions", auth, sessionsRouter(cfg, store));

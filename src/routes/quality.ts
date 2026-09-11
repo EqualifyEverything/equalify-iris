@@ -71,8 +71,8 @@ function bearer(header: string | undefined): string | null {
  * is exactly the one that could not ship, because a jsdom parse error quotes the markup
  * it choked on.
  *
- * Guarded by `server.quality_token` and not by `server.api_token`, which gates the rest
- * of `/v1` — `quality_token` in config.ts is where that separation is argued. Unset means
+ * Guarded by `server.quality_token` and not by `server.api_token`, which gates `/v1/me` and
+ * `/v1/sessions` — `quality_token` in config.ts is where that separation is argued. Unset means
  * **404**: a deployment that has not opted in does not acknowledge the endpoint at all,
  * so scanning for it reveals nothing about whether the operator merely forgot a token.
  *

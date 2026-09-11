@@ -94,15 +94,19 @@ export interface IrisConfig {
     //     that: a gate has to say it is a gate.
     //
     // It also has to answer ON a gated deployment — the CI job holds this token and not
-    // the other one — which is why it carries its own guard instead of sitting behind the
-    // gate. See index.ts for the mount order that follows from it.
+    // the other one — which is why it carries its own guard instead of relying on the gate.
+    // What delivers that is index.ts never handing `/v1/quality` to the auth middleware.
     quality_token?: string;
-    // OPTIONAL shared secret that gates every `/v1` route. Unset by default, which
+    // OPTIONAL shared secret that gates `/v1/me` and `/v1/sessions`. Unset by default, which
     // leaves the deployment open to anyone who can reach it — that is what a public demo
     // needs, and the per-address limits in util/requestLimits.ts are what bound the cost.
     //
-    // Set it and every call must send `Authorization: Bearer <it>`. Two things follow, and
-    // both are the point rather than a limitation:
+    // It is not the whole of `/v1`: index.ts attaches the auth middleware to those two mounts
+    // and to nothing else, so `/v1/health`, `/v1/stats`, `/v1/limits` and `/v1/quality` answer
+    // whether this is set or not. Each of those says on its own mount why it may.
+    //
+    // Set it and a call to either mount must send `Authorization: Bearer <it>`. Two things
+    // follow, and both are the point rather than a limitation:
     //
     //   - It is NOT a GitHub token, so a copy that leaks costs a rate-limit bypass rather
     //     than write access to `github.upstream_repo`. Same reasoning as `quality_token`

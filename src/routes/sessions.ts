@@ -101,7 +101,9 @@ const ALLOWED_TYPES = [...Object.keys(IMAGE_MEDIA_TYPES).map((e) => e.slice(1).t
 // so the handler decides the status code and nothing else re-words the diagnosis.
 class PageTooLargeError extends Error {}
 
-// One-line axe-core summary for the PR description (from sessions/<id>/lint.json).
+// One row of `GET /v1/sessions` (see its handler below). Deliberately no lint result and no
+// document: a list is for finding a session, and everything about its output is on the session
+// itself.
 function sessionSummary(s: SessionRecord) {
   return {
     session_id: s.session_id,

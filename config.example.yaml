@@ -8,7 +8,10 @@ server:
   # Public URL of this deployment. Printed at startup so you can check the running
   # process is the one you meant to deploy. Iris builds no URLs from it.
   base_url: http://localhost:8080
-  # Shared secret every /v1 caller must send as `Authorization: Bearer <token>`.
+  # Shared secret a caller must send as `Authorization: Bearer <token>` to convert
+  # a document or read a session. It does not close the whole API: GET /v1/health,
+  # /v1/limits, /v1/stats and /v1/quality answer whether it is set or not, and none
+  # of them returns a document or a session.
   #
   # Blank (the default) means the API is OPEN: anyone who can reach this deployment
   # can convert documents and can read any session whose id they have. That is what

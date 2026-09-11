@@ -15,10 +15,11 @@ import type { Paths } from "../src/store/paths.ts";
 //
 // The nine standard agent files are gone (they were unreachable), so
 // that second net is gone with them. The same hole now drafts an agent with a model
-// call and FILES an issue on the upstream repo proposing a `table` agent — under the
-// user's own GitHub identity, since that is whose token files contributions.
-// A maintainer sees a proposal for a type the page pass has always handled, and the
-// user gets the credit for it.
+// call and FILES an issue on the upstream repo proposing a `table` agent. It goes up
+// under the deployment's own GitHub account, which is the only identity this service
+// has (`runContribution` in src/pipeline/contribute.ts reads that token). So a
+// maintainer sees a proposal for a type the page pass has always handled, filed by the
+// operator's own deployment.
 //
 // So this is now the only thing standing between a sloppy model string and a
 // spurious public issue, which is why it is asserted directly rather than through
@@ -109,7 +110,7 @@ test("a case variant of a standard type is filtered too", async () => {
   // so a model writing `"Table"` or `"FormField"` is entirely ordinary — `STANDARD`
   // itself spells one entry `formField`. An exact-match filter lets every one of these
   // through to a vision call and a public issue on the upstream repo, filed under the
-  // user's own GitHub identity, proposing a specialist for a type the page pass has
+  // deployment's own GitHub account, proposing a specialist for a type the page pass has
   // always handled.
   //
   // Until those nine files were deleted this was invisible: `loadAgent` looked up `agents/Table.md`, which

@@ -527,8 +527,9 @@ does not acknowledge the endpoint at all. Set `server.quality_token`
 (`IRIS_QUALITY_TOKEN`) to a long random value — `openssl rand -hex 32` — and restart. This token is
 its own, deliberately not `server.api_token`: the caller is a scheduled workflow that needs a page
 tally, and `api_token` would also give it every session's document. So **setting `api_token` does
-not gate this endpoint** — it is one of the four that stay reachable on a closed deployment
-([Authenticate](#authenticate)), and the workflow keeps working when you close one. Responses carry
+not gate this endpoint**: it is one of the four that stay reachable on a closed deployment
+([Authenticate](#authenticate)). That is deliberate — closing a deployment must not silently stop
+its own quality report. Responses carry
 `Cache-Control: no-store` and are cached in-process for five minutes.
 
 Two more values live in the repo that reads it — the `QUALITY_URL` **variable** (the deployment's
@@ -571,8 +572,9 @@ To find out which kind you are talking to, call `GET /v1/me` with no header: **2
 
 ### What the gate covers
 
-`server.api_token` protects `/v1/me` and everything under `/v1/sessions`. Four endpoints sit above
-it and stay reachable on a gated deployment, on purpose — none of them touches a document or an
+`server.api_token` protects `/v1/me` and everything under `/v1/sessions`, and nothing else — the
+gate is attached to those two mounts rather than to `/v1` as a whole. Four endpoints are outside it
+and stay reachable on a gated deployment, on purpose. None of them touches a document or an
 identity:
 
 | Endpoint | Why it is open |

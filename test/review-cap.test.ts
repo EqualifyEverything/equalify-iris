@@ -60,12 +60,13 @@ test("review cap: no ceiling — a deliberately high cap is not silently reduced
   assert.equal(normalizeReviewIterations(50), 50);
 });
 
-test("review cap: the normalized value is what makes a first login survive", () => {
+test("review cap: the normalized value is what makes the first request survive", () => {
   withStore((store) => {
     // The failure this prevents, spelled out: null straight from YAML reaches the
-    // NOT NULL column, and makeAuthMiddleware turns the throw into a 401 about the
-    // user's token. Asserted rather than described, so a future change that drops
-    // the guard in loadConfig fails here instead of in production on first login.
+    // NOT NULL column, and makeAuthMiddleware answers the throw as a 500 saying the
+    // deployment could not record its own identity. Asserted rather than described, so
+    // a future change that drops the guard in loadConfig fails here instead of on the
+    // first request a deployment serves.
     assert.throws(
       () =>
         store.upsertUser({ github_user_id: 1, github_login: "raw" }, null as unknown as number),
