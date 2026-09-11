@@ -132,7 +132,7 @@ MOCK_GH_PORT=$GH_PORT MOCK_OR_PORT=$OR_PORT node test/mock-services.mjs &
 PIDS+=($!)
 
 echo "==> starting Iris"
-IRIS_CONFIG="$CFG" node --experimental-sqlite src/index.ts > "$LOG" 2>&1 &
+IRIS_CONFIG="$CFG" node src/index.ts > "$LOG" 2>&1 &
 IRIS_PID=$!
 PIDS+=("$IRIS_PID")
 
@@ -296,7 +296,7 @@ sed -e "s#^  port: $PORT\$#  port: $OPEN_PORT#" \
 grep -q '^  api_token:' "$OPEN_CFG" && fail "open config" "api_token survived into $OPEN_CFG"
 grep -q "^  port: $OPEN_PORT\$" "$OPEN_CFG" || fail "open config" "port rewrite failed in $OPEN_CFG"
 mkdir -p "$OPEN_DATA"
-IRIS_CONFIG="$OPEN_CFG" node --experimental-sqlite src/index.ts > "$OPEN_LOG" 2>&1 &
+IRIS_CONFIG="$OPEN_CFG" node src/index.ts > "$OPEN_LOG" 2>&1 &
 OPEN_PID=$!
 PIDS+=("$OPEN_PID")
 open_start=$SECONDS

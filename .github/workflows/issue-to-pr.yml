@@ -396,8 +396,9 @@ jobs:
       - uses: actions/setup-node@v7
         if: steps.triage.outputs.should_run == 'true'
         with:
-          # Must match .nvmrc — Iris runs its .ts sources directly and needs
-          # --experimental-sqlite / --env-file-if-exists.
+          # Must match .nvmrc — Iris runs its .ts sources directly, with no build step,
+          # and needs Node 24's unflagged type stripping, node:sqlite and
+          # --env-file-if-exists.
           node-version-file: .nvmrc
           cache: npm
 
