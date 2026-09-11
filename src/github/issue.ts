@@ -78,8 +78,9 @@ export function parseRepo(url: string): RepoRef {
 // affects every user until it is fixed.
 //
 // `anonymous` was the case this got wrong. It resolves to a config PAT like `service`
-// does, but `usingServiceToken` was false for it (no `issue_token` is set), so it took the
-// user-token branch and blamed the installation. The two config cases share a diagnosis
+// does, but the two-valued `usingServiceToken` this replaced was false for it (no
+// `issue_token` is set), so it took the user-token branch and blamed the installation.
+// The two config cases share a diagnosis
 // and differ only in which key to look at and who is affected, so they are one branch
 // with those two substituted rather than two branches saying the same thing.
 export type FilingCredential = "user" | "service" | "anonymous";

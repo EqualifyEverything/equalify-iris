@@ -56,7 +56,8 @@ const USER_TOKEN = "gho_real_person";
 const REAL_USER = { id: 909, login: "a-real-person" };
 // A token GitHub cannot answer ABOUT, as distinct from one it rejects. Both leave the
 // anonymous identity unresolved and both must leave a signed-in caller working, but only
-// one of them is a final answer — see `anonRejected` in auth/middleware.ts.
+// one of them is a final answer — see `isRejectedCredential` in auth/github.ts, and
+// `rejectedCredentials` in auth/middleware.ts for what is done with it.
 const UNANSWERABLE_TOKEN = "gho_github_is_having_a_day";
 
 // A GitHub that knows exactly two tokens, so "the anonymous credential was validated" and
