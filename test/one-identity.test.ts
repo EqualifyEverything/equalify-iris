@@ -518,6 +518,15 @@ test("after a repoint the old account's session id no longer reaches its session
     d.store.createSession({ session_id: "s-1", github_user_id: me.github_user_id, image_count: 1, iterations_max: 1 });
     assert.equal((await d.get("/v1/sessions/s-1")).status, 200, "the owning account could not read its own session");
 
+    // A control for the `/close` assertion after the repoint. Without it a 404 there could
+    // just as well be a route this test never mounted or a path I mistyped — both of which
+    // look identical to the guard refusing. A second session, so closing it does not disturb
+    // the reads on `s-1`. Any status but 404 will do: what is under test is the guard, not
+    // what close does to a queued session.
+    d.store.createSession({ session_id: "s-2", github_user_id: me.github_user_id, image_count: 1, iterations_max: 1 });
+    const ownClose = await d.get("/v1/sessions/s-2/close", { method: "POST" });
+    assert.notEqual(ownClose.status, 404, "the owning account could not reach close either, so the 404 below proves nothing");
+
     // The repoint. `__resetIdentity` is the restart: config does not hot-reload, so an
     // operator changing `github.token` always gets a fresh process.
     d.account({ id: 5150, login: "second-account" });
@@ -525,6 +534,15 @@ test("after a repoint the old account's session id no longer reaches its session
     const after = await d.get("/v1/sessions/s-1");
     assert.equal(after.status, 404, "a session from the old account was still reachable by id");
     assert.equal((await errorOf(after)).code, "session_not_found");
+
+    // The WRITE half, and the reason the docs say to close before switching rather than to
+    // export: `/close` goes through the same guard, and it is the only thing that removes
+    // `data_dir/tmp/<id>`. So a stranded session cannot be closed either — no fixture
+    // capture, and its tmp tree stays on disk. 404 whatever its status, because the
+    // ownership check runs before the state check.
+    const closed = await d.get("/v1/sessions/s-1/close", { method: "POST" });
+    assert.equal(closed.status, 404, "a session from the old account could still be closed");
+    assert.equal((await errorOf(closed)).code, "session_not_found");
 
     // Back again, which is the remedy the docs give. Without this the 404 above could just
     // as well be a session the repoint destroyed.

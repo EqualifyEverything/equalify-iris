@@ -134,4 +134,10 @@ Rotating the token for the **same** account changes nothing in the database. Poi
 route checks the owner, so a session id you still hold answers `404 session_not_found`: you cannot
 fetch the converted document, its logs or its diagnostics. The rows are still in
 `data/iris.sqlite`, nothing is deleted, and pointing the config back at the first account makes them
-reachable again. Export anything you need before switching.
+reachable again.
+
+You lose a write as well as the reads. `POST /v1/sessions/{id}/close` is checked the same way, and it
+is the only thing that removes a session's temporary files — so a stranded session cannot be closed
+either: no fixture capture, and its tmp tree sits on disk until you point the config back. **Close
+anything you have finished with before switching accounts.** That captures the fixtures and frees the
+disk; exporting the documents alone does neither.
