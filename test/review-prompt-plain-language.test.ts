@@ -83,13 +83,17 @@ function barePaths(text: string): string[] {
 }
 
 // Assert a region keeps its paths where the code-span comparisons can see them.
-function assertNoBarePaths(region: string, where: string): void {
-  assert.deepEqual(
-    barePaths(region),
-    [],
-    `${where} spells every path as an inline code span. A bare path is invisible to the set ` +
-      `comparison in this test, so a widening written as prose would pass — backtick it:\n${region}`,
-  );
+//
+// `why` is a parameter because the reason differs by region and a message that states the wrong one is
+// a message a reader cannot act on. Three of the four regions are compared with `codeSpans`, where a
+// bare path is genuinely invisible; the fourth reads prose too, so its complaint is not invisibility.
+function assertNoBarePaths(
+  region: string,
+  where: string,
+  why = "A bare path is invisible to the set comparison in this test, so a widening written as prose " +
+    "would pass — backtick it.",
+): void {
+  assert.deepEqual(barePaths(region), [], `${where} spells every path as an inline code span. ${why}\n${region}`);
 }
 
 function reviewPrompt(): string {
@@ -246,14 +250,8 @@ test("CONTRIBUTING.md's Documentation section binds the same files the prompt do
 // updating three of them leaves this bullet promising the old, narrower scope.
 test("CONTRIBUTING.md's automated-review bullet does not keep its own copy of the scope", () => {
   const item = contributingReviewBullet();
-  // First, because this is the one assertion that accepts an EMPTY result: a list re-added as prose —
-  // "if your PR touches README.md, docs/, config.example.yaml or agents/" — is the shape a code-span
-  // reader would pass, and it is caught here rather than below, with "backtick it". That leaves the
-  // tolerance below code-spans-only, the same rule the other three regions follow, and it keeps this
-  // bullet out of a failure whose remedy belongs to a different test: a prose `agents/` also matches
-  // the last test's `agents` check, which cannot tell it from the English word.
-  assertNoBarePaths(item, "CONTRIBUTING.md's automated-review bullet");
-  // Backticks stripped, so a backticked partial copy is still read as a list of paths.
+  // Backticks stripped, so this reads a list written as prose as well as a backticked one. Unlike the
+  // other three regions, which compare `codeSpans` and cannot see a prose path at all.
   const paths = [...new Set([...(item.replaceAll("`", "").match(PATH_RE) ?? [])])]
     .filter((t) => t !== "CONTRIBUTING.md")
     .sort();
@@ -267,13 +265,29 @@ test("CONTRIBUTING.md's automated-review bullet does not keep its own copy of th
       names(paths) === names(BOUND_BARE)
         ? `this bullet names every bound path but spells at least one without its trailing slash ` +
             `(${paths.join(", ")} against ${BOUND_BARE.join(", ")}). Nothing is missing — add the ` +
-            `slash, which is how the other three copies of this set are written:\n${item}`
+            `slash, and the backticks with it if the member is bare, which is how the other three ` +
+            `copies of this set are written:\n${item}`
         : `this bullet either names no files or names all of BOUND_FILES. It names ${paths.join(", ")}, ` +
-            `which is a partial copy of the scope — the shape that goes stale when the set widens. One ` +
+            `which is a partial copy of the scope — the shape that goes stale when the set widens. The ` +
+            `fix is to delete the list and let the Documentation link carry it, NOT to backtick it. One ` +
             `member may also be missing from that list only because it is spelled \`docs\` without its ` +
             `slash, which PATH_RE cannot see; count what the bullet names before adding a path:\n${item}`,
     );
   }
+  // AFTER the comparison above, deliberately, and the ordering is the whole point rather than a detail.
+  // Both fire on a partial list written as prose, and their remedies are not equal: deleting the copy
+  // leaves nothing to backtick, while backticking it leaves the copy partial and spends a second red run
+  // reaching the message that names the defect. So the comparison speaks first, and this assertion prints
+  // for the shape the comparison TOLERATES — a complete copy, where the content is accepted and the
+  // spelling is the only complaint left.
+  assertNoBarePaths(
+    item,
+    "CONTRIBUTING.md's automated-review bullet",
+    "The comparison above reads prose, so this list is not invisible the way a bare path is in the " +
+      "other three regions — the complaint is only the spelling, and those three write theirs as code " +
+      "spans. If you did not mean to keep a copy of the set here at all, delete it and let the " +
+      "Documentation link carry it.",
+  );
   // Naming no files is only safe while the bullet says where the list does live. Without this, the
   // pointer could be deleted and the assertion above would still pass on a bullet that promises a
   // scope check and names no scope at all.
@@ -344,7 +358,8 @@ test("PATH_RE's bare-word list still matches how these four documents use those 
         `PATH_RE DOES match it bare. Two things reach this, and they want opposite fixes: a region ` +
         `has started using "agents" as an ordinary word, in which case the match has to come out of ` +
         `PATH_RE — or a scope list spells \`agents/\` without its trailing slash, in which case add ` +
-        `the slash and leave PATH_RE alone. The failing text says which:\n${outsideSpans(region)}`,
+        `the slash, and the backticks with it since a bare member fails its region's bare-path check ` +
+        `too, and leave PATH_RE alone. The failing text says which:\n${outsideSpans(region)}`,
     );
   }
 });
