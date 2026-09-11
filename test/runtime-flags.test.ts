@@ -16,16 +16,24 @@ const read = (rel: string) => readFileSync(join(ROOT, rel), "utf8");
 const LAUNCHERS = ["package.json", "Dockerfile", "test/e2e.sh"];
 
 // `24`, `v24` and `24.16.0` are all forms setup-node's node-version-file accepts, and
-// `Number()` reads only the first as a number. `lts/*` is accepted too and names no major at
-// all: it floats, so nothing here can compare it to the floor, and saying that is more use
-// than reporting a version comparison that never happened.
-function majorOf(raw: string, what: string): number {
+// `Number()` reads only the first as a number. Floating aliases are accepted too — `lts/*` in
+// .nvmrc, `node:lts-slim` in a Dockerfile — and name no major at all, so nothing here can
+// compare them to the floor. `null` says that, which is more use than a version comparison
+// that never happened.
+const readMajor = (raw: string): number | null => {
   const found = raw.trim().match(/^v?(\d+)\b/);
-  assert.ok(
-    found,
-    `${what} is "${raw.trim()}", which names no major version, so nothing here can check it against engines.node`,
-  );
-  return Number(found[1]);
+  return found ? Number(found[1]) : null;
+};
+
+const unreadable = (raw: string, what: string) =>
+  `${what} is "${raw.trim()}", which names no major version, so nothing here can check it against engines.node`;
+
+// For the floor itself: there is no other member to report alongside it, and every check below
+// is a comparison against it, so an unreadable floor ends the test rather than joining a list.
+function majorOf(raw: string, what: string): number {
+  const major = readMajor(raw);
+  assert.ok(major !== null, unreadable(raw, what));
+  return major;
 }
 
 test("node:sqlite loads in a process that was given no flag for it", () => {
@@ -74,16 +82,29 @@ test("every other place that states the Node version agrees with that floor", ()
   const at = (label: string, rel: string, re: RegExp) => {
     const found = read(rel).match(re);
     assert.ok(found, `${rel} no longer states a Node version where this test reads one`);
-    return { label, major: majorOf(found[1], label) };
+    return { label, raw: found[1], major: readMajor(found[1]) };
   };
 
-  // Both workflows run setup-node on .nvmrc, and the Dockerfile's base image is the runtime
-  // a deployment actually gets — the one path where a Node below the floor would bite.
-  // Above the floor is fine for both: testing or shipping on a newer Node than the package
-  // promises is allowed.
+  // EVERY `FROM node:` line, not the first. The Dockerfile is single-stage today, but a
+  // multi-stage one — `FROM node:24-slim AS build` … `FROM node:22-slim` for the runtime — is
+  // exactly the case this member exists to catch, and reading only the first match would call
+  // it clean while the stage that ships lost unflagged node:sqlite.
+  const stages = [...read("Dockerfile").matchAll(/^FROM node:(\S+)/gm)];
+  assert.ok(stages.length > 0, "the Dockerfile no longer builds on a `node:` image");
+
+  // Both workflows run setup-node on .nvmrc, and the Dockerfile's stages are the runtime a
+  // deployment actually gets — the one path where a Node below the floor would bite. Above the
+  // floor is fine for both: testing or shipping on a newer Node than the package promises is
+  // allowed.
   const atLeast = [
     at(".nvmrc", ".nvmrc", /^\s*(\S+)/),
-    at("the Dockerfile's base image", "Dockerfile", /^FROM node:(\S+)/m),
+    // Labelled by the image itself rather than by position, so a failure names the line to
+    // edit even when several stages disagree.
+    ...stages.map((m) => ({
+      label: `the Dockerfile's \`node:${m[1]}\``,
+      raw: m[1],
+      major: readMajor(m[1]),
+    })),
   ];
   // "Node 24+" IS the floor claim, so here the numbers have to be equal, not merely clear it.
   const exactly = [
@@ -92,10 +113,18 @@ test("every other place that states the Node version agrees with that floor", ()
   ];
 
   // Collected rather than asserted one at a time: `assert` throws at the first failure, so
-  // checking these in sequence would hide every member after the first that disagrees.
+  // checking these in sequence would hide every member after the first that disagrees. A
+  // member naming no major at all is collected the same way, for the same reason: it is a
+  // different fault with a different fix, but reporting it must not swallow the others.
+  const members = [...atLeast, ...exactly];
   const wrong = [
-    ...atLeast.filter((m) => m.major < floor).map((m) => `${m.label} is ${m.major}, below ${floor}`),
-    ...exactly.filter((m) => m.major !== floor).map((m) => `${m.label} says ${m.major}, not ${floor}`),
+    ...members.filter((m) => m.major === null).map((m) => unreadable(m.raw, m.label)),
+    ...atLeast
+      .filter((m) => m.major !== null && m.major < floor)
+      .map((m) => `${m.label} is ${m.major}, below ${floor}`),
+    ...exactly
+      .filter((m) => m.major !== null && m.major !== floor)
+      .map((m) => `${m.label} says ${m.major}, not ${floor}`),
   ];
   assert.deepEqual(wrong, [], `engines.node's floor is ${floor}: ${wrong.join("; ")}`);
 });
