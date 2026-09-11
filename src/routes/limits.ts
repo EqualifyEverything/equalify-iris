@@ -26,10 +26,12 @@ import { MAX_UPLOAD_FILES, publishedRateLimits, uploadCeilingBytes } from "../ut
  *                    "max_upload_memory_mb": 256, "window_seconds": 60 } }
  * ```
  *
- * Mounted above the auth middleware, like `GET /v1/stats`, so it answers even where the
+ * Not handed the auth middleware, like `GET /v1/stats`, so it answers even where the
  * operator set `server.api_token`: someone deciding whether their scan is small enough
  * should not need the deployment's shared secret to find out, and the answer is the same
- * for everyone. Deliberately NOT naming the model or provider that produced the numbers —
+ * for everyone. That is attachment and not position — index.ts hands `auth` to `/v1/me`
+ * and `/v1/sessions` and to nothing else, so moving this mount would not change it.
+ * Deliberately NOT naming the model or provider that produced the numbers —
  * a public endpoint that announces the deployment's model id would be publishing
  * infrastructure to answer a question about file sizes. The 400 from `POST /v1/sessions`
  * is where a caller with an actual rejected upload gets the detail.

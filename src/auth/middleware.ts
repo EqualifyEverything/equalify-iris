@@ -98,8 +98,10 @@ export function makeAuthMiddleware(store: Store, cfg: IrisConfig) {
 
     if (token === undefined) {
       // Only reachable from a config that never went through `validateConfig`. Answered
-      // rather than thrown so a misbuilt test config fails as a 401 with a reason instead of
-      // an unhandled rejection inside Express.
+      // rather than thrown so a misbuilt test config fails with a reason instead of an
+      // unhandled rejection inside Express. A 500 and not a 401, for the same reason the
+      // write below is not one: the missing key is the DEPLOYMENT's, and reporting it as a
+      // failed authentication points an operator at the caller's credential.
       sendError(res, 500, "server_error", "github.token is not configured on this deployment.");
       return;
     }

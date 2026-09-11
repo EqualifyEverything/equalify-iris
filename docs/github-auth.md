@@ -73,7 +73,8 @@ deployment either hands the secret to the people who should use it, or accepts s
 
 ### What the gate does not cover
 
-Four endpoints sit above it and answer on a gated deployment. None touches a document or an identity:
+The gate is attached to `/v1/me` and `/v1/sessions`, and to nothing else. Four endpoints are outside
+it and answer on a gated deployment. None touches a document or an identity:
 
 | Endpoint | Why |
 | --- | --- |

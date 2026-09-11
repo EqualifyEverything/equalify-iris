@@ -8,7 +8,11 @@ server:
   # Public URL of this deployment. Printed at startup so you can check the running
   # process is the one you meant to deploy. Iris builds no URLs from it.
   base_url: http://localhost:8080
-  # Shared secret every /v1 caller must send as `Authorization: Bearer <token>`.
+  # Shared secret a caller must send as `Authorization: Bearer <token>` to convert
+  # a document, read a session, or call GET /v1/me. Those are the only routes it
+  # covers. It does not close the whole API: GET /v1/health, /v1/limits, /v1/stats
+  # and /v1/quality answer whether it is set or not, and none of them returns a
+  # document, a session or an identity.
   #
   # Blank (the default) means the API is OPEN: anyone who can reach this deployment
   # can convert documents and can read any session whose id they have. That is what
@@ -24,10 +28,13 @@ server:
   # which files an issue when a rate crosses a threshold.
   #
   # Blank (default) means the endpoint answers 404 — opting in is deliberate.
-  # Not the per-user GitHub auth the rest of the API uses: this is an aggregate
-  # over every document the deployment has converted, so it belongs to no user,
-  # and the caller is a CI job with no GitHub identity. Aggregate-only by
-  # construction; no document content is exposed.
+  #
+  # Keep it separate from `api_token` above rather than reusing that value. The
+  # reader is a scheduled workflow that needs a page tally, and `api_token` would
+  # give it every session's document as well. Setting `api_token` does not gate
+  # this endpoint: the workflow holds this token and not that one, so the tally
+  # still answers on a closed deployment. Aggregate-only by construction; no
+  # document content is exposed.
   quality_token: ${IRIS_QUALITY_TOKEN}
   # How many proxies sit in front of this deployment. Set it to 1 behind a single
   # Caddy/nginx (2 behind a CDN in front of that, and so on), and leave it unset

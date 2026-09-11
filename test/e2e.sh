@@ -26,8 +26,10 @@ OPEN_DATA=/tmp/iris-e2e-open
 OPEN_CFG=/tmp/iris-e2e-open-config.yaml
 OPEN_LOG=/tmp/iris-e2e-open.log
 OPEN_BASE="http://localhost:$OPEN_PORT/v1"
-# Shared secret for GET /v1/quality (step 11c). Not a GitHub token — that endpoint
-# returns an aggregate belonging to no user and its real caller is a CI job.
+# Shared secret for GET /v1/quality (step 11c). Deliberately NOT the same value as
+# API_TOKEN below: the tally's caller is a CI job, which should not hold the secret that
+# opens every session's document. Step 11c checks that neither value opens the other's
+# route.
 QUALITY_TOKEN=e2e-quality-token
 # The shared secret gating /v1 (server.api_token). Set here so the script exercises a
 # CLOSED deployment: the gate is optional, and a run with it unset would never check that
@@ -203,9 +205,9 @@ pass "the agents it can route are not named among them"
 echo "==> 1b. GET /v1/limits (what an upload may be, no token)"
 # Deliberately WITHOUT "${AUTH[@]}": the browser app states the file limits on its upload
 # step, and someone deciding whether a scan is small enough should not need the deployment's
-# shared token to find out — so this endpoint sits above the auth middleware and stays
+# shared token to find out — so this endpoint is never handed the auth middleware and stays
 # reachable even on a gated deployment like this one. Step 2 establishes that /v1/me and
-# /v1/sessions do not.
+# /v1/sessions are, which is the whole of what the token covers.
 #
 # Asserted as a shape, not as today's numbers — every value here is resolved from the
 # configured model and provider, and this run's config is not the deployment's. What
@@ -419,9 +421,10 @@ fragmarks=$(jq -r '[.[].innerHtml | capture("Page marker (?<n>[0-9]+)").n] | @cs
   || fail "fragment order" "order=$fragorder markers=$fragmarks"
 
 echo "==> 7b. GET /v1/stats (public tally, no token)"
-# Deliberately WITHOUT "${AUTH[@]}": this endpoint is mounted above the auth
-# middleware so the browser app can show the tally to a visitor who has not signed
-# in, and step 2 has already established that everything else 401s without a token.
+# Deliberately WITHOUT "${AUTH[@]}": this endpoint is never handed the auth
+# middleware, so the browser app can show the tally on a deployment it holds no token
+# for. Step 2 established that /v1/me and /v1/sessions 401 without one; this route and
+# the three other ungated ones are what the token does not cover.
 # Exactly one 3-page session has completed at this point.
 #
 # The count is asserted only here, not again after the feedback rounds below: the
@@ -1249,25 +1252,37 @@ echo "==> 11c. GET /v1/quality (the tally the weekly quality-report workflow rea
 # recordRunSignals, which is a silent failure that makes the tally read BETTER.
 QAUTH=(-H "Authorization: Bearer $QUALITY_TOKEN")
 
-# The guard first. This endpoint is not behind the auth middleware every other one
-# uses, so its shared secret is the only thing in front of it.
+# The guard first. The auth middleware is never attached to this route (src/index.ts), so
+# `quality_token` is the only thing in front of it.
 code=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/quality")
 [ "$code" = "401" ] && pass "no token => 401" || fail "quality" "unauthenticated request got $code, expected 401"
 code=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer wrong-token" "$BASE/quality")
 [ "$code" = "401" ] && pass "wrong token => 401" || fail "quality" "wrong token got $code, expected 401"
-# A user's GitHub token must NOT work here. It is a valid bearer token for every
-# other endpoint, so accepting it would be an easy mistake to make and an invisible
-# one — the workflow would keep working either way.
+# `server.api_token` must NOT work here. It is the valid bearer for /me and /sessions on
+# this deployment, so accepting it would be an easy mistake and an invisible one — the
+# weekly workflow keeps working either way, and the operator who handed someone the API
+# token would have handed them the tally too.
 code=$(curl -s -o /dev/null -w '%{http_code}' "${AUTH[@]}" "$BASE/quality")
-[ "$code" = "401" ] && pass "a valid GitHub token is not a quality token (401)" \
-  || fail "quality" "a GitHub token was accepted on /quality ($code)"
+[ "$code" = "401" ] && pass "the API token is not a quality token (401)" \
+  || fail "quality" "server.api_token was accepted on /quality ($code)"
+# And the separation the other way round, which is the half a reader of the comment above
+# would assume was covered: the tally's token must not open the rest of the API. `auth`
+# compares `server.api_token` and nothing else (src/auth/middleware.ts), so a workflow's
+# credential reaches the tally and stops there.
+code=$(curl -s -o /dev/null -w '%{http_code}' "${QAUTH[@]}" "$BASE/me")
+[ "$code" = "401" ] && pass "the quality token is not an API token (401 on /me)" \
+  || fail "quality" "server.quality_token was accepted on /me ($code)"
 
+# Then the tally itself, on a deployment that IS gated (API_TOKEN is set): it answers with
+# only `quality_token`. That is what the docs promise the weekly workflow — closing a
+# deployment must not silently stop the quality report — and it holds because `auth` is
+# attached per route and was never attached to this one.
 q=$(curl -s "${QAUTH[@]}" "$BASE/quality")
 # `!= null` rather than truthiness: `documents` is 0 on a deployment that has
 # converted nothing, and 0 is falsy in jq, so `.documents and …` would report a
 # perfectly good empty tally as a malformed response.
 echo "$q" | jq -e '.documents != null and .window_days != null' >/dev/null \
-  && pass "tally returned: $(echo "$q" | jq -c '{documents, mean_rounds, unresolved_rate, rules: (.rules | length)}')" \
+  && pass "the tally answers on a GATED deployment, with only the quality token: $(echo "$q" | jq -c '{documents, mean_rounds, unresolved_rate, rules: (.rules | length)}')" \
   || fail "quality" "$q"
 
 # The denominator is the whole design: a clean run writes no violation rows, so

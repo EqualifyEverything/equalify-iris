@@ -67,15 +67,16 @@ export class Paths {
   }
   // `sessionNewAgents()` and `sessionPrs()` used to sit here with zero callers,
   // left over from an earlier fork-and-PR design. That flow has been dropped
-  // (contributions are issues filed under the user's identity), so they are gone
-  // rather than waiting for it.
+  // (contributions are issues, filed under the deployment's own GitHub account), so
+  // they are gone rather than waiting for it.
   sessionAgentUpdates(id: string): string {
     return join(this.sessionDir(id), "agent-updates.md");
   }
   sessionUnresolved(id: string): string {
     return join(this.sessionDir(id), "unresolved.md");
   }
-  // Final axe-core result, summarized into the PR description on close.
+  // Final axe-core result. Written once at the end of a run and read by nothing here — see
+  // the write in pipeline/orchestrator.ts for who it is for.
   sessionLint(id: string): string {
     return join(this.sessionDir(id), "lint.json");
   }

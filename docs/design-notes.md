@@ -91,7 +91,8 @@ Each decision below is one bullet, and the headings only group them:
   (`STANDARD` itself spells one entry `formField`), so `"Table"` is ordinary output. While the nine
   files existed, `agents/Table.md` resolved on a case-insensitive volume and absorbed it. With them
   gone, an exact-match filter would draft an agent and file a public issue on the upstream repo —
-  under the user's own GitHub identity — for a type the page pass covers.
+  under the deployment's own GitHub account, the only identity Iris has — for a type the page pass
+  covers.
 - **No provenance comments in the output.** `@source` / `@agent` / `@fragment` wrappers travel with
   a fragment through the pipeline, and an early design kept them in the final HTML. Iris delivers
   clean content-only HTML instead. The comments leak pipeline internals into a document meant to be

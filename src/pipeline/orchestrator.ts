@@ -429,7 +429,10 @@ export async function runPipeline(args: {
         examples: deliveredGeneric.slice(0, 5),
       });
     }
-    // Final accessibility lint result, summarized into the PR description on close.
+    // Final accessibility lint result, written for an operator reading the session directory
+    // by hand. Nothing in the service reads it back: the counts a caller sees come from the
+    // run log and the run signals below, and the wording that says otherwise belonged to the
+    // withdrawn fork-and-PR flow, which had a PR description to summarize it into.
     writeFileSync(paths.sessionLint(sessionId), JSON.stringify(review.lint, null, 2));
     if (review.unresolved.length) {
       writeFileSync(

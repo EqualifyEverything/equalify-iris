@@ -12,9 +12,11 @@ import { normalizeReviewIterations, DEFAULT_MAX_REVIEW_ITERATIONS } from "../src
 // the values it must not silently become the whole point of normalizing it — and
 // two of them fail in ways nothing else in the system would report:
 //
-//   null  -> reaches a NOT NULL column and every FIRST LOGIN on the deployment
-//            fails as `401 unauthorized: Token validation failed` (a config typo
-//            reported as the caller's token being bad)
+//   null  -> reaches a NOT NULL column, so the first request that reaches `/v1/me` or
+//            `/v1/sessions` fails as `500 server_error: This deployment could not record
+//            its own identity` (a config typo reported as a fault with no named cause;
+//            the SQLite message goes to the server log, not to the caller). The four
+//            ungated routes keep answering, so the deployment looks up.
 //   0/-1  -> the review loop stops reviewing: 0 buys one reader pass with no fix
 //            ever applied, a negative skips review outright
 //
@@ -60,12 +62,13 @@ test("review cap: no ceiling — a deliberately high cap is not silently reduced
   assert.equal(normalizeReviewIterations(50), 50);
 });
 
-test("review cap: the normalized value is what makes a first login survive", () => {
+test("review cap: the normalized value is what makes the first request survive", () => {
   withStore((store) => {
     // The failure this prevents, spelled out: null straight from YAML reaches the
-    // NOT NULL column, and makeAuthMiddleware turns the throw into a 401 about the
-    // user's token. Asserted rather than described, so a future change that drops
-    // the guard in loadConfig fails here instead of in production on first login.
+    // NOT NULL column, and makeAuthMiddleware answers the throw as a 500 saying the
+    // deployment could not record its own identity. Asserted rather than described, so
+    // a future change that drops the guard in loadConfig fails here instead of on the
+    // first request a deployment gets on `/v1/me` or `/v1/sessions`.
     assert.throws(
       () =>
         store.upsertUser({ github_user_id: 1, github_login: "raw" }, null as unknown as number),

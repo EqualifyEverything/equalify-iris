@@ -9,11 +9,12 @@ import { qualityRouter } from "../src/routes/quality.ts";
 // the numbers mean; this covers the two things only the route decides — who is let in,
 // and whether a window's answer can be served for a different window.
 //
-// The guard is the part worth pinning. Unlike every other endpoint this one is not
-// behind the GitHub auth middleware (the data belongs to no user, and the caller is a
-// CI job), so its shared secret is the ONLY thing standing between a deployment-wide
-// quality report and anyone who guesses the path. A regression here is invisible: the
-// endpoint keeps answering correctly for the workflow either way.
+// The guard is the part worth pinning. The auth middleware is never attached to this route
+// (src/index.ts), and it is one of four that are not, so its own shared secret is the ONLY
+// thing standing between a deployment-wide quality report and anyone who guesses the path.
+// That is deliberate: the caller is a CI job that must reach the tally on a gated deployment
+// while holding no `server.api_token`. A regression here is invisible — the endpoint keeps
+// answering correctly for the workflow either way.
 
 const TOKEN = "s3cret-quality-token";
 

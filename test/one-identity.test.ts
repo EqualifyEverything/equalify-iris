@@ -439,7 +439,7 @@ test("a config with no github.token is refused at startup, by name", () => {
         // needs to be able to do, and where the example reads it from.
         /issues:write/.test(e.message) &&
         /IRIS_GITHUB_TOKEN/.test(e.message),
-      "a deployment with no identity started anyway, and every request would 401",
+      "a deployment with no identity started anyway, and every /v1/me and /v1/sessions request would 500",
     );
 
     // Sanity: the same config with the key set loads. Otherwise this passes for any config

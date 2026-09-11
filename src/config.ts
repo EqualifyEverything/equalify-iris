@@ -78,23 +78,35 @@ export interface IrisConfig {
   server: {
     port: number;
     base_url: string;
-    // Shared secret that gates `GET /v1/quality`, the deployment-wide quality tally
-    // the weekly workflow files issues from. Unset by default, and the
-    // endpoint answers 404 until it is set — an operator opts in rather than
-    // discovering they exposed it.
+    // Plain shared secret — not a GitHub credential — that gates `GET /v1/quality`, the
+    // deployment-wide quality tally the weekly workflow files issues from. Unset by
+    // default, and the endpoint answers 404 until it is set: an operator opts in rather
+    // than discovering they exposed it.
     //
-    // Deliberately NOT the GitHub user auth every other endpoint uses. That answers
-    // "which user is this", and this data belongs to no user: it is an aggregate over
-    // every document the deployment has converted, so there is no user whose token
-    // should unlock it and no user who should be denied their own. It is also read by
-    // a CI job, which has no GitHub user to be.
+    // Separate from `api_token` below, which gates the rest of `/v1`, for two reasons
+    // that outlive either key. THE CANONICAL EXPLANATION — other sites point here.
+    //
+    //   - Different reader. The caller is the weekly CI job, and the only thing it needs
+    //     is a page tally. Handing it `api_token` would hand a scheduled workflow the
+    //     secret that opens every session's document to get an aggregate.
+    //   - Different exposure. Unset, this answers 404 rather than 401, so a deployment
+    //     that never opted in does not admit the endpoint exists. `api_token` cannot do
+    //     that: a gate has to say it is a gate.
+    //
+    // It also has to answer ON a gated deployment — the CI job holds this token and not
+    // the other one — which is why it carries its own guard instead of relying on the gate.
+    // What delivers that is index.ts never handing `/v1/quality` to the auth middleware.
     quality_token?: string;
-    // OPTIONAL shared secret that gates every `/v1` route. Unset by default, which
+    // OPTIONAL shared secret that gates `/v1/me` and `/v1/sessions`. Unset by default, which
     // leaves the deployment open to anyone who can reach it — that is what a public demo
     // needs, and the per-address limits in util/requestLimits.ts are what bound the cost.
     //
-    // Set it and every call must send `Authorization: Bearer <it>`. Two things follow, and
-    // both are the point rather than a limitation:
+    // It is not the whole of `/v1`: index.ts attaches the auth middleware to those two mounts
+    // and to nothing else, so `/v1/health`, `/v1/stats`, `/v1/limits` and `/v1/quality` answer
+    // whether this is set or not. Each of those says on its own mount why it may.
+    //
+    // Set it and a call to either mount must send `Authorization: Bearer <it>`. Two things
+    // follow, and both are the point rather than a limitation:
     //
     //   - It is NOT a GitHub token, so a copy that leaks costs a rate-limit bypass rather
     //     than write access to `github.upstream_repo`. Same reasoning as `quality_token`
@@ -422,7 +434,9 @@ function validateConfig(cfg: IrisConfig, unset: Set<string>, path: string): void
   // `expandEnv`), so the shape to catch is a key that is present and empty — which is
   // exactly what an operator who forgot the environment variable produces. Fatal rather
   // than warned, unlike the old check: without it there is no account to own a session,
-  // so every request would 401 and nothing would work at all.
+  // so every request to `/v1/me` or `/v1/sessions` would answer `500 server_error:
+  // github.token is not configured` (auth/middleware.ts) — nothing could convert a
+  // document or read one, which is the whole service.
   if (!githubToken(cfg)) {
     problems.push(
       `github.token is not set. Iris needs one GitHub PAT, held by the server, to own every session and file ` +
@@ -729,11 +743,19 @@ export function normalizeConcurrency(value: unknown): number {
 export function normalizeReviewIterations(value: unknown): number {
   // The same "absent means the default, not zero" trap as the other normalizers —
   // YAML parses a valueless `max_review_iterations:` as null and Number(null) is 0
-  // — but here it had a second failure on top of a bad cap: null flows through
+  // — but here it has a second failure on top of a bad cap: null flows through
   // makeAuthMiddleware to upsertUser, whose `= 3` parameter default only fires for
-  // `undefined`, so it reached a NOT NULL column and every first-time login on that
-  // deployment failed as `401 unauthorized: Token validation failed`. A config typo
-  // reported as the caller's token being bad.
+  // `undefined`, so it reaches a NOT NULL column and the write throws.
+  //
+  // Today that is `500 server_error: This deployment could not record its own identity`,
+  // on the first request that reaches `/v1/me` or `/v1/sessions` — the only two mounts
+  // `auth` is attached to. `/v1/health`, `/v1/stats`, `/v1/limits` and `/v1/quality` keep
+  // answering, which is what makes the typo hard to see: the deployment looks up.
+  // Before #459 the same typo answered
+  // `401 unauthorized: Token validation failed`, because `upsertUser` sat inside the
+  // catch that reported a GitHub refusal — a config typo blamed on the caller's token.
+  // That is why the write has a catch of its own now (auth/middleware.ts). This guard is
+  // what keeps either report from being reached.
   if (value === null || value === undefined) return DEFAULT_MAX_REVIEW_ITERATIONS;
   if (typeof value === "string" && value.trim() === "") return DEFAULT_MAX_REVIEW_ITERATIONS;
   const n = typeof value === "number" ? value : Number(value);
