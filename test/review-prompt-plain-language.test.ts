@@ -271,11 +271,13 @@ test("CONTRIBUTING.md's automated-review bullet does not keep its own copy of th
     const want = trim(BOUND_BARE);
     const missing = want.filter((x) => !have.includes(x));
     const extra = have.filter((x) => !want.includes(x));
-    // Three of the four branches want the copy GONE, and one does not: a complete copy is tolerated here,
-    // so the branch that fires on a complete copy with a spelling defect asks only for the spelling. This
-    // sentence therefore belongs to the three that mean it, not to a shared tail — printed under the
-    // first branch it reads "add the trailing slash … and the link is how this bullet is meant to carry
-    // it", and a reader cannot tell whether the assertion wants a slash or wants the list deleted.
+    // TWO of the four branches want the copy GONE — a partial one and a cross-reference — and two do not.
+    // A complete copy is tolerated here, so the spelling branch asks only for the spelling; and BOTH of the
+    // over-wide branch's own remedies (widen the set everywhere, or drop the extra path) leave a complete
+    // copy that this test then accepts, verified by running the remedy. So this sentence belongs to the two
+    // branches that mean it, and the other two say what they mean themselves. Appended to all four it read
+    // "add the trailing slash … and the link is how this bullet is meant to carry it", and a reader cannot
+    // tell whether the assertion wants a slash or wants the list deleted.
     const home =
       `The Documentation section is where this set is defined, and the [Documentation](#documentation) ` +
       `link is how this bullet is meant to carry it. `;
@@ -292,8 +294,9 @@ test("CONTRIBUTING.md's automated-review bullet does not keep its own copy of th
         `this bullet names every bound path AND ${extra.join(", ")}, so it is an OVER-WIDE copy, not a ` +
         `partial one. If the scope really did widen, BOUND_FILES and the Documentation section are where ` +
         `that happens and all four copies move together; if ${extra.join(", ")} is a cross-reference ` +
-        `rather than a scope member, drop it. ` +
-        home;
+        `rather than a scope member, drop it. Both of those leave a complete copy here, which this test ` +
+        `accepts, so neither asks you to delete the list — and if you did not mean to keep one, the ` +
+        `[Documentation](#documentation) link is how this bullet carries the set instead. `;
     } else if (missing.length === want.length) {
       why =
         `this bullet names ${have.join(", ")} and no member of the scope, so this is not a copy of the ` +
