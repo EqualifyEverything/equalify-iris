@@ -1085,7 +1085,8 @@ test("the page agent's numbering and abbreviation rules keep the clauses that ma
     // The rule above asks for one note per irregular list or table, so a multi-table parts
     // manual gets several — and two <p>s that both pick id="note" are an intra-page duplicate,
     // the same collision the symbol-marker clause closes and the same one assembly does not:
-    // namespaceAnchors renames ids more than one PAGE claims (src/pipeline/anchors.ts:611-615).
+    // `namespaceAnchors` renames ids more than one PAGE claims, and says so at the top of
+    // src/pipeline/anchors.ts ("Only ids that more than one page claims are renamed").
     ["the note ids are ordered and never reused, since one page may need several",
       /Number those ids by the order the annotated lists and tables appear on the page.*never reuse one/],
     ["the note claims only what this page shows, not what the document contains",

@@ -382,7 +382,8 @@ halves pinned in `test/page-prompt.test.ts`, `test/feedback-prompt.test.ts` and
 `test/verification.test.ts`.
 
 The fourth check is not a comparison at all but a field the verifier was never shown: the page
-agent's own `"log"`. `agents/page.md` asks for it by name in **26** places, and for six kinds of
+agent's own `"log"`. `agents/page.md` names the field on **44** lines
+(`grep -c '"log"' agents/page.md`), and for six kinds of
 finding it asks for a log entry — a page ending mid-sentence, a heading with no parent on the page,
 a symbol with no key, a placeholder image source, a language change, an irregular table. The verifier
 judges the HTML against that contract and was given the HTML alone, so on all six it could only ignore
