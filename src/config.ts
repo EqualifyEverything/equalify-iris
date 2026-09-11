@@ -741,11 +741,16 @@ export function normalizeConcurrency(value: unknown): number {
 export function normalizeReviewIterations(value: unknown): number {
   // The same "absent means the default, not zero" trap as the other normalizers —
   // YAML parses a valueless `max_review_iterations:` as null and Number(null) is 0
-  // — but here it had a second failure on top of a bad cap: null flows through
+  // — but here it has a second failure on top of a bad cap: null flows through
   // makeAuthMiddleware to upsertUser, whose `= 3` parameter default only fires for
-  // `undefined`, so it reached a NOT NULL column and every first-time login on that
-  // deployment failed as `401 unauthorized: Token validation failed`. A config typo
-  // reported as the caller's token being bad.
+  // `undefined`, so it reaches a NOT NULL column and the write throws.
+  //
+  // Today that is `500 server_error: This deployment could not record its own identity`,
+  // on the first request the deployment serves. Before #459 the same typo answered
+  // `401 unauthorized: Token validation failed`, because `upsertUser` sat inside the
+  // catch that reported a GitHub refusal — a config typo blamed on the caller's token.
+  // That is why the write has a catch of its own now (auth/middleware.ts). This guard is
+  // what keeps either report from being reached.
   if (value === null || value === undefined) return DEFAULT_MAX_REVIEW_ITERATIONS;
   if (typeof value === "string" && value.trim() === "") return DEFAULT_MAX_REVIEW_ITERATIONS;
   const n = typeof value === "number" ? value : Number(value);

@@ -12,9 +12,10 @@ import { normalizeReviewIterations, DEFAULT_MAX_REVIEW_ITERATIONS } from "../src
 // the values it must not silently become the whole point of normalizing it — and
 // two of them fail in ways nothing else in the system would report:
 //
-//   null  -> reaches a NOT NULL column and every FIRST LOGIN on the deployment
-//            fails as `401 unauthorized: Token validation failed` (a config typo
-//            reported as the caller's token being bad)
+//   null  -> reaches a NOT NULL column, so the FIRST REQUEST the deployment serves
+//            fails as `500 server_error: This deployment could not record its own
+//            identity` (a config typo reported as a fault with no named cause; the
+//            SQLite message goes to the server log, not to the caller)
 //   0/-1  -> the review loop stops reviewing: 0 buys one reader pass with no fix
 //            ever applied, a negative skips review outright
 //
