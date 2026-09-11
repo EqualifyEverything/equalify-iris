@@ -54,9 +54,9 @@ function codeSpans(text: string): string[] {
 // starting with the prompt's own "Docs prose that is not concise plain language" — and `agents` in 0 of
 // 4, where it appears only inside `agents/` or as the singular "agent prompts". So matching bare `docs`
 // would fire on prose that binds nothing and the pin would be deleted by the first person it annoyed,
-// while matching bare `agents` costs nothing. Both halves of that measurement are asserted below, in
-// both directions, so a document that starts using `agents` as English fails a test instead of quietly
-// making this regex wrong.
+// while matching bare `agents` costs nothing. Both halves of that measurement are asserted below — the
+// `docs` half as a floor, the `agents` half exactly — so a document that starts using `agents` as
+// English fails a test instead of quietly making this regex wrong.
 //
 // The limit that remains, stated because this is where someone reaches for a wider regex: a scope
 // member with no extension, no slash and no name this regex knows — "anything under src" — is
@@ -246,10 +246,14 @@ test("CONTRIBUTING.md's Documentation section binds the same files the prompt do
 // updating three of them leaves this bullet promising the old, narrower scope.
 test("CONTRIBUTING.md's automated-review bullet does not keep its own copy of the scope", () => {
   const item = contributingReviewBullet();
-  // Backticked or not, unlike every other assertion here. This is the one that accepts an EMPTY
-  // result, so reading only code spans would pass on exactly the shape it guards: a list re-added as
-  // prose — "if your PR touches README.md, docs/, config.example.yaml or agents/" — yields no spans
-  // at all. The others compare four spans for equality and fail when a path loses its backticks.
+  // First, because this is the one assertion that accepts an EMPTY result: a list re-added as prose —
+  // "if your PR touches README.md, docs/, config.example.yaml or agents/" — is the shape a code-span
+  // reader would pass, and it is caught here rather than below, with "backtick it". That leaves the
+  // tolerance below code-spans-only, the same rule the other three regions follow, and it keeps this
+  // bullet out of a failure whose remedy belongs to a different test: a prose `agents/` also matches
+  // the last test's `agents` check, which cannot tell it from the English word.
+  assertNoBarePaths(item, "CONTRIBUTING.md's automated-review bullet");
+  // Backticks stripped, so a backticked partial copy is still read as a list of paths.
   const paths = [...new Set([...(item.replaceAll("`", "").match(PATH_RE) ?? [])])]
     .filter((t) => t !== "CONTRIBUTING.md")
     .sort();
@@ -265,7 +269,9 @@ test("CONTRIBUTING.md's automated-review bullet does not keep its own copy of th
             `(${paths.join(", ")} against ${BOUND_BARE.join(", ")}). Nothing is missing — add the ` +
             `slash, which is how the other three copies of this set are written:\n${item}`
         : `this bullet either names no files or names all of BOUND_FILES. It names ${paths.join(", ")}, ` +
-            `which is a partial copy of the scope — the shape that goes stale when the set widens:\n${item}`,
+            `which is a partial copy of the scope — the shape that goes stale when the set widens. One ` +
+            `member may also be missing from that list only because it is spelled \`docs\` without its ` +
+            `slash, which PATH_RE cannot see; count what the bullet names before adding a path:\n${item}`,
     );
   }
   // Naming no files is only safe while the bullet says where the list does live. Without this, the
@@ -325,10 +331,15 @@ test("PATH_RE's bare-word list still matches how these four documents use those 
   );
 
   // Universal, and for the opposite reason: one bare use is enough to make this match cry wolf.
+  //
+  // The lookahead is not decoration. `\b` sits between `s` and `/`, so a plain `/\bagents\b/` matches the
+  // `agents` inside a prose `agents/` — a path, not the English word, and its remedy is the "backtick it"
+  // that `assertNoBarePaths` prints, not either of the two this message offers. Excluding a following
+  // slash leaves exactly the readings named below.
   for (const [where, region] of regions) {
     assert.doesNotMatch(
       outsideSpans(region),
-      /\bagents\b/i,
+      /\bagents\b(?!\/)/i,
       `${where} still keeps "agents" inside a code span or writes the singular "agent", which is why ` +
         `PATH_RE DOES match it bare. Two things reach this, and they want opposite fixes: a region ` +
         `has started using "agents" as an ordinary word, in which case the match has to come out of ` +
