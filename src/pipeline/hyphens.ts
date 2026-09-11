@@ -103,6 +103,39 @@ const TAG = /<(?:[^>"']|"[^"]*"|'[^']*')*>/g;
 // becomes `Compos- ite`, which is not a string the document contains, so a corrector sent looking for
 // it finds nothing. A page that wraps at the break also SHOWS the reader `Compos- ite`, hyphen and
 // space, which is a defect on its own terms and not the contradiction this rule is about.
+//
+// The `<br>` spelling of that break is the MEASURED case of the same limit, and #374 leaves it here as a
+// written-down limit rather than a patch. `Compos-<br>ite` inside one `<th>` puts the hyphen and the break
+// in a single cell; `textOf` renders the element as a space, so the word never becomes a candidate — the
+// same blindness as the wrapped source above, arriving as markup instead of whitespace. Neither this check
+// nor `joinBrokenWords` can see it, and the two miss it for the same reason at different widths: this check
+// reads `WORD` over `textOf`, where the tag has become a space, while the join's rewrite runs `WORD` over
+// each text run BETWEEN tags (`walk`, below) and `Compos-` ends its run, so no letter follows the hyphen
+// there either — `textOf` is only how the join builds its indexes. #374's census counts it on the
+// shipped arm: 24 breaks carried into column heads, `joinBrokenWords` closes 17, and of the 7 survivors 3
+// land on limits this file already names. The last 4 are this shape, all on one page
+// (`p069`) — a floor of about 4 per 100 pages, and `<br>` inside a `<th>` at all is 10 on 3 pages for
+// `kimi-k2.5`, 21 on 7 for `gpt-5.6-luna`, 0 for `claude-sonnet-4-6`.
+//
+// Not repaired, because the repair is a contract amendment and not a wider pattern. The distinction a
+// widening needs is between an element that ends a CELL and one that ends a LINE: `<td>Total-</td>` beside
+// `<td>farm</td>` must stay unjoined, while a `<br>` inside one cell is a line break, and `textOf` renders
+// both as one space. Teaching the pattern that difference also decides what `split` REPORTS, and `split` is
+// contractually a string the document contains — the document holds `Compos-<br>ite`, so a corrector sent
+// after `Compos-ite` or `Compos- ite` finds nothing on the page. Passes downstream read that contract, so
+// the change reaches further than the defect does. Four occurrences on one page do not pay for it, and
+// `agents/page.md` now says a word broken at the foot of a column is one word (#450), which lowers the rate
+// of the input for free. If a later census puts this well above its floor, the amendment is the fix and
+// this comment is where the reasoning to overturn lives.
+//
+// Both halves of that refusal are pinned as tests rather than left here as prose, and they catch different
+// mutations, all in `test/split-words.test.ts`: widening this pattern alone reddens the test for the
+// wrapped-source case ("a break the fragment wraps its own source at is invisible"), and widening it AND
+// taking whitespace out of `splitWordAudit`'s lookup key — the whole repair this paragraph describes —
+// reddens the `-<br>` limit test and the cell-boundary test as well. Those last two are separate tests on
+// purpose: a single one stops at its first failed assertion, so the cell-boundary pin would have reported
+// nothing until a second run. So the limit cannot quietly stop being true, either half of the widening
+// arrives at this argument by way of a red run, and the widening's cost shows up in the same run as its gain.
 const WORD = /\p{L}+(?:-\p{L}+)*/gu;
 
 export interface SplitWord {
