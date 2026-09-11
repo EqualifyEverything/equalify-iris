@@ -2,7 +2,7 @@ import type { Request, Response, NextFunction } from "express";
 import type { IrisConfig } from "../config.ts";
 import { anonymousToken } from "../config.ts";
 import type { Store, UserRecord } from "../store/db.ts";
-import { fetchUser, isRejectedCredential } from "./github.ts";
+import { fetchUser, isRejectedCredential, userLookupError } from "./github.ts";
 import { sendError } from "../routes/errors.ts";
 
 // Request augmented with the resolved user + their GitHub token.
@@ -45,6 +45,47 @@ const TTL_MS = 5 * 60 * 1000;
 // clients would. 10k entries is far above any single-machine deployment's real
 // concurrent user count and small enough to be bounded memory.
 const MAX_ENTRIES = 10_000;
+
+// CONFIGURED credentials GitHub answered 401 for, and when to ask again. A negative cache,
+// with the same TTL as a positive validation above, so every staleness window in this file
+// has one bound: a revoked token keeps working for up to TTL_MS, and a repaired one starts
+// working within TTL_MS. Both directions cost one `GET /user`.
+//
+// Why a TTL rather than a flag that latches for the process, which is what this started as:
+// a 401 is a final answer about the credential, but it is not a final answer about the
+// DEPLOYMENT. GitHub's auth can degrade and answer `Bad credentials` for a token that is
+// fine, and a latch would then serve 401 to every anonymous caller until someone restarted
+// the service — trading a per-request lookup for an outage that needs a human. It also
+// bounds the other direction: `req.anonymous` cannot be applied while the shared identity
+// is unresolved, so the window in which that guard is off is this TTL and not the rest of
+// the process.
+//
+// Only a value from config is ever recorded here — never a string that arrived in a header.
+// That is what bounds this map: it holds at most one entry per configured credential, so it
+// needs no ceiling and no eviction sweep, while a map keyed on whatever callers present
+// would be the unbounded one `MAX_ENTRIES` exists to prevent. A caller's own bad token
+// therefore still costs one lookup per request, which is the caller's own doing and is
+// already rate limited by address.
+const rejectedCredentials = new Map<string, number>();
+
+// Record a configured credential as rejected. Callers must have checked
+// `isRejectedCredential` first: anything other than a 401 means GitHub did not answer, and
+// caching that would be caching an outage.
+function markRejectedCredential(token: string, now: number): void {
+  rejectedCredentials.set(token, now + TTL_MS);
+}
+
+// Whether GitHub's rejection of this configured credential is still current. Expired
+// entries are dropped on read, so the map cannot accumulate them.
+function isRejectedCredentialCached(token: string, now: number): boolean {
+  const until = rejectedCredentials.get(token);
+  if (until === undefined) return false;
+  if (until <= now) {
+    rejectedCredentials.delete(token);
+    return false;
+  }
+  return true;
+}
 
 // Evict expired entries, then — if still over the ceiling — the oldest insertions.
 // A Map iterates in insertion order, and every entry is written with the same TTL,
@@ -89,10 +130,25 @@ export function isValidatedToken(token: string): boolean {
   return entry !== undefined && entry.expires > Date.now();
 }
 
-// Test-only: the cache is module-level state, so it survives between tests in one
-// process and would otherwise let one test's token satisfy another's assertion.
+// Test-only: both caches are module-level state, so they survive between tests in one
+// process and would otherwise let one test's token satisfy another's assertion. The
+// negative cache is cleared here too — a rejection recorded by one test would otherwise
+// make the next one's anonymous requests 401 with no lookup, which looks exactly like the
+// feature being off.
 export function __clearTokenCache(): void {
   tokenCache.clear();
+  rejectedCredentials.clear();
+}
+
+// Test-only: the negative cache's TTL is five minutes, so the only way to assert that it
+// EXPIRES is to write an entry that already has. Same device as `__seedTokenCache` above,
+// for the same reason — see test/token-cache.test.ts, which seeds a stale positive entry
+// rather than waiting for one.
+export function __seedRejectedCredential(token: string, expires: number): void {
+  rejectedCredentials.set(token, expires);
+}
+export function __rejectedCredentialUntil(token: string): number | undefined {
+  return rejectedCredentials.get(token);
 }
 
 // Test-only introspection. The bound is 10k entries, so asserting it through real
@@ -130,29 +186,25 @@ export function makeAuthMiddleware(store: Store, cfg: IrisConfig) {
   // Memoized rather than re-resolved because a token's account cannot change and config
   // does not hot-reload, so this costs ONE extra `GET /user` per process (none at all on
   // a deployment with the key unset).
+  //
+  // When it CANNOT be resolved, the flag is simply not applied, and the two things that are
+  // true then are worth separating, because an earlier version of this comment ran them
+  // together and claimed more than the code does:
+  //
+  //   - While the credential is rejected, nothing new can reach the shared identity —
+  //     the anonymous path calls the same `fetchUser` and 401s — so there is no session for
+  //     the guard to have protected.
+  //   - For sessions created BEFORE it broke, an unresolved id fails the comparison below
+  //     however the failure was handled, so caching the rejection changes nothing about
+  //     which list is served.
+  //
+  // What does NOT follow is that the two are equivalent across a RECOVERY: a rejection is
+  // cached for a TTL, so if GitHub was answering `Bad credentials` for a good token, the
+  // guard stays off for up to that window after it recovers, where re-asking every time
+  // would have re-armed on the next request. That is the residual cost of not asking, it is
+  // bounded by `rejectedCredentials`'s TTL rather than by the process, and it is why the
+  // cache is a TTL rather than a latch.
   let anonUserId: number | undefined;
-  // A FAILURE to resolve it is memoized only when GitHub REJECTED the credential (401).
-  // The two cases are not alike and the difference is not about how long they last:
-  //
-  //   - A 401 is a final answer about a configured value, and config does not hot-reload,
-  //     so retrying it cannot produce a different result before the restart that would
-  //     clear this flag anyway. Retrying forever is what the first version did, and its
-  //     cost is not bounded by an outage: a mistyped or revoked token is a permanent
-  //     state, so EVERY authenticated request paid an extra uncached `GET /user` (issued
-  //     with no timeout) for the life of the process — including requests whose own token
-  //     was a cache hit and would otherwise have made no outbound call at all.
-  //   - A 403 (rate limit), a 5xx or a thrown fetch says GitHub could not answer, not
-  //     that the answer is no. Latching on those would switch the guard off for the rest
-  //     of the process over a blip, so they are retried.
-  //
-  // Latching is safe here in a way that is worth stating, because "stop applying a guard"
-  // normally is not: a credential GitHub rejects cannot serve an anonymous request either
-  // — that path calls the same `fetchUser` and 401s — so while this flag is set, no new
-  // session can reach the shared identity. And it changes nothing for sessions created
-  // BEFORE the token broke: an unresolved anonymous id fails the comparison below
-  // whether the failure was memoized or retried, so both versions serve that account's
-  // own list identically. The flag only stops re-asking a question with a fixed answer.
-  let anonRejected = false;
   return async function auth(req: AuthedRequest, res: Response, next: NextFunction): Promise<void> {
     const header = req.header("authorization") ?? "";
     const match = header.match(/^Bearer\s+(.+)$/i);
@@ -209,6 +261,15 @@ export function makeAuthMiddleware(store: Store, cfg: IrisConfig) {
     };
 
     try {
+      // A rejection GitHub already gave us, inside its TTL, answers this request without
+      // asking again — and it has to be checked on BOTH halves, because the half an outside
+      // caller drives is the anonymous one. Thrown rather than answered here so the reply is
+      // produced by the one `catch` below: identical status, identical body, no way for a
+      // caller to tell a cached rejection from a fresh one, and one place to change if that
+      // wording ever does.
+      if (servedAnonymously && isRejectedCredentialCached(token, Date.now())) {
+        throw userLookupError(401);
+      }
       const userId = await resolveUserId(token);
       req.user = store.getUser(userId)!;
       req.token = token;
@@ -224,23 +285,39 @@ export function makeAuthMiddleware(store: Store, cfg: IrisConfig) {
           // Free: this request just resolved the anonymous credential itself.
           anonUserId = userId;
           req.anonymous = true;
-        } else if (anonUserId === undefined && anonRejected) {
-          // Already known to be unusable — no lookup, and no flag. See `anonRejected`.
+        } else if (anonUserId === undefined && isRejectedCredentialCached(anonToken, Date.now())) {
+          // Known-rejected within the TTL, so no lookup and no flag. The guard cannot be
+          // applied while the shared identity is unresolved — see `rejectedCredentials` for
+          // why that window is bounded by the TTL rather than by the process.
         } else {
           try {
             anonUserId ??= await resolveUserId(anonToken);
           } catch (e) {
-            // The deployment's own credential is unusable (revoked, mistyped, GitHub
+            // The deployment's own credential did not resolve (revoked, mistyped, GitHub
             // down). Swallowed here on purpose: it is not this caller's fault and must
             // not turn their working request into a 401. The operator's signal is that
             // every anonymous request 401s, plus the boot warning that the key is set.
-            if (isRejectedCredential(e)) anonRejected = true;
+            //
+            // Recorded only for a 401 — a rejection is an answer, while a 403 rate limit, a
+            // 5xx or a thrown fetch is GitHub failing to give one, and caching that would
+            // switch this guard off over a blip.
+            if (isRejectedCredential(e)) markRejectedCredential(anonToken, Date.now());
           }
           if (anonUserId === userId) req.anonymous = true;
         }
       }
       next();
     } catch (e) {
+      // Where the anonymous half LEARNS the credential is rejected. This is the path an
+      // outside caller drives, so it is the one that has to stop repeating the lookup:
+      // without this, a mistyped config value cost one uncached `GET /user` per
+      // unauthenticated request for the life of the process, which is the same cost the
+      // signed-in half was fixed for. Only for a request being served anonymously — a
+      // CALLER's bad token must never be recorded here (see `rejectedCredentials`), and it
+      // is `servedAnonymously`, not `token === anonToken`, that distinguishes them: a
+      // caller may present the deployment's own credential, and doing so must not let them
+      // write to this map.
+      if (servedAnonymously && isRejectedCredential(e)) markRejectedCredential(token, Date.now());
       // Same 401 either way. An anonymous credential that GitHub rejects is an
       // operator's problem, not the caller's, and saying which token failed here would
       // tell an anonymous caller about the deployment's credential; the boot warning

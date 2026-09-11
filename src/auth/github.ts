@@ -220,17 +220,23 @@ export function isRejectedCredential(e: unknown): boolean {
   return (e as { status?: number } | null)?.status === 401;
 }
 
+// The one place a `fetchUser` failure is constructed. Exported because a caller that has
+// CACHED one of these answers has to reproduce it exactly rather than compose its own
+// message — the difference between a cached rejection and a fresh one must not be visible
+// in a response, and a second copy of this string is a second thing to keep in step.
+export function userLookupError(status: number): UserLookupError {
+  const err = new Error(`github user lookup failed: ${status}`) as UserLookupError;
+  err.status = status;
+  return err;
+}
+
 // Identify the GitHub user behind a token. Login is signup: there is no separate
 // registration step.
 export async function fetchUser(token: string, apiBase: string): Promise<GitHubUser> {
   const res = await fetch(`${apiBase}/user`, {
     headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "User-Agent": "equalify-iris" },
   });
-  if (!res.ok) {
-    const err = new Error(`github user lookup failed: ${res.status}`) as UserLookupError;
-    err.status = res.status;
-    throw err;
-  }
+  if (!res.ok) throw userLookupError(res.status);
   const json = (await res.json()) as { id: number; login: string };
   return { id: json.id, login: json.login };
 }

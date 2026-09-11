@@ -6,7 +6,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
 import { Store } from "../src/store/db.ts";
-import { makeAuthMiddleware, __clearTokenCache } from "../src/auth/middleware.ts";
+import {
+  makeAuthMiddleware,
+  __clearTokenCache,
+  __seedRejectedCredential,
+  __rejectedCredentialUntil,
+} from "../src/auth/middleware.ts";
 import type { AuthedRequest } from "../src/auth/middleware.ts";
 import { meRouter } from "../src/routes/me.ts";
 import { sessionsRouter } from "../src/routes/sessions.ts";
@@ -56,9 +61,18 @@ const UNANSWERABLE_TOKEN = "gho_github_is_having_a_day";
 
 // A GitHub that knows exactly two tokens, so "the anonymous credential was validated" and
 // "the caller's own token was validated" are distinguishable, and anything else 401s.
-async function mockGitHub(): Promise<{ base: string; close: () => void; calls: () => number }> {
+async function mockGitHub(): Promise<{
+  base: string;
+  close: () => void;
+  calls: () => number;
+  // Start accepting a token this mock was rejecting, as the shared identity. For the case
+  // that cannot be tested with a static mock: GitHub answering `Bad credentials` for a
+  // credential that is actually fine, and then recovering.
+  recover: (token: string) => void;
+}> {
   const app = express();
   const state = { calls: 0 };
+  const recovered = new Set<string>();
   app.get("/user", (req, res) => {
     state.calls++;
     const auth = req.header("authorization") ?? "";
@@ -66,6 +80,7 @@ async function mockGitHub(): Promise<{ base: string; close: () => void; calls: (
     if (auth === `Bearer ${USER_TOKEN}`) return void res.json(REAL_USER);
     // Deliberately a 5xx and not a 401: a status that says "ask again later".
     if (auth === `Bearer ${UNANSWERABLE_TOKEN}`) return void res.status(502).json({ message: "Bad gateway" });
+    for (const t of recovered) if (auth === `Bearer ${t}`) return void res.json(ANON_USER);
     res.status(401).json({ message: "Bad credentials" });
   });
   const server = app.listen(0);
@@ -74,6 +89,7 @@ async function mockGitHub(): Promise<{ base: string; close: () => void; calls: (
     base: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
     close: () => server.close(),
     calls: () => state.calls,
+    recover: (token: string) => recovered.add(token),
   };
 }
 
@@ -112,6 +128,7 @@ async function harness(anonToken?: string) {
   return {
     store,
     ghCalls: gh.calls,
+    ghRecover: gh.recover,
     // No `headers` key at all when nothing is passed: an empty object would still be a
     // request with no Authorization header, but being explicit is what this suite is about.
     fetch: (path: string, headers?: Record<string, string>) =>
@@ -373,6 +390,86 @@ test("a REJECTED shared credential is asked about once, not once per request", a
       anonymous?: boolean;
     };
     assert.equal("anonymous" in me, false);
+  } finally {
+    h.close();
+  }
+});
+
+test("an ANONYMOUS request does not re-ask about a rejected credential either", async () => {
+  // Round 3 of #458: the first version of this cache was consulted only on the signed-in
+  // branch, so the identical cost stayed on the half an OUTSIDE caller drives. A request
+  // with no header goes straight into `resolveUserId`, and a failure writes nothing to the
+  // positive cache, so with a mistyped config value every unauthenticated request paid an
+  // uncached `GET /user` — with no timeout — before its 401.
+  const h = await harness("gho_operator_typo");
+  try {
+    const first = await h.fetch("/v1/me");
+    assert.equal(first.status, 401);
+    assert.equal(h.ghCalls(), 1, "the one lookup that learns the credential is rejected");
+    const second = await h.fetch("/v1/me");
+    assert.equal(h.ghCalls(), 1, "asked GitHub again about a credential it had already rejected");
+    // The saving must not be observable. A cached rejection and a fresh one are the same
+    // answer to the caller, down to the body — otherwise this becomes a way to ask whether
+    // the deployment has spoken to GitHub lately.
+    assert.equal(second.status, first.status);
+    assert.deepEqual(await second.json(), await first.json());
+  } finally {
+    h.close();
+  }
+});
+
+test("a rejection is cached for a bounded window, not for the life of the process", async () => {
+  // Why this is a TTL and not a flag that latches: GitHub's auth can answer `Bad
+  // credentials` for a token that is fine, and a latch would then 401 every anonymous
+  // caller until a human restarted the service — trading a per-request lookup for an
+  // outage. Recovery has to need no restart, so the expiry is the mechanism and this is the
+  // test of it.
+  //
+  // Seeded rather than waited for: the TTL is five minutes. Same device as the positive
+  // cache's expiry test (test/token-cache.test.ts seeds a stale entry rather than sleeping).
+  const BROKEN = "gho_transiently_rejected";
+  const h = await harness(BROKEN);
+  try {
+    assert.equal(await h.fetch("/v1/me").then((r) => r.status), 401);
+    assert.equal(h.ghCalls(), 1);
+    assert.notEqual(__rejectedCredentialUntil(BROKEN), undefined, "the rejection was not recorded at all");
+    // GitHub starts answering for it again — the credential was never actually bad.
+    h.ghRecover(BROKEN);
+    // Still inside the window: the cached rejection stands, and nothing is asked.
+    assert.equal(await h.fetch("/v1/me").then((r) => r.status), 401);
+    assert.equal(h.ghCalls(), 1);
+    // Now the window has passed.
+    __seedRejectedCredential(BROKEN, Date.now() - 1);
+    const res = await h.fetch("/v1/me");
+    assert.equal(res.status, 200, "a recovered credential stayed refused past its window");
+    assert.equal(h.ghCalls(), 2, "the expired entry did not cause a re-ask");
+    const body = (await res.json()) as { github_login: string; anonymous?: boolean };
+    assert.equal(body.github_login, ANON_USER.login);
+    // And the guard is armed again on the same request, not one later: this response is the
+    // one that re-resolves the shared identity.
+    assert.equal(body.anonymous, true);
+    // The expired entry is dropped on read rather than accumulating.
+    assert.equal(__rejectedCredentialUntil(BROKEN), undefined, "an expired entry was left in the map");
+  } finally {
+    h.close();
+  }
+});
+
+test("a CALLER's rejected token is never recorded as a rejected credential", async () => {
+  // The bound on the negative cache. It has no ceiling and no eviction sweep, which is only
+  // safe because nothing a caller sends can create an entry — a map keyed on whatever
+  // arrives in a header is the unbounded one `MAX_ENTRIES` exists to prevent, and distinct
+  // bearer strings are free to produce. Two shapes have to be checked, because the guard is
+  // `servedAnonymously` rather than a comparison against the configured value: an ordinary
+  // bad token, and a caller presenting the deployment's OWN credential.
+  const h = await harness(ANON_TOKEN);
+  try {
+    assert.equal(await h.fetch("/v1/me", { authorization: "Bearer gho_not_a_real_token" }).then((r) => r.status), 401);
+    assert.equal(__rejectedCredentialUntil("gho_not_a_real_token"), undefined, "a caller's token entered the map");
+    // The deployment's own credential, presented by a caller, resolves fine here — the point
+    // is that this path cannot write to the map even when the token IS the configured one.
+    assert.equal(await h.fetch("/v1/me", { authorization: `Bearer ${ANON_TOKEN}` }).then((r) => r.status), 200);
+    assert.equal(__rejectedCredentialUntil(ANON_TOKEN), undefined);
   } finally {
     h.close();
   }
