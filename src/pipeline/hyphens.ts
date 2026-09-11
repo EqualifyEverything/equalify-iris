@@ -108,7 +108,10 @@ const TAG = /<(?:[^>"']|"[^"]*"|'[^']*')*>/g;
 // written-down limit rather than a patch. `Compos-<br>ite` inside one `<th>` puts the hyphen and the break
 // in a single cell; `textOf` renders the element as a space, so the word never becomes a candidate — the
 // same blindness as the wrapped source above, arriving as markup instead of whitespace. Neither this check
-// nor `joinBrokenWords` can see it, since both read `WORD` over `textOf`. #374's census counts it on the
+// nor `joinBrokenWords` can see it, and the two miss it for the same reason at different widths: this check
+// reads `WORD` over `textOf`, where the tag has become a space, while the join's rewrite runs `WORD` over
+// each text run BETWEEN tags (`walk`, below) and `Compos-` ends its run, so no letter follows the hyphen
+// there either — `textOf` is only how the join builds its indexes. #374's census counts it on the
 // shipped arm: 24 breaks carried into column heads, `joinBrokenWords` closes 17, and of the 7 survivors 3
 // land on limits this file already names. The last 4 are this shape, all on one page
 // (`p069`) — a floor of about 4 per 100 pages, and `<br>` inside a `<th>` at all is 10 on 3 pages for
@@ -126,11 +129,13 @@ const TAG = /<(?:[^>"']|"[^"]*"|'[^']*')*>/g;
 // this comment is where the reasoning to overturn lives.
 //
 // Both halves of that refusal are pinned as tests rather than left here as prose, and they catch different
-// mutations, both in `test/split-words.test.ts`: widening this pattern alone reddens the test for the
+// mutations, all in `test/split-words.test.ts`: widening this pattern alone reddens the test for the
 // wrapped-source case ("a break the fragment wraps its own source at is invisible"), and widening it AND
 // taking whitespace out of `splitWordAudit`'s lookup key — the whole repair this paragraph describes —
-// reddens the `-<br>` limit test as well. So the limit cannot quietly stop being true, and either half of
-// the widening arrives at this argument by way of a red run.
+// reddens the `-<br>` limit test and the cell-boundary test as well. Those last two are separate tests on
+// purpose: a single one stops at its first failed assertion, so the cell-boundary pin would have reported
+// nothing until a second run. So the limit cannot quietly stop being true, either half of the widening
+// arrives at this argument by way of a red run, and the widening's cost shows up in the same run as its gain.
 const WORD = /\p{L}+(?:-\p{L}+)*/gu;
 
 export interface SplitWord {

@@ -836,10 +836,19 @@ test("a break spelled `-<br>` inside one cell is a stated limit, and both passes
   assert.deepEqual(splitWordContradictions(cell), [], "the page writes `Composite` whole and it changes nothing");
   assert.deepEqual(joinBrokenWords([cell]).pages, [cell]);
   assert.deepEqual(joinBrokenWords([cell]).joined, []);
-  // The distinction a widening would need, pinned beside it: a `<br>` inside one cell ends a LINE, a cell
-  // boundary ends the word's context, and `textOf` renders both as one space. Whatever happens to the shape
-  // above, THIS one keeps its hyphen — `Total-` and `farm` are two cells, and a `Totalfarm` elsewhere is not
-  // evidence that the printing broke a word.
+});
+
+test("a cell boundary is not a line break, and the widening that would join it keeps its hyphen", () => {
+  // The distinction a widening would need, pinned as its own test rather than after the shape above: a
+  // `<br>` inside one cell ends a LINE, a cell boundary ends the word's context, and `textOf` renders both
+  // as one space. Whatever happens to that shape, THIS one keeps its hyphen — `Total-` and `farm` are two
+  // cells, and a `Totalfarm` elsewhere is not evidence that the printing broke a word.
+  //
+  // Its own test because `assert` throws at the first failure, so under the widening the whole repair
+  // describes this pin reported nothing while it shared a test with the shape above: a reader would edit
+  // the `-<br>` assertions to match, run again, and only then meet this regression. Both are red in the
+  // same run now. Measured, not assumed — under that mutation this call returns
+  // `[{ split: "Total-  farm", joined: "Totalfarm" }]`, so the pin is live and not a tautology.
   const cells = `<table><tr><td>Total-</td><td>farm</td></tr></table><p>Totalfarm output.</p>`;
   assert.deepEqual(splitWordContradictions(cells), []);
   assert.deepEqual(joinBrokenWords([cells]).pages, [cells]);
