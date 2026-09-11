@@ -7,6 +7,19 @@ import { join } from "node:path";
 const ROOT = join(import.meta.dirname, "..");
 const read = (rel: string) => readFileSync(join(ROOT, rel), "utf8");
 
+// The version-drift test builds its members inside array literals, so a throw there hides every
+// member after it. `readFileSync` throws on a deleted file, which was the last way out of that
+// rule — `null` keeps it a reportable member instead. Only ENOENT: a permission or I/O failure
+// is not "the file is gone", and answering it with that message would be a wrong diagnosis.
+const readIfPresent = (rel: string): string | null => {
+  try {
+    return read(rel);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw err;
+  }
+};
+
 // Node stopped needing a flag to load node:sqlite, so every launcher used to pass one that
 // does nothing. These tests exist because the flag's absence is not self-explanatory: it is
 // licensed by the version floor, and lowering that floor would make it wrong again.
@@ -79,22 +92,32 @@ test("every other place that states the Node version agrees with that floor", ()
   const pkg = JSON.parse(read("package.json")) as { engines: { node: string } };
   const floor = majorOf(pkg.engines.node.replace(/^\D+/, ""), "engines.node");
 
-  // `raw: null` means the line this member reads is GONE — reworded, renamed or deleted.
-  // Nothing here asserts: a member that cannot be read is reported like one that disagrees,
-  // because rewording README.md's requirement must not stop the test before it has looked at
-  // CONTRIBUTING.md.
-  type Member = { label: string; raw: string | null; major: number | null };
+  // A member yields either a major to compare or a `problem` saying why it cannot — its file is
+  // gone, its line is gone, or the version it states names no major. Nothing here asserts:
+  // rewording README.md's requirement must not stop the test before it has looked at
+  // CONTRIBUTING.md, and each of the three faults has a different fix, so each says which it is.
+  type Member = { label: string; major: number | null; problem: string | null };
+
+  const fromText = (label: string, raw: string): Member => {
+    const major = readMajor(raw);
+    return { label, major, problem: major === null ? unreadable(raw, label) : null };
+  };
 
   const at = (label: string, rel: string, re: RegExp): Member => {
-    const found = read(rel).match(re);
-    return { label, raw: found?.[1] ?? null, major: found ? readMajor(found[1]) : null };
+    const text = readIfPresent(rel);
+    if (text === null) return { label, major: null, problem: `${rel} is not in the repo` };
+    const found = text.match(re);
+    if (!found)
+      return { label, major: null, problem: `${label} is no longer written where this test reads it` };
+    return fromText(label, found[1]);
   };
 
   // EVERY `FROM node:` line, not the first. The Dockerfile is single-stage today, but a
   // multi-stage one — `FROM node:24-slim AS build` … `FROM node:22-slim` for the runtime — is
   // exactly the case this member exists to catch, and reading only the first match would call
   // it clean while the stage that ships lost unflagged node:sqlite.
-  const stages = [...read("Dockerfile").matchAll(/^FROM node:(\S+)/gm)];
+  const dockerfile = readIfPresent("Dockerfile");
+  const stages = [...(dockerfile ?? "").matchAll(/^FROM node:(\S+)/gm)];
 
   // Both workflows run setup-node on .nvmrc, and the Dockerfile's stages are the runtime a
   // deployment actually gets — the one path where a Node below the floor would bite. Above the
@@ -103,15 +126,20 @@ test("every other place that states the Node version agrees with that floor", ()
   const atLeast: Member[] = [
     at(".nvmrc", ".nvmrc", /^\s*(\S+)/),
     // Labelled by the image itself rather than by position, so a failure names the line to
-    // edit even when several stages disagree. No `FROM node:` at all is one missing member,
-    // not an early exit.
+    // edit even when several stages disagree. A missing Dockerfile, or one that no longer
+    // builds on a `node:` image, is one reportable member — not an early exit.
     ...(stages.length > 0
-      ? stages.map((m) => ({
-          label: `the Dockerfile's \`node:${m[1]}\``,
-          raw: m[1],
-          major: readMajor(m[1]),
-        }))
-      : [{ label: "the Dockerfile's base image", raw: null, major: null }]),
+      ? stages.map((m) => fromText(`the Dockerfile's \`node:${m[1]}\``, m[1]))
+      : [
+          {
+            label: "the Dockerfile's base image",
+            major: null,
+            problem:
+              dockerfile === null
+                ? "Dockerfile is not in the repo"
+                : "the Dockerfile no longer builds on a `node:` image",
+          },
+        ]),
   ];
   // "Node 24+" IS the floor claim, so here the numbers have to be equal, not merely clear it.
   const exactly: Member[] = [
@@ -120,18 +148,13 @@ test("every other place that states the Node version agrees with that floor", ()
   ];
 
   // Collected rather than asserted one at a time: `assert` throws at the first failure, so
-  // checking these in sequence would hide every member after the first that disagrees. The two
-  // ways a member can fail to produce a number — its line is gone, or the version it states
-  // names no major — are collected for the same reason. Each is a different fault with a
-  // different fix, and reporting one must not swallow the rest.
+  // checking these in sequence would hide every member after the first that disagrees. A member
+  // that yields no major at all is collected for the same reason and carries its own `problem`,
+  // because "the file is gone", "the line is gone" and "the version names no major" have three
+  // different fixes — and reporting one must not swallow the rest.
   const members = [...atLeast, ...exactly];
   const wrong = [
-    ...members
-      .filter((m) => m.raw === null)
-      .map((m) => `${m.label} is gone, or no longer written where this test reads it`),
-    ...members
-      .filter((m) => m.raw !== null && m.major === null)
-      .map((m) => unreadable(m.raw as string, m.label)),
+    ...members.filter((m) => m.problem !== null).map((m) => m.problem as string),
     ...atLeast
       .filter((m) => m.major !== null && m.major < floor)
       .map((m) => `${m.label} is ${m.major}, below ${floor}`),
@@ -143,10 +166,15 @@ test("every other place that states the Node version agrees with that floor", ()
 });
 
 test("no launcher passes a flag node no longer needs", () => {
-  for (const rel of LAUNCHERS) {
-    assert.ok(
-      !read(rel).includes("--experimental-sqlite"),
-      `${rel} passes --experimental-sqlite, which is a no-op on the Node this repo requires`,
-    );
-  }
+  // Collected for the same reason as the drift test above: asserting per file stops at the
+  // first, so a Dockerfile that still passed the flag would say nothing about test/e2e.sh — and
+  // a launcher that has been DELETED is reported rather than thrown, because ENOENT out of the
+  // loop hides the launchers after it while claiming to have checked them.
+  const wrong = LAUNCHERS.flatMap((rel) => {
+    const text = readIfPresent(rel);
+    if (text === null) return [`${rel} is not in the repo, so this test no longer covers it`];
+    if (!text.includes("--experimental-sqlite")) return [];
+    return [`${rel} passes --experimental-sqlite, which is a no-op on the Node this repo requires`];
+  });
+  assert.deepEqual(wrong, [], wrong.join("; "));
 });
