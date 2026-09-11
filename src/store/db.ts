@@ -13,12 +13,13 @@ export type SessionStatus = "queued" | "running" | "ready_for_review" | "closed"
 // each phase; this only stops the enum from claiming they exist today.
 export type Phase = "extraction" | "assembly" | "review" | "done";
 
-// No `github_token` field, deliberately. The user's GitHub token is a live
-// credential — it files issues on their behalf during a run — but it never
-// needs to OUTLIVE the request that carried it: it arrives in the `Authorization`
-// header, is passed in memory to the queued run, and is gone when the run ends.
-// Storing it made a copy of `data/iris.sqlite` equivalent to GitHub API access as
-// every user who had ever logged in, in exchange for nothing the service used.
+// No `github_token` field, deliberately, and there is now nothing it could hold: this
+// deployment has ONE GitHub credential, it lives in `github.token`, and no caller ever
+// presents one (see auth/middleware.ts). A column per user was a copy of a live
+// credential — an early build wrote one, which made a copy of `data/iris.sqlite`
+// equivalent to GitHub API access as every user who had ever logged in, in exchange for
+// nothing the service read back. `rejectLegacyUsersTable` below refuses such a file
+// rather than adopting it.
 export interface UserRecord {
   github_user_id: number;
   github_login: string;
@@ -812,8 +813,10 @@ export class Store {
       PRAGMA busy_timeout = 5000;
       -- No github_token column, and no fork_repo column. The token is never
       -- persisted (see UserRecord above); fork_repo belonged to an earlier
-      -- fork-and-PR design, which was never built and is not going to be —
-      -- contributions are filed as issues under the user's own identity.
+      -- fork-and-PR design, which was never built and is not going to be --
+      -- contributions are filed as issues under this deployment's single
+      -- identity, and the human who prompted one is credited in the body
+      -- rather than as its author (see github/issue.ts).
       CREATE TABLE IF NOT EXISTS users (
         github_user_id INTEGER PRIMARY KEY,
         github_login TEXT NOT NULL,

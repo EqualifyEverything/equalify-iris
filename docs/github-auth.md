@@ -104,9 +104,10 @@ on the wire, and the hint says so rather than blaming one.
 
 - **Delete `data/iris.sqlite`.** An early build stored a token per user in a `github_token` column.
   There is no migration and the service refuses to start against such a file rather than adopting it:
-  the old `github_token TEXT NOT NULL` survives `CREATE TABLE IF NOT EXISTS`, so new rows would fail
-  with a constraint error surfaced as `401`, and the file still holds live plaintext tokens. You lose
-  session history and nothing else.
+  the old `github_token TEXT NOT NULL` survives `CREATE TABLE IF NOT EXISTS`, so Iris could not write
+  the one row it owns and **every** request would fail with a `500` naming a SQLite constraint on a
+  column no current build writes. The file also still holds live plaintext tokens, so delete it rather
+  than archiving it. You lose session history and nothing else.
 - **Delete these keys.** `github.client_id`, `github.client_secret`, `github.oauth_scope`,
   `github.oauth_base_url`, `github.anonymous_token`, `github.issue_token`, and
   `server.rate_limits.auth_per_minute`. They are ignored, not errors — but leaving them in a config
