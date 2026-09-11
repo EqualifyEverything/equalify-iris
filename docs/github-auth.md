@@ -1,139 +1,126 @@
-# GitHub sign-in, for operators
+# The GitHub token, for operators
 
-Iris has one identity provider: by default every request carries a user's GitHub token, and that
-token is what files the session's contributions under that user's own name. There is no second
-provider and no API key — the only way to serve callers without a token is the demo mode in
-[`github.anonymous_token`](#anonymous-access-a-demo-you-turn-on), which is off unless you set it. The
-[README](../README.md#github-is-the-only-sso-layer-and-tokens-are-required) says why. This file is
-the part you need to *deploy* it — registering your own app, what a private upstream can and cannot
-do, and what to do with a database from an older build.
+Iris has **one** GitHub identity: a personal access token you set once, held by the server, used for
+every session. Callers never present a GitHub credential — there is no sign-in, no OAuth app and no
+device flow. The [README](../README.md#one-github-identity-and-no-sign-in) says why it works this
+way. This file is what you need to deploy it.
 
-By default you need none of it: the bundled GitHub App and the device flow work with no setup and no
-secret, the same way the `gh` CLI does.
+Iris refuses to start without the token, so this is not optional setup.
 
-## Two consequences before you deploy
+## Make the token
 
-**1. The permission lives with the installation, not with your users.** The token does exactly two
-things: `GET /user` to identify the caller, and file issues on `upstream_repo`. Iris is registered as
-a **GitHub App**, so the second one is granted once — by installing the app on `upstream_repo` with
-`issues: write` — and users only *authorize*. Their consent screen requests **no repository access
-at all**, because there is nothing left for it to ask for.
+1. Go to [github.com/settings/personal-access-tokens/new](https://github.com/settings/personal-access-tokens/new)
+   (**Fine-grained tokens** → Generate new token).
+2. Repository access: **Only select repositories** → your `upstream_repo`.
+3. Permissions → Repository permissions → **Issues: Read and write**. Nothing else.
+4. Set an expiry you will remember. Nothing renews it.
+5. Put the value in the environment as `IRIS_GITHUB_TOKEN`; the example config reads it from there.
 
-One limit worth knowing if your `upstream_repo` is **private**: a user's token is the *intersection*
-of the installation's permissions and that user's own access, so installing the app does not give a
-user access they did not already have. On a private upstream, filing works for users who can see the
-repo and 404s for everyone else. Set `github.issue_token` if you need a private upstream to accept
-contributions from users who are not collaborators — it files everything under one account, which
-trades away the per-user attribution below. A public `upstream_repo` (the assumption here, since the
-agent library is meant to be shared) has no such limit.
+```yaml
+github:
+  token: ${IRIS_GITHUB_TOKEN}
+  upstream_repo: https://github.com/your-org/your-agent-library
+```
 
-This replaced an OAuth App requesting `public_repo`, and the reason is worth stating plainly: there
-is no OAuth scope meaning "open issues on one repository". `public_repo` was the narrowest one that
-could file, and it grants read **and write** to every public repository the user can reach —
-code, commit statuses, collaborators, webhooks — none of which Iris touches. Nothing pushes and
-nothing opens pull requests. So the old consent screen asked for orders of magnitude more than the
-service uses, and the app is the only way to fix that rather than merely document it.
+The token is never sent to a browser and never written to the database. Issues get filed as whatever
+account made it — so make it an account you are willing to see on those issues, and consider a
+service account rather than your own.
 
-What the user's token still carries is their **identity**. A user-to-server token acts as the user,
-so issues are filed under their own account and each contribution is credited to the person whose
-session produced it — the whole reason users authorize at all instead of the app filing as itself.
+**When it expires, conversions keep working.** Filing is the only thing that stops, with a 403 or 404
+whose log line names `github.token`. Nothing else breaks, which is why an expired token is easy to
+miss — put the expiry date in a calendar.
 
-**2. `github.issue_token` is an override, and not a recommended one.** Set it to a service-account
-PAT and every issue is filed under that bot account instead of under the user who produced it. It is
-off by default because it erases the attribution that is the point of the design. Use it only where
-a deployment genuinely cannot file as its users — an org policy that forbids it, say.
+## What one identity costs
 
-## Anonymous access: a demo you turn on
+Iris warns about this at every boot, so it is not a surprise later. All four follow from having no
+per-caller identity, and none of them is a bug:
 
-Set `github.anonymous_token` to a token for a **dedicated** GitHub account and a caller who sends
-**no** `Authorization` header is served as that account instead of refused. Unset — the default — a
-token is required on every call. The reason to turn it on is a visitor who wants to see Iris work on
-one page before deciding whether to sign in. Make it an account no person signs in with: the row
-below on the shared identity says why.
-
-Four things it costs, and Iris prints them at every boot so they are not a surprise later:
-
-| What changes | Why |
+| What | Why |
 | --- | --- |
-| `GET /v1/sessions` answers **403 `anonymous_session_list`** | Ownership is the GitHub user id and nothing else, so every anonymous visitor is the same owner. Listing "their" sessions would hand one visitor another's document. A session is still reachable at `GET /v1/sessions/{id}` with the id `POST /v1/sessions` returned. |
-| **That account** gets the same 403, signed in or not | The refusal is keyed on the identity a request reaches, not on whether it sent a header, so presenting this token as an ordinary `Bearer` is refused too. The alternative is not a convenience: it would make the token a key to every visitor's uploads, with no server access needed. This is the cost of a shared identity, so a dedicated account pays it and nobody notices. |
-| Uploads are counted per **address**, not per user | One shared account keyed per user would make `upload_per_minute` a single bucket for every anonymous caller on the internet, and the symptom is a deployment that looks healthy and is permanently rate limited. |
-| Feedback is filed under **that** account | An anonymous session has no user to credit. This is the attribution the default protects, so a deployment that cares about it should leave the key blank. A 403 while filing names `github.anonymous_token` in its `hint`, because the GitHub App's installation cannot be the cause. |
+| Contributors get **no attribution** | Every issue is filed as your token's account. The issue says what a session found, not who found it. |
+| `GET /v1/sessions` lists **the deployment's** sessions | Ownership is one account, so there is no such thing as "the caller's sessions". Anyone who can call it sees every session id, and an id is all `/output` needs. |
+| Uploads are limited **per address** | The only credential a caller can present is shared, so keying a budget on it would put the whole internet in one bucket. Behind NAT, callers share a budget — and `server.trust_proxy` has to be right or they all look like the proxy. |
+| A visitor can read **another visitor's** document | Given the session id. Sessions are not isolated from each other, because there is nobody to isolate. |
 
-Two details worth knowing before you deploy it:
+The last two are the ones to think about before you deploy publicly. Gating (below) is the answer.
 
-- **A broken token is still refused.** The fallback serves callers who present *nothing*. A request
-  with `Bearer <expired>` or a non-Bearer header gets a 401, because a client that is trying to be
-  someone should see its own sign-in fail, not be moved silently into a shared account.
-- **The credential is validated like any other**, with the same `GET /user` and the same 5-minute
-  cache. A revoked or mistyped value there does not produce a phantom user — it makes every anonymous
-  request 401, and the failure is in the boot log rather than the caller's response.
+## Gate it, or leave it open
 
-Clients detect the mode by calling `GET /v1/me` with no token: **200** with `anonymous: true` means
-anonymous use is allowed here, **401** means it is not. That answer cannot go stale, because it is
-the same code path a real anonymous request takes.
+`server.api_token` is a **separate shared secret** that decides who may call the API at all. It is
+not a GitHub token and it does not make anyone anybody: every caller who presents it reaches the same
+deployment account.
 
-## Registering your own app
+**Blank (the default) means open.** Anyone who can reach the port can convert documents, spend your
+model budget and read any session whose id they have. That is what makes the bundled browser app work
+with no setup, and it is the right default for a laptop or a private network — not for a public URL.
 
-Two settings the service depends on, if you point `github.client_id` at your own GitHub App:
+**Set it and callers must present it:**
 
-| Setting | Value | Why |
-| --- | --- | --- |
-| **Enable Device Flow** | on | Off by default for a new app, and the device flow is the default deployment's only login path (it returns `device_flow_disabled` without it). |
-| **Expire user authorization tokens** | **off** | With expiry on, user tokens last 8 hours and come with a refresh token. Nothing here persists or refreshes a credential, so turning expiry on means building refresh plumbing first. |
+```yaml
+server:
+  api_token: ${IRIS_API_TOKEN}   # openssl rand -hex 32
+```
 
-The misconfiguration this *cannot* catch at startup is the app not being installed on
-`upstream_repo` — that state lives on github.com, not in config. It surfaces as a **403 or 404**
-during filing, logged with a `hint` saying so. Both statuses, because GitHub does not reveal
-repositories a credential cannot see: an app that was never installed reads as `404 Not Found`
-rather than as a permissions error. (A misspelled `upstream_repo` looks identical, and the hint says
-so rather than blaming the installation.) When `issue_token` is set, the hint names the **service
-PAT** instead, since the installation governs only tokens issued to users.
+```bash
+curl -H "Authorization: Bearer $IRIS_API_TOKEN" "$BASE/me"
+```
+
+Absent, malformed, wrong scheme and wrong secret all get the same `401` saying only that the
+deployment is gated. Nothing tells a caller anything about the secret.
+
+**Gating turns off the bundled demo page**, which holds no credential. That is the trade: a public
+deployment either hands the secret to the people who should use it, or accepts strangers.
+
+### What the gate does not cover
+
+Four endpoints sit above it and answer on a gated deployment. None touches a document or an identity:
+
+| Endpoint | Why |
+| --- | --- |
+| `GET /v1/health` | A load balancer's probe cannot hold a secret. |
+| `GET /v1/limits` | Someone deciding whether their scan is small enough should not need the key to find out. |
+| `GET /v1/stats` | A deployment-wide tally, no per-session detail. |
+| `GET /v1/quality` | Has its own token (`server.quality_token`) and 404s unless you set it. |
+
+If any of those must be private too, put it behind your reverse proxy. Iris will not do it for you.
+
+## Two failures and what they look like
+
+**`401 This deployment could not authenticate to GitHub`** — your token is wrong, revoked or expired,
+or GitHub is down. Iris asks GitHub once, caches the answer for the life of the process, and after a
+failure waits 30 seconds before asking again — so a transient outage clears itself without a restart
+and without one `GET /user` per request. Fix the token and restart.
+
+**`500 github.token is not configured`** — only reachable from a config that never went through
+validation. A deployment that booted has the key.
+
+Filing failures are separate and never fail a run: they are logged as `agent_issue_failed` /
+`agent_update_issue_failed` with a `hint`. The likely cause is always the same one now — that PAT's
+access to `upstream_repo`. Expect **404** more often than 403: GitHub does not reveal repositories a
+credential cannot see, so no access reads as "no such repo". A misspelled `upstream_repo` is identical
+on the wire, and the hint says so rather than blaming one.
 
 ## Coming from an earlier build
 
-Three things changed, and two of them can stop a working deployment:
-
-- **A configured OAuth App id is now a hard startup failure.** An `Ov…` `client_id` is refused,
-  because Iris no longer sends any OAuth scope: such an app would authenticate users and then be
-  unable to file a single issue. Register a GitHub App (`Iv…`) and install it on your
-  `upstream_repo`, or leave `client_id` blank for the bundled one.
-- **`upstream_repo` is no longer independent of `client_id`.** Under the old OAuth App, the
-  `public_repo` scope could file on any public repo, so leaving `client_id` blank and repointing
-  `upstream_repo` at your own agent library worked. A GitHub App's `issues: write` comes from its
-  *installation* on one specific repository, and the bundled app is installed on this repo — so that
-  same config now files nothing, for anyone. You need your own app installed on your repo (or ask us
-  to install ours there). This combination warns at startup rather than failing, since we cannot see
-  from config whether the bundled app was installed on your repo.
-- **`github.oauth_scope` is gone.** A config that still sets it — including `oauth_scope: none`,
-  which used to be a startup error — now starts fine and ignores the key. Delete it.
-
-There is no user-facing migration: no one had authorized the OAuth App, and any existing
-authorization can be revoked at
-[github.com/settings/applications](https://github.com/settings/applications).
+- **Delete `data/iris.sqlite`.** An early build stored a token per user in a `github_token` column.
+  There is no migration and the service refuses to start against such a file rather than adopting it:
+  the old `github_token TEXT NOT NULL` survives `CREATE TABLE IF NOT EXISTS`, so new rows would fail
+  with a constraint error surfaced as `401`, and the file still holds live plaintext tokens. You lose
+  session history and nothing else.
+- **Delete these keys.** `github.client_id`, `github.client_secret`, `github.oauth_scope`,
+  `github.oauth_base_url`, `github.anonymous_token`, `github.issue_token`, and
+  `server.rate_limits.auth_per_minute`. They are ignored, not errors — but leaving them in a config
+  file describes a deployment you do not have.
+- **`POST /v1/auth/github/device` and its poll endpoint are gone** (404). Any client running the
+  device flow needs updating: it now sends either nothing or `server.api_token`.
+- **`GET /v1/me` no longer describes the caller.** It describes the deployment, and it has no
+  `anonymous` field to check — 200 means open, 401 means gated.
 
 ## What happens to a token
 
-**It is never written to disk.** The token arrives in the `Authorization` header, is used in memory
-for the request and for the pipeline run it authorizes, and is gone when the run ends. There is no
-`github_token` column in `data/iris.sqlite` and no token file — a stolen copy of the database is a
-list of GitHub user IDs and logins, not GitHub access.
+Yours is in your config and your environment; treat it like any other server secret. Nothing else
+about it is stored: there is no `github_token` column and no token file, so a stolen copy of
+`data/iris.sqlite` is a list of GitHub user ids and logins, not GitHub access.
 
-Two smaller things follow from that, both worth knowing:
-
-- Identity lookups (`GET /user`) are cached in memory for **5 minutes**, keyed by the token, so a
-  revoked token keeps working for up to that long. The cache is bounded (10,000 entries, oldest
-  evicted) and entries are *not* renewed on use — deliberately, so that a busy token cannot outlive
-  its revocation indefinitely. It is empty on restart.
-- Because nothing is stored, there is nothing to rotate, re-encrypt or purge when a user revokes
-  access. Revocation at github.com is the whole mechanism.
-
-**If you have a `data/iris.sqlite` from an earlier build, delete it.** Tokens *were* stored in a
-`github_token` column once, and there is no migration — every user re-authorizes from scratch. The
-service refuses to start against such a file and names the fix, rather than adopting it: the old
-table's `github_token TEXT NOT NULL` would survive `CREATE TABLE IF NOT EXISTS`, so first-time
-logins would fail with a SQLite constraint error returned as `401 unauthorized` (users who already
-had a row would keep working, which makes it look like flaky GitHub auth rather than a schema
-mismatch) — and the claim above would be false for that file, since it still holds live plaintext
-tokens for everyone who ever logged in. Delete it rather than archiving it; users lose only their
-session history.
+There is no per-user token to rotate, cache or purge, and no user-facing revocation story — because
+no user ever authorized anything. Revoke at github.com and restart.

@@ -984,16 +984,21 @@ jobs:
                learning path, not a hypothetical. Flag any change that widens what gets filed,
                weakens the dedupe, narrows the dedupe key back toward a single value, turns the
                update path's comment back into a silent skip, files under the wrong identity, or
-               turns a swallowed error into a hard failure (or vice-versa) without saying so. Pay particular attention
-               to *whose* token is used — `src/pipeline/contribute.ts` currently falls back to
-               the end user's OAuth token when no service token is configured, which is a real
-               tension with the stated intent of never publishing under end users' identities.
-               Any change in that area needs to be deliberate.
+               turns a swallowed error into a hard failure (or vice-versa) without saying so.
+               There is exactly one filing identity now — the deployment's `github.token` — so
+               flag any change that reintroduces a second one, or that sends a caller-supplied
+               credential to GitHub.
 
-            3. **Auth, tokens, and secrets.** Device-flow handling (`src/auth/`), bearer-token
-               validation, per-session ownership checks on every `/v1/sessions/:id` route, and
-               anything that could log, persist, or echo a GitHub token, an API key, or a user's
-               uploaded content. Cross-session data access is a security bug, not a nit.
+            3. **Auth, tokens, and secrets.** `src/auth/` answers two separate questions: may this
+               caller use the API at all (`server.api_token`, optional, checked BEFORE GitHub is
+               consulted so a refused stranger cannot spend the deployment's GitHub rate limit),
+               and who is this deployment (`github.token`, resolved once per process). Flag
+               anything that conflates them — presenting the gate token must not make a caller
+               anybody — anything that lets a 401 name a credential, and anything that could log,
+               persist, or echo `github.token`, `server.api_token`, a model API key, or a user's
+               uploaded content. Sessions are NOT isolated from each other by design (one
+               identity owns them all), so an ownership check is not the defence here; a route
+               that widens what a session id reaches still is.
 
             4. **Provider / model routing and cost.** Model resolution falls back per-agent →
                provider `per_capability` → provider `default_model`. Flag changes that make an

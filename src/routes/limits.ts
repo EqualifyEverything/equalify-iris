@@ -22,16 +22,17 @@ import { MAX_UPLOAD_FILES, publishedRateLimits, uploadCeilingBytes } from "../ut
  *              "hint": "Each image must be under 3.7 MB and in one of PNG, ... format. …" },
  *   "pdf": { "max_pages": 25 },
  *   "upload": { "max_files": 25, "max_request_bytes": 134217728 },
- *   "rate_limits": { "general_per_minute": 240, "auth_per_minute": 60, "upload_per_minute": 12,
+ *   "rate_limits": { "general_per_minute": 240, "upload_per_minute": 12,
  *                    "max_upload_memory_mb": 256, "window_seconds": 60 } }
  * ```
  *
- * Unauthenticated, like `GET /v1/stats`: a visitor deciding whether to prepare a file
- * has not signed in yet, and the answer is the same for everyone. Deliberately NOT
- * naming the model or provider that produced the numbers — a public endpoint that
- * announces the deployment's model id would be publishing infrastructure to answer a
- * question about file sizes. The authenticated 400 from `POST /v1/sessions` is where
- * a caller with an actual rejected upload gets the detail.
+ * Mounted above the auth middleware, like `GET /v1/stats`, so it answers even where the
+ * operator set `server.api_token`: someone deciding whether their scan is small enough
+ * should not need the deployment's shared secret to find out, and the answer is the same
+ * for everyone. Deliberately NOT naming the model or provider that produced the numbers —
+ * a public endpoint that announces the deployment's model id would be publishing
+ * infrastructure to answer a question about file sizes. The 400 from `POST /v1/sessions`
+ * is where a caller with an actual rejected upload gets the detail.
  *
  * Computed once at construction: config does not hot-reload in v1, so there is
  * nothing here that can change between requests.

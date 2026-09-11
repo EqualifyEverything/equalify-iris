@@ -39,9 +39,12 @@ function spokenLabel(el: Element): string {
 }
 
 test("every link that opens a new tab says so in its label", () => {
-  const links = [...doc.querySelectorAll('a[target="_blank"]')];
-  assert.ok(links.length > 0, "expected at least the GitHub device-flow link to target _blank");
-  for (const a of links) {
+  // Zero is the right answer today, and the assertion that used to require one is gone with
+  // its subject: the page's only `target="_blank"` link sent a visitor to github.com to
+  // enter a device code, and nothing signs in now. The loop stays because a re-added link
+  // has to be checked on the day it is added — and it is not vacuous, since the button test
+  // below requires at least one new-tab control on the page.
+  for (const a of doc.querySelectorAll('a[target="_blank"]')) {
     assert.match(spokenLabel(a), WARNS, `link "${a.textContent?.trim()}" opens a new tab without saying so`);
   }
 });

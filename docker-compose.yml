@@ -12,13 +12,21 @@ services:
     ports:
       - "8080:8080"
     environment:
-      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID}
-      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET}
       IRIS_UPSTREAM_REPO: ${IRIS_UPSTREAM_REPO}
+      # The deployment's one GitHub identity. Required — the container exits at startup
+      # without it. See .env.example.
+      IRIS_GITHUB_TOKEN: ${IRIS_GITHUB_TOKEN}
+      # The shared secret callers must present, or blank for an open deployment (which is
+      # what the browser app at / needs). Blank on a public URL means public.
+      IRIS_API_TOKEN: ${IRIS_API_TOKEN:-}
       # Number of reverse proxies in front of this container (1 behind a single
       # Caddy/nginx). Blank trusts nothing, which makes every caller behind a proxy
       # share one rate-limit bucket. See .env.example.
       IRIS_TRUST_PROXY: ${IRIS_TRUST_PROXY:-}
+      # GET /v1/quality's own secret. Blank (default) makes that endpoint 404. Listed here
+      # because .env.example offers it, and a variable this file drops is one an operator
+      # sets and then cannot find.
+      IRIS_QUALITY_TOKEN: ${IRIS_QUALITY_TOKEN:-}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
       # For Bedrock instead, supply the standard AWS credential env vars.
     volumes:

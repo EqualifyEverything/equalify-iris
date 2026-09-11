@@ -8,26 +8,17 @@ import { installHintFor } from "../src/github/issue.ts";
 import type { PipelineContext } from "../src/pipeline/context.ts";
 import type { Paths } from "../src/store/paths.ts";
 
-// Issue filing fails softly on purpose — a contribution is a side effect, and a
-// GitHub outage must not fail a document the user already paid for. But filing is
-// also the point of the design (every session gives back under the user's
-// own identity), so a permissions failure means the deployment is silently not
-// contributing while looking healthy — and it lands as a single log line, several
-// steps from its cause: the permission was granted on github.com, when the GitHub
-// App was installed, possibly by a different person than the one reading the log.
+// Issue filing fails softly on purpose — a contribution is a side effect, and a GitHub
+// outage must not fail a document the user already paid for. But filing is also the point
+// of the design, so a permissions failure means the deployment is silently not contributing
+// while looking healthy — and it lands as a single log line, one step from its cause: what
+// `github.token` may do was decided on github.com, not in any file the operator has.
 //
-// Under a GitHub App there is one cause on the user path and config cannot show it:
-// the app is not installed on `upstream_repo` (or its installation no longer grants
-// Issues write). A user-to-server token carries the user's identity but takes its
-// repository permission from the installation, so with no installation no user can
-// file — and nothing at startup can tell, because the install state is not in config.
-// The log line has to carry that diagnosis.
-//
-// A hint that fires on the wrong failure is worse than no hint, because an
-// operator reading it mid-incident acts on it. Three ways this one could: a
-// rate-limit 403, a 403 from the SERVICE token (whose scopes live on github.com and
-// have nothing to do with the app's installation), and a "403" that came from the
-// model provider and never reached GitHub at all. There is a test for each.
+// There is one credential now, so the hint has one thing to name. What it must still get
+// right is WHEN to fire, because a hint on the wrong failure is worse than no hint: an
+// operator reads it mid-incident and acts on it. Three ways this one could misfire — a
+// rate-limit 403, a "403" that came from the model provider and never reached GitHub, and a
+// thrown non-object — and there is a test for each.
 
 interface Rec {
   events: { type: string; data: Record<string, unknown> }[];
@@ -43,7 +34,7 @@ type Failure = { status: number; body?: string; headers?: Record<string, string>
 function makeCtx(
   dir: string,
   failure: Failure,
-  opts: { issueToken?: string; draftError?: Error; anonymousSession?: boolean } = {},
+  opts: { draftError?: Error } = {},
 ): { ctx: PipelineContext; rec: Rec } {
   const agentsDir = join(dir, "agents");
   const inputDir = join(dir, "input");
@@ -53,14 +44,12 @@ function makeCtx(
   const rec: Rec = { events: [] };
   const ctx = {
     sessionId: "ses_test",
-    githubToken: opts.anonymousSession ? "gho_deployment_anon" : "gho_user",
-    anonymousSession: opts.anonymousSession,
+    githubToken: "ghp_deployment",
     images: [{ name: "page-001.png", order: 1, path: join(inputDir, "page-001.png") }],
     cfg: {
       github: {
         upstream_repo: "https://github.com/example/iris",
         api_base_url: "http://127.0.0.1:1/never-listening",
-        issue_token: opts.issueToken,
       },
     },
     paths: { agentsDir, tmpAgentsDir: () => join(dir, "tmp-agents") } as unknown as Paths,
@@ -97,7 +86,7 @@ function makeCtx(
 
 async function contribute(
   failure: Failure,
-  opts: { issueToken?: string; draftError?: Error; anonymousSession?: boolean } = {},
+  opts: { draftError?: Error } = {},
 ): Promise<Record<string, unknown>> {
   const dir = mkdtempSync(join(tmpdir(), "iris-403-"));
   const { ctx, rec } = makeCtx(dir, failure, opts);
@@ -119,58 +108,38 @@ async function contribute(
 // status is the only signal. These tests assert that by sending real statuses and
 // never a message containing the code.
 
-test("a 403 from issue filing names the app's installation as the likely cause", async () => {
+test("a 403 from issue filing names github.token and the permission it needs", async () => {
   const data = await contribute({ status: 403, body: "Resource not accessible by personal access token" });
   assert.match(String(data.error), /Resource not accessible/);
   assert.doesNotMatch(String(data.error), /403/, "GitHub's message carries the code after all — see the note above");
   const hint = String(data.hint ?? "");
   assert.match(hint, /403/);
-  assert.match(hint, /install/i, "the hint did not name the installation as the cause");
-  assert.match(hint, /Issues/i, "the hint did not say which permission is needed");
-  // Where to go and fix it. The permission is not in any file the operator has.
-  assert.match(hint, /settings\/installations/, "the hint did not say where to fix it");
-  // Why it is not one user's problem — the failure is deployment-wide, which is the
-  // part that decides how urgently an operator treats it.
-  assert.match(hint, /every user/i, "the hint did not convey that this affects all users");
+  // The config key, because that is where the operator has to go, and the permission,
+  // because a PAT with the wrong one produces exactly this.
+  assert.match(hint, /github\.token/, "the hint did not name the credential that failed");
+  assert.match(hint, /Issues: read and write/i, "the hint did not say which permission is needed");
+  assert.match(hint, /expired/i, "the hint omitted expiry, which fails here identically");
+  // How much is broken decides how urgently an operator reads this, and under one
+  // identity the answer is always "everything".
+  assert.match(hint, /every filing/i, "the hint did not convey that this affects all filings");
 });
 
-test("a missing installation is diagnosed on its 404, which is how GitHub reports it", async () => {
-  // The cause this hint exists for does NOT produce a 403. GitHub does not reveal
-  // repositories a credential cannot see, so an app that was never installed reads as
-  // "no such repo". Diagnosing only 403 would miss it entirely.
+test("a 404 is diagnosed too, because that is how GitHub reports no access", async () => {
+  // The likeliest cause does NOT produce a 403: GitHub does not reveal repositories a
+  // credential cannot see, so a token without access reads as "no such repo". Diagnosing
+  // only 403 would miss it entirely.
   const data = await contribute({ status: 404, body: "Not Found" });
   const hint = String(data.hint ?? "");
   assert.match(hint, /404/, "a 404 from issue filing got no diagnosis at all");
-  assert.match(hint, /not\s+installed/i, "the hint did not name the uninstalled-app cause");
-  assert.match(hint, /settings\/installations/, "the hint did not say where to fix it");
-  // 404 is genuinely ambiguous — a typo in upstream_repo looks identical — so the
-  // hint must offer that too rather than asserting the installation confidently.
-  assert.match(hint, /misspelled|spelled/i, "the hint asserted the installation for an ambiguous 404");
-  // And the third cause, which is NOT a misconfiguration of the app at all: a user's
-  // token is the intersection of the installation's permissions and that user's own
-  // access, so a private upstream 404s for a user who cannot see it however correctly
-  // the app is installed. Without this the hint sends a private-upstream operator to
-  // re-install a working installation, and never names the fix (issue_token).
-  assert.match(hint, /private/i, "the hint omitted the private-upstream cause of a 404");
-  assert.match(hint, /issue_token/, "named the private-upstream cause without its remedy");
-  // The "affects every user" framing is shared with the 403 branch, so on a 404 it has
-  // to be CONDITIONAL rather than dropped: an operator told flatly that every user is
-  // broken, while some of their users file fine, discards the whole hint as wrong.
-  assert.match(
-    hint,
-    /if the installation is the cause/,
-    "asserted a deployment-wide failure for a 404 that can be one user's own access",
-  );
-});
-
-test("a 404 under a service token still points at the PAT", async () => {
-  // The app's installation is irrelevant to the outcome here, which is the point:
-  // with `issue_token` set, the PAT is the credential that made the call.
-  const data = await contribute({ status: 404, body: "Not Found" }, { issueToken: "ghp_service" });
-  const hint = String(data.hint ?? "");
-  assert.match(hint, /issue_token/, "did not name the credential that actually failed");
-  assert.match(hint, /404/);
-  assert.doesNotMatch(hint, /Install the app/, "told the operator to install the app for a PAT failure");
+  assert.match(hint, /github\.token/, "the hint did not name the credential that failed");
+  // 404 is genuinely ambiguous — a typo in upstream_repo looks identical — so the hint
+  // must offer that rather than asserting permissions confidently.
+  assert.match(hint, /misspelled|spelled/i, "the hint asserted permissions for an ambiguous 404");
+  // And the 403 branch must NOT carry the ambiguity clause: a 403 is not GitHub hiding a
+  // repository, so offering "or you misspelled it" there would send an operator to check
+  // a name that is demonstrably correct.
+  const forbidden = await contribute({ status: 403, body: "Resource not accessible by personal access token" });
+  assert.doesNotMatch(String(forbidden.hint), /misspelled/i, "offered the 404 ambiguity for a 403");
 });
 
 test("a non-permissions failure gets no permissions hint", async () => {
@@ -185,9 +154,9 @@ test("a non-permissions failure gets no permissions hint", async () => {
 });
 
 test("a rate-limit 403 gets no permissions hint", async () => {
-  // GitHub answers 403 for primary and secondary rate limits too, where permissions
-  // are irrelevant. A confident "install the app" would send a throttled operator to
-  // re-install a perfectly good installation.
+  // GitHub answers 403 for primary and secondary rate limits too, where permissions are
+  // irrelevant. A confident "check that PAT" would send a throttled operator to rotate a
+  // perfectly good token.
   // The body deliberately does NOT say "rate limit", so this exercises the header
   // and not the text fallback — otherwise the two checks would be indistinguishable
   // and one of them could be dead.
@@ -215,38 +184,17 @@ test("a rate-limit 403 gets no permissions hint", async () => {
   assert.match(String(real.hint), /403/, "a real permissions failure lost its hint");
 });
 
-test("a service-token 403 blames the PAT, not the app's installation", async () => {
-  // With `issue_token` set, the failing credential is a service PAT whose scopes live
-  // on github.com. The app's installation governs only tokens issued to users, so
-  // naming it here would send an operator to change something that cannot affect this
-  // failure — and re-installing is not a harmless no-op to suggest mid-incident.
-  const data = await contribute({ status: 403, body: "Resource not accessible by integration" }, {
-    issueToken: "ghp_service",
-  });
-  const hint = String(data.hint ?? "");
-  assert.match(hint, /issue_token/, "did not name the credential that actually failed");
-  // The user path's phrasing is the imperative "Install the app on upstream_repo".
-  // This branch must not produce it — it may mention the installation only to rule it
-  // out, which the next assertion pins.
-  assert.doesNotMatch(hint, /Install the app/, "told the operator to install the app for a PAT failure");
-  assert.match(hint, /installation is not involved/, "left the reader to wonder about the app");
-});
-
-test("an anonymous session's 403 blames the anonymous PAT and bounds the damage", async () => {
-  // Third credential, and it was reported as the FIRST one until #458 round 1: a session
-  // served by `github.anonymous_token` has no signed-in user, but `issue_token` is unset
-  // too, so the old two-valued flag read `usingServiceToken: false` and sent the operator
-  // to re-install a GitHub App whose installation cannot affect this call at all.
-  const data = await contribute({ status: 403, body: "Resource not accessible by personal access token" }, {
-    anonymousSession: true,
-  });
-  const hint = String(data.hint ?? "");
-  assert.match(hint, /github\.anonymous_token/, "named neither the credential that failed nor its key");
-  assert.doesNotMatch(hint, /issue_token/, "blamed the service token, which is not set here");
-  assert.doesNotMatch(hint, /Install the app/, "told the operator to install the app for a PAT failure");
-  // How much is broken decides how urgently this is read, and here it is the narrow
-  // case: signed-in users file with their own tokens and are untouched.
-  assert.match(hint, /signed-in users are unaffected/, "left the blast radius as broad as an issue_token failure");
+test("the hint sends nobody to a GitHub App installation, which is no longer involved", async () => {
+  // The removed design authenticated users through a GitHub App, so both branches of the
+  // old hint pointed at github.com/settings/installations. Nothing installs anything now —
+  // the credential is a PAT — and re-installing an app is not a harmless thing to suggest
+  // mid-incident. Both statuses are checked because the stale advice used to live in both.
+  for (const status of [403, 404]) {
+    const data = await contribute({ status, body: "Not Found" });
+    const hint = String(data.hint ?? "");
+    assert.doesNotMatch(hint, /install/i, `${status}: told the operator to install a GitHub App`);
+    assert.doesNotMatch(hint, /issue_token|anonymous_token/, `${status}: named a config key that no longer exists`);
+  }
 });
 
 test("a 403 that only says so in its message is NOT treated as a GitHub failure", async () => {
@@ -266,7 +214,7 @@ test("a provider 403 while drafting is not diagnosed as a GitHub permissions pro
     draftError: new Error("openrouter 403: {\"error\":{\"message\":\"key disabled\"}}"),
   });
   assert.match(String(data.error), /openrouter 403/);
-  assert.equal(data.hint, undefined, "blamed the app's installation for a model-provider failure");
+  assert.equal(data.hint, undefined, "blamed the GitHub credential for a model-provider failure");
   assert.equal(data.stage, "draft", "a provider failure was not distinguishable from a filing failure");
 });
 
@@ -277,10 +225,6 @@ test("a thrown non-object cannot make the diagnosis itself throw", async () => {
   // `run_complete` logged, so throwing here would flip a finished session to
   // `failed` (the orchestrator's outer catch). Cheap to make impossible.
   for (const thrown of [null, undefined, "just a string", 403]) {
-    assert.equal(
-      installHintFor(thrown, { credential: "user" }),
-      undefined,
-      `threw or hinted for ${JSON.stringify(thrown)}`,
-    );
+    assert.equal(installHintFor(thrown), undefined, `threw or hinted for ${JSON.stringify(thrown)}`);
   }
 });

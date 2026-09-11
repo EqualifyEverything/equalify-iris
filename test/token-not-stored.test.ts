@@ -7,28 +7,31 @@ import { join } from "node:path";
 import express from "express";
 import type { AddressInfo } from "node:net";
 import { Store } from "../src/store/db.ts";
-import { makeAuthMiddleware, __clearTokenCache } from "../src/auth/middleware.ts";
+import { makeAuthMiddleware, __resetIdentity } from "../src/auth/middleware.ts";
 import { meRouter } from "../src/routes/me.ts";
 import type { IrisConfig } from "../src/config.ts";
 
-// The user's GitHub token is a live credential and it is never persisted.
-// It arrives in the `Authorization` header, is held in memory for the run it
-// authorizes, and is gone when that run ends.
+// The deployment's GitHub token is a live credential and it is never persisted. It comes
+// from config, is held in memory, and is written nowhere.
 //
-// This is asserted against the DATABASE FILE, not against the schema or the record
-// type, because those are the two things a well-meaning change edits without meaning
-// to reintroduce the exposure — an added column, a JSON blob of "profile", a debug
-// field on a session row. The claim documented in the README is about what a stolen
-// copy of `data/iris.sqlite` is worth, so that file is what gets searched. WAL matters
-// here: a row written moments ago may live in `iris.sqlite-wal` rather than in the main
-// file, so both are read.
+// The collapse to one identity RAISED the stakes of this rather than settling them. There
+// used to be many short-lived user tokens; there is now one PAT with `issues: write` on the
+// upstream repo, used by every request, so a single copy of it in the database file is worth
+// more than any one user's token was.
+//
+// Asserted against the DATABASE FILE, not against the schema or the record type, because
+// those are the two things a well-meaning change edits without meaning to reintroduce the
+// exposure — an added column, a JSON blob of "profile", a debug field on a session row. The
+// claim documented in the README is about what a stolen copy of `data/iris.sqlite` is worth,
+// so that file is what gets searched. WAL matters here: a row written moments ago may live in
+// `iris.sqlite-wal` rather than in the main file, so both are read.
 //
 // The token is deliberately a string that could not appear by coincidence.
 const TOKEN = "gho_never_persist_ZZQQ7734";
 const GH_USER = { id: 4242, login: "iris-tester" };
 
-// A GitHub whose only job is to identify the caller — the one call a valid token
-// makes on an authenticated request.
+// A GitHub whose only job is to identify the deployment — the one call the middleware
+// makes, once per process.
 async function mockGitHub(): Promise<{ base: string; close: () => void; calls: number }> {
   const app = express();
   const state = { calls: 0 };
@@ -53,15 +56,17 @@ async function mockGitHub(): Promise<{ base: string; close: () => void; calls: n
 
 function cfgFor(apiBase: string): IrisConfig {
   return {
-    github: { api_base_url: apiBase, upstream_repo: "https://github.com/example/iris" },
+    github: { api_base_url: apiBase, upstream_repo: "https://github.com/example/iris", token: TOKEN },
+    server: {},
     defaults: { max_review_iterations: 3 },
   } as unknown as IrisConfig;
 }
 
-// Drive a real authenticated request through the real middleware and the real store,
-// then hand back both the response body and the raw bytes of everything on disk.
+// Drive a real request through the real middleware and the real store, then hand back both
+// the response body and the raw bytes of everything on disk. No Authorization header: the
+// credential is the deployment's, and a caller never sends one.
 async function authenticatedRequest(): Promise<{ body: Record<string, unknown>; dbBytes: string }> {
-  __clearTokenCache();
+  __resetIdentity();
   const dir = mkdtempSync(join(tmpdir(), "iris-token-"));
   const gh = await mockGitHub();
   const dbPath = join(dir, "iris.sqlite");
@@ -76,7 +81,7 @@ async function authenticatedRequest(): Promise<{ body: Record<string, unknown>; 
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 
   try {
-    const res = await fetch(`${base}/v1/me`, { headers: { Authorization: `Bearer ${TOKEN}` } });
+    const res = await fetch(`${base}/v1/me`);
     // Read the body ONCE, before asserting on the status: a failed assertion that
     // needs the text would otherwise consume it and the `.json()` below throws
     // "Body is unusable", masking the real failure with a plumbing error.
@@ -109,7 +114,7 @@ test("an authenticated request writes no copy of the token to disk", async () =>
   assert.equal(
     dbBytes.includes(TOKEN),
     false,
-    "the user's GitHub token was persisted: a copy of the database is now GitHub access as every user who has logged in",
+    "the deployment's GitHub token was persisted: a copy of the database is now issues:write on the upstream repo",
   );
   // A prefix search as well, in case something stores a truncated or transformed
   // form — enough of the token to be replayable is still too much.

@@ -21,57 +21,32 @@ function json(res, status, obj) {
 // ---- Mock GitHub (covers both api.github.com and github.com OAuth paths) ----
 const forks = new Set(); // repos that have been forked to the test user
 let prNumber = 140;
-// Body of the most recent POST /login/device/code, readable via
-// GET /__last_device_scope so e2e.sh can assert that the service requested NO scope.
-//
-// `null` until the route is actually hit, NOT `{}`: with `{}` the reported
-// `present:false` would be indistinguishable from "the device flow was never started",
-// so the no-scope assertion could pass without the service having sent anything. The
-// probe reports `recorded` separately for exactly that reason.
-let lastDeviceBody = null;
+
+// The one credential this mock accepts, and it must be the value e2e.sh puts in
+// `github.token`. Checked rather than ignored: the deployment's PAT is now the only
+// credential in the system, so "the config reached the GitHub client" is worth one
+// comparison — a mock that answered anything would pass an Iris that sent nothing.
+const DEPLOYMENT_TOKEN = "ghp_e2e_deployment_token";
+
+// Every /user call the service made, readable via GET /__user_lookups so e2e.sh can
+// assert the identity is resolved ONCE for the whole run rather than per request. The
+// count is invisible from the client — every response is a 200 either way.
+let userLookups = 0;
 
 const gh = createServer(async (req, res) => {
   const url = new URL(req.url, `http://localhost:${GH_PORT}`);
   const p = url.pathname;
   const m = req.method;
 
-  // What the last device-flow start asked GitHub for. Recorded rather than
-  // asserted here so e2e.sh can check what the SERVICE sends — the request
-  // body is otherwise invisible from outside, and a reintroduced scope is a silent
-  // problem: the flow succeeds either way.
-  //
-  // `recorded` is what makes the assertion non-vacuous: "no scope was sent" and "no
-  // request was sent" are otherwise the same answer, so a break that stopped the flow
-  // reaching here would read as a pass.
-  if (m === "GET" && p === "/__last_device_scope")
-    return json(res, 200, {
-      recorded: lastDeviceBody !== null,
-      present: lastDeviceBody !== null && "scope" in lastDeviceBody,
-      scope: lastDeviceBody?.scope ?? null,
-    });
+  if (m === "GET" && p === "/__user_lookups") return json(res, 200, { count: userLookups });
 
-  // OAuth / device flow
-  if (m === "POST" && p === "/login/device/code") {
-    try {
-      lastDeviceBody = JSON.parse((await readBody(req)) || "{}");
-    } catch {
-      lastDeviceBody = {};
-    }
-    return json(res, 200, {
-      device_code: "DEVICECODE123",
-      user_code: "WXYZ-1234",
-      verification_uri: "https://github.com/login/device",
-      expires_in: 900,
-      interval: 1,
-    });
+  // Who the deployment is. One call per process in a healthy run.
+  if (m === "GET" && p === "/user") {
+    userLookups += 1;
+    if (req.headers.authorization !== `Bearer ${DEPLOYMENT_TOKEN}`)
+      return json(res, 401, { message: "Bad credentials" });
+    return json(res, 200, { id: 4242, login: "iris-tester" });
   }
-  if (m === "POST" && p === "/login/oauth/access_token")
-    // No `scope` and no `refresh_token`/`expires_in`: the shape a GitHub App with
-    // user-token expiry disabled actually returns.
-    return json(res, 200, { access_token: "gho_testtoken", token_type: "bearer" });
-
-  // Authenticated user (api base): identifies the caller AND getAuthenticated()
-  if (m === "GET" && p === "/user") return json(res, 200, { id: 4242, login: "iris-tester" });
 
   // repos.get
   let mm;

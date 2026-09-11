@@ -489,18 +489,19 @@ test("evalAgentScores reports per-fixture scores, not just their mean", async ()
   });
 });
 
-// The agent-update proposal is filed as a GitHub issue on the same soft-failure
-// terms as runContribution's new-agent issue, so a 403 caused by the GitHub App
-// missing Issues write on `upstream_repo` reaches an operator only through the log
-// line. This asserts that path carries the diagnosis too — it was added to the
-// suggestion path first and this one was missed, which is easy to repeat since the
-// two are in different files with no shared call site.
-test("a 403 filing an agent-update issue carries the install hint", async () => {
+// The agent-update proposal is filed as a GitHub issue on the same soft-failure terms as
+// runContribution's new-agent issue, so a 403 caused by `github.token` lacking Issues write
+// on `upstream_repo` reaches an operator only through the log line. This asserts that path
+// carries the diagnosis too — it was added to the suggestion path first and this one was
+// missed, which is easy to repeat since the two are in different files with no shared call
+// site. What the diagnosis SAYS is pinned in test/contribute-403.test.ts; what matters here
+// is that the same one arrives.
+test("a 403 filing an agent-update issue carries the permissions hint", async () => {
   await withTemp(async (dir) => {
     const { ctx, events } = gateCtx(dir, "table.md", [{ accepted: JUDGEABLE, produces: JUDGEABLE }], {
       // A token is required to reach the filing call at all; without one the code
       // logs agent_update_issue_skipped and never tries.
-      githubToken: "gho_user",
+      githubToken: "ghp_deployment",
     });
     const realFetch = globalThis.fetch;
     globalThis.fetch = (async () =>
@@ -521,8 +522,8 @@ test("a 403 filing an agent-update issue carries the install hint", async () => 
     const failed = events.find((e) => e.type === "agent_update_issue_failed");
     assert.ok(failed, `no agent_update_issue_failed event: ${events.map((e) => e.type).join(", ")}`);
     const hint = String(failed.data.hint ?? "");
-    assert.match(hint, /install/i, "the update path logged no install hint");
-    assert.match(hint, /settings\/installations/, "the hint did not say where to fix it");
+    assert.match(hint, /github\.token/, "the update path logged no permissions hint");
+    assert.match(hint, /Issues: read and write/i, "the hint did not say where to fix it");
   });
 });
 

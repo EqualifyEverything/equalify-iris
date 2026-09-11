@@ -1,9 +1,12 @@
 # Equalify Iris — API Guide (bash / curl)
 
-Every endpoint is under `/v1`. All responses are JSON unless noted. Every endpoint except
-`/v1/health`, `/v1/stats` and `/v1/auth/*` requires `Authorization: Bearer <github_token>`
-— with one exception, `/v1/quality`, which takes a bearer token that is **not** a
-GitHub token ([Quality tally](#quality-tally-shared-secret-off-by-default)).
+Every endpoint is under `/v1`. All responses are JSON unless noted. **No endpoint takes a GitHub
+token** — Iris holds its own and you never see it ([Authenticate](#authenticate)). Whether you send
+anything at all depends on the deployment: where the operator set `server.api_token`, `/v1/me` and
+`/v1/sessions` need `Authorization: Bearer <that shared secret>`; where they did not, send no header.
+`/v1/health`, `/v1/stats` and `/v1/limits` never need one. `/v1/quality` is the exception in the other
+direction: it has its own separate secret
+([Quality tally](#quality-tally-shared-secret-off-by-default)).
 
 These commands are copy-pasteable. They are the same calls exercised by `test/e2e.sh`, which
 runs the whole lifecycle against mock GitHub + mock model services and asserts every response.
@@ -533,73 +536,58 @@ token above. Verify the pair with `gh workflow run quality-report.yml -f dry_run
 waiting for the weekly schedule; [ci.md](ci.md)'s "Weekly quality report" section has the full procedure,
 including why a green run that declines to file is the expected result on a young deployment.
 
-## Authenticate (get a token)
+## Authenticate
 
-GitHub is the only auth mechanism, and by default a GitHub token is **required** on every API
-call — there is no API key and no second SSO provider. That is a design decision, not a gap: your
-token is what files your session's feedback back to the shared agent library, under your own GitHub
-identity. Using Iris and improving it for the next person are the same act. If you would rather not
-contribute, this is not the service to run.
+**There is no sign-in.** You do not create an account, run an OAuth flow, or hand Iris a GitHub
+token. The deployment holds one GitHub credential of its own (`github.token`, server-side only) and
+uses it for every session's feedback. Nothing you send is a GitHub credential.
 
-An operator can open a **demo mode** (`github.anonymous_token`) in which calls with no
-`Authorization` header at all are served as the deployment's own account. It is off unless they set
-it, and where it is on the trade is explicit: no session list, upload limits by address instead of
-per user, and feedback credited to the deployment rather than to you. To find out which kind of
-deployment you are talking to, call `GET /v1/me` with no token — 200 with `anonymous: true` means
-anonymous calls work here, 401 means you need to sign in below. Full operator detail is in
-[github-auth.md](github-auth.md#anonymous-access-a-demo-you-turn-on).
+That has one cost worth knowing before you use it: **your contributions are filed under the
+deployment's account, not yours.** Feedback still reaches the shared agent library, and it still
+improves Iris for the next person, but your name is not on it.
 
-By default the service uses a **bundled GitHub App** — you don't create or configure anything;
-just run the device flow below and approve in your browser.
+The operator chooses one of two modes.
 
-The consent screen requests **no repository access at all.** Iris is a GitHub App, so the one
-permission it needs — write access to issues on the upstream repo — comes from the app being
-*installed* on that repo, not from your authorization. What your token grants is your **identity**,
-which is what puts your name on the feedback your session contributes. It cannot read your code, and
-it cannot touch any repository other than the upstream one the app is installed on.
+**Open** — `server.api_token` is blank. Send no `Authorization` header at all. This is the default,
+and it is what makes the bundled browser app work with no setup.
 
-Your token is never written to disk. It is read from the `Authorization` header, held in memory
-for the duration of the run it authorizes, and discarded — revoke it any time at
-[github.com/settings/applications](https://github.com/settings/applications) and the service loses
-that access within five minutes (see [github-auth.md](github-auth.md#what-happens-to-a-token)).
-
-*Operators:* an earlier build did store tokens, in a `github_token` column. There is no migration —
-delete any `data/iris.sqlite` from before that change and let users re-authorize. The service
-refuses to start against such a file rather than adopting it, since the old table would break
-first-time logins *and* would still hold live plaintext tokens, making the paragraph above false for
-that deployment.
-
-### CLI / bash — device flow (recommended for terminals)
+**Gated** — the operator set `server.api_token` to a shared secret and gave it to you. Send it as a
+bearer token:
 
 ```bash
-# Begin: returns a code to type into the browser.
-dev=$(curl -s -X POST "$BASE/auth/github/device")
-echo "$dev"
-# {"device_code":"...","user_code":"WXYZ-1234","verification_uri":"https://github.com/login/device","expires_in":900,"interval":5}
-
-# Open the verification_uri in a browser and enter the user_code, then poll:
-DEVICE_CODE=$(echo "$dev" | jq -r .device_code)
-curl -s -X POST "$BASE/auth/github/device/poll" \
-  -H 'content-type: application/json' \
-  -d "{\"device_code\":\"$DEVICE_CODE\"}"
-# while pending -> 202 {"status":"pending","error":"authorization_pending"}
-# once approved -> 200 {"access_token":"gho_...","token_type":"bearer"}
-
-export TOKEN=gho_xxx   # paste the access_token
-export AUTH="Authorization: Bearer $TOKEN"
+export AUTH="Authorization: Bearer the-secret-the-operator-gave-you"
+curl -s -H "$AUTH" "$BASE/me"
 ```
 
-### Web clients — redirect flow
+This secret is **not** a GitHub token. It answers one question — may this caller use the API? — and
+it makes you nobody in particular: every caller who presents it is the same deployment account, so
+it is a door key, not an identity. Where a deployment is open, drop `-H "$AUTH"` from every example
+below.
 
-```
-GET  /v1/auth/github/start      -> 302 redirect to the GitHub consent screen
-GET  /v1/auth/github/callback   -> 200 {"access_token":"gho_...","token_type":"bearer"}
-```
+To find out which kind you are talking to, call `GET /v1/me` with no header: **200** means open,
+**401** means gated. That answer cannot go stale, because it is the same check an upload runs.
 
-`/start` issues a state value and redirects to GitHub; after the user approves, GitHub calls
-`/callback?code=...&state=...` and the service returns the access token.
+### What the gate covers
+
+`server.api_token` protects `/v1/me` and everything under `/v1/sessions`. Four endpoints sit above
+it and stay reachable on a gated deployment, on purpose — none of them touches a document or an
+identity:
+
+| Endpoint | Why it is open |
+| --- | --- |
+| [`GET /v1/health`](#health-unauthenticated) | A load balancer's probe cannot hold a secret. |
+| [`GET /v1/limits`](#upload-limits-unauthenticated) | Someone deciding whether their scan is small enough should not need the key to find out. |
+| [`GET /v1/stats`](#public-tally-unauthenticated) | A deployment-wide tally with no per-session detail. |
+| [`GET /v1/quality`](#quality-tally-shared-secret-off-by-default) | Has its own separate token, and is 404 unless the operator set it. |
+
+*Operators:* an earlier build stored a token per user, in a `github_token` column. There is no
+migration — delete any `data/iris.sqlite` from before that change. The service refuses to start
+against such a file rather than adopting it, since it would still hold live plaintext tokens.
 
 ## Current user
+
+Despite the name, this describes the **deployment**, not you. There is one identity here and every
+caller reaches it.
 
 ```bash
 curl -s -H "$AUTH" "$BASE/me"
@@ -612,39 +600,20 @@ curl -s -H "$AUTH" "$BASE/me"
   "defaults": { "max_review_iterations": 3 }
 }
 ```
-`upstream_repo` is where this deployment files your contributions. There is no `fork_repo` field:
-contributions are filed as issues, so no fork is ever created.
 
-**This is also the probe for anonymous access.** Call it with no `Authorization` header:
+`github_login` is the account this deployment files contributions as. `upstream_repo` is where it
+files them. `defaults.max_review_iterations` is the review cap every session gets. There is no
+`fork_repo` field: contributions are filed as issues, so no fork is ever created.
 
-```bash
-curl -s -o /dev/null -w '%{http_code}\n' "$BASE/me"   # 200 = anonymous allowed, 401 = token required
-```
+**Call this first.** It is the cheapest way to find out whether the deployment works at all, because
+it runs exactly what an upload runs:
 
-A 200 carries one extra field, and the login is the *deployment's* account rather than yours:
-
-```json
-{
-  "github_login": "iris-demo-bot",
-  "github_user_id": 4242,
-  "upstream_repo": "https://github.com/example/iris",
-  "defaults": { "max_review_iterations": 3 },
-  "anonymous": true
-}
-```
-
-Check for `anonymous` rather than comparing logins: it is the only thing that distinguishes the two
-modes, so a client that ignores it will greet a visitor by the bot's name and file their feedback as
-the bot without either of them knowing. The key is **absent** for an ordinary signed-in user, not
-`false`.
-
-It means "this request resolved to the account the operator configured as
-`github.anonymous_token`", which is *not* the same as "this request sent no token". A caller
-presenting that account's own token gets `anonymous: true` as well, and everything on this page that
-follows from the flag — including the `403` on [List sessions](#list-sessions) — follows for them
-too. There is one shared identity, and this is how you tell you are it. What anonymous callers give
-up is listed under [List sessions](#list-sessions) and in
-[github-auth.md](github-auth.md#anonymous-access-a-demo-you-turn-on).
+| Answer | What it means |
+| --- | --- |
+| **200** | Usable. If you sent no header, the deployment is open. |
+| **401** `This deployment requires a shared API token.` | Gated — you need `server.api_token` from the operator. |
+| **401** `This deployment could not authenticate to GitHub…` | The operator's `github.token` is wrong, revoked, or GitHub is down. Not your problem to fix; tell them. Iris retries GitHub 30 seconds after a failure, so a transient one clears itself. |
+| **500** `github.token is not configured…` | The operator never set it. |
 
 ## Create a session (upload images)
 
@@ -722,7 +691,6 @@ curl -s "$BASE/limits" | jq
   "upload": { "max_files": 25, "max_request_bytes": 134217728 },
   "rate_limits": {
     "general_per_minute": 240,
-    "auth_per_minute": 60,
     "upload_per_minute": 12,
     "max_upload_memory_mb": 256,
     "window_seconds": 60
@@ -838,13 +806,12 @@ assuming a hang.
 
 A deployment limits requests at the HTTP layer, because it is a single process whose reads hit
 SQLite synchronously — one client's runaway loop is felt by everyone, including the runs already
-in flight. Three budgets, each per minute, all published by `GET /v1/limits`:
+in flight. Two budgets, each per minute, both published by `GET /v1/limits`:
 
 | Budget | Applies to | Default | Counted per |
 | --- | --- | --- | --- |
-| `general_per_minute` | everything under `/v1` except `/v1/health` | 240 | token if validated, else address |
-| `auth_per_minute` | `/v1/auth/*` | 60 | address (there is no token yet) |
-| `upload_per_minute` | `POST /v1/sessions` | 12 | user |
+| `general_per_minute` | everything under `/v1` except `/v1/health` | 240 | address |
+| `upload_per_minute` | `POST /v1/sessions` | 12 | address |
 
 Every response carries the budget it was counted against, so a client can pace itself without
 being refused first:
@@ -880,9 +847,11 @@ declares no length, which can only be refused while it is arriving:
   once across all callers (`max_upload_memory_mb`). This is about *bytes in flight*, not your
   request count, so small uploads are essentially never refused for it. Retry in a few seconds.
 
-A token identifies you no matter which address you arrive from, so signing in is what gets you
-your own budget: unauthenticated requests, and any bearer token this deployment has not validated,
-count against your **address** — which you may be sharing with an entire campus.
+**Everything is counted per address**, and nothing you can send changes that. There is no per-user
+budget to earn: the only credential you might present is a shared secret, so it is the same for every
+caller and would put the whole internet in one bucket. The cost is real — behind NAT or a shared
+proxy you share a budget with everyone else there. Operators: `server.trust_proxy` has to be right,
+or every request looks like it came from the proxy.
 
 ## Poll status
 
@@ -5384,12 +5353,13 @@ session's `agent-updates.md`. Filing is a side effect ([Contributions](#contribu
 
 ### `agent_update_issue_skipped`
 
-There was no GitHub token, so nothing was filed: `agent` is the file the proposal was about, and
-`reason` is `no github token`, the only value it takes.
+The deployment has no `github.token`, so nothing was filed: `agent` is the file the proposal was
+about, and `reason` is `no github token`, the only value it takes.
 
 The proposal stays in the session's `agent-updates.md`, which is where it was written either way —
-what this line says is that it stayed there. A deployment that sets `github.issue_token` never writes
-it.
+what this line says is that it stayed there. A deployment that booted cannot reach this line
+(`github.token` is required at startup), so seeing it means the pipeline was driven directly — a
+local run or a test — rather than through the API.
 
 ### `feedback_training_failed`
 
@@ -6356,18 +6326,17 @@ curl -s -H "$AUTH" "$BASE/sessions?status=ready_for_review"
 `0`, negative, fractional, non-numeric — is the default, not an error: one rule, so two
 equally invalid values can't get page sizes differing by a factor of twenty.
 
-**This is the one endpoint an anonymous caller cannot use.** Where the operator has set
-`github.anonymous_token`, a request with no token gets `403 anonymous_session_list` here while every
-other endpoint serves it. A list is "the caller's sessions", ownership is the GitHub user id, and
-every anonymous caller shares one — so the honest answer is a refusal rather than a page of documents
-belonging to whoever used the demo before you. Keep the `session_id` that `POST /v1/sessions`
-returned; polling, output, feedback and close all work with it.
+**This lists the deployment's sessions, not yours.** There is one identity here, so every caller
+who can reach this endpoint sees every session anyone uploaded — including documents you did not
+upload, and yours to whoever asks next. That is the cost of having no sign-in, and it is why an
+operator handling anything private should gate the deployment with `server.api_token` and treat the
+list as shared among everyone holding that secret.
 
-The refusal is on the identity the request reaches, not on the absence of a header, so it also
-applies to a token **for the shared account itself**. If you are signed in and see this, your account
-is the one configured as `github.anonymous_token` — sign in with another, and see
-[github-auth.md](github-auth.md#anonymous-access-a-demo-you-turn-on) for why that
-account is meant to be one nobody uses.
+Nothing here reveals a document's contents: a row is a `session_id`, a status, a page count and two
+timestamps. But a `session_id` is all `GET /v1/sessions/{id}/output` needs.
+
+If you only want your own work, keep the `session_id` that `POST /v1/sessions` returned; polling,
+output, feedback and close all work with it and none of them needs this list.
 
 Paginate by passing `cursor=<next_cursor>` **verbatim** — it encodes both halves of the
 sort key (`created_at|session_id`), because `created_at` alone is not unique: sessions
@@ -6459,13 +6428,10 @@ you a document you already paid for. It is logged as `agent_issue_failed` instea
 naming the likely cause when the failure looks like a permissions problem (usually: the GitHub App
 is not installed on `upstream_repo`).
 
-A deployment can set `github.issue_token` to a service-account PAT to file everything under one bot
-account instead. That is **not recommended** and it is off by default: it erases the attribution
-that is the point of the design. Use it only where an org policy forbids filing as users.
-
-An **anonymous** session (`github.anonymous_token`, off by default) has no user to credit, so its
-contributions are filed under the deployment's account. If you want your name on what your session
-teaches the library, sign in.
+**Everything is filed under the deployment's own account** (`github.token`) — there is no per-user
+identity to credit. So the issue says what your session found, and not who found it. If attribution
+matters to you, file it yourself against `upstream_repo`; the issue Iris opens is a normal issue and
+you can comment on it.
 
 ## Errors
 
@@ -6473,11 +6439,10 @@ All errors share one shape:
 ```json
 { "error": { "code": "invalid_state", "message": "Human-readable description", "details": {} } }
 ```
-Common codes: `unauthorized` (401), `session_not_found` (404), `invalid_state` (409),
-`invalid_request` (400), `rate_limited` (429, carries `Retry-After` — see
-[Rate limits](#rate-limits-how-often-you-may-ask)), `upload_too_large` (413),
-`anonymous_session_list` (403, only on [`GET /v1/sessions`](#list-sessions), and only where the
-operator turned anonymous access on).
+Common codes: `unauthorized` (401 — see [Authenticate](#authenticate) for the three things it can
+mean), `session_not_found` (404), `invalid_state` (409), `invalid_request` (400), `rate_limited`
+(429, carries `Retry-After` — see [Rate limits](#rate-limits-how-often-you-may-ask)),
+`upload_too_large` (413), `server_error` (500).
 
 A run that fails reports why in the `error` field of `GET /v1/sessions/{id}`. One worth
 recognizing:

@@ -10,11 +10,6 @@
 //     no connection pool to absorb a burst: each query occupies the event loop, so a
 //     tight polling loop degrades every other request in the process — including the
 //     ones driving a pipeline that is already running.
-//   * `/v1/auth` is unauthenticated by design and its device-flow poll makes an
-//     OUTBOUND call to GitHub per request. Unbounded, that makes Iris an amplifier: the
-//     caller spends one cheap request, the deployment spends one of its GitHub rate
-//     limit tokens, and the cost of exhausting that lands on every user's login rather
-//     than on the caller.
 //   * multer buffers the ENTIRE multipart body into memory before any handler — and
 //     therefore before the run queue — runs. That is a limit the run queue
 //     could not address; a gate that sits in front of multer is what addresses it, which
@@ -30,11 +25,8 @@
 
 import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 import type { NextFunction, Request, RequestHandler, Response } from "express";
-import { createHash } from "node:crypto";
 import type { IrisConfig, RateLimitConfig } from "../config.ts";
 import { resolveRateLimits } from "../config.ts";
-import { isValidatedToken } from "../auth/middleware.ts";
-import type { AuthedRequest } from "../auth/middleware.ts";
 import { sendError } from "../routes/errors.ts";
 import { formatBytes } from "../providers/imageLimits.ts";
 
@@ -84,65 +76,28 @@ const UPLOAD_GATE_RETRY_SECONDS = 10;
 
 const WINDOW_MS = 60_000;
 
-function bearerToken(req: Request): string | undefined {
-  const match = (req.header("authorization") ?? "").match(/^Bearer\s+(.+)$/i);
-  return match ? match[1].trim() : undefined;
-}
-
 /**
- * Who a request counts against.
+ * Who a request counts against: the source address, on every route.
  *
- * Per credential when the credential is one this process has already validated,
- * otherwise per source address. Both halves of that matter:
+ * There is nothing better available, and that is a consequence of there being one
+ * identity. A caller presents either no credential or `server.api_token`, which is
+ * SHARED — so keying on the credential would put every visitor in one bucket and the
+ * first of the minute would spend everyone's budget. `req.user` is no better: it is the
+ * deployment's own account on every request. The address is the only thing left that
+ * distinguishes callers at all.
  *
- *   * Per credential, because per-IP alone is wrong for exactly the deployments Iris
- *     targets. A campus or office NAT puts every user behind one address, and a reverse
- *     proxy does the same unless `server.trust_proxy` is set correctly — so an IP bucket
- *     is shared by people who have nothing to do with each other, and the second user
- *     to poll a session pays for the first. A GitHub token identifies one user no matter
- *     how many hops it arrived over.
- *   * Only when ALREADY VALIDATED, because a bearer token is just a string in a header.
- *     Keying on any token presented would hand an attacker a fresh budget per random
- *     string — and each of those strings also costs an outbound `GET /user` (an unknown
- *     token is a cache miss by definition, see auth/middleware.ts), so it would make the
- *     most expensive path the one with no limit on it. Unvalidated bearers therefore
- *     share the caller's IP bucket, where rotation buys nothing.
+ * What that costs, and it is a real cost rather than a rounding error: a campus or office
+ * NAT puts every user behind one address, so they share a bucket and the second person to
+ * poll a session pays for the first. The per-minute defaults are sized with that in mind
+ * (see `generalRateLimit`), and `server.trust_proxy` has to be right or the buckets are
+ * worse still — every caller behind the proxy becomes one client.
  *
- * The key is a truncated SHA-256 of the token, never the token: buckets live in memory
- * beside a hit count and 16 hex characters are ample to separate users, so there is no
- * reason for a second copy of a live credential to exist (the same rule the token cache
- * follows — nothing persists it, nothing logs it).
- *
- * `ipKeyGenerator` rather than `req.ip` for the fallback: it groups IPv6 addresses by
- * /56, since a single host is routinely handed a /64 and per-address buckets would mean
- * no limit at all for anyone on IPv6.
+ * `ipKeyGenerator` rather than `req.ip`: it groups IPv6 addresses by /56, since a single
+ * host is routinely handed a /64 and per-address buckets would mean no limit at all for
+ * anyone on IPv6.
  */
 export function clientKey(req: Request): string {
-  const token = bearerToken(req);
-  if (token && isValidatedToken(token)) {
-    return `t:${createHash("sha256").update(token).digest("hex").slice(0, 16)}`;
-  }
   return `ip:${ipKeyGenerator(req.ip ?? "")}`;
-}
-
-// The upload limiter sits behind the auth middleware, so the user is resolved and there
-// is no need to infer them from the header. Falls back to clientKey for the same reason
-// it exists — a router mounted without auth in a test must still get a key.
-//
-// An ANONYMOUS request is the exception, and it has to be: `github.anonymous_token`
-// resolves every caller who sent no credential to ONE user record, so keying on the
-// user id would put the whole internet in a single bucket of `upload_per_minute` and
-// the first visitor of the minute would spend everyone's. Those requests key by
-// address instead — the same fallback `clientKey` uses for an unvalidated bearer, and
-// for the same reason: it is the only thing left that distinguishes callers.
-//
-// Note that the general limiter needs no such branch. It runs BEFORE auth and keys on
-// the bearer token or the address, and an anonymous request has no bearer token to key
-// on, so it already lands in an address bucket.
-function userKey(req: Request): string {
-  const authed = req as AuthedRequest;
-  if (authed.anonymous) return clientKey(req);
-  return authed.user ? `u:${authed.user.github_user_id}` : clientKey(req);
 }
 
 const passThrough: RequestHandler = (_req, _res, next) => next();
@@ -240,30 +195,6 @@ export function generalRateLimit(cfg: IrisConfig): RequestHandler {
 }
 
 /**
- * The stricter `/v1/auth` limiter. Authentication is unauthenticated by definition, so
- * this one can only key on the address — there is no credential yet to count against.
- *
- * That is also why the default (60/minute) is not the 10-20 that "brute force" suggests.
- * There is nothing here to brute force: no password, and the device code is entered at
- * github.com rather than here. What the limit protects is the outbound call each poll
- * makes, and the traffic it must not break is a device-flow login, which polls every 5
- * seconds (12/minute) for as long as it takes the user to approve it — behind one NAT,
- * that is several concurrent logins in the same bucket. A limit that made logging in
- * unreliable would be a worse outage than the flood it prevents.
- */
-export function authRateLimit(cfg: IrisConfig): RequestHandler {
-  const limits = resolveRateLimits(cfg.server.rate_limits);
-  if (!limits.enabled) return passThrough;
-  return limiter({
-    limit: limits.auth_per_minute,
-    key: (req) => `ip:${ipKeyGenerator(req.ip ?? "")}`,
-    message: (limit, retryAfter) =>
-      `Too many authentication requests: this deployment allows ${limit} per minute per address. ` +
-      `Retry in ${retryAfter}s.`,
-  });
-}
-
-/**
  * The session-creation limiter, mounted in front of multer so a request over budget is
  * refused before its body is buffered.
  *
@@ -278,7 +209,10 @@ export function uploadRateLimit(cfg: IrisConfig): RequestHandler {
   if (!limits.enabled) return passThrough;
   return limiter({
     limit: limits.upload_per_minute,
-    key: userKey,
+    // By address, like every other limiter. This one sits BEHIND the auth middleware, so
+    // `req.user` is resolved and available — and it is the same account for everybody,
+    // which would put the whole internet in one bucket of `upload_per_minute`.
+    key: clientKey,
     message: (limit, retryAfter) =>
       `Too many uploads: this deployment accepts ${limit} per minute. A conversion takes minutes and ` +
       `runs are queued, so uploads past that only wait on each other. Retry in ${retryAfter}s.`,
