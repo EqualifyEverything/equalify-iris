@@ -826,6 +826,26 @@ test("an entity-spelled hyphen is a stated limit, and stays as written", () => {
   assert.deepEqual(joinBrokenWords(pages).joined, []);
 });
 
+test("a break spelled `-<br>` inside one cell is a stated limit, and both passes leave it", () => {
+  // #374's residue, and the reason it is a limit rather than a defect: `textOf` renders the `<br>` as a
+  // space and `WORD` needs a letter immediately after the hyphen, so the word is a candidate for neither
+  // pass. Measured at 4 occurrences on one page — a floor of about 4 per 100 pages — and repairing it means
+  // amending `SplitWord.split`'s contract, which other passes read. Pinned so a widening has to change
+  // these lines deliberately and read the argument in `hyphens.ts` while doing it.
+  const cell = `<table><tr><th>Compos-<br>ite</th></tr></table><p>The Composite index.</p>`;
+  assert.deepEqual(splitWordContradictions(cell), [], "the page writes `Composite` whole and it changes nothing");
+  assert.deepEqual(joinBrokenWords([cell]).pages, [cell]);
+  assert.deepEqual(joinBrokenWords([cell]).joined, []);
+  // The distinction a widening would need, pinned beside it: a `<br>` inside one cell ends a LINE, a cell
+  // boundary ends the word's context, and `textOf` renders both as one space. Whatever happens to the shape
+  // above, THIS one keeps its hyphen — `Total-` and `farm` are two cells, and a `Totalfarm` elsewhere is not
+  // evidence that the printing broke a word.
+  const cells = `<table><tr><td>Total-</td><td>farm</td></tr></table><p>Totalfarm output.</p>`;
+  assert.deepEqual(splitWordContradictions(cells), []);
+  assert.deepEqual(joinBrokenWords([cells]).pages, [cells]);
+  assert.deepEqual(joinBrokenWords([cells]).joined, []);
+});
+
 test("a garbled page can put the tail in the dictionary and switch the condition off", () => {
   // Measured rather than hypothetical: on #334's rotated arm `vidual` appears as a standalone token, so
   // `Indi-vidual` is left alone there while the same word is joined on every straight arm. The
