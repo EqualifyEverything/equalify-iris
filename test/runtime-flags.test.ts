@@ -79,10 +79,15 @@ test("every other place that states the Node version agrees with that floor", ()
   const pkg = JSON.parse(read("package.json")) as { engines: { node: string } };
   const floor = majorOf(pkg.engines.node.replace(/^\D+/, ""), "engines.node");
 
-  const at = (label: string, rel: string, re: RegExp) => {
+  // `raw: null` means the line this member reads is GONE — reworded, renamed or deleted.
+  // Nothing here asserts: a member that cannot be read is reported like one that disagrees,
+  // because rewording README.md's requirement must not stop the test before it has looked at
+  // CONTRIBUTING.md.
+  type Member = { label: string; raw: string | null; major: number | null };
+
+  const at = (label: string, rel: string, re: RegExp): Member => {
     const found = read(rel).match(re);
-    assert.ok(found, `${rel} no longer states a Node version where this test reads one`);
-    return { label, raw: found[1], major: readMajor(found[1]) };
+    return { label, raw: found?.[1] ?? null, major: found ? readMajor(found[1]) : null };
   };
 
   // EVERY `FROM node:` line, not the first. The Dockerfile is single-stage today, but a
@@ -90,35 +95,43 @@ test("every other place that states the Node version agrees with that floor", ()
   // exactly the case this member exists to catch, and reading only the first match would call
   // it clean while the stage that ships lost unflagged node:sqlite.
   const stages = [...read("Dockerfile").matchAll(/^FROM node:(\S+)/gm)];
-  assert.ok(stages.length > 0, "the Dockerfile no longer builds on a `node:` image");
 
   // Both workflows run setup-node on .nvmrc, and the Dockerfile's stages are the runtime a
   // deployment actually gets — the one path where a Node below the floor would bite. Above the
   // floor is fine for both: testing or shipping on a newer Node than the package promises is
   // allowed.
-  const atLeast = [
+  const atLeast: Member[] = [
     at(".nvmrc", ".nvmrc", /^\s*(\S+)/),
     // Labelled by the image itself rather than by position, so a failure names the line to
-    // edit even when several stages disagree.
-    ...stages.map((m) => ({
-      label: `the Dockerfile's \`node:${m[1]}\``,
-      raw: m[1],
-      major: readMajor(m[1]),
-    })),
+    // edit even when several stages disagree. No `FROM node:` at all is one missing member,
+    // not an early exit.
+    ...(stages.length > 0
+      ? stages.map((m) => ({
+          label: `the Dockerfile's \`node:${m[1]}\``,
+          raw: m[1],
+          major: readMajor(m[1]),
+        }))
+      : [{ label: "the Dockerfile's base image", raw: null, major: null }]),
   ];
   // "Node 24+" IS the floor claim, so here the numbers have to be equal, not merely clear it.
-  const exactly = [
+  const exactly: Member[] = [
     at("README.md's install requirement", "README.md", /Requires \*\*Node\.js (\d+)\+\*\*/),
     at("CONTRIBUTING.md's install requirement", "CONTRIBUTING.md", /Requires \*\*Node (\d+)\+\*\*/),
   ];
 
   // Collected rather than asserted one at a time: `assert` throws at the first failure, so
-  // checking these in sequence would hide every member after the first that disagrees. A
-  // member naming no major at all is collected the same way, for the same reason: it is a
-  // different fault with a different fix, but reporting it must not swallow the others.
+  // checking these in sequence would hide every member after the first that disagrees. The two
+  // ways a member can fail to produce a number — its line is gone, or the version it states
+  // names no major — are collected for the same reason. Each is a different fault with a
+  // different fix, and reporting one must not swallow the rest.
   const members = [...atLeast, ...exactly];
   const wrong = [
-    ...members.filter((m) => m.major === null).map((m) => unreadable(m.raw, m.label)),
+    ...members
+      .filter((m) => m.raw === null)
+      .map((m) => `${m.label} is gone, or no longer written where this test reads it`),
+    ...members
+      .filter((m) => m.raw !== null && m.major === null)
+      .map((m) => unreadable(m.raw as string, m.label)),
     ...atLeast
       .filter((m) => m.major !== null && m.major < floor)
       .map((m) => `${m.label} is ${m.major}, below ${floor}`),
