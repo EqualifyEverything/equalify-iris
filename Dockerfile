@@ -23,4 +23,4 @@ COPY . .
 RUN cp -n config.example.yaml config.yaml || true
 
 EXPOSE 8080
-CMD ["node", "--experimental-sqlite", "src/index.ts"]
+CMD ["node", "src/index.ts"]
