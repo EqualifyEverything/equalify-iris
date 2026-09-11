@@ -1,5 +1,6 @@
 import type { Request, Response, NextFunction } from "express";
 import type { IrisConfig } from "../config.ts";
+import { anonymousToken } from "../config.ts";
 import type { Store, UserRecord } from "../store/db.ts";
 import { fetchUser } from "./github.ts";
 import { sendError } from "../routes/errors.ts";
@@ -8,6 +9,16 @@ import { sendError } from "../routes/errors.ts";
 export interface AuthedRequest extends Request {
   user?: UserRecord;
   token?: string;
+  // True when this request sent no credential and was served by
+  // `github.anonymous_token` instead of refused. `user` and `token` are then the
+  // deployment's shared demo identity rather than the caller's, which is why the flag
+  // exists: the two are indistinguishable downstream otherwise, and two places have to
+  // tell them apart — the session LIST (a shared owner cannot separate whose document
+  // is whose) and the upload rate limiter (a shared user id is one bucket for everyone).
+  //
+  // Absent rather than `false` on an ordinary authenticated request, so a reader of
+  // `req.anonymous` gets the same falsy answer whether this middleware ran or not.
+  anonymous?: boolean;
 }
 
 // Cache token -> user id so we don't hit GitHub's /user on every request.
@@ -100,14 +111,36 @@ export function __seedTokenCache(token: string, id: number, expires: number): vo
 export function makeAuthMiddleware(store: Store, cfg: IrisConfig) {
   const apiBase = cfg.github.api_base_url;
   const defaultMaxIter = cfg.defaults.max_review_iterations;
+  // The deployment's own credential for callers who present none, or undefined when
+  // this deployment requires a token on every call (the default). Read once: config
+  // does not hot-reload.
+  const anonToken = anonymousToken(cfg);
   return async function auth(req: AuthedRequest, res: Response, next: NextFunction): Promise<void> {
     const header = req.header("authorization") ?? "";
     const match = header.match(/^Bearer\s+(.+)$/i);
-    if (!match) {
-      sendError(res, 401, "unauthorized", "Missing or malformed Authorization header");
+    // No header at all is the only shape the anonymous credential answers for.
+    //
+    // A header that is present and malformed still 401s, and that asymmetry is the
+    // point rather than an oversight: a client sending `Bearer <expired>` or
+    // `Basic …` is TRYING to be someone, and serving it as the shared demo identity
+    // would silently move it into another account's session space — its uploads
+    // landing where it cannot list them and its feedback filed under a bot. The
+    // failure it should see is its own broken credential.
+    const anonymous = !header && anonToken !== undefined;
+    if (!match && !anonymous) {
+      sendError(
+        res,
+        401,
+        "unauthorized",
+        "Missing or malformed Authorization header",
+      );
       return;
     }
-    const token = match[1].trim();
+    // Validated below exactly like a user's token — `GET /user`, same cache, same TTL.
+    // Nothing here trusts it because it came from config: a revoked or mistyped
+    // anonymous credential must fail the same way, at the same place, rather than
+    // producing a user record with no GitHub account behind it.
+    const token = match ? match[1].trim() : anonToken!;
 
     try {
       const now = Date.now();
@@ -131,8 +164,13 @@ export function makeAuthMiddleware(store: Store, cfg: IrisConfig) {
       }
       req.user = store.getUser(userId)!;
       req.token = token;
+      if (anonymous) req.anonymous = true;
       next();
     } catch (e) {
+      // Same 401 either way. An anonymous credential that GitHub rejects is an
+      // operator's problem, not the caller's, and saying which token failed here would
+      // tell an anonymous caller about the deployment's credential; the boot warning
+      // and this message's `github user lookup failed` are what the operator has.
       sendError(res, 401, "unauthorized", `Token validation failed: ${(e as Error).message}`);
     }
   };

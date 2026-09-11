@@ -189,7 +189,33 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
   // and repeats rows at tie boundaries (see store.listSessions). The cursor is
   // therefore compound, and an unparseable one is a 400 rather than being
   // compared as a string, which used to silently hand back page one forever.
+  //
+  // This is the ONE route `github.anonymous_token` closes, and the reason is the word
+  // "this user's" above. Ownership here is `github_user_id` and nothing else (see
+  // `ownedSession`), so on a deployment serving every anonymous caller with one
+  // credential, "this user's sessions" is every anonymous visitor's sessions — a
+  // stranger's uploaded document, listed by id to whoever asks next. Refused rather
+  // than filtered, because there is nothing to filter on: the request carries no
+  // property that distinguishes one anonymous caller from another, and inventing one
+  // (an address, a cookie) would be a second, weaker identity pretending to be
+  // ownership.
+  //
+  // What anonymous callers keep is every other route: a session is reachable by its own
+  // id, which is `ses_` + a ULID — 80 random bits, so it is a capability rather than a
+  // guess. That is a real narrowing of the guarantee and it is why this mode is off by
+  // default and warned about at boot.
   r.get("/", (req: AuthedRequest, res) => {
+    if (req.anonymous) {
+      sendError(
+        res,
+        403,
+        "anonymous_session_list",
+        "This deployment serves callers with no GitHub token as one shared identity, so it cannot tell " +
+          "whose sessions are whose and will not list them. Use the session id returned by POST /v1/sessions, " +
+          "or sign in with GitHub for a session list of your own.",
+      );
+      return;
+    }
     // One rule for every unusable value: fall back to the default. Written as
     // `Math.max(parseInt(x) || 20, 1)` it was two rules — `?limit=0` is falsy so
     // it became 20, while `?limit=-1` clamped to 1 — so two equally invalid

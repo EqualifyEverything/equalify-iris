@@ -3,6 +3,8 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  anonymousToken,
+  anonymousTokenWarning,
   applyTrustProxy,
   bedrockApiWarning,
   bundledAppWarning,
@@ -34,6 +36,11 @@ if (cidWarning) console.warn(`WARNING: ${cidWarning}`);
 // elsewhere without registering your own app files nothing for anyone.
 const appWarning = bundledAppWarning(cfg.github.client_id, cfg.github.upstream_repo);
 if (appWarning) console.warn(`WARNING: ${appWarning}`);
+
+// And the one that is not a mistake: anonymous access is ON, which is a deployment-wide
+// policy whose every consequence is invisible from outside (see anonymousTokenWarning).
+const anonWarning = anonymousTokenWarning(anonymousToken(cfg));
+if (anonWarning) console.warn(`WARNING: ${anonWarning}`);
 
 // A cache TTL nobody can spell is worth saying here, because boot is the only place it
 // is observable at all — the two TTLs differ in price, not in reported tokens.

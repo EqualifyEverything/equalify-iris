@@ -80,12 +80,13 @@ storage:
   # alternative for multi-instance deployments (not implemented in v1).
   database: ./data/iris.sqlite
 
-# GitHub OAuth is the only auth mechanism, and a user's token is
+# GitHub OAuth is the only auth mechanism, and by default a user's token is
 # REQUIRED on every API call. That is the sustainability model, not a limitation:
 # the token identifies the user AND files their session's feedback back to the
 # shared agent library under their own identity, so using Iris and improving it are
-# the same act. There is no anonymous mode and no way to consume the
-# service without contributing.
+# the same act. `anonymous_token` below is the one way to open the service to
+# callers who send no token, it is off unless you set it, and it costs those
+# callers their session list and their credit.
 #
 # Nothing here opens pull requests: contributions are filed as issues (an earlier
 # design opened them — see docs/design-notes.md).
@@ -143,6 +144,26 @@ github:
   # device flow ENABLED and user-token expiry OFF, then installing it on your
   # `upstream_repo`. If filing logs a 403/404, the app is probably not installed — the
   # log line's `hint` says so.
+  #
+  # OPTIONAL demo mode. Set this to one of YOUR GitHub tokens and callers who send NO
+  # `Authorization` header are served as that account instead of refused. Leave it unset
+  # — the default — and a token is required on every call. Turn it on so a visitor can
+  # convert one page before deciding to sign in.
+  #
+  # Three costs, all deliberate, and Iris warns about them at every boot:
+  #   - No session list. Ownership is the GitHub user id, so every anonymous visitor is
+  #     the same owner; `GET /v1/sessions` refuses them (403 `anonymous_session_list`)
+  #     rather than listing strangers' documents. A session is still reachable by the id
+  #     `POST /v1/sessions` returned.
+  #   - Uploads are limited by ADDRESS, not per user — one shared account would otherwise
+  #     be one `upload_per_minute` bucket for everyone.
+  #   - Their feedback is filed under THIS account. That is the credit the default
+  #     protects, so a deployment that cares about attribution leaves this blank.
+  #
+  # A caller who sends a BROKEN token is still refused: this serves people who present
+  # nothing, not people whose sign-in failed. Clients detect the mode with `GET /v1/me`,
+  # which answers `anonymous: true` (and 401 where the mode is off).
+  anonymous_token: ${IRIS_ANONYMOUS_TOKEN}
 
 # LLM provider abstraction (see docs/models.md). Each agent declares a capability;
 # the deployment decides which provider serves it.
