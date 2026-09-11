@@ -986,10 +986,12 @@ export class Store {
    * keeps the old table — `github_token TEXT NOT NULL` — while `upsertUser` no longer
    * supplies that column, and the two symptoms both point away from the cause:
    *
-   *   * The first request after every boot throws `NOT NULL constraint failed:
-   *     users.github_token` where the auth middleware records this deployment's
-   *     identity, so EVERY request 500s until the file is dealt with — the deployment
-   *     cannot provision the one row it owns. The middleware reports that as a server
+   *   * The first request to `/v1/me` or `/v1/sessions` after every boot throws
+   *     `NOT NULL constraint failed: users.github_token` where the auth middleware
+   *     records this deployment's identity, so every request to either 500s until the
+   *     file is dealt with — the deployment cannot provision the one row it owns. The
+   *     four ungated routes keep answering, so a load balancer's probe and the public
+   *     tally look healthy while nothing can convert. The middleware reports that as a server
    *     fault with the driver's message in the log rather than as GitHub refusing the
    *     token (auth/middleware.ts keeps the write outside the GitHub try for exactly
    *     this reason), which is what leaves "the store cannot be written" as the

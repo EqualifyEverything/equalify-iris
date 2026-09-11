@@ -434,7 +434,9 @@ function validateConfig(cfg: IrisConfig, unset: Set<string>, path: string): void
   // `expandEnv`), so the shape to catch is a key that is present and empty — which is
   // exactly what an operator who forgot the environment variable produces. Fatal rather
   // than warned, unlike the old check: without it there is no account to own a session,
-  // so every request would 401 and nothing would work at all.
+  // so every request to `/v1/me` or `/v1/sessions` would answer `500 server_error:
+  // github.token is not configured` (auth/middleware.ts) — nothing could convert a
+  // document or read one, which is the whole service.
   if (!githubToken(cfg)) {
     problems.push(
       `github.token is not set. Iris needs one GitHub PAT, held by the server, to own every session and file ` +
@@ -746,7 +748,10 @@ export function normalizeReviewIterations(value: unknown): number {
   // `undefined`, so it reaches a NOT NULL column and the write throws.
   //
   // Today that is `500 server_error: This deployment could not record its own identity`,
-  // on the first request the deployment serves. Before #459 the same typo answered
+  // on the first request that reaches `/v1/me` or `/v1/sessions` — the only two mounts
+  // `auth` is attached to. `/v1/health`, `/v1/stats`, `/v1/limits` and `/v1/quality` keep
+  // answering, which is what makes the typo hard to see: the deployment looks up.
+  // Before #459 the same typo answered
   // `401 unauthorized: Token validation failed`, because `upsertUser` sat inside the
   // catch that reported a GitHub refusal — a config typo blamed on the caller's token.
   // That is why the write has a catch of its own now (auth/middleware.ts). This guard is
