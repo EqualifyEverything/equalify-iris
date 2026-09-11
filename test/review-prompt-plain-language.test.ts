@@ -67,12 +67,16 @@ const PATH_RE =
 
 // Path-like tokens that are NOT inside a code span, minus CONTRIBUTING.md itself.
 //
-// This exists because every assertion below compares CODE SPANS, and a path written without
-// backticks is invisible to all of them: a fifth path added as prose leaves a four-span list that
+// This exists because THREE of the four assertions below compare CODE SPANS, and a path written without
+// backticks is invisible to those three: a fifth path added as prose leaves a four-span list that
 // `deepEqual` still accepts, while the reviewer reads the sentence and enforces five. So rather than
 // teach each comparison to read prose — which would then have to tell a scope member apart from a
 // mention — every one of these regions is required to keep its paths in backticks, and a bare one
 // fails with a message saying to backtick it.
+//
+// The fourth, CONTRIBUTING.md's automated-review bullet, DOES read prose, so invisibility is not its
+// reason for carrying this check; uniform spelling is. That is why the message takes a `why` — a shared
+// helper that states one reason for four call sites states a false one for the odd caller.
 //
 // CONTRIBUTING.md is excluded by name: it is the authority these regions cite, it is never a member
 // of the set, and the citation is what makes the scope traceable.
@@ -82,7 +86,7 @@ function barePaths(text: string): string[] {
   return hits.filter((t) => t !== "CONTRIBUTING.md").sort();
 }
 
-// Assert a region keeps its paths where the code-span comparisons can see them.
+// Assert a region spells its paths as inline code spans, like the other three copies of this set.
 //
 // `why` is a parameter because the reason differs by region and a message that states the wrong one is
 // a message a reader cannot act on. Three of the four regions are compared with `codeSpans`, where a
@@ -256,23 +260,53 @@ test("CONTRIBUTING.md's automated-review bullet does not keep its own copy of th
     .filter((t) => t !== "CONTRIBUTING.md")
     .sort();
   if (paths.length > 0 && JSON.stringify(paths) !== JSON.stringify(BOUND_BARE)) {
-    // Two different failures, and calling both "a partial copy" sends a reader hunting for a missing
-    // member that is right there. "README.md, docs/, config.example.yaml or agents" names every bound
-    // path and spells one of them without its trailing slash; the set is complete and the spelling is
-    // what fails.
-    const names = (xs: string[]): string => JSON.stringify(xs.map((x) => x.replace(/\/$/, "")).sort());
-    assert.fail(
-      names(paths) === names(BOUND_BARE)
-        ? `this bullet names every bound path but spells at least one without its trailing slash ` +
-            `(${paths.join(", ")} against ${BOUND_BARE.join(", ")}). Nothing is missing — add the ` +
-            `slash, and the backticks with it if the member is bare, which is how the other three ` +
-            `copies of this set are written:\n${item}`
-        : `this bullet either names no files or names all of BOUND_FILES. It names ${paths.join(", ")}, ` +
-            `which is a partial copy of the scope — the shape that goes stale when the set widens. The ` +
-            `fix is to delete the list and let the Documentation link carry it, NOT to backtick it. One ` +
-            `member may also be missing from that list only because it is spelled \`docs\` without its ` +
-            `slash, which PATH_RE cannot see; count what the bullet names before adding a path:\n${item}`,
-    );
+    // Composed from what is MISSING and what is EXTRA rather than chosen by a two-way test with an
+    // `else`. Four shapes reach here and a catch-all names the first one anybody thought of: a partial
+    // copy, a copy that is complete but for a spelling, an OVER-WIDE copy, and a path that is not a copy
+    // of this set at all — a cross-reference like `docs/ci.md`. "A partial copy" was printed for the last
+    // two, one of which is the opposite of partial, and it named `ci.md` as a member of a scope the
+    // bullet never claimed.
+    const trim = (xs: string[]): string[] => [...new Set(xs.map((x) => x.replace(/\/$/, "")))].sort();
+    const have = trim(paths);
+    const want = trim(BOUND_BARE);
+    const missing = want.filter((x) => !have.includes(x));
+    const extra = have.filter((x) => !want.includes(x));
+    const tail = `The Documentation section is where this set is defined, and the ` +
+      `[Documentation](#documentation) link is how this bullet is meant to carry it:\n${item}`;
+    let why: string;
+    if (missing.length === 0 && extra.length === 0) {
+      why =
+        `this bullet names every bound path but spells at least one differently ` +
+        `(${paths.join(", ")} against ${BOUND_BARE.join(", ")}). Nothing is missing — add the trailing ` +
+        `slash, and the backticks with it if the member is bare, which is how the other three copies of ` +
+        `this set are written. `;
+    } else if (missing.length === 0) {
+      why =
+        `this bullet names every bound path AND ${extra.join(", ")}, so it is an OVER-WIDE copy, not a ` +
+        `partial one. If the scope really did widen, BOUND_FILES and the Documentation section are where ` +
+        `that happens and all four copies move together; if ${extra.join(", ")} is a cross-reference ` +
+        `rather than a scope member, drop it. `;
+    } else if (missing.length === want.length) {
+      why =
+        `this bullet names ${have.join(", ")} and no member of the scope, so this is not a copy of the ` +
+        `list — most likely a cross-reference. This test cannot tell a cross-reference from a copy, so ` +
+        `it permits neither: name every member or none. Reword without the path, or put the mention in ` +
+        `the Documentation section. `;
+    } else {
+      why =
+        `this bullet names ${have.join(", ")} and not ${missing.join(", ")}, which is a partial copy of ` +
+        `the scope — the shape that goes stale when the set widens. The fix is to delete the list, NOT ` +
+        `to backtick it` +
+        (extra.length > 0 ? `, and ${extra.join(", ")} is not in the scope either` : ``) +
+        `. ` +
+        // Only when `docs` is the member reported missing, because that is the one member this
+        // comparison can miss: `PATH_RE` does not match bare `docs`, on purpose.
+        (missing.includes("docs")
+          ? `Count what the bullet names first: \`docs\` may be there and spelled without its slash, ` +
+            `which PATH_RE cannot see. `
+          : ``);
+    }
+    assert.fail(why + tail);
   }
   // AFTER the comparison above, deliberately, and the ordering is the whole point rather than a detail.
   // Both fire on a partial list written as prose, and their remedies are not equal: deleting the copy
