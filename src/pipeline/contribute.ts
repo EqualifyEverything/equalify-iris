@@ -1,7 +1,7 @@
 import { loadAgent } from "../agents/loader.ts";
 import { loadImage, type PipelineContext } from "./context.ts";
 import { ACCESSIBILITY_REQUIREMENTS } from "./accessibility.ts";
-import { createAgentIssue, installHintFor, type FilingCredential } from "../github/issue.ts";
+import { createAgentIssue, installHintFor } from "../github/issue.ts";
 
 // The content types the general page pass covers itself. A
 // suggestion naming one of these is declined rather than dispatched, and never
@@ -40,10 +40,9 @@ export function logicalType(name: string): string {
 // a miss is not symmetric. `STANDARD` spells one entry `formField`, so `"FormField"` or
 // `"Table"` — spellings a model will produce, since these are prose descriptions of
 // content types and not filenames — used to fall through to `draftAgent` and
-// `createAgentIssue`: a public issue on the upstream repo, filed under the USER's own
-// GitHub identity, proposing a specialist for a type the page pass has always
-// handled. A false decline costs one specialist that the page pass covers anyway; a
-// false accept costs a real person's name on a spurious proposal.
+// `createAgentIssue`: a public issue on the upstream repo, proposing a specialist for a
+// type the page pass has always handled. A false decline costs one specialist that the page
+// pass covers anyway; a false accept costs a spurious proposal on a public tracker.
 //
 // This used to be backstopped by `loadAgent` finding `agents/table.md` — on a
 // case-insensitive volume, `agents/Table.md` too. Those nine files are gone (they
@@ -96,29 +95,11 @@ async function draftAgent(ctx: PipelineContext, s: Suggestion): Promise<string> 
 // For each genuinely-new suggested content type, draft an agent and file a
 // labeled GitHub issue with the code + context.
 //
-// Filed under the LOGGED-IN USER's identity, which is the whole reason GitHub is
-// the auth layer: using Iris and giving back to the shared agent library are the
-// same act, credited to the person who did it. `github.issue_token` is an
-// optional override for deployments that must file under one bot account instead,
-// and it trades that attribution away.
-//
-// There is a third case, and it is not a user: a deployment with
-// `github.anonymous_token` set serves callers who send no token as its own account, so
-// their contributions are filed under that account. Nobody signed in, so there is no
-// attribution to trade away — but a 403 there means something different from a 403 on a
-// user's token, which is what `FilingCredential` below carries to the failure.
+// Filed as the deployment's own GitHub account (`github.token`), because that is the only
+// identity this service has. Nobody's session carries a credential of their own, so the
+// issue body credits the session instead of the account — see `createAgentIssue`.
 export async function runContribution(ctx: PipelineContext, suggestions: Suggestion[]): Promise<void> {
-  // Which credential is used decides what a 403 means, so it is recorded rather than
-  // re-derived at the failure. Three cases, not two: `issue_token` wins when set, an
-  // anonymous session files with the config PAT that served it, and everyone else files
-  // as themselves. The first two are config PATs whose access has nothing to do with the
-  // GitHub App installation — see `installHintFor`.
-  const credential: FilingCredential = ctx.cfg.github.issue_token
-    ? "service"
-    : ctx.anonymousSession
-      ? "anonymous"
-      : "user";
-  const token = ctx.cfg.github.issue_token || ctx.githubToken;
+  const token = ctx.githubToken;
   if (!token || suggestions.length === 0) return;
 
   const seen = new Set<string>();
@@ -126,8 +107,8 @@ export async function runContribution(ctx: PipelineContext, suggestions: Suggest
     // Normalized and tested for standardness the same way dispatchSpecialist does it —
     // one shared pair of functions, because when the two normalized separately they
     // disagreed and the disagreement was a filed issue. See `isStandardType` for why
-    // the fallthrough is expensive: a draft is a vision call, and the issue goes up
-    // under the user's own GitHub identity.
+    // the fallthrough is expensive: a draft is a vision call, and the issue goes up on a
+    // public tracker.
     const name = logicalType(s.name);
     if (!name || isStandardType(name) || seen.has(name.toLowerCase())) continue;
     // Deduplicated case-insensitively too: `"chartData"` and `"chartdata"` in one run
@@ -163,7 +144,7 @@ export async function runContribution(ctx: PipelineContext, suggestions: Suggest
         agent: name,
         error: (e as Error)?.message ?? String(e),
         stage: "file",
-        ...installHintFor(e, { credential }),
+        ...installHintFor(e),
       });
     }
   }

@@ -35,60 +35,32 @@ export function parseRepo(url: string): RepoRef {
 // A maintainer who wants labels can add them with a repo-side rule keyed on the title
 // prefix, which applies them as the repository rather than as the filer and therefore
 // works regardless of who filed.
+//
+// Iris now files everything as ONE account (`github.token`), which may well have push
+// access — so labels could be made to stick. They are still not used: the dedupe search
+// reads the title, and a label would be a second thing to keep in step with it.
 
 // Why an issue-filing failure was probably about permissions, or undefined if it
 // was not.
 //
-// Both filing paths (a new-agent suggestion and an agent-update proposal) fail
-// softly — a contribution is a side effect and a GitHub outage must not fail a
-// document the user already paid for — so the log line is the only place the cause
-// can appear. And the cause is several steps away from the failure: which credential
-// was used depends on config, and what it may do was decided elsewhere, on
-// github.com, in a place no config file can show.
+// Both filing paths (a new-agent suggestion and an agent-update proposal) fail softly — a
+// contribution is a side effect and a GitHub outage must not fail a document the user
+// already paid for — so the log line is the only place the cause can appear. And the cause
+// is a step away from the failure: what the credential may do was decided on github.com, in
+// a place no config file can show.
 //
-// Under a GitHub App there are two such causes on the user path, which replaced two
-// scope-related ones:
+// There is one credential to blame now, `github.token`, and one place to look: that PAT's
+// own access to `upstream_repo`. A fine-grained PAT needs `Issues: read and write` on that
+// repository and nothing else. The collapse to one identity removed the harder question this
+// hint used to answer — WHICH of three credentials had failed, and whether the answer
+// implicated a GitHub App installation shared by every user.
 //
-//   - The app is NOT INSTALLED on `upstream_repo` (or its installation was removed,
-//     or `issues` was never granted write). A user-to-server token carries the
-//     user's identity but takes its repository permission from the installation, so
-//     with no installation there is no permission — for every user at once. This is
-//     the misconfiguration to suspect first, and it cannot be caught at startup: the
-//     app's install state lives on github.com, not in config.
-//
-//   - The USER cannot see `upstream_repo`. A user-to-server token is the intersection
-//     of the installation's permissions and that user's own access, so on a private
-//     upstream, filing works for collaborators and 404s for everyone else however
-//     correctly the app is installed. Distinguishable from the case above by shape
-//     rather than by status: it is per-user, not deployment-wide.
-//
-// Both 403 and 404 are diagnosed, and both user-path causes are usually 404: GitHub
-// does not reveal repositories a credential cannot see, so neither reads as a
-// permissions error. Treating 403 as the only permissions signal would miss the case
-// this hint exists for. That leaves 404 genuinely ambiguous three ways — a misspelled
-// `upstream_repo` is identical on the wire too — so the wording names the
-// possibilities instead of asserting one.
-//
-// WHICH credential failed is load-bearing, not decoration, and there are three of them
-// rather than two. A token that came from CONFIG — `github.issue_token`, or the
-// `github.anonymous_token` that files an anonymous session's contributions — is a PAT
-// whose access has nothing to do with the app's installation, so sending an operator to
-// re-install a working app would waste the one clue they have. A user's token is the
-// opposite case: its permission comes from the installation, and a failure there usually
-// affects every user until it is fixed.
-//
-// `anonymous` was the case this got wrong. It resolves to a config PAT like `service`
-// does, but the two-valued `usingServiceToken` this replaced was false for it (no
-// `issue_token` is set), so it took the user-token branch and blamed the installation.
-// The two config cases share a diagnosis
-// and differ only in which key to look at and who is affected, so they are one branch
-// with those two substituted rather than two branches saying the same thing.
-export type FilingCredential = "user" | "service" | "anonymous";
-
-export function installHintFor(
-  e: unknown,
-  opts: { credential: FilingCredential },
-): { hint: string } | undefined {
+// Both 403 and 404 are diagnosed, and 404 is the likelier: GitHub does not reveal
+// repositories a credential cannot see, so a token without access reads as "no such repo"
+// rather than as a permissions error, and treating 403 as the only permissions signal would
+// miss the common case. That leaves 404 ambiguous — a misspelled `upstream_repo` is identical
+// on the wire — so the wording names both possibilities instead of asserting one.
+export function installHintFor(e: unknown): { hint: string } | undefined {
   // Octokit's RequestError carries the code on `.status`, and only calls that
   // actually reached GitHub produce one. Deliberately NOT falling back to
   // matching the code in the message: a provider error is a plain
@@ -99,64 +71,26 @@ export function installHintFor(
   // catch, and that catch runs after the document is already delivered.
   const status = (e as { status?: number } | null)?.status;
   if (status !== 403 && status !== 404) return undefined;
-  // GitHub also answers 403 for primary and secondary rate limits, where
-  // permissions are irrelevant and this hint would send an operator to re-install a
-  // working app. Checked on the response headers first (`x-ratelimit-remaining: 0`
-  // is the primary-limit signal) and on the message text for the secondary limit,
-  // which says so in prose rather than in a header.
+  // GitHub also answers 403 for primary and secondary rate limits, where permissions are
+  // irrelevant and this hint would send an operator to re-check a working token. Checked on
+  // the response headers first (`x-ratelimit-remaining: 0` is the primary-limit signal) and
+  // on the message text for the secondary limit, which says so in prose rather than in a
+  // header.
   const message = (e as Error | null)?.message ?? "";
   const headers = (e as { response?: { headers?: Record<string, string> } } | null)?.response?.headers ?? {};
   if (headers["x-ratelimit-remaining"] === "0" || /rate limit|abuse|secondary limit/i.test(message)) {
     return undefined;
   }
-  // A missing repo is reported the same way whichever credential was used, so this
-  // possibility is named in both branches below.
-  const notFound = status === 404;
-  if (opts.credential !== "user") {
-    // One diagnosis for both config credentials, because the fix is the same one: look at
-    // that PAT, not at the installation. What differs is the key to look at, and how much
-    // of the deployment is affected — an `issue_token` failure costs every filing, an
-    // `anonymous_token` failure costs only the sessions of callers who sent no credential,
-    // which is the difference between "nothing is being contributed" and "signed-in users
-    // are fine". Naming the wrong one of those sends the operator looking in the wrong log.
-    const anon = opts.credential === "anonymous";
-    const key = anon ? "github.anonymous_token" : "github.issue_token";
-    const whose = anon ? "this deployment's anonymous credential" : "the service account";
-    return {
-      hint:
-        `${status} while filing as ${whose}: ${key} is set, so the failing ` +
-        `credential is that PAT — check its scopes and its access to upstream_repo on github.com` +
-        (notFound ? `, and check that upstream_repo is spelled correctly (GitHub answers 404 for a repo a token cannot see)` : ``) +
-        `. The GitHub App's installation is not involved; it only governs tokens issued to users.` +
-        (anon
-          ? ` Only anonymous sessions file with this credential, so signed-in users are unaffected — if filing ` +
-            `fails for them too, that is a separate cause.`
-          : ``),
-    };
-  }
   return {
     hint:
-      (notFound
-        ? // The uninstalled case. GitHub hides the repo rather than refusing, so
-          // this reads as "no such repo" until you know to suspect the installation.
-          //
-          // Two other causes produce an identical 404 and are named rather than
-          // assumed away. A misspelled `upstream_repo` is the cheap one. The other is
-          // that a user-to-server token is the intersection of the installation's
-          // permissions and THIS USER's own access: on a private upstream, a user who
-          // cannot see the repo 404s no matter how correctly the app is installed —
-          // and that one is per-user, not deployment-wide, so it must not be reported
-          // with the "affects every user" framing below.
-          `404 on a repo that exists means this user's token cannot see it: the GitHub App is probably not ` +
-          `installed on upstream_repo. (A misspelled upstream_repo gives the same 404. So does a PRIVATE ` +
-          `upstream_repo that this particular user cannot access — a user's token is limited to their own ` +
-          `access as well as the installation's, so a private upstream needs github.issue_token to file for ` +
-          `everyone; if filing works for some users and not others, that is this.) `
-        : `403 usually means the GitHub App's installation lacks Issues write on this repo. `) +
-      `Install the app on upstream_repo — or check that its installation still grants Issues: Read and write — ` +
-      `at github.com/settings/installations. A user's authorization carries no repository access on its own; ` +
-      `permission comes from the installation, so if the installation is the cause this affects every user ` +
-      `until it is fixed.`,
+      `${status} while filing an issue: the credential is github.token, so check that PAT's access to ` +
+      `upstream_repo on github.com — a fine-grained token needs "Issues: read and write" on that repository, ` +
+      `and an expired token fails here too. ` +
+      (status === 404
+        ? `GitHub answers 404 rather than 403 for a repository a token cannot see, so this is either ` +
+          `permissions or a misspelled upstream_repo. Both are worth checking. `
+        : ``) +
+      `This affects every filing rather than one user's: the whole deployment files as this one account.`,
   };
 }
 
@@ -365,9 +299,8 @@ export async function createAgentUpdateIssue(
 // A code span, not plain text, because this is the only string in either body that a
 // user typed by hand, and GitHub renders markdown in issue bodies: an `@name` in it
 // would ping a stranger, `#12` would cross-link an unrelated issue, and `[x](url)`
-// would publish a link — all under whichever identity filed, which `github.issue_token`
-// can make a service account rather than the person who typed it. None of that is
-// linkified inside a code span.
+// would publish a link — all under the deployment's own GitHub account, which is not the
+// person who typed it. None of that is linkified inside a code span.
 //
 // Collapsed to one line (a code span cannot hold a blank line), capped, and fenced with
 // one more backtick than the longest run in the text so the user cannot close the span

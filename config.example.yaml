@@ -5,9 +5,20 @@
 
 server:
   port: 8080
-  # Public base URL of this deployment. Used to build the GitHub OAuth
-  # callback URL and surfaced in device-flow instructions.
+  # Public URL of this deployment. Printed at startup so you can check the running
+  # process is the one you meant to deploy. Iris builds no URLs from it.
   base_url: http://localhost:8080
+  # Shared secret every /v1 caller must send as `Authorization: Bearer <token>`.
+  #
+  # Blank (the default) means the API is OPEN: anyone who can reach this deployment
+  # can convert documents and can read any session whose id they have. That is what
+  # makes the bundled demo page work — it holds no credential.
+  #
+  # Set it to close the deployment. It is NOT a GitHub token and grants nothing on
+  # GitHub; it only decides who may call the API. Everything still runs as the one
+  # GitHub account in `github.token` below. Setting it also means the demo page
+  # cannot be used against this deployment, since the page sends no token.
+  api_token: ${IRIS_API_TOKEN}
   # Shared secret gating GET /v1/quality, the deployment-wide tally of how good
   # the output has been. Read by the weekly quality-report workflow,
   # which files an issue when a rate crosses a threshold.
@@ -37,11 +48,12 @@ server:
   # everyone using it — including the runs already in flight — and the run cap
   # below cannot help, since the cheap endpoints never reach the queue.
   #
-  # Defaults are sized an order of magnitude above a working client (the demo
-  # polls a running session every 2.5s; a device-flow login polls every 5s) and
-  # are counted per GitHub token where one has been validated, per address
-  # otherwise — so one user's polling loop cannot spend everyone else's budget
-  # behind a shared NAT. Omit any key for its default; a valueless or
+  # Everything is counted PER ADDRESS. There is nothing better to count against:
+  # one deployment is one GitHub account, and `server.api_token` is shared, so
+  # keying on the credential would put every caller in one bucket. The cost is
+  # that users behind one NAT or proxy share a bucket, which is why the defaults
+  # sit an order of magnitude above a working client (the demo page polls a
+  # running session every 2.5s). Omit any key for its default; a valueless or
   # non-positive key is treated as unset rather than as "allow nothing".
   #
   # `GET /v1/limits` publishes whatever is in effect, and a refused request gets
@@ -49,14 +61,8 @@ server:
   rate_limits:
     # Everything under /v1 except the liveness probe.
     general_per_minute: 240
-    # /v1/auth only, per address — there is no credential yet to count against.
-    # Each device-flow poll costs an OUTBOUND call to GitHub, which is what this
-    # protects; it is not a brute-force limit (there is no password here, and the
-    # code is entered at github.com). Keep it well above 12/minute or logins
-    # behind a shared address become unreliable.
-    auth_per_minute: 60
-    # POST /v1/sessions, per user. A conversion takes minutes and runs are queued,
-    # so uploads past this only wait on each other.
+    # POST /v1/sessions. A conversion takes minutes and runs are queued, so
+    # uploads past this only wait on each other.
     upload_per_minute: 12
     # Megabytes of upload body being RECEIVED at once, across all callers — the
     # one number here that bounds memory rather than request count, and so the
@@ -80,94 +86,39 @@ storage:
   # alternative for multi-instance deployments (not implemented in v1).
   database: ./data/iris.sqlite
 
-# GitHub OAuth is the only auth mechanism, and by default a user's token is
-# REQUIRED on every API call. That is the sustainability model, not a limitation:
-# the token identifies the user AND files their session's feedback back to the
-# shared agent library under their own identity, so using Iris and improving it are
-# the same act. `anonymous_token` below is the one way to open the service to
-# callers who send no token. It is off unless you set it. It costs those callers
-# their session list and their credit.
+# Iris has ONE GitHub identity: the token below. The server holds it, callers never
+# see it, and nobody signs in. Every session is owned by that account and every issue
+# Iris files is filed under it.
 #
-# Nothing here opens pull requests: contributions are filed as issues (an earlier
-# design opened them — see docs/design-notes.md).
+# What that costs, and Iris says so at every boot:
+#   - Contributors get no credit. A suggestion produced by someone else's document is
+#     filed under this account, with their feedback quoted in the body.
+#   - `GET /v1/sessions` lists the DEPLOYMENT's sessions, not one caller's. Anyone who
+#     may call the API can see what everyone converted. A private deployment wants
+#     `server.api_token` set.
+#   - Rate limits count per address, since every request is the same account.
 #
-# The user's token is never persisted. It arrives in the `Authorization` header,
-# stays in memory for the run it authorizes, and is gone when the run ends — so a
-# copy of the SQLite database is not GitHub access.
+# Earlier versions signed each user in through a GitHub App device flow, which is where
+# the credit came from. It is gone: see docs/design-notes.md for what it cost to run.
+#
+# Nothing here opens pull requests — contributions are filed as issues.
+#
+# The token is never persisted. It stays in memory, so a copy of the SQLite database
+# is not GitHub access.
 github:
-  # Leave blank to use the bundled Equalify Iris GITHUB APP via the device flow
-  # (no per-operator app setup needed — like the GitHub CLI). Set it only to point
-  # at your own GitHub App; its id starts `Iv`, and the id is not a secret.
+  # REQUIRED. A fine-grained personal access token with `Issues: read and write` on
+  # `upstream_repo` and nothing else. Iris refuses to start without it.
   #
-  # It must be a GitHub App, not an OAuth App: an `Ov…` id is refused at startup,
-  # because Iris requests no OAuth scope and an OAuth App would therefore
-  # authenticate users fine and then fail every issue filing. See the note below
-  # `issue_token` for the registration settings your own app needs.
-  #
-  # Leaving this blank and changing `upstream_repo` is NOT enough on its own: the
-  # bundled app is installed on EqualifyEverything/equalify-iris, and an app's
-  # `issues: write` comes from its installation, so filing would fail for every user.
-  # That combination warns at startup.
-  client_id: ${GITHUB_CLIENT_ID}
-  # Only required for the WEB redirect flow (/auth/github/start + /callback). The
-  # device flow (CLI/Postman) needs no secret. Never commit a real secret.
-  client_secret: ${GITHUB_CLIENT_SECRET}
-  # The upstream agent library repo — where agent-suggestion issues are filed.
-  # Changing this requires a GitHub App installed on THAT repo: see `client_id` above.
+  # Set it from the environment, as here, and keep it out of the file. It expires and
+  # nothing renews it: when it does, filing fails with a 403/404 whose log line names
+  # this key. Conversions keep working — filing is the part that stops.
+  token: ${IRIS_GITHUB_TOKEN}
+  # The upstream agent library repo — where agent-suggestion issues are filed. The
+  # token above needs issue write access to THIS repository.
   upstream_repo: ${IRIS_UPSTREAM_REPO}
-  # GitHub host base URLs. Override for GitHub Enterprise (e.g.
-  # https://github.example.com/api/v3 and https://github.example.com). Defaults
-  # to public GitHub when omitted.
+  # GitHub API base URL. Override for GitHub Enterprise (e.g.
+  # https://github.example.com/api/v3). Defaults to public GitHub when omitted.
   api_base_url: ${GITHUB_API_BASE_URL}
-  oauth_base_url: ${GITHUB_OAUTH_BASE_URL}
-  # OPTIONAL override for who authors auto-filed issues. Leave blank (the default):
-  # issues are then filed as the logged-in user, which is the point of the design —
-  # each contribution is credited to the person whose session produced it. A PAT here
-  # files everything under one bot account instead and erases that attribution, so
-  # set it only where a deployment genuinely cannot file as its users (e.g. an org
-  # policy that forbids it).
-  issue_token: ${IRIS_GITHUB_TOKEN}
-  # No `oauth_scope` key: Iris authenticates as a GITHUB APP, which does not use
-  # OAuth scopes. Its one permission — `issues: write` — comes from INSTALLING the app
-  # on `upstream_repo`, so the consent screen users see requests no repository access
-  # at all.
-  #
-  # If `upstream_repo` is PRIVATE, note that a user's token is limited to that user's
-  # own access as well as the installation's: filing then works only for users who can
-  # already see the repo, and 404s for the rest. Set `issue_token` above for a private
-  # upstream that must accept contributions from non-collaborators.
-  #
-  # (An OAuth App could only express "file an issue" as `public_repo`: read AND write
-  # to every public repo the user can reach, account-wide. That is what this replaced.)
-  #
-  # Pointing `client_id` at your own app therefore means registering a GitHub App with
-  # device flow ENABLED and user-token expiry OFF, then installing it on your
-  # `upstream_repo`. If filing logs a 403/404, the app is probably not installed — the
-  # log line's `hint` says so.
-  #
-  # OPTIONAL demo mode. Set this to a token for a DEDICATED GitHub account — not one a
-  # person signs in with — and callers who send NO `Authorization` header are served as
-  # that account instead of refused. Leave it unset — the default — and a token is
-  # required on every call. Turn it on so a visitor can convert one page before deciding
-  # to sign in.
-  #
-  # Four costs, all deliberate, and Iris warns about them at every boot:
-  #   - No session list. Ownership is the GitHub user id, so every anonymous visitor is
-  #     the same owner; `GET /v1/sessions` refuses them (403 `anonymous_session_list`)
-  #     rather than listing strangers' documents. A session is still reachable by the id
-  #     `POST /v1/sessions` returned.
-  #   - THIS account loses its own session list. The refusal is on the identity, not on
-  #     the request's shape, so signing in as it gets the same 403. Use an account
-  #     nobody needs: the alternative is that its token lists every visitor's uploads.
-  #   - Uploads are limited by ADDRESS, not per user — one shared account would otherwise
-  #     be one `upload_per_minute` bucket for everyone.
-  #   - Their feedback is filed under THIS account. That is the credit the default
-  #     protects, so a deployment that cares about attribution leaves this blank.
-  #
-  # A caller who sends a BROKEN token is still refused: this serves people who present
-  # nothing, not people whose sign-in failed. Clients detect the mode with `GET /v1/me`,
-  # which answers `anonymous: true` (and 401 where the mode is off).
-  anonymous_token: ${IRIS_ANONYMOUS_TOKEN}
 
 # LLM provider abstraction (see docs/models.md). Each agent declares a capability;
 # the deployment decides which provider serves it.

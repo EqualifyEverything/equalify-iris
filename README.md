@@ -14,11 +14,10 @@ Three constraints shape the whole design, and the code is written to hold them:
   model provider, database, object store — is replaceable by configuration, and the defaults
   (SQLite + local filesystem) need nothing hosted. That is also why in-process work is
   budgeted rather than assumed: see the concurrency and request-limit knobs below.
-- **GitHub, deliberately not replaceable.** GitHub is the only sign-in, and by default a token
-  is required on every call, because that token is what files each session's contributions under
-  the user's own name. One config key opens a demo mode where callers who send no token share the
-  deployment's own account, and it costs them their session list and their credit —
-  [why](#github-is-the-only-sso-layer-and-tokens-are-required).
+- **One GitHub identity, held by the server.** There is no sign-in. You set one GitHub token; Iris
+  uses it to file every session's contributions. Callers send nothing — or a shared secret, if you
+  gate the deployment. Simple, and it costs per-user attribution and session isolation:
+  [what that means](#one-github-identity-and-no-sign-in).
 
 ---
 
@@ -150,8 +149,8 @@ Check it's alive:
 curl http://localhost:8080/v1/health
 ```
 
-Or just open the **accessible browser app** at the root for a no-API walkthrough (sign in with
-GitHub → upload page images → convert → view the accessible HTML):
+Or just open the **accessible browser app** at the root for a no-API walkthrough — no sign-in, no
+token (upload page images → convert → view the accessible HTML):
 
 ```
 http://localhost:8080/
@@ -199,15 +198,14 @@ from the environment at startup; changes require a restart.
   `server.rate_limits` bounds what can be **asked** of it, which is a different problem — the cheap
   endpoints never reach the queue, and every one of them queries SQLite *synchronously* on the one
   event loop. Per minute: `general_per_minute` across `/v1` (240, liveness probe exempt),
-  `auth_per_minute` on `/v1/auth` (60 — each device-flow poll costs an outbound call to GitHub, so
-  this protects your GitHub rate limit rather than a password), `upload_per_minute` on session
-  creation (12), plus `max_upload_memory_mb` (256), which meters the **bytes** of upload body
-  arriving at once so that concurrent *small* uploads never wait on each other. These gates
-  **refuse** (429 with `Retry-After` and the standard error body) rather than wait, since nothing
-  has been received yet — the opposite of the run cap, for the same reason. A request counts
-  against its GitHub token once validated and against its address otherwise, so one user's polling
-  cannot spend everyone's budget from behind a shared NAT. `GET /v1/limits` publishes whatever is in
-  effect. Set `enabled: false` to turn it off where a proxy already does the job.
+  `upload_per_minute` on session creation (12), plus `max_upload_memory_mb` (256), which meters the
+  **bytes** of upload body arriving at once so that concurrent *small* uploads never wait on each
+  other. These gates **refuse** (429 with `Retry-After` and the standard error body) rather than
+  wait, since nothing has been received yet — the opposite of the run cap, for the same reason.
+  Every request counts against its **address**: there is one identity here, so a credential-keyed
+  budget would be one bucket for the whole internet. The cost is that callers behind one NAT share a
+  bucket. `GET /v1/limits` publishes whatever is in effect. Set `enabled: false` to turn it off where
+  a proxy already does the job.
 - **Behind a reverse proxy**: set `server.trust_proxy` to the number of proxies in front of Iris
   (1 for a single Caddy/nginx). Without it every caller presents as the proxy's address and shares
   one rate-limit bucket — the log warns when it sees an `X-Forwarded-For` while this is unset.
@@ -215,84 +213,65 @@ from the environment at startup; changes require a restart.
   header a client wrote, which would make the per-address limits bound nothing. Express's own
   vocabulary (`loopback`, or a list of proxy addresses and subnets) works too; anything it cannot
   interpret warns and trusts nothing, rather than taking the process down at startup.
-- **GitHub**: GitHub is the auth mechanism — a user *is* their GitHub account, and a token
-  is **required** on every call. By default the
-  service uses a **bundled GitHub App via the device flow** — no per-operator app setup, no
-  secret (the same approach the `gh` CLI uses). Set `github.client_id` only to point at your
-  own GitHub App; `client_secret` is needed only if you enable the web redirect flow.
-  **No OAuth scope is requested at all** — the app's one permission comes from installing it on
-  `upstream_repo` — see [GitHub is the only SSO layer](#github-is-the-only-sso-layer-and-tokens-are-required).
+- **GitHub**: one key, and Iris will not start without it. `github.token` is a fine-grained PAT with
+  `Issues: read and write` on `upstream_repo` — see
+  [One GitHub identity](#one-github-identity-and-no-sign-in). There is no app to register and no
+  OAuth app: nothing here runs a login flow.
+- **Who may call the API**: `server.api_token` is a shared secret, blank by default. Blank means
+  **open** — anyone who can reach the port can convert documents and spend your model budget. Set it
+  on a public deployment.
 
-### GitHub is the only SSO layer, and tokens are required
+### One GitHub identity, and no sign-in
 
-There is no API key and no second identity provider. By default every request carries a user's
-GitHub token, and that token is what files the session's feedback back to the shared agent
-library — as an issue, under that user's own GitHub identity.
+Iris holds **one** GitHub token, server-side. Callers never present a GitHub credential. That token
+is what files each session's feedback back to the shared agent library, as an issue on
+`upstream_repo`.
 
-**That is the sustainability model, not an implementation detail.** The agents in
-`agents/` get better because sessions run against real documents and real corrections; a user who
-could consume the service without contributing would be taking from a library nobody was refilling.
-Requiring GitHub auth is how using Iris and improving it become the same act, and how each
-contribution is credited to the person who produced it. If you would rather your users not
-contribute, this is not the service to deploy.
+**Contributing back is the sustainability model, not an implementation detail.** The agents in
+`agents/` get better because sessions run against real documents and real corrections; a deployment
+that consumed the service without contributing would be taking from a library nobody was refilling.
 
-**The one exception is a demo, and you have to turn it on.** Set `github.anonymous_token` to a
-token for a **dedicated** GitHub account — one no person signs in with — and callers who send **no**
-`Authorization` header are served as that account instead of refused. Leave it unset — the default —
-and there is no anonymous access at all. It exists so a visitor can try Iris on one page before
-deciding to sign in.
+**What one identity costs.** Iris warns about all of this at boot, so it does not surprise you in
+production:
 
-What it costs, all of it deliberate and none of it visible to the caller unless you tell them:
+- **No attribution.** Every issue is filed as your token's account. It says what a session found,
+  not who found it.
+- **No session isolation.** Ownership is one account, so `GET /v1/sessions` lists *the deployment's*
+  sessions, not the caller's — and a session id is all it takes to read that document. Visitors are
+  not walled off from each other, because there is nobody to wall off.
+- **Limits per address.** The only credential a caller can present is shared, so keying a budget on
+  it would put the whole internet in one bucket.
 
-- **No session list.** Ownership is the GitHub user ID and nothing else, so every anonymous
-  visitor is the same owner. `GET /v1/sessions` therefore refuses them with `403
-  anonymous_session_list` rather than listing strangers' documents. A session is still reachable
-  by its own ID, which is what `POST /v1/sessions` returns.
-- **That account loses its own session list too.** The refusal is on the identity, not on the
-  shape of the request, so signing in as it — or presenting its token as an ordinary `Bearer` —
-  gets the same 403. It has to be an account you do not use, because the alternative is worse:
-  if holding that token bought a session list, whoever holds it reads every visitor's uploads.
-- **Upload limits by address, not by user.** One shared account would otherwise be one
-  `upload_per_minute` bucket for the whole internet.
-- **Feedback filed under that account.** An anonymous session's issues are filed as it, not as
-  the visitor, which is exactly the credit the default is protecting.
+**So decide who may call it.** `server.api_token` gates `/v1/me` and `/v1/sessions` behind a shared
+secret you hand out; blank leaves them open. Health, limits, stats and quality stay reachable either
+way — none of them touches a document. Gating also turns off the bundled browser app, which holds no
+credential: that is the trade.
 
-A request that sends a *broken* token is still refused — the fallback is for callers who present
-nothing, not for ones whose sign-in failed. Iris warns at boot whenever the key is set, and
-`GET /v1/me` answers `anonymous: true` so a client can tell which mode it is in.
+**Nothing about a caller is stored.** Callers do not authenticate, so there is nothing to store about
+them — and there is no `github_token` column in `data/iris.sqlite` and no token file. A stolen copy of
+the database holds your deployment's own GitHub user ID and login, plus session history. Not GitHub
+access. Your token lives in your environment, like any other server secret.
 
-**A user's token is never written to disk.** It arrives in the `Authorization` header, is used in
-memory for the request and for the run it authorizes, and is gone when the run ends. There is no
-`github_token` column in `data/iris.sqlite` and no token file — a stolen copy of the database is a
-list of GitHub user IDs and logins, not GitHub access. Revoking at github.com is the whole
-mechanism; there is nothing here to rotate or purge.
-
-Everything an operator needs beyond that is in **[docs/github-auth.md](docs/github-auth.md)**:
-registering your own GitHub App, what a **private** `upstream_repo` can and cannot accept,
-`github.issue_token` and what it trades away, the 5-minute identity cache, and — if you are coming
-from an earlier build — the two config changes that can stop a working deployment, plus why a
-`data/iris.sqlite` from back then has to be deleted rather than adopted.
+Everything an operator needs is in **[docs/github-auth.md](docs/github-auth.md)**: making the token
+with the right permission, what an expired one breaks (filing, and nothing else), the two 401s and
+what each means, and — if you are coming from an earlier build — the keys to delete and why a
+`data/iris.sqlite` from back then has to go.
 
 ## API
 
-All endpoints are under `/v1` and (except auth, health, stats and limits) require
-`Authorization: Bearer <github_token>`. `/v1/quality` is the one exception in the other
-direction: it takes a bearer token too, but its own shared secret rather than a GitHub one.
-Where `github.anonymous_token` is set, a request with no header at all is served as the
-deployment's account — except `GET /v1/sessions`, which refuses it.
+All endpoints are under `/v1`. **No endpoint takes a GitHub token.** Where `server.api_token` is set,
+`/v1/me` and everything under `/v1/sessions` need `Authorization: Bearer <server.api_token>`; where it
+is blank they need no header at all. Health, limits and stats never do. `/v1/quality` is the exception
+in the other direction: it has its own shared secret and 404s unless you set it.
 
 | Method & path | Purpose |
 | --- | --- |
-| `GET  /v1/health` | Liveness probe |
-| `GET  /v1/stats` | Public tally of pages converted, plus a two-number quality summary (no token; aggregate only) |
+| `GET  /v1/health` | Liveness probe (never gated) |
+| `GET  /v1/stats` | Public tally of pages converted, plus a two-number quality summary (never gated; aggregate only) |
 | `GET  /v1/quality` | Deployment-wide tally of output *quality* (own shared secret, off by default; aggregate only) |
-| `GET  /v1/limits` | What an upload may be — formats, per-image size, page cap (no token) |
-| `GET  /v1/auth/github/start` | Begin OAuth (web clients) |
-| `GET  /v1/auth/github/callback` | OAuth callback → returns access token |
-| `POST /v1/auth/github/device` | Begin device flow (CLI clients) |
-| `POST /v1/auth/github/device/poll` | Poll device flow (send `{ "device_code": ... }`) |
-| `GET  /v1/me` | Current GitHub user + config (also answers whether anonymous use is allowed) |
-| `GET  /v1/sessions` | List the caller's sessions (never anonymous — see the demo mode above) |
+| `GET  /v1/limits` | What an upload may be — formats, per-image size, page cap (never gated) |
+| `GET  /v1/me` | What this deployment is: its GitHub account, upstream repo and defaults. Also the probe for whether it is gated |
+| `GET  /v1/sessions` | List **the deployment's** sessions — see the note above on isolation |
 | `POST /v1/sessions` | Create a session, upload images and/or PDFs (`multipart/form-data`) |
 | `GET  /v1/sessions/{id}` | Poll status |
 | `GET  /v1/sessions/{id}/output` | Fetch the HTML when ready |
@@ -350,7 +329,7 @@ src/
     calibration.ts       # does the fidelity verifier discriminate? (docs/verifier-calibration.md)
   tools/calibrate.ts     # CLI for that measurement; nothing in a run imports it
   util/queue.ts          # bounded FIFO run queue (cross-session concurrency cap)
-  auth/                  # GitHub OAuth + device flow + bearer middleware
+  auth/                  # resolves the deployment's one GitHub identity; gate middleware
   github/                # auto-files labeled agent-suggestion issues
   store/                 # node:sqlite metadata store + on-disk session layout
   routes/                # /v1 endpoints
@@ -371,7 +350,7 @@ of these were always their own documents.
 | [docs/API.md](docs/API.md) | Every endpoint, with copy-pasteable `curl`. The run log's fields. |
 | [docs/design-notes.md](docs/design-notes.md) | Why the code is the way it is. Read this before changing it. |
 | [docs/models.md](docs/models.md) | Which model runs which agent, and what each choice is worth. |
-| [docs/github-auth.md](docs/github-auth.md) | Deploying the GitHub sign-in: your own app, a private upstream, an older database. |
+| [docs/github-auth.md](docs/github-auth.md) | The GitHub token: making it, what one identity costs, gating the API, an older database. |
 | [docs/cost.md](docs/cost.md) | What a page costs, measured. |
 | [docs/ci.md](docs/ci.md) | The five workflows that run this repo, including the bot that will review your PR. |
 | [docs/verifier-calibration.md](docs/verifier-calibration.md) | How to re-measure whether the page verifier catches damage. |

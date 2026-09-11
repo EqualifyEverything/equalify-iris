@@ -48,7 +48,7 @@ for PDF uploads — **poppler-utils** (`brew install poppler` / `apt-get install
 
 ```bash
 npm install
-cp .env.example .env            # GitHub OAuth (optional) + a model provider key
+cp .env.example .env            # a GitHub PAT (required) + a model provider key
 cp config.example.yaml config.yaml
 npm start                       # http://localhost:8080  (app at /, API under /v1)
 ```
@@ -154,5 +154,6 @@ Your PR gets a review from Claude in CI before a maintainer reads it
 ## Architecture (orientation)
 
 `src/pipeline` (extraction → assembly → review), `src/providers` (LLM provider abstraction),
-`src/routes` (the `/v1` API), `src/auth` (GitHub OAuth), `agents/` (the agent prompt files).
+`src/routes` (the `/v1` API), `src/auth` (the deployment's one GitHub identity, and the API gate),
+`agents/` (the agent prompt files).
 See [README.md](README.md) and [docs/API.md](docs/API.md).

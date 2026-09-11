@@ -18,10 +18,25 @@ DATA=/tmp/iris-e2e
 CFG=/tmp/iris-e2e-config.yaml
 LOG=/tmp/iris-e2e.log
 BASE="http://localhost:$PORT/v1"
+# A SECOND, short-lived deployment with the gate switched off (step 3a). Its own port,
+# database and log, because it runs while the first one is still up and two Stores on one
+# sqlite file would be testing locking rather than the gate.
+OPEN_PORT=8100
+OPEN_DATA=/tmp/iris-e2e-open
+OPEN_CFG=/tmp/iris-e2e-open-config.yaml
+OPEN_LOG=/tmp/iris-e2e-open.log
+OPEN_BASE="http://localhost:$OPEN_PORT/v1"
 # Shared secret for GET /v1/quality (step 11c). Not a GitHub token — that endpoint
-# is the one that does not use the per-user auth, because it returns an aggregate
-# belonging to no user and its real caller is a CI job.
+# returns an aggregate belonging to no user and its real caller is a CI job.
 QUALITY_TOKEN=e2e-quality-token
+# The shared secret gating /v1 (server.api_token). Set here so the script exercises a
+# CLOSED deployment: the gate is optional, and a run with it unset would never check that
+# the refusal works or that the token is compared the way the docs say.
+API_TOKEN=e2e-api-token
+# The deployment's GitHub PAT (github.token) — the only GitHub credential in the system.
+# Must match DEPLOYMENT_TOKEN in test/mock-services.mjs, which refuses anything else, so
+# a config that never reaches the GitHub client fails here rather than passing quietly.
+GITHUB_TOKEN=ghp_e2e_deployment_token
 
 # Seconds to wait for Iris to answer /health. Generous because a cold CI runner
 # type-strips every .ts source with no warm cache; locally this takes ~1s.
@@ -45,7 +60,7 @@ dump_server_log() {
 PIDS=()
 cleanup() {
   for pid in "${PIDS[@]:-}"; do kill "$pid" 2>/dev/null || true; done
-  rm -rf "$DATA" "$CFG"
+  rm -rf "$DATA" "$CFG" "$OPEN_DATA" "$OPEN_CFG"
 }
 trap cleanup EXIT
 
@@ -60,27 +75,26 @@ server:
   # 11c needs it on. Written literally rather than via \${IRIS_QUALITY_TOKEN} so
   # the test does not depend on the caller's environment.
   quality_token: $QUALITY_TOKEN
+  # Written literally for the same reason as quality_token above.
+  api_token: $API_TOKEN
   # A whole test run is one client from one address (issue #102): this script creates ~11
   # sessions and polls twice a second throughout, which is nothing for a deployment but
   # sits right on the DEFAULT upload budget of 12/minute when the mocks make runs finish
   # in seconds. Raised rather than switched off, so what these steps exercise is still the
-  # real limiter — and \`auth_per_minute\` is deliberately left SMALL, because the device
-  # flow above is the last authentication this script performs, which makes /v1/auth the
-  # one budget it can exhaust on purpose to prove a refusal (step 3b).
+  # real limiter. \`upload_per_minute\` is raised only to 30 — comfortably above the ~11 this
+  # script needs and low enough to exhaust on purpose at the end (step 11e), which is the
+  # one budget it can prove a refusal on now that /v1/auth is gone.
   rate_limits:
     general_per_minute: 6000
-    upload_per_minute: 600
-    auth_per_minute: 10
+    upload_per_minute: 30
 storage:
   data_dir: $DATA
   agents_dir: ./agents
   database: $DATA/iris.sqlite
 github:
-  client_id: test-client
-  client_secret: test-secret
+  token: $GITHUB_TOKEN
   upstream_repo: https://github.com/example/iris
   api_base_url: http://localhost:$GH_PORT
-  oauth_base_url: http://localhost:$GH_PORT
 providers:
   default: openrouter
   openrouter:
@@ -187,9 +201,11 @@ done
 pass "the agents it can route are not named among them"
 
 echo "==> 1b. GET /v1/limits (what an upload may be, no token)"
-# Deliberately WITHOUT "${AUTH[@]}": the browser app states the file limits on its
-# upload step, where the visitor has not signed in yet, so this endpoint sits above
-# the auth middleware. Step 2 establishes that everything else 401s.
+# Deliberately WITHOUT "${AUTH[@]}": the browser app states the file limits on its upload
+# step, and someone deciding whether a scan is small enough should not need the deployment's
+# shared token to find out — so this endpoint sits above the auth middleware and stays
+# reachable even on a gated deployment like this one. Step 2 establishes that /v1/me and
+# /v1/sessions do not.
 #
 # Asserted as a shape, not as today's numbers — every value here is resolved from the
 # configured model and provider, and this run's config is not the deployment's. What
@@ -225,60 +241,114 @@ curl -si "$BASE/health" | grep -qi '^ratelimit:' \
   && fail "health exempt" "the liveness probe is behind the rate limiter" \
   || pass "liveness probe is not rate limited"
 
-echo "==> 2. auth gating (no token => 401)"
+echo "==> 2. the gate refuses a caller who cannot present server.api_token"
+# Three shapes, one answer. A deployment that told them apart would tell a stranger which
+# half of their guess was right; all any of them may learn is that the deployment is gated.
 code=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/me")
-[ "$code" = "401" ] && pass "unauthenticated request rejected" || fail "auth gating" "got $code"
+[ "$code" = "401" ] && pass "refused: no Authorization header" || fail "auth gating (absent)" "got $code"
+code=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Token $API_TOKEN" "$BASE/me")
+[ "$code" = "401" ] && pass "refused: right secret, wrong scheme" || fail "auth gating (scheme)" "got $code"
+code=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer not-the-secret" "$BASE/me")
+[ "$code" = "401" ] && pass "refused: wrong secret" || fail "auth gating (secret)" "got $code"
+# All three carry the same message, and it is the deployment's shape rather than the
+# library's default text.
+body=$(curl -s "$BASE/me")
+echo "$body" | jq -e '.error.code=="unauthorized" and (.error.message|test("shared API token"))' >/dev/null \
+  && pass "the refusal says the deployment is gated, and nothing else" || fail "auth gating shape" "$body"
+AUTH=(-H "Authorization: Bearer $API_TOKEN")
 
-echo "==> 3. device flow"
-dev=$(curl -s -X POST "$BASE/auth/github/device")
-echo "$dev" | jq -e '.user_code and .verification_uri' >/dev/null && pass "device code issued" || fail "device" "$dev"
-DEVICE_CODE=$(echo "$dev" | jq -r '.device_code')
-poll=$(curl -s -X POST "$BASE/auth/github/device/poll" -H 'content-type: application/json' -d "{\"device_code\":\"$DEVICE_CODE\"}")
-TOKEN=$(echo "$poll" | jq -r '.access_token')
-[ -n "$TOKEN" ] && [ "$TOKEN" != "null" ] && pass "token obtained: $TOKEN" || fail "device poll" "$poll"
-AUTH=(-H "Authorization: Bearer $TOKEN")
-
-# Iris requests NO scope: it authenticates as a GitHub App, whose `issues: write`
-# comes from installing the app on `upstream_repo` rather than from the user. This is
-# invisible from the client — the flow succeeds whatever is requested — and a scope
-# added back would be silently ignored by GitHub rather than breaking anything, so
-# nothing but this assertion would notice the service going back to asking every user
-# for account-wide access to their public repos.
-#
-# `.recorded` is asserted alongside `.present`: "the body carried no scope" and "the
-# route was never hit" would otherwise be the same answer, so this assertion — the only
-# thing standing between the repo and a silently reintroduced scope — could pass
-# vacuously if the service stopped starting the flow at all.
-scope=$(curl -s "http://localhost:$GH_PORT/__last_device_scope")
-echo "$scope" | jq -e '.recorded==true and .present==false' >/dev/null \
-  && pass "the device flow requested no scope (and a request was actually recorded)" \
-  || fail "oauth scope" "expected a recorded device-flow body carrying no scope, got $scope"
-
-echo "==> 3b. the request budget is enforced, not just published (issue #102)"
-# Step 1b proved the limiter is mounted and publishes headers; this proves it REFUSES, in
-# the documented shape, through the real stack. /v1/auth is the endpoint to do it on: it
-# holds the strict budget (auth_per_minute: 10 in the config above), the login just above
-# is the last authentication this script performs, and every request there would otherwise
-# cost an outbound call to GitHub — which is the reason the limit exists.
-code=""
-for i in $(seq 1 12); do
-  code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/auth/github/device")
-  [ "$code" = "429" ] && break
-done
-[ "$code" = "429" ] && pass "auth budget enforced after $i requests" \
-  || fail "auth limit" "expected a 429 within 12 requests to /v1/auth, got $code"
-# And the refusal is an Iris error with a retry hint rather than the library's default
-# plain-text body — a client that cannot parse a refusal cannot pace itself.
-refusal=$(curl -si -X POST "$BASE/auth/github/device")
-echo "$refusal" | grep -qi '^retry-after:' \
-  && echo "$refusal" | tail -1 | jq -e '.error.code=="rate_limited" and .error.details.retry_after_seconds > 0' >/dev/null \
-  && pass "429 carries Retry-After and an Iris error body" \
-  || fail "auth limit shape" "expected Retry-After and an Iris rate_limited body, got: $refusal"
-
-echo "==> 4. GET /v1/me"
+echo "==> 3. the deployment has one GitHub identity, resolved once"
+# The gate is not an identity: presenting it makes a caller allowed, not somebody. Who the
+# deployment IS comes from github.token, and the mock refuses any other value — so a 200
+# here means the configured PAT reached the GitHub client.
 me=$(curl -s "${AUTH[@]}" "$BASE/me")
-echo "$me" | jq -e '.github_login=="iris-tester" and .defaults.max_review_iterations==1' >/dev/null \
-  && pass "identity resolved ($(echo "$me" | jq -r .github_login))" || fail "me" "$me"
+echo "$me" | jq -e '.github_login=="iris-tester"' >/dev/null \
+  && pass "identity resolved ($(echo "$me" | jq -r .github_login))" || fail "identity" "$me"
+# Resolved ONCE for the process, not per request. Invisible from the client — every
+# response is a 200 either way — and the cost of getting it wrong is one outbound GitHub
+# call per request on a service whose demo page polls every 2.5s.
+for _ in 1 2 3; do curl -s -o /dev/null "${AUTH[@]}" "$BASE/me"; done
+lookups=$(curl -s "http://localhost:$GH_PORT/__user_lookups" | jq -r .count)
+[ "$lookups" = "1" ] && pass "GET /user was called once for the whole run" \
+  || fail "identity lookups" "expected 1 call to GitHub's /user, got $lookups"
+# Nothing signs in, so the endpoints that used to exist for it are gone rather than
+# answering something. A 404 here is the assertion: a route left mounted would be a
+# device flow nobody maintains.
+code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "${AUTH[@]}" "$BASE/auth/github/device")
+[ "$code" = "404" ] && pass "no device-flow endpoint" || fail "auth routes" "POST /v1/auth/github/device answered $code"
+
+echo "==> 3a. an OPEN deployment serves a caller who presents nothing"
+# The rest of this script runs gated, which leaves the shape the demo page actually depends
+# on — `api_token` unset, no credential anywhere in the browser — covered by unit tests and
+# never driven through the real stack. That is the half where a mistake ships: a gate that
+# refuses when it should be absent looks like a working deployment to every test above.
+#
+# It has to come after step 3, not with step 2: this boots a second deployment that resolves
+# its own identity, which adds a `GET /user` to the counter step 3 asserts is exactly 1.
+sed -e "s#^  port: $PORT\$#  port: $OPEN_PORT#" \
+    -e "/^  api_token:/d" \
+    -e "s#$DATA#$OPEN_DATA#g" \
+    "$CFG" > "$OPEN_CFG"
+# The point of the step is a MISSING key, so check it is missing rather than trusting sed —
+# a config that still carried the gate would make the 200 below prove nothing.
+grep -q '^  api_token:' "$OPEN_CFG" && fail "open config" "api_token survived into $OPEN_CFG"
+grep -q "^  port: $OPEN_PORT\$" "$OPEN_CFG" || fail "open config" "port rewrite failed in $OPEN_CFG"
+mkdir -p "$OPEN_DATA"
+IRIS_CONFIG="$OPEN_CFG" node --experimental-sqlite src/index.ts > "$OPEN_LOG" 2>&1 &
+OPEN_PID=$!
+PIDS+=("$OPEN_PID")
+open_start=$SECONDS
+open_booted=""
+while [ $((SECONDS - open_start)) -lt "$BOOT_TIMEOUT" ]; do
+  if curl -sf "$OPEN_BASE/health" >/dev/null 2>&1; then open_booted=1; break; fi
+  if ! kill -0 "$OPEN_PID" 2>/dev/null; then
+    echo "  ✗ the open deployment exited during startup"
+    tail -20 "$OPEN_LOG" | sed 's/^/    /'
+    cleanup
+    exit 1
+  fi
+  sleep 0.3
+done
+[ -n "$open_booted" ] || fail "open boot" "no /health within ${BOOT_TIMEOUT}s; see $OPEN_LOG"
+# No Authorization header at all, which is what a browser on the demo page sends.
+open_me=$(curl -s -w '\n%{http_code}' "$OPEN_BASE/me")
+open_code=$(echo "$open_me" | tail -1)
+[ "$open_code" = "200" ] && pass "an unauthenticated caller is served (HTTP 200)" \
+  || fail "open deployment" "GET /v1/me with no header answered $open_code: $(echo "$open_me" | head -1)"
+# Served AS the deployment, not as nobody: an open gate must not also mean an unresolved
+# identity, or every session would belong to a user row that does not exist.
+echo "$open_me" | head -1 | jq -e '.github_login=="iris-tester"' >/dev/null \
+  && pass "and served as the deployment's own identity" \
+  || fail "open deployment identity" "$(echo "$open_me" | head -1)"
+# A bearer token on an ungated deployment is ignored, not rejected. Worth one request: a
+# demo page that once set the header, or a proxy that adds one, must not start 401ing.
+open_code=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer anything-at-all" "$OPEN_BASE/me")
+[ "$open_code" = "200" ] && pass "an unexpected bearer token is ignored, not refused" \
+  || fail "open deployment (bearer)" "got $open_code"
+# The boot line has to say what an OPEN deployment costs — it is the only warning an
+# operator who never reads the docs will see, and it is the branch of identityWarning that
+# a gated run (every other step here) never prints.
+grep -q 'server.api_token is unset' "$OPEN_LOG" \
+  && pass "the boot log names the open deployment's exposure" \
+  || fail "open boot warning" "nothing in $OPEN_LOG says server.api_token is unset"
+grep -q 'read any session whose id they have' "$OPEN_LOG" \
+  && pass "and says what that exposes" \
+  || fail "open boot warning" "the warning does not say sessions are readable by id: $OPEN_LOG"
+# The other branch must not also be there. Without this the assertions above would pass on a
+# boot line that printed both, which is the shape a future edit to identityWarning produces.
+grep -q 'the demo page cannot be used' "$OPEN_LOG" \
+  && fail "open boot warning" "the GATED warning was printed by an ungated deployment" \
+  || pass "and not the gated deployment's warning"
+kill "$OPEN_PID" 2>/dev/null || true
+wait "$OPEN_PID" 2>/dev/null || true
+
+echo "==> 4. GET /v1/me describes the deployment"
+echo "$me" | jq -e '.defaults.max_review_iterations==1' >/dev/null \
+  && pass "defaults published" || fail "me" "$me"
+# It is also the capability probe the demo page uses, so its answer must come from the same
+# middleware a real upload runs — which is what the identity assertion above just exercised.
+echo "$me" | jq -e '.upstream_repo=="https://github.com/example/iris"' >/dev/null \
+  && pass "upstream repo published" || fail "me shape" "$me"
 # The response shape over the wire, not just in a unit test: `fork_repo` is gone
 # rather than permanently null, since nothing forks.
 echo "$me" | jq -e 'has("fork_repo")|not' >/dev/null \
@@ -1330,13 +1400,15 @@ echo "$q" | jq -e '.mean_rounds != null and .mean_rounds >= 0 and .mean_rounds <
 echo "$q" | jq -e '.since != null' >/dev/null && pass "since is set" \
   || fail "quality" "since is null despite $docs document(s)"
 
-# Nothing per-session, per-user or per-document. This is the constraint that matters
-# most, because the consumer copies these values into a PUBLIC issue and the
-# documents are user uploads. Checked against the real session id and login the run
-# above actually used, not a placeholder.
+# Nothing per-session, per-document, and neither of this deployment's credentials. This is
+# the constraint that matters most, because the consumer copies these values into a PUBLIC
+# issue and the documents are user uploads. Checked against the real session id and the real
+# tokens this run used, not placeholders — and both tokens are checked because one deployment
+# now holds one PAT that every session belongs to, so a copy in a public issue is
+# `issues: write` on the upstream repo for whoever reads it.
 # (`if`, not `grep … && fail`: under `set -e` a grep that finds nothing would fail
 # the AND-list and kill the script, turning "no leak" into a broken run.)
-for secret in "$SID" "$TOKEN"; do
+for secret in "$SID" "$GITHUB_TOKEN" "$API_TOKEN"; do
   if echo "$q" | grep -qF "$secret"; then
     fail "quality" "the tally leaked '$secret' — see the constraint in src/routes/quality.ts"
   fi
@@ -1414,6 +1486,29 @@ fi
 echo "==> 13. close again => 409 invalid_state"
 code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "${AUTH[@]}" "$BASE/sessions/$SID/close")
 [ "$code" = "409" ] && pass "re-close rejected (409)" || fail "re-close" "got $code"
+
+echo "==> 14. the request budget is enforced, not just published (issue #102)"
+# Step 1b proved the limiter is mounted and publishes headers; this proves it REFUSES, in
+# the documented shape, through the real stack.
+#
+# LAST, and on the upload limiter, because that is the only budget left with a bucket of its
+# own: /v1/auth used to hold a small one, and it is gone with the device flow. Spending this
+# one ends the script's ability to upload, hence the position. The bodies are empty on
+# purpose — the limiter runs in front of multer, so a refused request never needs one.
+code=""
+for i in $(seq 1 40); do
+  code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "${AUTH[@]}" "$BASE/sessions")
+  [ "$code" = "429" ] && break
+done
+[ "$code" = "429" ] && pass "upload budget enforced after $i requests" \
+  || fail "upload limit" "expected a 429 within 40 requests to /v1/sessions, got $code"
+# And the refusal is an Iris error with a retry hint rather than the library's default
+# plain-text body — a client that cannot parse a refusal cannot pace itself.
+refusal=$(curl -si -X POST "${AUTH[@]}" "$BASE/sessions")
+echo "$refusal" | grep -qi '^retry-after:' \
+  && echo "$refusal" | tail -1 | jq -e '.error.code=="rate_limited" and .error.details.retry_after_seconds > 0' >/dev/null \
+  && pass "429 carries Retry-After and an Iris error body" \
+  || fail "upload limit shape" "expected Retry-After and an Iris rate_limited body, got: $refusal"
 
 echo ""
 echo "ALL ENDPOINTS PASSED ✅"

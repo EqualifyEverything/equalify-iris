@@ -619,7 +619,7 @@ jobs:
             echo "src/pipeline   extraction -> assembly -> review"
             echo "src/providers  LLM provider abstraction (Bedrock, OpenRouter)"
             echo "src/routes     the /v1 API"
-            echo "src/auth       GitHub OAuth / device flow"
+            echo "src/auth       the deployment's one GitHub identity + the API gate"
             echo "src/github     upstream issue filing"
             echo "src/store      SQLite + per-session directories"
             echo "agents/        content-agent library (markdown files that ARE prompts)"

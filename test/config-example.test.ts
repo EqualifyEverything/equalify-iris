@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { readFileSync, writeFileSync, mkdtempSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { loadConfig, type Capability } from "../src/config.ts";
+import { apiToken, githubToken, loadConfig, type Capability } from "../src/config.ts";
 import { resolveAgentModel } from "../src/providers/index.ts";
 import { modelGeneration, resolveImageLimits } from "../src/providers/imageLimits.ts";
 import { claudeFamily, cacheableSystemPrompt } from "../src/providers/promptCache.ts";
@@ -31,28 +31,47 @@ const EXAMPLE = fileURLToPath(new URL("../config.example.yaml", import.meta.url)
 const AGENTS = ["page", "reader", "copy_editor", "feedback", "builder"];
 const CAPABILITIES: Capability[] = ["text", "vision", "structured_output"];
 
-test("the example config an operator copies loads, and needs exactly the one credential it names", () => {
-  // The unset case FIRST, and this ordering is load-bearing: `loadConfig` memoizes by
+// The two variables the file expands and cannot start without: a model provider and the
+// deployment's one GitHub identity. Set together, because a test about anything else must
+// not fail for a missing credential.
+function credentials(): void {
+  process.env.OPENROUTER_API_KEY = "test-key";
+  process.env.IRIS_GITHUB_TOKEN = "ghp_example_test";
+}
+
+test("the example config an operator copies loads, and needs exactly the two credentials it names", () => {
+  // The unset cases FIRST, and this ordering is load-bearing: `loadConfig` memoizes by
   // resolved path, so a successful load below would be handed back here and the check
   // would pass without validating anything.
   delete process.env.OPENROUTER_API_KEY;
+  delete process.env.IRIS_GITHUB_TOKEN;
   assert.throws(
     () => loadConfig(EXAMPLE),
-    /OPENROUTER_API_KEY/,
+    (e: Error) =>
+      /OPENROUTER_API_KEY/.test(e.message) &&
+      // Both, in one failure. An operator who fixes the first and restarts to find a second
+      // is an operator who restarts a third time; the message lists every unexpanded
+      // variable it found.
+      /IRIS_GITHUB_TOKEN/.test(e.message),
     "an unexpanded credential must fail at startup, by name, rather than reappear mid-run as a 401",
   );
 
-  // And with that one variable set it loads — one credential and no cloud account, which
-  // is what `providers.default: openrouter` is in the file for. The bedrock block is
-  // present and unreferenced, and must not be validated for credentials it does not need.
-  process.env.OPENROUTER_API_KEY = "test-key";
+  // And with those two set it loads. No cloud account and no OAuth app: one API key, one
+  // PAT. The bedrock block is present and unreferenced, and must not be validated for
+  // credentials it does not need.
+  credentials();
   const cfg = loadConfig(EXAMPLE);
   assert.equal(cfg.providers.default, "openrouter");
   assert.ok(cfg.providers.bedrock?.default_model, "the second provider block should still be present");
+  // `server.api_token` is the OPPOSITE case and belongs in the same assertion: it is the
+  // one credential in this file that is optional, and unset it must leave the deployment
+  // open rather than unusable — that is what makes the bundled demo page work.
+  assert.equal(apiToken(cfg), undefined, "the example config ships gated, so the demo page cannot reach it");
+  assert.equal(githubToken(cfg), "ghp_example_test");
 });
 
 test("every agent the example dispatches resolves to a model, on the provider it names", () => {
-  process.env.OPENROUTER_API_KEY = "test-key";
+  credentials();
   const { providers } = loadConfig(EXAMPLE);
   for (const agent of AGENTS) {
     for (const capability of CAPABILITIES) {
@@ -69,7 +88,7 @@ test("every agent the example dispatches resolves to a model, on the provider it
 // model name — the name is allowed to change, and does. Both blocks, every capability,
 // naming one model in the two id spellings the two providers use.
 test("both provider blocks in the example name the same model", () => {
-  process.env.OPENROUTER_API_KEY = "test-key";
+  credentials();
   const { providers } = loadConfig(EXAMPLE);
   const ids: string[] = [];
   for (const name of ["openrouter", "bedrock"] as const) {
@@ -119,7 +138,7 @@ test("both provider blocks in the example name the same model", () => {
 // second copy of the number: whoever changes the model has one file left to update and this
 // says which. The prose above the sample quotes the same figure beside the model's name.
 test("the long edge the example publishes is the one the API sample prints", () => {
-  process.env.OPENROUTER_API_KEY = "test-key";
+  credentials();
   const resolved = resolveImageLimits(loadConfig(EXAMPLE)).max_long_edge_px;
 
   const docs = readFileSync(fileURLToPath(new URL("../docs/API.md", import.meta.url)), "utf8");
@@ -162,7 +181,7 @@ test("the commented per_agent examples load if an operator uncomments them", () 
   lines.splice(start, end - start, ...lines.slice(start, end).map((l) => l.replace(/^( *)# ?/, "$1")));
   lines.splice(active, 1);
 
-  process.env.OPENROUTER_API_KEY = "test-key";
+  credentials();
   const path = join(mkdtempSync(join(tmpdir(), "iris-config-example-")), "config.yaml");
   writeFileSync(path, lines.join("\n"));
   const { providers } = loadConfig(path);

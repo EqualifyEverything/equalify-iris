@@ -84,7 +84,6 @@ export async function runPipeline(args: {
   maxReviewIterations: number;
   feedback?: string;
   githubToken?: string;
-  anonymousSession?: boolean;
 }): Promise<void> {
   const { cfg, store, sessionId } = args;
   const paths = new Paths(cfg);
@@ -111,7 +110,6 @@ export async function runPipeline(args: {
     extractionConcurrency: cfg.defaults.extraction_concurrency,
     recheckSampleSize: cfg.defaults.recheck_sample_size,
     githubToken: args.githubToken,
-    anonymousSession: args.anonymousSession,
   };
 
   try {

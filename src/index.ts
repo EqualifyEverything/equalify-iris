@@ -3,44 +3,33 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  anonymousToken,
-  anonymousTokenWarning,
+  apiToken,
   applyTrustProxy,
   bedrockApiWarning,
-  bundledAppWarning,
-  clientIdWarning,
+  githubToken,
+  identityWarning,
   loadConfig,
   perAgentKeyWarning,
   promptCacheTtlWarning,
 } from "./config.ts";
 import { Store } from "./store/db.ts";
 import { makeAuthMiddleware } from "./auth/middleware.ts";
-import { authRouter } from "./routes/auth.ts";
 import { meRouter } from "./routes/me.ts";
 import { sessionsRouter } from "./routes/sessions.ts";
 import { statsRouter } from "./routes/stats.ts";
 import { limitsRouter } from "./routes/limits.ts";
 import { qualityRouter } from "./routes/quality.ts";
 import { visionModelWarning } from "./providers/imageLimits.ts";
-import { authRateLimit, generalRateLimit } from "./util/requestLimits.ts";
+import { generalRateLimit } from "./util/requestLimits.ts";
 
 const cfg = loadConfig();
 
-// The credential check config can do. An OAuth App id here would authenticate users
-// and then fail every issue filing, with nothing at boot to say so (see
-// clientIdWarning; the unambiguous `Ov…` case is a startup error in validateConfig).
-const cidWarning = clientIdWarning(cfg.github.client_id);
-if (cidWarning) console.warn(`WARNING: ${cidWarning}`);
-
-// The other one: the bundled app is installed on one repo, so pointing upstream_repo
-// elsewhere without registering your own app files nothing for anyone.
-const appWarning = bundledAppWarning(cfg.github.client_id, cfg.github.upstream_repo);
-if (appWarning) console.warn(`WARNING: ${appWarning}`);
-
-// And the one that is not a mistake: anonymous access is ON, which is a deployment-wide
-// policy whose every consequence is invisible from outside (see anonymousTokenWarning).
-const anonWarning = anonymousTokenWarning(anonymousToken(cfg));
-if (anonWarning) console.warn(`WARNING: ${anonWarning}`);
+// Not a mistake, but a deployment-wide policy whose every consequence is invisible from
+// outside: this service has ONE GitHub identity, and whether a stranger may spend it
+// depends on a second, unrelated key (see identityWarning). Printed at boot because boot
+// is the only place both keys are read together.
+const idWarning = identityWarning(githubToken(cfg), apiToken(cfg) !== undefined);
+if (idWarning) console.warn(`WARNING: ${idWarning}`);
 
 // A cache TTL nobody can spell is worth saying here, because boot is the only place it
 // is observable at all — the two TTLs differ in price, not in reported tokens.
@@ -103,17 +92,16 @@ app.get("/v1/health", (_req, res) => res.json({ status: "ok", service: "equalify
 // the event loop with synchronous SQLite reads.
 app.use("/v1", generalRateLimit(cfg));
 
-// The public tally of pages converted (unauthenticated, aggregate-only). The
-// browser app reads it to report how many pages Iris has made accessible, so it
-// has to answer before anyone signs in — and it is mounted here, above the auth
-// middleware, for exactly that reason.
+// The public tally of pages converted (aggregate-only, no per-session detail). The
+// browser app reads it to report how many pages Iris has made accessible, and it is
+// mounted here, above the auth middleware, so it still answers where the operator set
+// `server.api_token` — a page count is not something a shared secret should be needed for.
 app.use("/v1/stats", statsRouter(store));
 
-// What this deployment accepts for an upload (unauthenticated, no user data). Above
-// the auth middleware for the same reason as the tally, plus one of its own: the
-// browser app states the file limits on the upload step, where the visitor has not
-// signed in yet — and someone deciding whether a scan is small enough should not have
-// to authenticate to find out.
+// What this deployment accepts for an upload (no user data). Above the auth middleware
+// for the same reason as the tally, plus one of its own: the browser app states the file
+// limits on the upload step, and someone deciding whether a scan is small enough should
+// not need the deployment's shared token to find out.
 app.use("/v1/limits", limitsRouter(cfg));
 
 // The deployment-wide quality tally, read by the weekly
@@ -133,13 +121,9 @@ app.get("/", (_req, res) => {
 // Keep the old /demo path working for any shared links.
 app.get("/demo", (_req, res) => res.redirect(302, "/"));
 
-// Auth endpoints are unauthenticated by definition, which is also why they get a
-// tighter budget than the rest: there is no credential to count against yet, and every
-// device-flow poll spends an outbound call to GitHub. Counted in ADDITION to the general
-// limiter above — the stricter of the two is simply the one that bites first.
-app.use("/v1/auth", authRateLimit(cfg), authRouter(cfg));
-
-// Everything else requires a GitHub bearer token.
+// Everything else runs as this deployment's GitHub account, and is refused if that
+// account cannot be resolved. If `server.api_token` is set, the caller must also present
+// it — see auth/middleware.ts, which asks those two questions separately.
 const auth = makeAuthMiddleware(store, cfg);
 app.use("/v1/me", auth, meRouter(cfg));
 app.use("/v1/sessions", auth, sessionsRouter(cfg, store));

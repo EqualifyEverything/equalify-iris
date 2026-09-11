@@ -1,242 +1,55 @@
-// GitHub App auth helpers. GitHub is the only auth mechanism.
+// The one GitHub call Iris makes to identify itself.
 //
-// Base URLs are passed in (not hardcoded) so a deployment can target GitHub
-// Enterprise, and so the suite can drive the flow against a mock host.
+// A deployment has a single GitHub identity: the token in `github.token`, set once by the
+// operator and never sent to a client. This file turns that token into an account.
 //
-// Iris authenticates as a GITHUB APP, not an OAuth App, and no scope is requested
-// anywhere in this file. That is the whole reason for the choice, so it is worth
-// being explicit about where the permission went.
+// The base URL is passed in rather than hardcoded so a deployment can target GitHub
+// Enterprise, and so the suite can drive this against a mock host.
 //
-// What the user's token is used for is unchanged, and it is only two things:
+// What the token is used for, and it is only three things:
 //
-//   1. `GET /user`, to identify the caller.
-//   2. Filing agent-suggestion and agent-update issues on the upstream repo
-//      (create the issue, and read-or-create its triage label).
+//   1. `GET /user`, here, to name the account sessions and issues belong to.
+//   2. Filing agent-suggestion and agent-update issues on `upstream_repo` — see
+//      src/github/issue.ts.
+//   3. The dedupe that runs before each of those: a title search for the issue already
+//      tracking this lesson, and a comment on it when there is one.
 //
-// An OAuth App can only express #2 as `public_repo`, an ACCOUNT-WIDE grant of read
-// and write to every public repository the user can reach — code, commit statuses,
-// collaborators, webhooks. Nothing here uses any of that: nothing pushes and nothing
-// opens pull requests (an earlier design described a fork-and-PR flow that was
-// never built and has been dropped). The consent screen was therefore asking for orders of
-// magnitude more than the service does, and there is no narrower OAuth scope — no
-// scope means "issues on one repository".
+// So the narrowest credential that works is a fine-grained personal access token scoped to
+// `upstream_repo` alone with `Issues: read and write`. The READ half is for the dedupe in
+// (3), not for a label — `ensureLabel` is gone (src/github/issue.ts, and both filing paths
+// pass no `labels`), because GitHub silently drops labels set by a filer without push
+// access. Do not add one back on the strength of a comment here. Nothing pushes, nothing
+// opens pull requests, and nothing reads code, so a classic `repo` token grants far more
+// than this service uses.
 //
-// A GitHub App moves that permission off the user entirely. `issues: write` is
-// granted once, by INSTALLING the app on `upstream_repo`, and it is scoped to the
-// repositories of that installation. Users only authorize; the consent screen
-// requests no repository access at all, because there is nothing left for it to ask
-// for.
+// Two operator-visible consequences of there being one token:
 //
-// One limit of that, because it is easy to state too strongly: a user-to-server token
-// is the INTERSECTION of the installation's permissions and the authorizing user's own
-// access. Installing the app does not hand a user access they did not have — GitHub is
-// explicit that "if a user does not have access to a repository, your app cannot access
-// that repository on their behalf even if the app is installed on that repository." So
-// a PUBLIC `upstream_repo` (the design's assumption — the agent library is public) files
-// for everyone, while a PRIVATE one files only for users who can already see it and
-// 404s for everyone else. A private upstream that anyone can contribute to therefore
-// needs `github.issue_token`, which trades away per-user attribution.
-//
-// What the user's token still carries is their IDENTITY: a user-to-server token acts
-// as the user, so issues are filed under their own account and each contribution is
-// credited to the person whose session produced it. That is why the app is
-// authorized by users at all rather than filing everything as itself.
-//
-// Two registration settings this code depends on, both invisible from here:
-//   - Device flow ENABLED. It is off by default for a new app, and the default
-//     deployment's only login path (`startDeviceFlow`) returns
-//     `device_flow_disabled` without it.
-//   - Token expiry OFF. GitHub's default is an 8-hour user token plus a refresh
-//     token; with expiry off, `expires_in`/`refresh_token` are omitted and a token
-//     stays valid until revoked. Nothing here persists or refreshes a credential
-//     (src/auth/middleware.ts caches only a token->id mapping, in memory), so
-//     turning expiry on later means building refresh plumbing first.
+//   - Every issue is filed under this account, and NOBODY IS CREDITED. Neither body carries
+//     a human identifier — see the two builders in src/github/issue.ts: what identifies a
+//     contribution is the session id. On the feedback path the user's own words are quoted
+//     verbatim, which is a trace of a person, not an attribution of one. Do not read this
+//     as licence to put a `@name` in a body: issue.ts wraps user text in a code span
+//     precisely so a name inside it cannot notify anyone.
+//   - A fine-grained PAT EXPIRES, and nothing here refreshes it. The day it lapses, every
+//     request 401s with "could not authenticate to GitHub" and the fix is a new token in
+//     config. GitHub emails the token's owner before that happens; there is no in-process
+//     warning, because a PAT's expiry is not visible in `GET /user`.
 
 export interface GitHubUser {
   id: number;
   login: string;
 }
 
-export function authorizeUrl(
-  clientId: string,
-  redirectUri: string,
-  state: string,
-  oauthBase: string,
-): string {
-  // No `scope` parameter, deliberately. A GitHub App ignores it — its permissions
-  // come from the installation, not from the authorization — so sending one would
-  // be inert at best and misleading to anyone reading this URL.
-  const params = new URLSearchParams({
-    client_id: clientId,
-    redirect_uri: redirectUri,
-    state,
-  });
-  return `${oauthBase}/login/oauth/authorize?${params.toString()}`;
-}
-
-// The warning text for a token GitHub issued with an expiry, or undefined if it has
-// none. Shared by both login flows rather than written at each: BOTH must diagnose
-// this, and the device flow having a warning the web flow lacked was the whole defect
-// — a web-flow deployment that left "Expire user authorization tokens" at GitHub's
-// default got no signal at all, and the symptom (every user 401s, eight hours later,
-// nowhere near the cause) is the least guessable one this service has.
+// Identify the GitHub account behind a token.
 //
-// Returned rather than logged so the callers decide where it goes and so it is
-// testable. Nothing here persists or refreshes a credential — src/auth/middleware.ts
-// caches only a token->id mapping, in memory — so an expiring token is not a mode
-// this service supports, which is why it warns rather than adapting.
-export function expiringTokenWarning(expiresIn: number | undefined): string | undefined {
-  if (expiresIn === undefined) return undefined;
-  return (
-    `GitHub issued a user token expiring in ${expiresIn}s. Iris does not refresh tokens, so users will be ` +
-    `logged out and their requests will 401 after that. Turn OFF "Expire user authorization tokens" in the ` +
-    `GitHub App's settings.`
-  );
-}
-
-export interface TokenResult {
-  access_token: string;
-  // Present only when the app has user-token expiry ON, which this service is not
-  // built for. See expiringTokenWarning.
-  expires_in?: number;
-}
-
-// Exchange an OAuth code (web flow) for an access token.
-//
-// Returns the expiry alongside the token, for the same reason pollDeviceFlow does:
-// it is the only observable difference between an app registered with user-token
-// expiry off and one left at GitHub's default, and the web flow needs that diagnosis
-// as much as the device flow does.
-export async function exchangeCode(
-  clientId: string,
-  clientSecret: string,
-  code: string,
-  redirectUri: string,
-  oauthBase: string,
-): Promise<TokenResult> {
-  const res = await fetch(`${oauthBase}/login/oauth/access_token`, {
-    method: "POST",
-    headers: { Accept: "application/json", "Content-Type": "application/json" },
-    body: JSON.stringify({ client_id: clientId, client_secret: clientSecret, code, redirect_uri: redirectUri }),
-  });
-  const json = (await res.json()) as {
-    access_token?: string;
-    error?: string;
-    error_description?: string;
-    expires_in?: number;
-  };
-  if (!json.access_token) throw new Error(json.error_description ?? json.error ?? "token exchange failed");
-  return { access_token: json.access_token, expires_in: json.expires_in };
-}
-
-export interface DeviceCodeResponse {
-  device_code: string;
-  user_code: string;
-  verification_uri: string;
-  expires_in: number;
-  interval: number;
-}
-
-// Begin the device flow (CLI clients).
-export async function startDeviceFlow(
-  clientId: string,
-  oauthBase: string,
-): Promise<DeviceCodeResponse> {
-  const res = await fetch(`${oauthBase}/login/device/code`, {
-    method: "POST",
-    headers: { Accept: "application/json", "Content-Type": "application/json" },
-    // No `scope`, same reason as authorizeUrl.
-    body: JSON.stringify({ client_id: clientId }),
-  });
-  // The body is read on BOTH paths, and the error inside it is the point. GitHub
-  // answers `device_flow_disabled` when the app was registered without the "Enable
-  // Device Flow" checkbox — the one setting this default login path needs, invisible
-  // from here, and the single most likely thing to be wrong on a fresh app. The route
-  // turns whatever this throws into the operator's error message, so dropping the
-  // body left them with "device flow start failed: 400" and no way to guess.
-  //
-  // And an error can arrive with a 200: GitHub's OAuth endpoints return `{"error":
-  // "..."}` at 200 in some cases, which a status-only check reads as success. That
-  // returned a DeviceCodeResponse of undefineds and the route answered 200 with
-  // `device_code: null` — a client polling forever against a flow that never started.
-  // So success requires a `device_code`, not a 2xx.
-  const body = (await res.json().catch(() => null)) as
-    | (Partial<DeviceCodeResponse> & { error?: string; error_description?: string })
-    | null;
-  if (!res.ok || !body?.device_code) {
-    const detail = body?.error_description ?? body?.error;
-    throw new Error(`device flow start failed: ${res.status}${detail ? ` ${detail}` : ""}`);
-  }
-  return body as DeviceCodeResponse;
-}
-
-export type DevicePoll =
-  | { status: "approved"; access_token: string; expires_in?: number }
-  | { status: "pending"; error: string };
-
-// Poll for device-flow approval. Returns pending until the user approves.
-//
-// `expires_in` is carried out of the response for one reason: it is the only
-// observable difference between an app registered with user-token expiry OFF (the
-// setting this code requires) and one left at GitHub's default. Nothing here
-// persists or refreshes a credential, so a deployment that missed that checkbox
-// works for eight hours and then 401s every request with nothing to explain it. The
-// route logs it; see routes/auth.ts.
-export async function pollDeviceFlow(
-  clientId: string,
-  deviceCode: string,
-  oauthBase: string,
-): Promise<DevicePoll> {
-  const res = await fetch(`${oauthBase}/login/oauth/access_token`, {
-    method: "POST",
-    headers: { Accept: "application/json", "Content-Type": "application/json" },
-    body: JSON.stringify({
-      client_id: clientId,
-      device_code: deviceCode,
-      grant_type: "urn:ietf:params:oauth:grant-type:device_code",
-    }),
-  });
-  const json = (await res.json()) as { access_token?: string; error?: string; expires_in?: number };
-  if (json.access_token) {
-    return { status: "approved", access_token: json.access_token, expires_in: json.expires_in };
-  }
-  return { status: "pending", error: json.error ?? "authorization_pending" };
-}
-
-// A failure from `fetchUser`, carrying the HTTP status as a FIELD as well as in the
-// message. The status is what tells a permanent answer from a transient one — 401 means
-// GitHub rejected the credential and will keep rejecting it, while a 5xx, a 403 rate
-// limit or a thrown fetch is worth retrying — and a caller that has to decide must not
-// have to parse the prose to do it. (`installHintFor` in github/issue.ts refuses the same
-// text matching for the same reason: a message can carry a number that came from
-// somewhere else entirely.)
-export type UserLookupError = Error & { status: number };
-
-// Whether an error from `fetchUser` is GitHub REJECTING the credential, as opposed to
-// being unable to answer about it. Only 401: a 403 is a rate limit or a policy block, a
-// 5xx is GitHub's problem, and a network failure has no status at all — none of those say
-// the token is bad, so none of them are safe to treat as a final answer.
-export function isRejectedCredential(e: unknown): boolean {
-  return (e as { status?: number } | null)?.status === 401;
-}
-
-// The one place a `fetchUser` failure is constructed. Exported because a caller that has
-// CACHED one of these answers has to reproduce it exactly rather than compose its own
-// message — the difference between a cached rejection and a fresh one must not be visible
-// in a response, and a second copy of this string is a second thing to keep in step.
-export function userLookupError(status: number): UserLookupError {
-  const err = new Error(`github user lookup failed: ${status}`) as UserLookupError;
-  err.status = status;
-  return err;
-}
-
-// Identify the GitHub user behind a token. Login is signup: there is no separate
-// registration step.
+// The status goes in the message because that is the only place it is read: the caller
+// backs off for a fixed window on ANY failure and says so, rather than sorting a 401 from a
+// 500 (see src/auth/middleware.ts for why one identity makes that distinction moot).
 export async function fetchUser(token: string, apiBase: string): Promise<GitHubUser> {
   const res = await fetch(`${apiBase}/user`, {
     headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "User-Agent": "equalify-iris" },
   });
-  if (!res.ok) throw userLookupError(res.status);
+  if (!res.ok) throw new Error(`github user lookup failed: ${res.status}`);
   const json = (await res.json()) as { id: number; login: string };
   return { id: json.id, login: json.login };
 }

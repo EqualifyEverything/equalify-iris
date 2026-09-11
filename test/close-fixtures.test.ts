@@ -33,11 +33,9 @@ function cfg(dir: string): IrisConfig {
     server: { port: 3000, base_url: "http://localhost:3000" },
     storage: { data_dir: dir, agents_dir: "agents", database: join(dir, "iris.sqlite") },
     github: {
-      client_id: "Iv1.test",
-      client_secret: "s",
+      token: "ghp_test",
       upstream_repo: "https://github.com/o/r",
       api_base_url: "https://api.github.com",
-      oauth_base_url: "https://github.com",
     },
     providers: { default: "openrouter", openrouter: { api_key: "k", default_model: "anthropic/claude-sonnet-4.6" } },
     defaults: { max_review_iterations: 1, extraction_concurrency: 2, max_concurrent_runs: 1, recheck_sample_size: 1 },

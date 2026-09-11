@@ -112,8 +112,20 @@ function sessionSummary(s: SessionRecord) {
   };
 }
 
-// Owned-by-caller lookup. Returns undefined (caller sends 404) when missing or
-// owned by another user, so a token cannot probe others' sessions.
+// Owned-by-this-deployment lookup. Returns undefined (caller sends 404) when the session is
+// missing or belongs to a different account.
+//
+// It is NOT a guard between callers any more, and reading it as one is the mistake: there is
+// one identity, no caller presents a credential, and every session this deployment created
+// belongs to it — so anyone holding a session id reaches that session, deliberately (see the
+// reachability note on `GET /v1/sessions` below). The id-mismatch branch has one live cause, an
+// operator repointing `github.token` at a different GitHub account: the old account's rows
+// stay in the database and stop being reachable, and pointing it back restores them. Pinned in
+// test/one-identity.test.ts and documented in docs/github-auth.md, because from outside it
+// looks like the sessions were destroyed.
+//
+// Every per-session route funnels through here, so this is the single place that decision is
+// made — do not re-derive it at a call site.
 function ownedSession(store: Store, id: string, userId: number): SessionRecord | undefined {
   const s = store.getSession(id);
   if (!s || s.github_user_id !== userId) return undefined;
@@ -182,51 +194,21 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
     return startedImmediately;
   };
 
-  // GET /v1/sessions — list this user's sessions, newest first.
+  // GET /v1/sessions — list THIS DEPLOYMENT's sessions, newest first.
   //
-  // Paged by keyset on (created_at, session_id), not by created_at alone: that is
-  // not unique — a burst of uploads shares a millisecond — and paging on it drops
-  // and repeats rows at tie boundaries (see store.listSessions). The cursor is
-  // therefore compound, and an unparseable one is a 400 rather than being
-  // compared as a string, which used to silently hand back page one forever.
+  // Not one caller's: there is one identity, so every session belongs to it and this lists
+  // all of them. That is a real narrowing of what this route used to promise, and it is the
+  // cost the one-identity design pays — a visitor can page through the ids of documents other
+  // visitors uploaded. What is NOT weakened is a session's own reachability: `ses_` + a ULID
+  // is 80 random bits, so nothing is guessable, and a deployment that must not leak the list
+  // sets `server.api_token` so strangers cannot reach this route at all.
   //
-  // This is the ONE route `github.anonymous_token` closes, and the reason is the word
-  // "this user's" above. Ownership here is `github_user_id` and nothing else (see
-  // `ownedSession`), so on a deployment serving every anonymous caller with one
-  // credential, "this user's sessions" is every anonymous visitor's sessions — a
-  // stranger's uploaded document, listed by id to whoever asks next. Refused rather
-  // than filtered, because there is nothing to filter on: the request carries no
-  // property that distinguishes one anonymous caller from another, and inventing one
-  // (an address, a cookie) would be a second, weaker identity pretending to be
-  // ownership.
-  //
-  // `req.anonymous` is keyed on the identity reached and not on the missing header, which
-  // is what makes this guard cover the caller who holds the shared account's token and
-  // presents it normally. That caller is why the flag is not simply "sent no credential":
-  // ownership cannot tell them from a visitor, so neither can this.
-  //
-  // What anonymous callers keep is every other route: a session is reachable by its own
-  // id, which is `ses_` + a ULID — 80 random bits, so it is a capability rather than a
-  // guess. That is a real narrowing of the guarantee and it is why this mode is off by
-  // default and warned about at boot.
+  // Paged by keyset on (created_at, session_id), not by created_at alone: that is not unique
+  // — a burst of uploads shares a millisecond — and paging on it drops and repeats rows at
+  // tie boundaries (see store.listSessions). The cursor is therefore compound, and an
+  // unparseable one is a 400 rather than being compared as a string, which used to silently
+  // hand back page one forever.
   r.get("/", (req: AuthedRequest, res) => {
-    if (req.anonymous) {
-      // One reason, two remedies, because two different callers land here: a visitor with
-      // no token, and whoever holds the account this deployment uses as its anonymous
-      // credential. Telling the second to "sign in" would be useless advice — they are
-      // signed in, and that is exactly the problem — so the message names both.
-      sendError(
-        res,
-        403,
-        "anonymous_session_list",
-        "This deployment serves callers with no GitHub token as one shared identity, and this request " +
-          "resolves to that identity, so it cannot tell whose sessions are whose and will not list them. " +
-          "Use the session id returned by POST /v1/sessions. If you are signed in and seeing this, your " +
-          "account is the one configured as github.anonymous_token: a session list needs an account this " +
-          "deployment does not share, or sign in with a different one.",
-      );
-      return;
-    }
     // One rule for every unusable value: fall back to the default. Written as
     // `Math.max(parseInt(x) || 20, 1)` it was two rules — `?limit=0` is falsy so
     // it became 20, while `?limit=-1` clamped to 1 — so two equally invalid
@@ -410,16 +392,12 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
     // Queue the pipeline; clients poll GET /v1/sessions/{id}. The session stays
     // in the `queued` status it was created with until a slot frees up, so a
     // client polling sees queued -> running -> ready_for_review.
-    // `anonymousSession` travels with the token because the two answer one question
-    // together: what the run files with, and whose credential that is. A filing failure is
-    // diagnosed from the pair (see `installHintFor`).
     enqueueRun({
       cfg,
       store,
       sessionId,
       maxReviewIterations: maxIter,
       githubToken: req.token,
-      anonymousSession: req.anonymous,
     });
 
     res.status(201).json({
@@ -539,7 +517,6 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
       maxReviewIterations: s.iterations_max,
       feedback,
       githubToken: req.token,
-      anonymousSession: req.anonymous,
     });
     // Report what actually happened. Under the run cap a re-run waits, and
     // saying "running" then would make a queued session look hung. Both report

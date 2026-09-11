@@ -47,11 +47,9 @@ function cfg(providers: IrisConfig["providers"]): IrisConfig {
     server: { port: 3000, base_url: "http://localhost:3000" },
     storage: { data_dir: "/tmp/iris-test", agents_dir: "agents", database: ":memory:" },
     github: {
-      client_id: "Iv1.test",
-      client_secret: "s",
+      token: "ghp_test",
       upstream_repo: "o/r",
       api_base_url: "https://api.github.com",
-      oauth_base_url: "https://github.com",
     },
     providers,
     defaults: { max_review_iterations: 3, extraction_concurrency: 5, max_concurrent_runs: 2, recheck_sample_size: 1 },

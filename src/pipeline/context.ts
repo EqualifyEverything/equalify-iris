@@ -38,15 +38,10 @@ export interface PipelineContext {
   // read off `cfg` at the claim site for the same reason as the line above: one place
   // resolves it, and a phase cannot disagree with the number the run was started with.
   recheckSampleSize: number;
-  // The logged-in user's GitHub token — used to file agent-suggestion issues
-  // attributed to them (unless a service token override is configured).
+  // The deployment's GitHub token (`github.token`) — used to file agent-suggestion and
+  // agent-update issues. Optional because a run started without one still produces a
+  // document; it just contributes nothing back.
   githubToken?: string;
-  // True when the request that started this run resolved to the deployment's shared
-  // anonymous identity (`github.anonymous_token`), so `githubToken` above is a PAT out of
-  // config rather than a user's own credential. Carried because a filing failure is
-  // diagnosed by WHICH credential failed (`installHintFor`), and a config PAT's access has
-  // nothing to do with the GitHub App installation a user's token depends on.
-  anonymousSession?: boolean;
 }
 
 // The extension -> media type map lives with the rest of the model's input limits

@@ -5,7 +5,6 @@ import { request as httpRequest } from "node:http";
 import type { AddressInfo } from "node:net";
 import type { IrisConfig, RateLimitConfig } from "../src/config.ts";
 import {
-  DEFAULT_AUTH_PER_MINUTE,
   DEFAULT_GENERAL_PER_MINUTE,
   DEFAULT_MAX_UPLOAD_MEMORY_MB,
   DEFAULT_UPLOAD_PER_MINUTE,
@@ -18,15 +17,14 @@ import {
   MAX_UPLOAD_BYTES,
   MAX_UPLOAD_FILES,
   __resetProxyWarning,
-  authRateLimit,
   __setUploadCeiling,
   generalRateLimit,
   meterUploadBody,
   publishedRateLimits,
   requestSizeGate,
   uploadGate,
+  uploadRateLimit,
 } from "../src/util/requestLimits.ts";
-import { __clearTokenCache, __seedTokenCache } from "../src/auth/middleware.ts";
 import type { AuthedRequest } from "../src/auth/middleware.ts";
 import { limitsRouter } from "../src/routes/limits.ts";
 import { sessionsRouter } from "../src/routes/sessions.ts";
@@ -44,11 +42,12 @@ import { join } from "node:path";
 //   * An address is only an address if the deployment can trust the header it came from:
 //     unset, `X-Forwarded-For` is a claim, and a limiter that believed it would bound
 //     nothing while still answering 200 to everything.
-//   * A request counts against its CREDENTIAL where one has been validated, and against
-//     its address otherwise. Both halves are load-bearing: per-address alone punishes
-//     everyone behind a NAT for one user's polling, and per-credential-as-presented would
-//     hand a caller a fresh budget per random bearer string — on the path that spends an
-//     outbound `GET /user` per unknown token.
+//   * Every request counts against its ADDRESS, and nothing a caller sends can change that.
+//     There is one identity now, so the only presentable credential is `server.api_token`,
+//     which is shared: keying on it would put every visitor in one bucket, and keying on a
+//     bearer as PRESENTED would hand a caller a fresh budget per random string. What that
+//     costs is real and is the reason the defaults are generous — a campus NAT is one
+//     bucket — but there is nothing better left to key on.
 //   * The in-flight upload gate meters BYTES and returns what it charged on EVERY way a
 //     response can end. Both halves are load-bearing: metering requests instead would
 //     refuse a small upload that costs nothing, and a charge that is not returned refuses
@@ -66,11 +65,9 @@ function cfg(rate_limits?: Partial<RateLimitConfig>): IrisConfig {
     server: { port: 3000, base_url: "http://localhost:3000", rate_limits },
     storage: { data_dir: "/tmp/iris-test", agents_dir: "agents", database: ":memory:" },
     github: {
-      client_id: "Iv1.test",
-      client_secret: "s",
+      token: "ghp_test",
       upstream_repo: "https://github.com/o/r",
       api_base_url: "https://api.github.com",
-      oauth_base_url: "https://github.com",
     },
     providers: { default: "openrouter", openrouter: { api_key: "k", default_model: "anthropic/claude-sonnet-4.6" } },
     defaults: { max_review_iterations: 3, extraction_concurrency: 5, max_concurrent_runs: 2, recheck_sample_size: 1 },
@@ -103,15 +100,7 @@ async function serve(...middleware: express.RequestHandler[]): Promise<Client> {
 
 const bearer = (token: string): RequestInit => ({ headers: { authorization: `Bearer ${token}` } });
 
-// A token this process has "already validated", i.e. one sitting in the auth
-// middleware's cache. Seeded directly rather than by driving a login, because the point
-// under test is what the limiter does with a token whose validity it did not establish.
-function validated(token: string, id = 1): void {
-  __seedTokenCache(token, id, Date.now() + 60_000);
-}
-
 afterEach(() => {
-  __clearTokenCache();
   __resetProxyWarning();
   // The per-request ceiling is module state, so a test that lowers it owes every test after
   // it the real number back.
@@ -146,43 +135,44 @@ test("a caller over the general budget gets an Iris-shaped 429 with a retry hint
   }
 });
 
-test("a validated credential is its own client, and an unvalidated one is not", async () => {
-  validated("real-token-a", 1);
-  validated("real-token-b", 2);
+test("no bearer buys a fresh bucket: the budget is the address's", async () => {
   const srv = await serve(generalRateLimit(cfg({ general_per_minute: 1 })));
   try {
-    // Spend the address's budget with an unauthenticated request.
+    // Spend the address's budget.
     assert.equal(await srv.get().then((r) => r.status), 200);
     assert.equal(await srv.get().then((r) => r.status), 429);
 
-    // A user behind that same address still has their own budget — the case that makes
-    // this deployment usable from a campus NAT or from behind a reverse proxy.
-    assert.equal(await srv.get(bearer("real-token-a")).then((r) => r.status), 200);
-    assert.equal(await srv.get(bearer("real-token-a")).then((r) => r.status), 429);
-    // And one user exhausting theirs does not spend another's.
-    assert.equal(await srv.get(bearer("real-token-b")).then((r) => r.status), 200);
-
-    // A bearer nobody has validated is not a credential, so it cannot buy a fresh
-    // bucket: it counts against the address, which is already spent. Rotating the string
-    // is the cheapest attack available against per-credential keying, and it is also the
-    // path that costs an outbound GET /user per distinct token.
-    assert.equal(await srv.get(bearer("made-up-1")).then((r) => r.status), 429);
-    assert.equal(await srv.get(bearer("made-up-2")).then((r) => r.status), 429);
+    // Rotating the bearer is the cheapest attack available against per-credential keying,
+    // and under one identity there is no credential that could be keyed on anyway: the
+    // gate token is shared by everyone who has it, so a caller presenting it is not a
+    // distinguishable client. Every one of these counts against the spent address.
+    for (const token of ["s3cret", "made-up-1", "made-up-2", ""]) {
+      assert.equal(
+        await srv.get(bearer(token)).then((r) => r.status),
+        429,
+        `a bearer (${JSON.stringify(token)}) bought a budget the address had already spent`,
+      );
+    }
   } finally {
     srv.close();
   }
 });
 
-test("the auth budget is per address even for a validated caller", async () => {
-  validated("real-token-a", 1);
-  const srv = await serve(authRateLimit(cfg({ auth_per_minute: 1 })));
+test("the upload budget is per address too, and says what it is", async () => {
+  const srv = await serve(uploadRateLimit(cfg({ upload_per_minute: 1 })));
   try {
     assert.equal(await srv.post().then((r) => r.status), 200);
-    // Presenting a token cannot widen the budget on the endpoints that ISSUE tokens:
-    // there is nothing to count against there but the address.
-    const over = await srv.post(bearer("real-token-a"));
+    // This limiter sits BEHIND the auth middleware, so `req.user` is resolved by the time
+    // it runs — and it is the deployment's own account for every caller, which is why it
+    // keys on the address like the others. Keying on `req.user` here would look correct in
+    // review and put the whole internet in one bucket of `upload_per_minute`.
+    const over = await srv.post(bearer("s3cret"));
     assert.equal(over.status, 429);
-    assert.match(((await over.json()) as { error: { message: string } }).error.message, /per address/);
+    const { message } = ((await over.json()) as { error: { message: string } }).error;
+    assert.match(message, /accepts 1 per minute/);
+    // The refusal explains why the budget is small rather than reading as an outage: runs
+    // are queued, so uploads past the budget only wait on each other.
+    assert.match(message, /queued/);
   } finally {
     srv.close();
   }
@@ -586,7 +576,6 @@ test("a config that says nothing, or says something unusable, still gets a worki
   const fallback = {
     enabled: true,
     general_per_minute: DEFAULT_GENERAL_PER_MINUTE,
-    auth_per_minute: DEFAULT_AUTH_PER_MINUTE,
     upload_per_minute: DEFAULT_UPLOAD_PER_MINUTE,
     max_upload_memory_mb: DEFAULT_MAX_UPLOAD_MEMORY_MB,
   };
@@ -595,7 +584,7 @@ test("a config that says nothing, or says something unusable, still gets a worki
   // parses as null, and a limit of 0 means "refuse every request" — a config typo that
   // would take the deployment down for everyone.
   assert.deepEqual(
-    resolveRateLimits({ general_per_minute: null, auth_per_minute: 0, upload_per_minute: -5 } as never),
+    resolveRateLimits({ general_per_minute: null, upload_per_minute: -5 } as never),
     fallback,
   );
   assert.deepEqual(resolveRateLimits({ general_per_minute: "abc" } as never), fallback);

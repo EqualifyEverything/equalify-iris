@@ -122,15 +122,12 @@ Each decision below is one bullet, and the headings only group them:
   `Agent update proposal: <agent> — <lesson>` issue the same way. Both are simpler to triage, and
   they need no write access to a fork — so nothing forks and nothing pushes. The `pending_prs` and
   `prs_opened` response fields, the `skip_prs` parameter and the `fork_repo` field on `/v1/me`
-  belonged to that flow and are **not** part of the API. Issues are filed with the logged-in user's
-  token, which is
-  [required, and the point](../README.md#github-is-the-only-sso-layer-and-tokens-are-required);
-  `github.issue_token` overrides that with a service account, at the cost of the attribution. A
-  third credential files them on a deployment that turned anonymous access on: a session served by
-  `github.anonymous_token` has no signed-in user, so it files under that account. All three fail
-  softly, and each one makes a 403 mean something different — a user's token points at the GitHub
-  App installation, the other two are config PATs that do not, so the diagnosis logged with the
-  failure names the credential that was actually used.
+  belonged to that flow and are **not** part of the API. Issues are filed with the deployment's one
+  token, `github.token` — there is
+  [no per-user identity to file as](../README.md#one-github-identity-and-no-sign-in), which costs the
+  attribution and buys the whole login flow being gone. Filing fails softly, and there is now one
+  credential a 403 or 404 can be about, so the hint logged with the failure names it rather than
+  having to work out which of three was used.
 
   The update title carries a slug of the **lesson**, not just the agent, because the agent on that
   path is always `page.md`. With the agent alone, every proposal ever made computed one title, and

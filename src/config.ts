@@ -64,13 +64,9 @@ export interface RateLimitConfig {
   // and would rather not have two budgets to reason about. Not the way to widen a
   // limit — raise the numbers for that; this removes the bound entirely.
   enabled: boolean;
-  // Requests per minute across all of `/v1`, per credential (or per address, before a
-  // credential has been validated).
+  // Requests per minute across all of `/v1`, per address.
   general_per_minute: number;
-  // Requests per minute to `/v1/auth`, per address. Necessarily per address: there is
-  // no credential yet on the endpoint that issues one.
-  auth_per_minute: number;
-  // Session creations per minute, per user.
+  // Session creations per minute, per address.
   upload_per_minute: number;
   // Megabytes of upload body being received at once, across all callers. A rate limit
   // counts requests over a window; this bounds the ones that OVERLAP, which is what
@@ -93,6 +89,22 @@ export interface IrisConfig {
     // should unlock it and no user who should be denied their own. It is also read by
     // a CI job, which has no GitHub user to be.
     quality_token?: string;
+    // OPTIONAL shared secret that gates every `/v1` route. Unset by default, which
+    // leaves the deployment open to anyone who can reach it — that is what a public demo
+    // needs, and the per-address limits in util/requestLimits.ts are what bound the cost.
+    //
+    // Set it and every call must send `Authorization: Bearer <it>`. Two things follow, and
+    // both are the point rather than a limitation:
+    //
+    //   - It is NOT a GitHub token, so a copy that leaks costs a rate-limit bypass rather
+    //     than write access to `github.upstream_repo`. Same reasoning as `quality_token`
+    //     above, which is where this pattern comes from.
+    //   - The demo page cannot use a deployment that sets it. The page holds no
+    //     credential by design, so a gated deployment is an API-only one.
+    //
+    // It answers "may this caller use the API", never "who is this caller" — that question
+    // has one answer now (`github.token`), and this key does not change it.
+    api_token?: string;
     // How many reverse proxies sit in front of this deployment, as a hop count (1 for a
     // single Caddy or nginx). Passed to Express's `trust proxy` setting, which is what
     // decides whether `req.ip` is the caller's address or the proxy's.
@@ -117,37 +129,34 @@ export interface IrisConfig {
   };
   storage: { data_dir: string; agents_dir: string; database: string };
   github: {
-    client_id: string;
-    client_secret: string;
     upstream_repo: string;
     // Overridable for GitHub Enterprise (and for testing). Defaults below.
     api_base_url: string; // e.g. https://api.github.com
-    oauth_base_url: string; // e.g. https://github.com
-    // OPTIONAL service token (PAT) that files every issue under one bot account
-    // instead of under the user who ran the session.
+    // The deployment's ONE GitHub identity: a PAT the operator sets, held server-side,
+    // used for every call Iris makes to GitHub and resolved once per process to the
+    // account that owns every session.
     //
-    // Off by default, and deliberately not recommended: filing under each user's
-    // own identity is the point of authenticating with GitHub at all: every user
-    // gives back to the shared agent library, credited to them. A bot
-    // account erases that attribution. Set it only when a deployment cannot file as
-    // its users — e.g. an org policy that forbids it.
-    issue_token?: string;
-    // OPTIONAL credential that serves callers who send NO `Authorization` header at
-    // all, instead of refusing them. Off by default: with it unset, a token is
-    // required on every call and there is no anonymous access.
+    // Iris used to authenticate each visitor separately, through a GitHub device flow,
+    // so an issue it opened was filed under the person who ran the session. That is
+    // gone. Three credential concepts (per-user tokens, a service PAT for filing, and
+    // an anonymous PAT for visitors who sent nothing) have collapsed into this one,
+    // because two of them existed only to bridge between the other two.
     //
-    // Set it and the deployment has a demo mode — a visitor can convert a document
-    // without a GitHub account. What that costs is not obvious, so it is stated at
-    // boot (anonymousTokenWarning) and in three places in the docs: every anonymous
-    // caller is the SAME user as far as the store is concerned, so session ownership
-    // stops separating them (routes/sessions.ts refuses the session LIST for them —
-    // including to this account itself, since the refusal is keyed on the identity a
-    // request reaches and not on whether it sent a header), their uploads are counted by
-    // address rather than by user (util/requestLimits.ts), and their feedback is filed
-    // under this credential's account rather than their own. It therefore wants a
-    // DEDICATED account: the only way that token could list its own sessions is a rule
-    // that lists every anonymous visitor's to whoever holds it.
-    anonymous_token?: string;
+    // What that costs, stated here because it is invisible from outside:
+    //
+    //   - Every issue Iris opens is filed under this account, so a contributor gets no
+    //     attribution for the agent they caused to be suggested.
+    //   - Every session has the same owner, so `GET /v1/sessions` lists the
+    //     deployment's sessions rather than one visitor's, and one visitor can read
+    //     another's document by its id. A deployment where that matters wants
+    //     `server.api_token` set and no public page.
+    //   - Uploads are counted per ADDRESS, since a shared identity is one bucket for
+    //     everyone (util/requestLimits.ts).
+    //
+    // Never send this to a browser. It carries `issues: write` on `upstream_repo`, so a
+    // page that passed it to callers would be publishing it; the demo page sends no
+    // credential at all and the server supplies this one.
+    token?: string;
   };
   providers: {
     default: string;
@@ -234,12 +243,10 @@ export const MAX_CONCURRENT_RUNS_CEILING = 32;
 
 // The request-volume budget when the deployment doesn't say. Each is per minute; see
 // util/requestLimits.ts for the traffic each one was sized against, which is the thing
-// to re-check before changing one. In short: the demo polls a running session every
-// 2.5s (24/min) and a device-flow login polls every 5s (12/min) for as long as the user
-// takes to approve it, so these sit an order of magnitude above a working client and
-// still bound a loop that has come off its leash.
+// to re-check before changing one. In short: the demo page polls a running session every
+// 2.5s (24/min) and every caller behind one NAT shares a bucket, so these sit an order of
+// magnitude above a working client and still bound a loop that has come off its leash.
 export const DEFAULT_GENERAL_PER_MINUTE = 240;
-export const DEFAULT_AUTH_PER_MINUTE = 60;
 export const DEFAULT_UPLOAD_PER_MINUTE = 12;
 // Upload body being received at once, in megabytes — the only one of these that bounds
 // MEMORY rather than request count, and so the first to reduce on a small machine. 256 MB
@@ -280,7 +287,6 @@ export function resolveRateLimits(raw: Partial<RateLimitConfig> | undefined): Ra
   return {
     enabled,
     general_per_minute: normalizePositiveInt(raw?.general_per_minute, DEFAULT_GENERAL_PER_MINUTE),
-    auth_per_minute: normalizePositiveInt(raw?.auth_per_minute, DEFAULT_AUTH_PER_MINUTE),
     upload_per_minute: normalizePositiveInt(raw?.upload_per_minute, DEFAULT_UPLOAD_PER_MINUTE),
     max_upload_memory_mb: normalizePositiveInt(raw?.max_upload_memory_mb, DEFAULT_MAX_UPLOAD_MEMORY_MB),
   };
@@ -405,33 +411,23 @@ function expandEnv(value: unknown, unset: Set<string>): unknown {
 function validateConfig(cfg: IrisConfig, unset: Set<string>, path: string): void {
   const problems: string[] = [];
 
-  // The scope validation this function used to do is gone: it rejected a scopeless
-  // `github.oauth_scope` at startup, because a token that could identify a user but
-  // not file on their behalf broke the contribution model and failed
-  // silently — one swallowed `agent_issue_failed` line per run while the service kept
-  // answering 200. Iris now authenticates as a GitHub App, so a user's authorization
-  // carries no repository permission to get wrong: `issues: write` comes from
-  // INSTALLING the app on `upstream_repo` (see src/auth/github.ts).
+  // The GitHub App validation this function used to do is gone with the device flow it
+  // guarded. It checked `client_id`'s prefix, because an OAuth App id there produced a
+  // deployment where every login worked and no issue could ever be filed — a failure
+  // invisible at boot and silent at runtime. There is no `client_id` now: Iris holds one
+  // PAT and authenticates as one account.
   //
-  // What DID survive is the failure shape, one level up. An operator who points
-  // `client_id` at an OAuth App gets exactly the state the old check existed to
-  // prevent: no scope is requested (this code no longer has one to send), so the
-  // token identifies users and cannot file, `GET /user` keeps working, the service
-  // keeps answering 200, and contribution is dead with one log line per run. So the
-  // one thing about the credential that config CAN see is checked here.
-  //
-  // Only the unambiguous case is fatal. `Ov`-prefixed ids are OAuth Apps on
-  // github.com and nothing else, and no GitHub App has that prefix. Everything else
-  // non-`Iv` gets a warning instead (see clientIdWarning) rather than a refusal —
-  // legacy OAuth App ids are bare hex, GitHub Enterprise Server mints its own, and
-  // refusing a format this code has not seen would break a deployment that works.
-  if (cfg.github?.client_id?.startsWith("Ov")) {
+  // What replaces it is a plain presence check. The whole design rests on this key, and
+  // an unset `${IRIS_GITHUB_TOKEN}` expands to `""` rather than disappearing (see
+  // `expandEnv`), so the shape to catch is a key that is present and empty — which is
+  // exactly what an operator who forgot the environment variable produces. Fatal rather
+  // than warned, unlike the old check: without it there is no account to own a session,
+  // so every request would 401 and nothing would work at all.
+  if (!githubToken(cfg)) {
     problems.push(
-      `github.client_id "${cfg.github.client_id}" is an OAuth App (Ov…), and Iris needs a GitHub App (Iv…). ` +
-        `An OAuth App would authenticate users fine and then be unable to file issues: Iris requests no OAuth ` +
-        `scope, because a GitHub App takes its issues:write from being INSTALLED on upstream_repo. Register a ` +
-        `GitHub App (device flow enabled, user-token expiry off), install it on upstream_repo, and use its ` +
-        `client id — or leave github.client_id unset to use the bundled app.`,
+      `github.token is not set. Iris needs one GitHub PAT, held by the server, to own every session and file ` +
+        `every issue: create a fine-grained token with issues:write on github.upstream_repo and set it (the ` +
+        `example config reads it from IRIS_GITHUB_TOKEN). It is never sent to a browser.`,
     );
   }
 
@@ -461,25 +457,6 @@ function validateConfig(cfg: IrisConfig, unset: Set<string>, path: string): void
   if (problems.length === 0) return;
   const hint = unset.size > 0 ? ` Unset environment variables: ${[...unset].sort().join(", ")}.` : "";
   throw new Error(`Invalid config ${path}:\n  - ${problems.join("\n  - ")}\n${hint}`);
-}
-
-// A boot-time warning for a `client_id` that is probably not a GitHub App, or
-// undefined if it looks fine. Returned rather than logged so this is testable and so
-// the caller decides where it goes; src/index.ts prints it.
-//
-// Not an error, unlike the `Ov` case validateConfig rejects: GitHub Enterprise
-// Server mints its own id formats and pre-2022 OAuth Apps used bare hex, so a
-// refusal here could break a working deployment over a format this code has not
-// seen. But the consequence of being wrong is invisible at boot and expensive — an
-// OAuth App files nothing while looking healthy — so it is worth a line.
-export function clientIdWarning(clientId: string): string | undefined {
-  if (!clientId || clientId.startsWith("Iv")) return undefined;
-  return (
-    `github.client_id "${clientId}" does not look like a GitHub App id (those start "Iv"). ` +
-    `If it is an OAuth App, logins will work and issue filing will fail on every run: Iris requests no OAuth ` +
-    `scope, because a GitHub App gets issues:write from its installation on upstream_repo. Ignore this if you ` +
-    `are on GitHub Enterprise Server, where id formats differ.`
-  );
 }
 
 // A boot-time warning for a `prompt_cache_ttl` that is set to something this does not
@@ -647,86 +624,57 @@ export function perAgentKeyWarning(
   );
 }
 
-// A boot-time warning for the other combination config can see is broken: the bundled
-// app plus an `upstream_repo` it is not installed on.
-//
-// This became possible to get wrong only by moving to a GitHub App. `issues: write`
-// used to come from the user's `public_repo` scope, which reached any public repo, so
-// leaving `client_id` blank and repointing `upstream_repo` at your own agent library
-// worked. Now the permission comes from an installation on one specific repository,
-// and the bundled app is installed on Equalify's. So that same edit — one documented,
-// first-class knob (`IRIS_UPSTREAM_REPO`), changed on its own — yields a deployment
-// where every login succeeds and no contribution can ever be filed, for anyone.
-//
-// Warned rather than refused, and this is the whole reason it is not fatal: a
-// deployment can legitimately be in this state. Equalify can install the bundled app
-// on someone else's repo, and an operator can ask them to; nothing in config could
-// tell. Refusing would break that. But the failure is invisible at boot and silent at
-// runtime, so it gets a line — the property the deleted `oauth_scope` check used to
-// provide, restored for the case that replaced it.
-//
-// Deliberately not comparing against `api_base_url`: on GitHub Enterprise Server the
-// bundled app does not exist at all, `client_id` must be set, and this warning cannot
-// fire because the bundled default is not in use.
-export function bundledAppWarning(clientId: string, upstreamRepo: string): string | undefined {
-  if (clientId !== DEFAULT_CLIENT_ID) return undefined;
-  // Compared on owner/repo rather than on the URL: `upstream_repo` is documented as a
-  // URL and accepts the shapes parseRepo does (with or without `.git`, ssh or https),
-  // so a string compare would warn about a spelling of the right repo.
-  const m = upstreamRepo?.replace(/\.git$/, "").match(/github\.com[/:]([^/]+)\/([^/]+)/);
-  const slug = m ? `${m[1]}/${m[2]}` : undefined;
-  if (slug?.toLowerCase() === BUNDLED_APP_REPO.toLowerCase()) return undefined;
-  return (
-    `github.upstream_repo is "${upstreamRepo}" while github.client_id is unset, so Iris is using the bundled ` +
-    `Equalify Iris GitHub App — which is installed on ${BUNDLED_APP_REPO}, not on your repo. A GitHub App's ` +
-    `issues:write comes from its INSTALLATION, so logins will work and every issue filing will fail for every ` +
-    `user, logged once per run as agent_issue_failed. Either register your own GitHub App (device flow enabled, ` +
-    `user-token expiry off) and install it on ${slug ?? "your upstream_repo"}, then set github.client_id to its ` +
-    `id — or ask Equalify to install the bundled app there, and ignore this.`
-  );
+/**
+ * The deployment's one GitHub credential, or undefined when it is unset.
+ *
+ * One function because several callers have to agree on what "set" means, and an unset
+ * `${IRIS_GITHUB_TOKEN}` expands to `""` rather than disappearing (see `expandEnv`), so
+ * "present in the YAML" is not the test. Whitespace is trimmed for the same reason: the
+ * auth middleware would reject `"  "` as a credential, and a config that looked set while
+ * every request 401s sends an operator looking in the wrong half of the system.
+ */
+export function githubToken(cfg: IrisConfig): string | undefined {
+  return cfg.github.token?.trim() || undefined;
 }
 
 /**
- * The deployment's anonymous credential, or undefined when it has none.
+ * The shared secret gating `/v1`, or undefined when the deployment is open.
  *
- * One function because two callers have to agree on what "set" means, and an unset
- * `${IRIS_ANONYMOUS_TOKEN}` expands to `""` rather than disappearing (see `expandEnv`), so
- * "present in the YAML" is not the test. Whitespace is trimmed for the same reason: the
- * auth middleware would reject `"  "` as a credential, and a boot warning that announced
- * anonymous access while every anonymous request 401s would send an operator looking for
- * the bug in the wrong half of the system.
+ * Same trimming rule and the same reason as `githubToken` above: `"  "` would be a gate
+ * no caller could satisfy, since the middleware compares against a trimmed header.
  */
-export function anonymousToken(cfg: IrisConfig): string | undefined {
-  return cfg.github.anonymous_token?.trim() || undefined;
+export function apiToken(cfg: IrisConfig): string | undefined {
+  return cfg.server.api_token?.trim() || undefined;
 }
 
-// A boot-time line for `github.anonymous_token`, or undefined when it is unset.
+// A boot-time line stating what this deployment's single identity means, or undefined
+// when `github.token` is unset (validateConfig refuses that, so this is only for a
+// hand-built config in a test).
 //
-// Not a defect and not a misconfiguration — an operator who set this key asked for it,
-// so this is a statement of what it turned off rather than a complaint. It is here
-// because every consequence is invisible from the outside: the service answers 200 to
-// callers with no credential, which is the intended behaviour and is also
-// indistinguishable from the credential-required deployment right up to the point
-// where a stranger's document is involved.
+// Not a complaint: the operator set the key, and this is a statement of what it decided
+// for them. It exists because every consequence is invisible from outside — the service
+// answers 200 to callers with no credential at all, which is the intended behaviour and
+// is also indistinguishable from a private deployment right up to the point where a
+// stranger's document is involved.
 //
-// Warned at every boot rather than once at first use, because "is anonymous access on"
-// is a property of the deployment an operator reads in the log, and the alternative
-// place to notice it is a visitor's session appearing under a bot account.
+// Printed at every boot rather than once at first use, because "who does this deployment
+// think its users are" is a property an operator reads in the log; the alternative place
+// to notice it is a visitor's document appearing in someone else's session list.
 //
-// Deliberately does NOT name the credential, not even truncated: this is the one config
-// value that is a live GitHub token for a real account, and a boot log is copied into
-// issues.
-export function anonymousTokenWarning(anonymousToken: string | undefined): string | undefined {
-  if (!anonymousToken) return undefined;
+// Deliberately does NOT name the credential, not even truncated: it is a live GitHub token
+// for a real account, and a boot log gets copied into issues.
+export function identityWarning(token: string | undefined, gated: boolean): string | undefined {
+  if (!token) return undefined;
   return (
-    `github.anonymous_token is set, so this deployment serves callers who send no Authorization header ` +
-    `instead of refusing them. Four consequences, all deliberate and none visible from outside: every ` +
-    `anonymous caller is the same user in the database, so GET /v1/sessions refuses them (a shared owner ` +
-    `would list strangers' documents) and a session is reachable only by its own unguessable id; that ` +
-    `refusal is keyed on the identity, so this credential's own account gets it too, signed in or not — ` +
-    `use an account no person needs, because the alternative is a token that lists every visitor's ` +
-    `uploads; their uploads are rate limited by address, not per user; and their feedback is filed under ` +
-    `this credential's account, not theirs. Unset it to require a token on every call.`
+    `github.token is this deployment's only identity: every session is owned by that one account and every ` +
+    `issue Iris opens is filed under it, so contributors get no attribution and GET /v1/sessions lists the ` +
+    `deployment's sessions rather than one caller's. Uploads are therefore rate limited by address, not per ` +
+    `user. ` +
+    (gated
+      ? `server.api_token is set, so callers must present it — the demo page cannot be used against this ` +
+        `deployment, because it holds no credential.`
+      : `server.api_token is unset, so anyone who can reach this deployment can convert documents and read ` +
+        `any session whose id they have. Set server.api_token to require a shared secret.`)
   );
 }
 
@@ -829,29 +777,6 @@ export function normalizeRecheckSampleSize(value: unknown): number {
   return Math.max(0, Math.floor(n));
 }
 
-// Bundled GitHub App client_id for the device flow. This is the single
-// place to embed Equalify's registered "Equalify Iris" GitHub App so the default
-// deployment needs no per-operator app setup — the same pattern the GitHub CLI uses.
-// The client_id is NOT a secret (it is sent openly in every authorization flow); the
-// client secret is never bundled and is only needed for the web redirect flow. A
-// deployment can override this via config/env.
-//
-// A GitHub App, not an OAuth App — the `Iv23` prefix rather than `Ov23`. That is what
-// keeps the consent screen free of any repository grant: `issues: write` comes from
-// installing the app on `upstream_repo`, not from the user (see src/auth/github.ts).
-//
-// Pointing this at your own app means registering a GitHub App with device flow
-// enabled and user-token expiry off, and installing it on your `upstream_repo`.
-export const DEFAULT_CLIENT_ID = "Iv23liv73tlbX0VfoEkr";
-
-// The one repository the bundled app above is installed on. Its only purpose is
-// bundledAppWarning below: `issues: write` now comes from an installation, and an
-// installation is per-repository, so "which repo" is part of whether the bundled
-// credential works at all. Under the old OAuth App it was not — `public_repo` filed
-// on any public repo the user could reach, so `upstream_repo` and `client_id` were
-// independent knobs and a self-hoster could repoint the upstream alone.
-const BUNDLED_APP_REPO = "EqualifyEverything/equalify-iris";
-
 let cached: { path: string; config: IrisConfig } | null = null;
 
 export function loadConfig(path = process.env.IRIS_CONFIG ?? "config.yaml"): IrisConfig {
@@ -875,7 +800,6 @@ export function loadConfig(path = process.env.IRIS_CONFIG ?? "config.yaml"): Iri
   parsed.server.rate_limits = resolveRateLimits(parsed.server.rate_limits);
   // GitHub host defaults (overridable for GitHub Enterprise / testing).
   parsed.github.api_base_url = parsed.github.api_base_url || "https://api.github.com";
-  parsed.github.oauth_base_url = parsed.github.oauth_base_url || "https://github.com";
   // Normalize the extraction concurrency knob once, here, so every consumer can
   // trust it: absent/garbage -> default, out-of-range -> clamped. A deployment
   // that sets 0 or a negative value means "don't parallelize" -> 1.
@@ -911,10 +835,6 @@ export function loadConfig(path = process.env.IRIS_CONFIG ?? "config.yaml"): Iri
     const b = block as ProviderBlock;
     b.max_tokens = normalizeMaxTokens(b.max_tokens);
   }
-  // Fall back to the bundled GitHub App so the default device-flow deployment
-  // works with no per-operator app setup. Applied BEFORE validateConfig,
-  // so its client_id check sees the effective value rather than an empty string.
-  parsed.github.client_id = parsed.github.client_id || DEFAULT_CLIENT_ID;
   validateConfig(parsed, unset, path);
   cached = { path: resolved, config: parsed };
   return parsed;

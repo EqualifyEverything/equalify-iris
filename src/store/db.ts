@@ -13,12 +13,13 @@ export type SessionStatus = "queued" | "running" | "ready_for_review" | "closed"
 // each phase; this only stops the enum from claiming they exist today.
 export type Phase = "extraction" | "assembly" | "review" | "done";
 
-// No `github_token` field, deliberately. The user's GitHub token is a live
-// credential — it files issues on their behalf during a run — but it never
-// needs to OUTLIVE the request that carried it: it arrives in the `Authorization`
-// header, is passed in memory to the queued run, and is gone when the run ends.
-// Storing it made a copy of `data/iris.sqlite` equivalent to GitHub API access as
-// every user who had ever logged in, in exchange for nothing the service used.
+// No `github_token` field, deliberately, and there is now nothing it could hold: this
+// deployment has ONE GitHub credential, it lives in `github.token`, and no caller ever
+// presents one (see auth/middleware.ts). A column per user was a copy of a live
+// credential — an early build wrote one, which made a copy of `data/iris.sqlite`
+// equivalent to GitHub API access as every user who had ever logged in, in exchange for
+// nothing the service read back. `rejectLegacyUsersTable` below refuses such a file
+// rather than adopting it.
 export interface UserRecord {
   github_user_id: number;
   github_login: string;
@@ -812,8 +813,10 @@ export class Store {
       PRAGMA busy_timeout = 5000;
       -- No github_token column, and no fork_repo column. The token is never
       -- persisted (see UserRecord above); fork_repo belonged to an earlier
-      -- fork-and-PR design, which was never built and is not going to be —
-      -- contributions are filed as issues under the user's own identity.
+      -- fork-and-PR design, which was never built and is not going to be --
+      -- contributions are filed as issues under this deployment's single
+      -- identity, and nobody is credited: what a body identifies is the
+      -- session, not a person (see github/issue.ts).
       CREATE TABLE IF NOT EXISTS users (
         github_user_id INTEGER PRIMARY KEY,
         github_login TEXT NOT NULL,
@@ -972,9 +975,10 @@ export class Store {
    * Refuse to open a database whose `users` table predates the removal of
    * `github_token` / `fork_repo`.
    *
-   * There is deliberately **no migration**: every user starts from scratch, so a
-   * pre-existing database is not a deployment to be upgraded — it is a leftover, and
-   * the honest response is to say so rather than to quietly adopt it.
+   * There is deliberately **no migration**: the only thing in here worth carrying
+   * forward is session history, and nothing else in the file is a credential Iris
+   * still uses — so a pre-existing database is not a deployment to be upgraded, it is
+   * a leftover, and the honest response is to say so rather than to quietly adopt it.
    *
    * A check is still needed, because `CREATE TABLE IF NOT EXISTS` in the constructor
    * is a no-op when the table already exists. Without this, a stray `data/` directory (a
@@ -982,11 +986,14 @@ export class Store {
    * keeps the old table — `github_token TEXT NOT NULL` — while `upsertUser` no longer
    * supplies that column, and the two symptoms both point away from the cause:
    *
-   *   * Every FIRST-TIME login throws `NOT NULL constraint failed:
-   *     users.github_token` inside the auth middleware's try, which answers
-   *     `401 unauthorized` with the SQLite message in the body. Anyone who already
-   *     has a row keeps working, so it reads as "GitHub is flaky for new signups"
-   *     rather than as a schema mismatch.
+   *   * The first request after every boot throws `NOT NULL constraint failed:
+   *     users.github_token` where the auth middleware records this deployment's
+   *     identity, so EVERY request 500s until the file is dealt with — the deployment
+   *     cannot provision the one row it owns. The middleware reports that as a server
+   *     fault with the driver's message in the log rather than as GitHub refusing the
+   *     token (auth/middleware.ts keeps the write outside the GitHub try for exactly
+   *     this reason), which is what leaves "the store cannot be written" as the
+   *     visible symptom instead of a 401 pointing at a credential that is fine.
    *   * The plaintext tokens in that file stay there, now never refreshed and never
    *     cleared, while `getUser`'s `SELECT *` still returns them — so
    *     `req.user.github_token` exists at runtime although `UserRecord` says it
@@ -1014,10 +1021,11 @@ export class Store {
     throw new Error(
       `${path} was created by an older version of Iris: its users table still has ` +
         `${legacy.join(" and ")}. There is no migration — GitHub tokens are no longer stored at ` +
-        `all, and every user re-authorizes from scratch. Delete the database (and its -wal/-shm ` +
-        `files) and restart; users log in again with GitHub and lose nothing but their session ` +
-        `history. Note that the old file still contains plaintext GitHub tokens for every user ` +
-        `who logged in, so delete it rather than archiving it.`,
+        `all, and nobody logs in: this deployment has one identity, the token in github.token. ` +
+        `Delete the database (and its -wal/-shm files) and restart; Iris recreates its own row ` +
+        `on the first request, and the only thing lost is session history. Note that the old ` +
+        `file still contains plaintext GitHub tokens for every user who logged in to the older ` +
+        `build, so delete it rather than archiving it.`,
     );
   }
 
