@@ -249,8 +249,8 @@ credential: that is the trade.
 
 **Nothing about a caller is stored.** Callers do not authenticate, so there is nothing to store about
 them — and there is no `github_token` column in `data/iris.sqlite` and no token file. A stolen copy of
-the database holds one GitHub user ID and login, your own deployment's, plus session history. Not
-GitHub access. Your token lives in your environment, like any other server secret.
+the database holds your deployment's own GitHub user ID and login, plus session history. Not GitHub
+access. Your token lives in your environment, like any other server secret.
 
 Everything an operator needs is in **[docs/github-auth.md](docs/github-auth.md)**: making the token
 with the right permission, what an expired one breaks (filing, and nothing else), the two 401s and

@@ -121,9 +121,15 @@ on the wire, and the hint says so rather than blaming one.
 
 Yours is in your config and your environment; treat it like any other server secret. Nothing else
 about it is stored: there is no `github_token` column and no token file. A stolen copy of
-`data/iris.sqlite` is not GitHub access. What it does hold is one GitHub user id and login — your
-deployment's own, since that is the only row the `users` table ever gets — plus the session history,
-which is the part worth protecting.
+`data/iris.sqlite` is not GitHub access. What it does hold is a GitHub user id and login for each
+account this deployment has run as — one, unless you have pointed it at a different account, since
+nothing removes the old row or its sessions — plus the session history, which is the part worth
+protecting.
 
 There is no per-user token to rotate, cache or purge, and no user-facing revocation story — because
 no user ever authorized anything. Revoke at github.com and restart.
+
+Rotating the token for the **same** account changes nothing in the database. Pointing it at a
+**different** account does: sessions are listed by the account that owns them, so history from the
+old account stays in `data/iris.sqlite` but stops appearing in `GET /v1/sessions`. It is not deleted,
+and pointing the config back restores the listing.

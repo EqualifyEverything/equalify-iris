@@ -481,3 +481,45 @@ test("the boot line says what one identity costs, and never prints the credentia
   assert.equal(identityWarning(undefined, false), undefined);
   assert.equal(identityWarning(githubToken({ github: { token: "   " } } as unknown as IrisConfig), false), undefined);
 });
+
+test("pointing the deployment at a different GitHub account hides the old sessions without deleting them", () => {
+  // `docs/github-auth.md` tells operators this, so it needs a check rather than an argument
+  // from how `upsertUser` looks. Two accounts is not a per-user model coming back: it is one
+  // deployment whose token was repointed, which is the ONLY way a second row appears —
+  // `upsertUser` keys on `github_user_id` and nothing deletes a row.
+  //
+  // The reason to pin it is that the symptom reads as data loss. An operator who switches
+  // accounts sees an empty `GET /v1/sessions` against a database that still has every row,
+  // and the honest advice — point it back — is only true if the rows really are still there.
+  const dir = mkdtempSync(join(tmpdir(), "iris-switch-"));
+  try {
+    const store = new Store(join(dir, "iris.sqlite"));
+    const OLD = 4242;
+    const NEW = 9999;
+    store.upsertUser({ github_user_id: OLD, github_login: "first-account" });
+    store.createSession({ session_id: "s-old", github_user_id: OLD, image_count: 1, iterations_max: 1 });
+
+    // The switch. A rotation for the SAME account is the `upsertUser` above running twice and
+    // is not this case, which is why the ids differ rather than the logins.
+    store.upsertUser({ github_user_id: NEW, github_login: "second-account" });
+    store.createSession({ session_id: "s-new", github_user_id: NEW, image_count: 1, iterations_max: 1 });
+
+    assert.deepEqual(
+      store.listSessions(NEW, { limit: 10 }).map((s) => s.session_id),
+      ["s-new"],
+      "the new account's session list showed a session it does not own",
+    );
+    // The claim that matters: hidden, not gone. Read through `getSession`, which does not
+    // filter by account, so it can see a row `listSessions` will not return.
+    assert.ok(store.getSession("s-old"), "switching accounts deleted the old account's session");
+    assert.equal(store.getUser(OLD)?.github_login, "first-account", "the old account's row was removed");
+    // And the advice in the docs works: pointing the config back lists them again.
+    assert.deepEqual(
+      store.listSessions(OLD, { limit: 10 }).map((s) => s.session_id),
+      ["s-old"],
+      "pointing the deployment back at the first account did not restore its session list",
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
