@@ -256,9 +256,11 @@ test("the session list refuses an anonymous caller and still serves a signed-in 
     const body = (await refused.json()) as { error: { code: string; message: string } };
     assert.equal(body.error.code, "anonymous_session_list");
     // The message has to name the remedy, because a client that just uploaded has the one
-    // thing that still works and no way to guess it from a bare 403.
+    // thing that still works and no way to guess it from a bare 403. Both remedies are
+    // asserted, one per caller who can land here: the session id for a visitor, and the
+    // account for whoever holds the shared credential (see the test below).
     assert.match(body.error.message, /session id returned by POST \/v1\/sessions/);
-    assert.match(body.error.message, /sign in with GitHub/);
+    assert.match(body.error.message, /sign in with a different one/);
 
     // The refusal is about the caller, not the route: the same deployment lists a
     // signed-in user's own sessions, and lists only theirs.
@@ -274,6 +276,86 @@ test("the session list refuses an anonymous caller and still serves a signed-in 
     // narrowing the mode trades for — reachability by id, which is `ses_` + a ULID rather
     // than an owner check.
     assert.equal(await h.fetch("/v1/sessions/ses_anon_one").then((r) => r.status), 200);
+  } finally {
+    h.close();
+  }
+});
+
+test("the shared account's own token gets the same refusal, not the list", async () => {
+  // Round 1 of #458 found this: the flag was keyed on the missing HEADER, so the one caller
+  // who can reach the shared identity another way — by presenting its token normally — was
+  // served the page the 403 exists to prevent. Measured before the fix: `200` and
+  // `{"sessions":[{"session_id":"ses_anon_one",…}]}`, a visitor's document listed by id to
+  // whoever holds that account's token, from anywhere, with no access to the server.
+  //
+  // Docs tell the operator to use a token "of your own", so the caller is not hypothetical:
+  // it is the operator signing in to their own deployment.
+  const h = await harness(ANON_TOKEN);
+  try {
+    h.store.upsertUser({ github_user_id: ANON_USER.id, github_login: ANON_USER.login }, 1);
+    h.store.createSession({
+      session_id: "ses_anon_one",
+      github_user_id: ANON_USER.id,
+      image_count: 1,
+      iterations_max: 1,
+    });
+
+    const res = await h.fetch("/v1/sessions", { authorization: `Bearer ${ANON_TOKEN}` });
+    assert.equal(res.status, 403);
+    const body = (await res.json()) as { error: { code: string; message: string } };
+    assert.equal(body.error.code, "anonymous_session_list");
+    // And the message has to be usable by THIS caller. "Sign in with GitHub" was the only
+    // advice before, which is no advice at all for someone who is signed in.
+    assert.match(body.error.message, /github\.anonymous_token/);
+
+    // `/v1/me` agrees, because one flag decides both. A client that trusted `anonymous`
+    // to mean "no credential was sent" would be wrong; it means "this is the shared
+    // identity", which is the thing every downstream owner check is keyed on.
+    const me = (await h.fetch("/v1/me", { authorization: `Bearer ${ANON_TOKEN}` }).then((r) => r.json())) as {
+      anonymous?: boolean;
+    };
+    assert.equal(me.anonymous, true);
+  } finally {
+    h.close();
+  }
+});
+
+test("resolving the shared identity costs one lookup and does not break a signed-in caller", async () => {
+  const h = await harness(ANON_TOKEN);
+  try {
+    // A signed-in request has to resolve TWO tokens the first time — its own, and the
+    // anonymous credential it is compared against — and then neither again.
+    assert.equal(await h.fetch("/v1/me", { authorization: `Bearer ${USER_TOKEN}` }).then((r) => r.status), 200);
+    assert.equal(h.ghCalls(), 2, "the caller's token and the shared credential, once each");
+    assert.equal(await h.fetch("/v1/me", { authorization: `Bearer ${USER_TOKEN}` }).then((r) => r.status), 200);
+    assert.equal(h.ghCalls(), 2, "memoized for the life of the process, so no per-request cost");
+
+    // And the identity comparison did not misfire: a real user is not anonymous because a
+    // deployment happens to have the key set.
+    const me = (await h.fetch("/v1/me", { authorization: `Bearer ${USER_TOKEN}` }).then((r) => r.json())) as {
+      github_login: string;
+      anonymous?: boolean;
+    };
+    assert.equal(me.github_login, REAL_USER.login);
+    assert.equal("anonymous" in me, false);
+  } finally {
+    h.close();
+  }
+});
+
+test("an unusable shared credential does not 401 a signed-in caller", async () => {
+  // The failure mode the lookup above introduces if it is not contained: the deployment's
+  // own credential is revoked or mistyped, so resolving it throws — on a request that has
+  // nothing to do with it. A caller's working token must not fail because the operator's
+  // is broken. The operator's signal is that anonymous requests 401, plus the boot warning.
+  const h = await harness("gho_operator_typo");
+  try {
+    assert.equal(await h.fetch("/v1/me", { authorization: `Bearer ${USER_TOKEN}` }).then((r) => r.status), 200);
+    // Retried rather than latched off: a transient outage must not disable the guard for
+    // the rest of the process, so each such request pays one failed lookup.
+    assert.equal(await h.fetch("/v1/me", { authorization: `Bearer ${USER_TOKEN}` }).then((r) => r.status), 200);
+    // And the mode itself is simply unusable, which is the operator's cue.
+    assert.equal(await h.fetch("/v1/me").then((r) => r.status), 401);
   } finally {
     h.close();
   }
@@ -372,13 +454,21 @@ test("the boot warning fires only when the key is set, and never prints the cred
   assert.equal(anonymousTokenWarning(undefined), undefined);
   assert.equal(anonymousTokenWarning(""), undefined);
   const warning = anonymousTokenWarning(ANON_TOKEN) ?? "";
-  // The three consequences an operator cannot see from outside, each named. Asserted
+  // The four consequences an operator cannot see from outside, each named. Asserted
   // because this string is the only place the deployment states its own policy, and a
   // warning that says "anonymous access is on" without saying what that costs is the
   // version of this that would have shipped.
   assert.match(warning, /GET \/v1\/sessions refuses them/);
   assert.match(warning, /rate limited by address/);
   assert.match(warning, /filed under this credential's account/);
+  // The fourth is the one an operator acts on when CHOOSING the account, and it is the
+  // only consequence that lands on them rather than on a visitor: this token's own
+  // account gets the same 403. Round 1 of #458 is what added it — before the fix the
+  // account was exempt, and being exempt is what made the token a session list for
+  // every visitor. So the warning has to ask for a dedicated account and say why.
+  assert.match(warning, /this credential's own account gets it too/);
+  assert.match(warning, /no person needs/, "asked for nothing of the operator");
+  assert.match(warning, /lists every visitor's/, "named the requirement without its reason");
   // A boot log gets pasted into issues. This is the one config value that is a live
   // GitHub token for a real account, so no part of it appears here.
   assert.equal(warning.includes(ANON_TOKEN), false);

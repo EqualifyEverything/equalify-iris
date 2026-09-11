@@ -9,11 +9,16 @@ import { sendError } from "../routes/errors.ts";
 export interface AuthedRequest extends Request {
   user?: UserRecord;
   token?: string;
-  // True when this request sent no credential and was served by
-  // `github.anonymous_token` instead of refused. `user` and `token` are then the
-  // deployment's shared demo identity rather than the caller's, which is why the flag
-  // exists: the two are indistinguishable downstream otherwise, and two places have to
-  // tell them apart — the session LIST (a shared owner cannot separate whose document
+  // True when this request resolved to the deployment's shared demo identity — either
+  // because it sent no credential and `github.anonymous_token` served it instead of
+  // refusing it, or because it presented a credential for that same account. It is a
+  // question about the IDENTITY reached, not about the shape of the request, because
+  // ownership downstream is `github_user_id` and nothing else: a caller holding that
+  // account's token is indistinguishable from an anonymous visitor to every check that
+  // matters, so it must be indistinguishable here too.
+  //
+  // The flag exists because `user` and `token` cannot say this on their own, and two
+  // places have to know — the session LIST (a shared owner cannot separate whose document
   // is whose) and the upload rate limiter (a shared user id is one bucket for everyone).
   //
   // Absent rather than `false` on an ordinary authenticated request, so a reader of
@@ -115,10 +120,25 @@ export function makeAuthMiddleware(store: Store, cfg: IrisConfig) {
   // this deployment requires a token on every call (the default). Read once: config
   // does not hot-reload.
   const anonToken = anonymousToken(cfg);
+  // The GitHub user id the anonymous credential resolves to, memoized for the life of
+  // the process. Identity, not the token string, is what `req.anonymous` has to mean:
+  // the shared account still OWNS every anonymous session, so a caller who reaches that
+  // identity by any other route — presenting this same token in a header, or a second
+  // token belonging to the same account — must be treated the same way, or the session
+  // list this deployment refuses to anonymous callers is served to them anyway.
+  //
+  // Memoized rather than re-resolved because a token's account cannot change and config
+  // does not hot-reload, so this costs ONE extra `GET /user` per process (none at all on
+  // a deployment with the key unset). A resolution FAILURE is deliberately not cached:
+  // it means the guard cannot be applied, and a transient GitHub outage must not switch
+  // it off for the rest of the process. The cost of that choice is one failed lookup per
+  // authenticated request while GitHub is unreachable, which is bounded and does not
+  // fail the request.
+  let anonUserId: number | undefined;
   return async function auth(req: AuthedRequest, res: Response, next: NextFunction): Promise<void> {
     const header = req.header("authorization") ?? "";
     const match = header.match(/^Bearer\s+(.+)$/i);
-    // No header at all is the only shape the anonymous credential answers for.
+    // No header at all is the only shape SERVED by the anonymous credential.
     //
     // A header that is present and malformed still 401s, and that asymmetry is the
     // point rather than an oversight: a client sending `Bearer <expired>` or
@@ -126,8 +146,13 @@ export function makeAuthMiddleware(store: Store, cfg: IrisConfig) {
     // would silently move it into another account's session space — its uploads
     // landing where it cannot list them and its feedback filed under a bot. The
     // failure it should see is its own broken credential.
-    const anonymous = !header && anonToken !== undefined;
-    if (!match && !anonymous) {
+    //
+    // Being served this way is not the same question as being FLAGGED anonymous, and the
+    // two are decided in different places for that reason: this one is about which
+    // credential answers the request, and `req.anonymous` below is about which identity it
+    // arrives at.
+    const servedAnonymously = !header && anonToken !== undefined;
+    if (!match && !servedAnonymously) {
       sendError(
         res,
         401,
@@ -142,29 +167,58 @@ export function makeAuthMiddleware(store: Store, cfg: IrisConfig) {
     // producing a user record with no GitHub account behind it.
     const token = match ? match[1].trim() : anonToken!;
 
-    try {
+    // One resolution path for every credential — the caller's, and the anonymous one
+    // whose identity the flag below is compared against. Sharing it is what makes the
+    // comparison cheap: the second call is a cache hit for the rest of the TTL.
+    const resolveUserId = async (t: string): Promise<number> => {
       const now = Date.now();
-      const cached = tokenCache.get(token);
-      let userId: number;
+      const cached = tokenCache.get(t);
       if (cached && cached.expires > now) {
         // Nothing to write on a cache hit: the token is not persisted, so there is
         // no stored copy to keep fresh. (This branch used to re-`upsertUser` on
         // every cached request purely to refresh `users.github_token`.)
-        userId = cached.id;
-      } else {
-        // GitHub identifies the caller; login provisions an account.
-        const ghUser = await fetchUser(token, apiBase);
-        store.upsertUser({ github_user_id: ghUser.id, github_login: ghUser.login }, defaultMaxIter);
-        userId = ghUser.id;
-        // Evict before inserting, so the ceiling is a real bound rather than one
-        // exceeded by however many requests arrive between sweeps. A stale entry for
-        // this very token (expired, hence the miss) is collected here too.
-        evict(now);
-        tokenCache.set(token, { id: userId, expires: now + TTL_MS });
+        return cached.id;
       }
+      // GitHub identifies the caller; login provisions an account.
+      const ghUser = await fetchUser(t, apiBase);
+      store.upsertUser({ github_user_id: ghUser.id, github_login: ghUser.login }, defaultMaxIter);
+      // Evict before inserting, so the ceiling is a real bound rather than one
+      // exceeded by however many requests arrive between sweeps. A stale entry for
+      // this very token (expired, hence the miss) is collected here too.
+      evict(now);
+      tokenCache.set(t, { id: ghUser.id, expires: now + TTL_MS });
+      return ghUser.id;
+    };
+
+    try {
+      const userId = await resolveUserId(token);
       req.user = store.getUser(userId)!;
       req.token = token;
-      if (anonymous) req.anonymous = true;
+
+      // `anonymous` means "this request arrives at the shared demo identity", which is a
+      // superset of "this request was served anonymously". The extra members are the
+      // reason it is asked as a question about identity: whoever holds the account behind
+      // `github.anonymous_token` can present it as an ordinary Bearer token, and ownership
+      // downstream is `github_user_id` alone — so without this, that one caller lists
+      // every anonymous visitor's sessions, which is the guarantee the 403 exists to keep.
+      if (anonToken !== undefined) {
+        if (servedAnonymously) {
+          // Free: this request just resolved the anonymous credential itself.
+          anonUserId = userId;
+          req.anonymous = true;
+        } else {
+          try {
+            anonUserId ??= await resolveUserId(anonToken);
+          } catch {
+            // The deployment's own credential is unusable (revoked, mistyped, GitHub
+            // down). Swallowed here on purpose: it is not this caller's fault and must
+            // not turn their working request into a 401. The operator's signal is that
+            // every anonymous request 401s, plus the boot warning that the key is set.
+            // Left unmemoized so the next request retries.
+          }
+          if (anonUserId === userId) req.anonymous = true;
+        }
+      }
       next();
     } catch (e) {
       // Same 401 either way. An anonymous credential that GitHub rejects is an

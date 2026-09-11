@@ -69,14 +69,24 @@ export function parseRepo(url: string): RepoRef {
 // `upstream_repo` is identical on the wire too — so the wording names the
 // possibilities instead of asserting one.
 //
-// `usingServiceToken` is load-bearing, not decoration: when `github.issue_token` is
-// set it is that PAT that failed, and the app's installation has nothing to do with
-// it. Sending an operator to re-install the app to fix a PAT failure would waste the
-// one clue they have — and the service-token shape is what the README recommends for
-// deployments that cannot file as their users.
+// WHICH credential failed is load-bearing, not decoration, and there are three of them
+// rather than two. A token that came from CONFIG — `github.issue_token`, or the
+// `github.anonymous_token` that files an anonymous session's contributions — is a PAT
+// whose access has nothing to do with the app's installation, so sending an operator to
+// re-install a working app would waste the one clue they have. A user's token is the
+// opposite case: its permission comes from the installation, and a failure there usually
+// affects every user until it is fixed.
+//
+// `anonymous` was the case this got wrong. It resolves to a config PAT like `service`
+// does, but `usingServiceToken` was false for it (no `issue_token` is set), so it took the
+// user-token branch and blamed the installation. The two config cases share a diagnosis
+// and differ only in which key to look at and who is affected, so they are one branch
+// with those two substituted rather than two branches saying the same thing.
+export type FilingCredential = "user" | "service" | "anonymous";
+
 export function installHintFor(
   e: unknown,
-  opts: { usingServiceToken: boolean },
+  opts: { credential: FilingCredential },
 ): { hint: string } | undefined {
   // Octokit's RequestError carries the code on `.status`, and only calls that
   // actually reached GitHub produce one. Deliberately NOT falling back to
@@ -101,13 +111,26 @@ export function installHintFor(
   // A missing repo is reported the same way whichever credential was used, so this
   // possibility is named in both branches below.
   const notFound = status === 404;
-  if (opts.usingServiceToken) {
+  if (opts.credential !== "user") {
+    // One diagnosis for both config credentials, because the fix is the same one: look at
+    // that PAT, not at the installation. What differs is the key to look at, and how much
+    // of the deployment is affected — an `issue_token` failure costs every filing, an
+    // `anonymous_token` failure costs only the sessions of callers who sent no credential,
+    // which is the difference between "nothing is being contributed" and "signed-in users
+    // are fine". Naming the wrong one of those sends the operator looking in the wrong log.
+    const anon = opts.credential === "anonymous";
+    const key = anon ? "github.anonymous_token" : "github.issue_token";
+    const whose = anon ? "this deployment's anonymous credential" : "the service account";
     return {
       hint:
-        `${status} while filing as the service account: github.issue_token is set, so the failing ` +
+        `${status} while filing as ${whose}: ${key} is set, so the failing ` +
         `credential is that PAT — check its scopes and its access to upstream_repo on github.com` +
         (notFound ? `, and check that upstream_repo is spelled correctly (GitHub answers 404 for a repo a token cannot see)` : ``) +
-        `. The GitHub App's installation is not involved; it only governs tokens issued to users.`,
+        `. The GitHub App's installation is not involved; it only governs tokens issued to users.` +
+        (anon
+          ? ` Only anonymous sessions file with this credential, so signed-in users are unaffected — if filing ` +
+            `fails for them too, that is a separate cause.`
+          : ``),
     };
   }
   return {

@@ -1,7 +1,7 @@
 import { loadAgent } from "../agents/loader.ts";
 import { loadImage, type PipelineContext } from "./context.ts";
 import { ACCESSIBILITY_REQUIREMENTS } from "./accessibility.ts";
-import { createAgentIssue, installHintFor } from "../github/issue.ts";
+import { createAgentIssue, installHintFor, type FilingCredential } from "../github/issue.ts";
 
 // The content types the general page pass covers itself. A
 // suggestion naming one of these is declined rather than dispatched, and never
@@ -101,10 +101,23 @@ async function draftAgent(ctx: PipelineContext, s: Suggestion): Promise<string> 
 // same act, credited to the person who did it. `github.issue_token` is an
 // optional override for deployments that must file under one bot account instead,
 // and it trades that attribution away.
+//
+// There is a third case, and it is not a user: a deployment with
+// `github.anonymous_token` set serves callers who send no token as its own account, so
+// their contributions are filed under that account. Nobody signed in, so there is no
+// attribution to trade away — but a 403 there means something different from a 403 on a
+// user's token, which is what `FilingCredential` below carries to the failure.
 export async function runContribution(ctx: PipelineContext, suggestions: Suggestion[]): Promise<void> {
-  // Which credential is used decides what a 403 means, so it is recorded rather
-  // than re-derived at the failure.
-  const usingServiceToken = Boolean(ctx.cfg.github.issue_token);
+  // Which credential is used decides what a 403 means, so it is recorded rather than
+  // re-derived at the failure. Three cases, not two: `issue_token` wins when set, an
+  // anonymous session files with the config PAT that served it, and everyone else files
+  // as themselves. The first two are config PATs whose access has nothing to do with the
+  // GitHub App installation — see `installHintFor`.
+  const credential: FilingCredential = ctx.cfg.github.issue_token
+    ? "service"
+    : ctx.anonymousSession
+      ? "anonymous"
+      : "user";
   const token = ctx.cfg.github.issue_token || ctx.githubToken;
   if (!token || suggestions.length === 0) return;
 
@@ -150,7 +163,7 @@ export async function runContribution(ctx: PipelineContext, suggestions: Suggest
         agent: name,
         error: (e as Error)?.message ?? String(e),
         stage: "file",
-        ...installHintFor(e, { usingServiceToken }),
+        ...installHintFor(e, { credential }),
       });
     }
   }

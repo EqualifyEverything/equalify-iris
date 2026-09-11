@@ -41,6 +41,12 @@ export interface PipelineContext {
   // The logged-in user's GitHub token — used to file agent-suggestion issues
   // attributed to them (unless a service token override is configured).
   githubToken?: string;
+  // True when the request that started this run resolved to the deployment's shared
+  // anonymous identity (`github.anonymous_token`), so `githubToken` above is a PAT out of
+  // config rather than a user's own credential. Carried because a filing failure is
+  // diagnosed by WHICH credential failed (`installHintFor`), and a config PAT's access has
+  // nothing to do with the GitHub App installation a user's token depends on.
+  anonymousSession?: boolean;
 }
 
 // The extension -> media type map lives with the rest of the model's input limits

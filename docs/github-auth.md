@@ -45,18 +45,20 @@ a deployment genuinely cannot file as its users — an org policy that forbids i
 
 ## Anonymous access: a demo you turn on
 
-Set `github.anonymous_token` to one of your own GitHub tokens and a caller who sends **no**
-`Authorization` header is served as that account instead of refused. Unset — the default — a token is
-required on every call. The reason to turn it on is a visitor who wants to see Iris work on one page
-before deciding whether to sign in.
+Set `github.anonymous_token` to a token for a **dedicated** GitHub account and a caller who sends
+**no** `Authorization` header is served as that account instead of refused. Unset — the default — a
+token is required on every call. The reason to turn it on is a visitor who wants to see Iris work on
+one page before deciding whether to sign in. Make it an account no person signs in with: the row
+below on the shared identity says why.
 
-Three things it costs, and Iris prints them at every boot so they are not a surprise later:
+Four things it costs, and Iris prints them at every boot so they are not a surprise later:
 
 | What changes | Why |
 | --- | --- |
 | `GET /v1/sessions` answers **403 `anonymous_session_list`** | Ownership is the GitHub user id and nothing else, so every anonymous visitor is the same owner. Listing "their" sessions would hand one visitor another's document. A session is still reachable at `GET /v1/sessions/{id}` with the id `POST /v1/sessions` returned. |
+| **That account** gets the same 403, signed in or not | The refusal is keyed on the identity a request reaches, not on whether it sent a header, so presenting this token as an ordinary `Bearer` is refused too. The alternative is not a convenience: it would make the token a key to every visitor's uploads, with no server access needed. This is the cost of a shared identity, so a dedicated account pays it and nobody notices. |
 | Uploads are counted per **address**, not per user | One shared account keyed per user would make `upload_per_minute` a single bucket for every anonymous caller on the internet, and the symptom is a deployment that looks healthy and is permanently rate limited. |
-| Feedback is filed under **your** account | An anonymous session has no user to credit. This is the attribution the default protects, so a deployment that cares about it should leave the key blank. |
+| Feedback is filed under **that** account | An anonymous session has no user to credit. This is the attribution the default protects, so a deployment that cares about it should leave the key blank. A 403 while filing names `github.anonymous_token` in its `hint`, because the GitHub App's installation cannot be the cause. |
 
 Two details worth knowing before you deploy it:
 

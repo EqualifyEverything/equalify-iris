@@ -140,9 +140,13 @@ export interface IrisConfig {
     // without a GitHub account. What that costs is not obvious, so it is stated at
     // boot (anonymousTokenWarning) and in three places in the docs: every anonymous
     // caller is the SAME user as far as the store is concerned, so session ownership
-    // stops separating them (routes/sessions.ts refuses the session LIST for them),
-    // their uploads are counted by address rather than by user (util/requestLimits.ts),
-    // and their feedback is filed under this credential's account rather than their own.
+    // stops separating them (routes/sessions.ts refuses the session LIST for them —
+    // including to this account itself, since the refusal is keyed on the identity a
+    // request reaches and not on whether it sent a header), their uploads are counted by
+    // address rather than by user (util/requestLimits.ts), and their feedback is filed
+    // under this credential's account rather than their own. It therefore wants a
+    // DEDICATED account: the only way that token could list its own sessions is a rule
+    // that lists every anonymous visitor's to whoever holds it.
     anonymous_token?: string;
   };
   providers: {
@@ -716,11 +720,13 @@ export function anonymousTokenWarning(anonymousToken: string | undefined): strin
   if (!anonymousToken) return undefined;
   return (
     `github.anonymous_token is set, so this deployment serves callers who send no Authorization header ` +
-    `instead of refusing them. Three consequences, all deliberate and none visible from outside: every ` +
+    `instead of refusing them. Four consequences, all deliberate and none visible from outside: every ` +
     `anonymous caller is the same user in the database, so GET /v1/sessions refuses them (a shared owner ` +
-    `would list strangers' documents) and a session is reachable only by its own unguessable id; their ` +
-    `uploads are rate limited by address, not per user; and their feedback is filed under this ` +
-    `credential's account, not theirs. Unset it to require a token on every call.`
+    `would list strangers' documents) and a session is reachable only by its own unguessable id; that ` +
+    `refusal is keyed on the identity, so this credential's own account gets it too, signed in or not — ` +
+    `use an account no person needs, because the alternative is a token that lists every visitor's ` +
+    `uploads; their uploads are rate limited by address, not per user; and their feedback is filed under ` +
+    `this credential's account, not theirs. Unset it to require a token on every call.`
   );
 }
 

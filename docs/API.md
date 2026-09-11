@@ -6356,6 +6356,12 @@ every anonymous caller shares one — so the honest answer is a refusal rather t
 belonging to whoever used the demo before you. Keep the `session_id` that `POST /v1/sessions`
 returned; polling, output, feedback and close all work with it.
 
+The refusal is on the identity the request reaches, not on the absence of a header, so it also
+applies to a token **for the shared account itself**. If you are signed in and see this, your account
+is the one configured as `github.anonymous_token` — sign in with another, and see
+[github-auth.md](github-auth.md#anonymous-access-a-demo-you-turn-on) for why that
+account is meant to be one nobody uses.
+
 Paginate by passing `cursor=<next_cursor>` **verbatim** — it encodes both halves of the
 sort key (`created_at|session_id`), because `created_at` alone is not unique: sessions
 created in the same millisecond tie on it, and paging on a non-unique key skips and

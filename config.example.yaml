@@ -85,8 +85,8 @@ storage:
 # the token identifies the user AND files their session's feedback back to the
 # shared agent library under their own identity, so using Iris and improving it are
 # the same act. `anonymous_token` below is the one way to open the service to
-# callers who send no token, it is off unless you set it, and it costs those
-# callers their session list and their credit.
+# callers who send no token. It is off unless you set it. It costs those callers
+# their session list and their credit.
 #
 # Nothing here opens pull requests: contributions are filed as issues (an earlier
 # design opened them — see docs/design-notes.md).
@@ -145,16 +145,20 @@ github:
   # `upstream_repo`. If filing logs a 403/404, the app is probably not installed — the
   # log line's `hint` says so.
   #
-  # OPTIONAL demo mode. Set this to one of YOUR GitHub tokens and callers who send NO
-  # `Authorization` header are served as that account instead of refused. Leave it unset
-  # — the default — and a token is required on every call. Turn it on so a visitor can
-  # convert one page before deciding to sign in.
+  # OPTIONAL demo mode. Set this to a token for a DEDICATED GitHub account — not one a
+  # person signs in with — and callers who send NO `Authorization` header are served as
+  # that account instead of refused. Leave it unset — the default — and a token is
+  # required on every call. Turn it on so a visitor can convert one page before deciding
+  # to sign in.
   #
-  # Three costs, all deliberate, and Iris warns about them at every boot:
+  # Four costs, all deliberate, and Iris warns about them at every boot:
   #   - No session list. Ownership is the GitHub user id, so every anonymous visitor is
   #     the same owner; `GET /v1/sessions` refuses them (403 `anonymous_session_list`)
   #     rather than listing strangers' documents. A session is still reachable by the id
   #     `POST /v1/sessions` returned.
+  #   - THIS account loses its own session list. The refusal is on the identity, not on
+  #     the request's shape, so signing in as it gets the same 403. Use an account
+  #     nobody needs: the alternative is that its token lists every visitor's uploads.
   #   - Uploads are limited by ADDRESS, not per user — one shared account would otherwise
   #     be one `upload_per_minute` bucket for everyone.
   #   - Their feedback is filed under THIS account. That is the credit the default

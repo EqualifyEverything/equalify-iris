@@ -237,9 +237,10 @@ contribution is credited to the person who produced it. If you would rather your
 contribute, this is not the service to deploy.
 
 **The one exception is a demo, and you have to turn it on.** Set `github.anonymous_token` to a
-GitHub token of your own and callers who send **no** `Authorization` header are served as that
-account instead of refused. Leave it unset — the default — and there is no anonymous access at
-all. It exists so a visitor can try Iris on one page before deciding to sign in.
+token for a **dedicated** GitHub account — one no person signs in with — and callers who send **no**
+`Authorization` header are served as that account instead of refused. Leave it unset — the default —
+and there is no anonymous access at all. It exists so a visitor can try Iris on one page before
+deciding to sign in.
 
 What it costs, all of it deliberate and none of it visible to the caller unless you tell them:
 
@@ -247,10 +248,14 @@ What it costs, all of it deliberate and none of it visible to the caller unless 
   visitor is the same owner. `GET /v1/sessions` therefore refuses them with `403
   anonymous_session_list` rather than listing strangers' documents. A session is still reachable
   by its own ID, which is what `POST /v1/sessions` returns.
+- **That account loses its own session list too.** The refusal is on the identity, not on the
+  shape of the request, so signing in as it — or presenting its token as an ordinary `Bearer` —
+  gets the same 403. It has to be an account you do not use, because the alternative is worse:
+  if holding that token bought a session list, whoever holds it reads every visitor's uploads.
 - **Upload limits by address, not by user.** One shared account would otherwise be one
   `upload_per_minute` bucket for the whole internet.
-- **Feedback filed under your account.** An anonymous session's issues are yours, not the
-  visitor's, which is exactly the credit the default is protecting.
+- **Feedback filed under that account.** An anonymous session's issues are filed as it, not as
+  the visitor, which is exactly the credit the default is protecting.
 
 A request that sends a *broken* token is still refused — the fallback is for callers who present
 nothing, not for ones whose sign-in failed. Iris warns at boot whenever the key is set, and
