@@ -325,9 +325,11 @@ test("the user's own words reach the issue", async () => {
 test("feedback cannot ping strangers or publish links from the issue it lands in", async () => {
   // This is the first thing that puts a user's typed text into an upstream issue body,
   // and GitHub renders markdown there. `@name` pings a real person, `#12` cross-links an
-  // unrelated issue, and a link is published — under whichever identity filed, which
-  // `github.issue_token` can make a service account rather than the person who typed it.
-  // A code span renders none of them, so the feedback has to stay inside one.
+  // unrelated issue, and a link is published — always under this deployment's own account,
+  // never the account of whoever typed it, since there is only one identity. So a ping that
+  // renders is this service pinging a stranger on behalf of an anonymous visitor, which is
+  // worse than the same text under its author's name, not better. A code span renders none
+  // of them, so the feedback has to stay inside one.
   const gh = mockGitHub([]);
   try {
     await createAgentUpdateIssue("ghu_user", REPO, API, {

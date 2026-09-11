@@ -6,16 +6,21 @@
 // The base URL is passed in rather than hardcoded so a deployment can target GitHub
 // Enterprise, and so the suite can drive this against a mock host.
 //
-// What the token is used for, and it is only two things:
+// What the token is used for, and it is only three things:
 //
 //   1. `GET /user`, here, to name the account sessions and issues belong to.
-//   2. Filing agent-suggestion and agent-update issues on `upstream_repo` (create the
-//      issue, and read-or-create its triage label) — see src/github/issue.ts.
+//   2. Filing agent-suggestion and agent-update issues on `upstream_repo` — see
+//      src/github/issue.ts.
+//   3. The dedupe that runs before each of those: a title search for the issue already
+//      tracking this lesson, and a comment on it when there is one.
 //
 // So the narrowest credential that works is a fine-grained personal access token scoped to
-// `upstream_repo` alone with `Issues: read and write`. Nothing pushes, nothing opens pull
-// requests, and nothing reads code, so a classic `repo` token grants far more than this
-// service uses.
+// `upstream_repo` alone with `Issues: read and write`. The READ half is for the dedupe in
+// (3), not for a label — `ensureLabel` is gone (src/github/issue.ts, and both filing paths
+// pass no `labels`), because GitHub silently drops labels set by a filer without push
+// access. Do not add one back on the strength of a comment here. Nothing pushes, nothing
+// opens pull requests, and nothing reads code, so a classic `repo` token grants far more
+// than this service uses.
 //
 // Two operator-visible consequences of there being one token:
 //

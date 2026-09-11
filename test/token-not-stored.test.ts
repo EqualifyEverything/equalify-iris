@@ -157,9 +157,9 @@ test("GET /v1/me returns no fork_repo", async () => {
 // deployment to upgrade — there is no migration, by decision. But the check has to
 // exist, because `CREATE TABLE IF NOT EXISTS` silently keeps the old table, and the
 // resulting failure points away from its cause: `upsertUser` throws
-// `NOT NULL constraint failed: users.github_token`, the auth middleware catches it,
-// and a first-time login gets `401 unauthorized` with a SQLite message in the body
-// while anyone who already has a row keeps working.
+// `NOT NULL constraint failed: users.github_token` when the middleware records this
+// deployment's identity, so every request 500s and the operator is left reading a
+// SQLite constraint on a column no current build writes.
 test("a pre-existing database with a token column is refused at startup", async () => {
   const dir = mkdtempSync(join(tmpdir(), "iris-legacy-"));
   const dbPath = join(dir, "iris.sqlite");
@@ -223,7 +223,7 @@ test("a pre-existing database with a token column is refused at startup", async 
         // file still holds live plaintext credentials.
         /[Dd]elete the database/.test(e.message) &&
         /plaintext/.test(e.message),
-      "an older database was adopted silently — new logins would 401 with a SQL error",
+      "an older database was adopted silently — every request would 500 with a SQL error",
     );
 
     // Refusing to adopt a file and modifying it anyway cannot both be true. The

@@ -972,9 +972,10 @@ export class Store {
    * Refuse to open a database whose `users` table predates the removal of
    * `github_token` / `fork_repo`.
    *
-   * There is deliberately **no migration**: every user starts from scratch, so a
-   * pre-existing database is not a deployment to be upgraded — it is a leftover, and
-   * the honest response is to say so rather than to quietly adopt it.
+   * There is deliberately **no migration**: the only thing in here worth carrying
+   * forward is session history, and nothing else in the file is a credential Iris
+   * still uses — so a pre-existing database is not a deployment to be upgraded, it is
+   * a leftover, and the honest response is to say so rather than to quietly adopt it.
    *
    * A check is still needed, because `CREATE TABLE IF NOT EXISTS` in the constructor
    * is a no-op when the table already exists. Without this, a stray `data/` directory (a
@@ -982,11 +983,14 @@ export class Store {
    * keeps the old table — `github_token TEXT NOT NULL` — while `upsertUser` no longer
    * supplies that column, and the two symptoms both point away from the cause:
    *
-   *   * Every FIRST-TIME login throws `NOT NULL constraint failed:
-   *     users.github_token` inside the auth middleware's try, which answers
-   *     `401 unauthorized` with the SQLite message in the body. Anyone who already
-   *     has a row keeps working, so it reads as "GitHub is flaky for new signups"
-   *     rather than as a schema mismatch.
+   *   * The first request after every boot throws `NOT NULL constraint failed:
+   *     users.github_token` where the auth middleware records this deployment's
+   *     identity, so EVERY request 500s until the file is dealt with — the deployment
+   *     cannot provision the one row it owns. The middleware reports that as a server
+   *     fault with the driver's message in the log rather than as GitHub refusing the
+   *     token (auth/middleware.ts keeps the write outside the GitHub try for exactly
+   *     this reason), which is what leaves "the store cannot be written" as the
+   *     visible symptom instead of a 401 pointing at a credential that is fine.
    *   * The plaintext tokens in that file stay there, now never refreshed and never
    *     cleared, while `getUser`'s `SELECT *` still returns them — so
    *     `req.user.github_token` exists at runtime although `UserRecord` says it
@@ -1014,10 +1018,11 @@ export class Store {
     throw new Error(
       `${path} was created by an older version of Iris: its users table still has ` +
         `${legacy.join(" and ")}. There is no migration — GitHub tokens are no longer stored at ` +
-        `all, and every user re-authorizes from scratch. Delete the database (and its -wal/-shm ` +
-        `files) and restart; users log in again with GitHub and lose nothing but their session ` +
-        `history. Note that the old file still contains plaintext GitHub tokens for every user ` +
-        `who logged in, so delete it rather than archiving it.`,
+        `all, and nobody logs in: this deployment has one identity, the token in github.token. ` +
+        `Delete the database (and its -wal/-shm files) and restart; Iris recreates its own row ` +
+        `on the first request, and the only thing lost is session history. Note that the old ` +
+        `file still contains plaintext GitHub tokens for every user who logged in to the older ` +
+        `build, so delete it rather than archiving it.`,
     );
   }
 

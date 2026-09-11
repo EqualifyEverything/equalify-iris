@@ -2,7 +2,7 @@ import type { Request, Response, NextFunction } from "express";
 import type { IrisConfig } from "../config.ts";
 import { apiToken, githubToken } from "../config.ts";
 import type { Store, UserRecord } from "../store/db.ts";
-import { fetchUser } from "./github.ts";
+import { fetchUser, type GitHubUser } from "./github.ts";
 import { sendError } from "../routes/errors.ts";
 
 // Request augmented with the deployment's resolved identity + the token it authenticates
@@ -40,12 +40,25 @@ const FAILURE_BACKOFF_MS = 30 * 1000;
 let identity: number | undefined;
 let retryAfter = 0;
 
+// The lookup itself while it is in flight, shared by every request that arrives before it
+// settles.
+//
+// Memoizing the resolved id alone is not enough, and the gap is only visible at a cold
+// start: `identity` is assigned AFTER the await, so N requests arriving in one tick all see
+// `undefined` and all call `GET /user`. Sequential pins cannot show it — the second request
+// finds the first already finished — so a client opening 20 parallel requests against a
+// fresh process spent 20 lookups against this deployment's GitHub rate limit. Once per
+// process, and the gate still runs first, so no stranger can trigger it; cheap to close
+// anyway, and the pin for it has to be concurrent.
+let inFlight: Promise<GitHubUser> | undefined;
+
 // Test-only: the memo above outlives a test, so one test's resolved identity would
 // otherwise satisfy the next test's assertion — including tests whose whole subject is what
 // happens before it resolves.
 export function __resetIdentity(): void {
   identity = undefined;
   retryAfter = 0;
+  inFlight = undefined;
 }
 
 // Test-only introspection, so a test can assert that a SECOND request did not ask GitHub
@@ -101,14 +114,16 @@ export function makeAuthMiddleware(store: Store, cfg: IrisConfig) {
         sendError(res, 401, "unauthorized", "This deployment could not authenticate to GitHub.");
         return;
       }
+      // GitHub identifies the account. Nothing here trusts the token because it came from
+      // config — a revoked or mistyped PAT has to fail at the same place a bad one would.
+      let ghUser: GitHubUser;
       try {
-        // GitHub identifies the account; `upsertUser` provisions the row every session is
-        // owned by. Nothing here trusts the token because it came from config — a revoked or
-        // mistyped PAT has to fail at the same place a bad one would.
-        const ghUser = await fetchUser(token, apiBase);
-        store.upsertUser({ github_user_id: ghUser.id, github_login: ghUser.login }, defaultMaxIter);
-        identity = ghUser.id;
+        inFlight ??= fetchUser(token, apiBase);
+        ghUser = await inFlight;
       } catch (e) {
+        // Cleared, or every later request would await a promise that has already rejected
+        // and the backoff window could never end.
+        inFlight = undefined;
         retryAfter = Date.now() + FAILURE_BACKOFF_MS;
         sendError(
           res,
@@ -118,6 +133,27 @@ export function makeAuthMiddleware(store: Store, cfg: IrisConfig) {
         );
         return;
       }
+
+      // Provisioning the row every session is owned by, and deliberately NOT inside the
+      // catch above: a failed WRITE is not a failed authentication. Reporting it as one puts
+      // a SQLite message in a 401 saying GitHub refused us — which is the exact confusion
+      // `rejectLegacyUsersTable` was written to prevent, and it lists that symptom as the
+      // thing that points an operator away from the real cause (store/db.ts). It also must
+      // not set the GitHub backoff: a store fault does not become less true in 30 seconds.
+      try {
+        store.upsertUser({ github_user_id: ghUser.id, github_login: ghUser.login }, defaultMaxIter);
+      } catch (e) {
+        // The detail goes to the server log rather than to the caller: on an open
+        // deployment this response is public, and a driver's message can carry a path.
+        console.error(`ERROR: could not record the deployment's identity: ${(e as Error).message}`);
+        sendError(res, 500, "server_error", "This deployment could not record its own identity. See the server log.");
+        return;
+      }
+
+      // Last, because `req.user` below reads the row through this id with a non-null
+      // assertion: setting it before the write succeeded would hand a route an undefined
+      // user instead of an error.
+      identity = ghUser.id;
     }
 
     req.user = store.getUser(identity)!;

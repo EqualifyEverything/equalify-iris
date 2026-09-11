@@ -39,11 +39,13 @@ function spokenLabel(el: Element): string {
 }
 
 test("every link that opens a new tab says so in its label", () => {
-  // Zero is the right answer today, and the assertion that used to require one is gone with
-  // its subject: the page's only `target="_blank"` link sent a visitor to github.com to
-  // enter a device code, and nothing signs in now. The loop stays because a re-added link
-  // has to be checked on the day it is added — and it is not vacuous, since the button test
-  // below requires at least one new-tab control on the page.
+  // This loop is empty today, and that is not a mistake: the assertion that used to require
+  // one link is gone with its subject, since the page's only `target="_blank"` link sent a
+  // visitor to github.com to enter a device code and nothing signs in now. It stays so that
+  // a re-added link is checked on the day it is added rather than the day someone remembers
+  // this file — which is the whole reason to keep it, and the only one. The button test below
+  // does NOT rescue it from being vacuous: that test's subject is buttons wired to
+  // `window.open`, a set disjoint from this one, so it can pass with zero links here.
   for (const a of doc.querySelectorAll('a[target="_blank"]')) {
     assert.match(spokenLabel(a), WARNS, `link "${a.textContent?.trim()}" opens a new tab without saying so`);
   }

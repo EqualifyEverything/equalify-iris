@@ -18,6 +18,14 @@ DATA=/tmp/iris-e2e
 CFG=/tmp/iris-e2e-config.yaml
 LOG=/tmp/iris-e2e.log
 BASE="http://localhost:$PORT/v1"
+# A SECOND, short-lived deployment with the gate switched off (step 3a). Its own port,
+# database and log, because it runs while the first one is still up and two Stores on one
+# sqlite file would be testing locking rather than the gate.
+OPEN_PORT=8100
+OPEN_DATA=/tmp/iris-e2e-open
+OPEN_CFG=/tmp/iris-e2e-open-config.yaml
+OPEN_LOG=/tmp/iris-e2e-open.log
+OPEN_BASE="http://localhost:$OPEN_PORT/v1"
 # Shared secret for GET /v1/quality (step 11c). Not a GitHub token — that endpoint
 # returns an aggregate belonging to no user and its real caller is a CI job.
 QUALITY_TOKEN=e2e-quality-token
@@ -52,7 +60,7 @@ dump_server_log() {
 PIDS=()
 cleanup() {
   for pid in "${PIDS[@]:-}"; do kill "$pid" 2>/dev/null || true; done
-  rm -rf "$DATA" "$CFG"
+  rm -rf "$DATA" "$CFG" "$OPEN_DATA" "$OPEN_CFG"
 }
 trap cleanup EXIT
 
@@ -268,6 +276,71 @@ lookups=$(curl -s "http://localhost:$GH_PORT/__user_lookups" | jq -r .count)
 # device flow nobody maintains.
 code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "${AUTH[@]}" "$BASE/auth/github/device")
 [ "$code" = "404" ] && pass "no device-flow endpoint" || fail "auth routes" "POST /v1/auth/github/device answered $code"
+
+echo "==> 3a. an OPEN deployment serves a caller who presents nothing"
+# The rest of this script runs gated, which leaves the shape the demo page actually depends
+# on — `api_token` unset, no credential anywhere in the browser — covered by unit tests and
+# never driven through the real stack. That is the half where a mistake ships: a gate that
+# refuses when it should be absent looks like a working deployment to every test above.
+#
+# It has to come after step 3, not with step 2: this boots a second deployment that resolves
+# its own identity, which adds a `GET /user` to the counter step 3 asserts is exactly 1.
+sed -e "s#^  port: $PORT\$#  port: $OPEN_PORT#" \
+    -e "/^  api_token:/d" \
+    -e "s#$DATA#$OPEN_DATA#g" \
+    "$CFG" > "$OPEN_CFG"
+# The point of the step is a MISSING key, so check it is missing rather than trusting sed —
+# a config that still carried the gate would make the 200 below prove nothing.
+grep -q '^  api_token:' "$OPEN_CFG" && fail "open config" "api_token survived into $OPEN_CFG"
+grep -q "^  port: $OPEN_PORT\$" "$OPEN_CFG" || fail "open config" "port rewrite failed in $OPEN_CFG"
+mkdir -p "$OPEN_DATA"
+IRIS_CONFIG="$OPEN_CFG" node --experimental-sqlite src/index.ts > "$OPEN_LOG" 2>&1 &
+OPEN_PID=$!
+PIDS+=("$OPEN_PID")
+open_start=$SECONDS
+open_booted=""
+while [ $((SECONDS - open_start)) -lt "$BOOT_TIMEOUT" ]; do
+  if curl -sf "$OPEN_BASE/health" >/dev/null 2>&1; then open_booted=1; break; fi
+  if ! kill -0 "$OPEN_PID" 2>/dev/null; then
+    echo "  ✗ the open deployment exited during startup"
+    tail -20 "$OPEN_LOG" | sed 's/^/    /'
+    cleanup
+    exit 1
+  fi
+  sleep 0.3
+done
+[ -n "$open_booted" ] || fail "open boot" "no /health within ${BOOT_TIMEOUT}s; see $OPEN_LOG"
+# No Authorization header at all, which is what a browser on the demo page sends.
+open_me=$(curl -s -w '\n%{http_code}' "$OPEN_BASE/me")
+open_code=$(echo "$open_me" | tail -1)
+[ "$open_code" = "200" ] && pass "an unauthenticated caller is served (HTTP 200)" \
+  || fail "open deployment" "GET /v1/me with no header answered $open_code: $(echo "$open_me" | head -1)"
+# Served AS the deployment, not as nobody: an open gate must not also mean an unresolved
+# identity, or every session would belong to a user row that does not exist.
+echo "$open_me" | head -1 | jq -e '.github_login=="iris-tester"' >/dev/null \
+  && pass "and served as the deployment's own identity" \
+  || fail "open deployment identity" "$(echo "$open_me" | head -1)"
+# A bearer token on an ungated deployment is ignored, not rejected. Worth one request: a
+# demo page that once set the header, or a proxy that adds one, must not start 401ing.
+open_code=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer anything-at-all" "$OPEN_BASE/me")
+[ "$open_code" = "200" ] && pass "an unexpected bearer token is ignored, not refused" \
+  || fail "open deployment (bearer)" "got $open_code"
+# The boot line has to say what an OPEN deployment costs — it is the only warning an
+# operator who never reads the docs will see, and it is the branch of identityWarning that
+# a gated run (every other step here) never prints.
+grep -q 'server.api_token is unset' "$OPEN_LOG" \
+  && pass "the boot log names the open deployment's exposure" \
+  || fail "open boot warning" "nothing in $OPEN_LOG says server.api_token is unset"
+grep -q 'read any session whose id they have' "$OPEN_LOG" \
+  && pass "and says what that exposes" \
+  || fail "open boot warning" "the warning does not say sessions are readable by id: $OPEN_LOG"
+# The other branch must not also be there. Without this the assertions above would pass on a
+# boot line that printed both, which is the shape a future edit to identityWarning produces.
+grep -q 'the demo page cannot be used' "$OPEN_LOG" \
+  && fail "open boot warning" "the GATED warning was printed by an ungated deployment" \
+  || pass "and not the gated deployment's warning"
+kill "$OPEN_PID" 2>/dev/null || true
+wait "$OPEN_PID" 2>/dev/null || true
 
 echo "==> 4. GET /v1/me describes the deployment"
 echo "$me" | jq -e '.defaults.max_review_iterations==1' >/dev/null \

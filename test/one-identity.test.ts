@@ -42,12 +42,17 @@ async function mockGitHub(): Promise<{
   base: string;
   calls: () => number;
   reply: (r: GhReply) => void;
+  delay: (ms: number) => void;
   close: () => void;
 }> {
-  const state = { calls: 0, reply: "user" as GhReply };
+  const state = { calls: 0, reply: "user" as GhReply, delay: 0 };
   const app = express();
-  app.get("/user", (_req, res) => {
+  app.get("/user", async (_req, res) => {
     state.calls++;
+    // Held open on request, so a burst of callers is still waiting on the first lookup when
+    // the second arrives. Without it the handler answers inside one tick and a concurrency
+    // claim would be timing luck rather than a pin.
+    if (state.delay > 0) await new Promise((r) => setTimeout(r, state.delay));
     if (state.reply === 401) {
       res.status(401).json({ message: "Bad credentials" });
       return;
@@ -66,6 +71,9 @@ async function mockGitHub(): Promise<{
     reply: (r) => {
       state.reply = r;
     },
+    delay: (ms) => {
+      state.delay = ms;
+    },
     close: () => server.close(),
   };
 }
@@ -74,6 +82,7 @@ interface Deployment {
   get: (path: string, init?: RequestInit) => Promise<Response>;
   calls: () => number;
   reply: (r: GhReply) => void;
+  delay: (ms: number) => void;
   close: () => void;
 }
 
@@ -81,11 +90,21 @@ interface Deployment {
 // the capability probe, and the cheapest route that requires the whole identity to have
 // resolved. `token: null` builds the config a `validateConfig` refuses, to check what a
 // deployment does when it was started some other way.
-async function deploy(opts: { gate?: string; token?: string | null } = {}): Promise<Deployment> {
+async function deploy(
+  opts: { gate?: string; token?: string | null; breakStore?: string } = {},
+): Promise<Deployment> {
   __resetIdentity();
   const dir = mkdtempSync(join(tmpdir(), "iris-identity-"));
   const gh = await mockGitHub();
   const store = new Store(join(dir, "iris.sqlite"));
+  // A store that cannot record the row. Replaced on the instance rather than by faking the
+  // database, because what is under test is where the failure is REPORTED, and any throw
+  // from this call reaches the same place.
+  if (opts.breakStore !== undefined) {
+    store.upsertUser = () => {
+      throw new Error(opts.breakStore);
+    };
+  }
   const cfg = {
     github: {
       api_base_url: gh.base,
@@ -106,6 +125,7 @@ async function deploy(opts: { gate?: string; token?: string | null } = {}): Prom
     get: (path, init) => fetch(base + path, init),
     calls: gh.calls,
     reply: gh.reply,
+    delay: gh.delay,
     close: () => {
       server.close();
       gh.close();
@@ -149,6 +169,66 @@ test("the deployment's identity is resolved once, however many requests arrive",
     assert.equal(d.calls(), 1, "asked GitHub who the deployment is more than once");
     assert.ok(__identityResolved(), "the identity did not survive the request that resolved it");
   } finally {
+    d.close();
+  }
+});
+
+// The test above cannot see this one's failure, and that is the point of writing it
+// separately: it awaits each request, so the second always finds the first finished. A cold
+// start does not arrive in that order. `identity` is assigned after the await, so every
+// request that lands while the first lookup is still in flight took the same branch and made
+// its own call — eight requests, eight lookups, once per process, against a rate limit
+// shared by everything else this deployment does with GitHub.
+test("a burst at a cold start is one lookup, not one per request", async () => {
+  const d = await deploy();
+  try {
+    // Long enough that all eight are demonstrably inside the window: the mock does not
+    // answer the first until the last has been issued.
+    d.delay(120);
+    const results = await Promise.all(Array.from({ length: 8 }, () => d.get("/v1/me")));
+    for (const [i, res] of results.entries()) {
+      assert.equal(res.status, 200, `request ${i + 1} of the burst failed: ${await res.text()}`);
+    }
+    assert.equal(d.calls(), 1, `a burst of 8 at a cold start spent ${d.calls()} GitHub lookups`);
+  } finally {
+    d.close();
+  }
+});
+
+// A write failure is not an authentication failure, and the difference is the whole value of
+// the message. `upsertUser` used to sit inside the same `try` as `fetchUser`, so a store
+// fault answered `401 could not authenticate to GitHub: <sqlite message>` — which is exactly
+// the symptom `rejectLegacyUsersTable` names (src/store/db.ts) as the one that sends an
+// operator to look at their token instead of their database. It also armed the 30-second
+// GitHub backoff, which a store fault has no reason to wait out.
+test("a store that cannot record the identity is not reported as GitHub refusing us", async () => {
+  const detail = "SQLITE_READONLY: attempt to write a readonly database (/private/tmp/iris.sqlite)";
+  const d = await deploy({ breakStore: detail });
+  const logged: string[] = [];
+  const realError = console.error;
+  console.error = (m?: unknown) => void logged.push(String(m));
+  try {
+    const res = await d.get("/v1/me");
+    assert.equal(res.status, 500, "a failed write answered as something other than a server fault");
+    const err = await errorOf(res);
+    assert.equal(err.code, "server_error");
+    // The driver's text stays server-side. On an open deployment this response is public, and
+    // a SQLite message carries the database's path.
+    assert.doesNotMatch(err.message, /SQLITE|readonly|\/private\/tmp/i, `the 500 echoed the driver: ${err.message}`);
+    assert.match(err.message, /record its own identity/i, "the 500 does not say what failed");
+    assert.ok(
+      logged.some((l) => l.includes(detail)),
+      `the detail reached neither the caller nor the log: ${JSON.stringify(logged)}`,
+    );
+
+    // And a second request does not re-ask GitHub for an identity it already has, nor sit
+    // out a backoff window it never earned.
+    const again = await d.get("/v1/me");
+    assert.equal(again.status, 500, "the second attempt changed answer");
+    assert.equal((await errorOf(again)).code, "server_error", "the second attempt blamed the credential");
+    assert.equal(d.calls(), 1, "a store failure sent us back to GitHub");
+  } finally {
+    console.error = realError;
     d.close();
   }
 });
