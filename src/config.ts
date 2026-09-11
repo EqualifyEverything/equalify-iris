@@ -78,16 +78,24 @@ export interface IrisConfig {
   server: {
     port: number;
     base_url: string;
-    // Shared secret that gates `GET /v1/quality`, the deployment-wide quality tally
-    // the weekly workflow files issues from. Unset by default, and the
-    // endpoint answers 404 until it is set — an operator opts in rather than
-    // discovering they exposed it.
+    // Plain shared secret — not a GitHub credential — that gates `GET /v1/quality`, the
+    // deployment-wide quality tally the weekly workflow files issues from. Unset by
+    // default, and the endpoint answers 404 until it is set: an operator opts in rather
+    // than discovering they exposed it.
     //
-    // Deliberately NOT the GitHub user auth every other endpoint uses. That answers
-    // "which user is this", and this data belongs to no user: it is an aggregate over
-    // every document the deployment has converted, so there is no user whose token
-    // should unlock it and no user who should be denied their own. It is also read by
-    // a CI job, which has no GitHub user to be.
+    // Separate from `api_token` below, which gates the rest of `/v1`, for two reasons
+    // that outlive either key. THE CANONICAL EXPLANATION — other sites point here.
+    //
+    //   - Different reader. The caller is the weekly CI job, and the only thing it needs
+    //     is a page tally. Handing it `api_token` would hand a scheduled workflow the
+    //     secret that opens every session's document to get an aggregate.
+    //   - Different exposure. Unset, this answers 404 rather than 401, so a deployment
+    //     that never opted in does not admit the endpoint exists. `api_token` cannot do
+    //     that: a gate has to say it is a gate.
+    //
+    // It also has to answer ON a gated deployment — the CI job holds this token and not
+    // the other one — which is why it carries its own guard instead of sitting behind the
+    // gate. See index.ts for the mount order that follows from it.
     quality_token?: string;
     // OPTIONAL shared secret that gates every `/v1` route. Unset by default, which
     // leaves the deployment open to anyone who can reach it — that is what a public demo

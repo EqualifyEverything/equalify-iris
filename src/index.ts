@@ -104,11 +104,11 @@ app.use("/v1/stats", statsRouter(store));
 // not need the deployment's shared token to find out.
 app.use("/v1/limits", limitsRouter(cfg));
 
-// The deployment-wide quality tally, read by the weekly
-// quality-report workflow. Mounted above the GitHub auth middleware because it
-// carries its own guard — a shared secret, since the data belongs to no user and the
-// caller is a CI job with no GitHub identity. Answers 404 until
-// `server.quality_token` is set.
+// The deployment-wide quality tally, read by the weekly quality-report workflow. Mounted
+// above the auth middleware because it carries its own guard, `server.quality_token` —
+// and it has to answer on a GATED deployment, because the CI job holds that token and not
+// `server.api_token` (config.ts's `quality_token` argues why they are separate). Answers
+// 404 until it is set.
 app.use("/v1/quality", qualityRouter(store, cfg.server));
 
 // The browser app is the front door, served at the root (unauthenticated; it

@@ -18,9 +18,18 @@ function json(res, status, obj) {
   res.end(JSON.stringify(obj));
 }
 
-// ---- Mock GitHub (covers both api.github.com and github.com OAuth paths) ----
-const forks = new Set(); // repos that have been forked to the test user
-let prNumber = 140;
+// ---- Mock GitHub (api.github.com) ----
+// `GET /user` is the only route, and everything else falls through to a 404 naming the
+// path. Iris's whole GitHub surface is that call (auth/github.ts) plus issue search,
+// create and comment (github/issue.ts) — it files issues, and never forks, branches,
+// commits a file or opens a pull request.
+//
+// The three filing calls are left UNHANDLED on purpose: a run that tries to file gets the
+// fall-through 404, which is how the e2e proves filing fails without failing the run (see
+// its specialist-dispatch step). So the fall-through is a fixture, not just a safety net —
+// which is why this mock should answer nothing it does not have to. It used to fake a
+// fork-and-PR flow left over from when contributions were pull requests; a service that
+// started forking again would have passed its tests on that fake 202.
 
 // The one credential this mock accepts, and it must be the value e2e.sh puts in
 // `github.token`. Checked rather than ignored: the deployment's PAT is now the only
@@ -33,7 +42,7 @@ const DEPLOYMENT_TOKEN = "ghp_e2e_deployment_token";
 // count is invisible from the client — every response is a 200 either way.
 let userLookups = 0;
 
-const gh = createServer(async (req, res) => {
+const gh = createServer((req, res) => {
   const url = new URL(req.url, `http://localhost:${GH_PORT}`);
   const p = url.pathname;
   const m = req.method;
@@ -46,41 +55,6 @@ const gh = createServer(async (req, res) => {
     if (req.headers.authorization !== `Bearer ${DEPLOYMENT_TOKEN}`)
       return json(res, 401, { message: "Bad credentials" });
     return json(res, 200, { id: 4242, login: "iris-tester" });
-  }
-
-  // repos.get
-  let mm;
-  if (m === "GET" && (mm = p.match(/^\/repos\/([^/]+)\/([^/]+)$/))) {
-    const [, owner, repo] = mm;
-    if (owner === "iris-tester") {
-      if (forks.has(repo)) return json(res, 200, { fork: true, default_branch: "main", html_url: `https://github.com/iris-tester/${repo}` });
-      return json(res, 404, { message: "Not Found" });
-    }
-    return json(res, 200, { fork: false, default_branch: "main", html_url: `https://github.com/${owner}/${repo}` });
-  }
-  // repos.createFork
-  if (m === "POST" && (mm = p.match(/^\/repos\/([^/]+)\/([^/]+)\/forks$/))) {
-    forks.add(mm[2]);
-    return json(res, 202, { fork: true, default_branch: "main", html_url: `https://github.com/iris-tester/${mm[2]}` });
-  }
-  // git.getRef  GET /repos/:o/:r/git/ref/heads/:branch
-  if (m === "GET" && p.match(/^\/repos\/[^/]+\/[^/]+\/git\/ref\//))
-    return json(res, 200, { ref: "refs/heads/main", object: { sha: "baseSHA0000000000000000000000000000000000" } });
-  // git.createRef
-  if (m === "POST" && p.match(/^\/repos\/[^/]+\/[^/]+\/git\/refs$/))
-    return json(res, 201, { ref: "refs/heads/new", object: { sha: "newSHA00000000000000000000000000000000000" } });
-  // repos.getContent -> 404 so createOrUpdate treats it as a new file
-  if (m === "GET" && p.match(/^\/repos\/[^/]+\/[^/]+\/contents\//)) return json(res, 404, { message: "Not Found" });
-  // repos.createOrUpdateFileContents
-  if (m === "PUT" && p.match(/^\/repos\/[^/]+\/[^/]+\/contents\//)) {
-    await readBody(req);
-    return json(res, 201, { content: { path: p }, commit: { sha: "commitSHA" } });
-  }
-  // pulls.create
-  if (m === "POST" && (mm = p.match(/^\/repos\/([^/]+)\/([^/]+)\/pulls$/))) {
-    await readBody(req);
-    prNumber += 1;
-    return json(res, 201, { number: prNumber, html_url: `https://github.com/${mm[1]}/${mm[2]}/pull/${prNumber}` });
   }
 
   json(res, 404, { message: `mock-github: unhandled ${m} ${p}` });

@@ -24,10 +24,13 @@ server:
   # which files an issue when a rate crosses a threshold.
   #
   # Blank (default) means the endpoint answers 404 — opting in is deliberate.
-  # Not the per-user GitHub auth the rest of the API uses: this is an aggregate
-  # over every document the deployment has converted, so it belongs to no user,
-  # and the caller is a CI job with no GitHub identity. Aggregate-only by
-  # construction; no document content is exposed.
+  #
+  # Keep it separate from `api_token` above rather than reusing that value. The
+  # reader is a scheduled workflow that needs a page tally, and `api_token` would
+  # give it every session's document as well. Setting `api_token` does not gate
+  # this endpoint: the workflow holds this token and not that one, so the tally
+  # still answers on a closed deployment. Aggregate-only by construction; no
+  # document content is exposed.
   quality_token: ${IRIS_QUALITY_TOKEN}
   # How many proxies sit in front of this deployment. Set it to 1 behind a single
   # Caddy/nginx (2 behind a CDN in front of that, and so on), and leave it unset

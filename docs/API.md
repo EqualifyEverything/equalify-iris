@@ -524,9 +524,11 @@ would think to check.
 
 **Off unless configured**, and unset means **404**, not 401: a deployment that has not opted in
 does not acknowledge the endpoint at all. Set `server.quality_token`
-(`IRIS_QUALITY_TOKEN`) to a long random value — `openssl rand -hex 32` — and restart. This is the
-one endpoint not behind the GitHub user auth: the data belongs to no user, and the caller is a CI
-job with no GitHub identity, so a per-user credential is the wrong shape for it. Responses carry
+(`IRIS_QUALITY_TOKEN`) to a long random value — `openssl rand -hex 32` — and restart. This token is
+its own, deliberately not `server.api_token`: the caller is a scheduled workflow that needs a page
+tally, and `api_token` would also give it every session's document. So **setting `api_token` does
+not gate this endpoint** — it is one of the four that stay reachable on a closed deployment
+([Authenticate](#authenticate)), and the workflow keeps working when you close one. Responses carry
 `Cache-Control: no-store` and are cached in-process for five minutes.
 
 Two more values live in the repo that reads it — the `QUALITY_URL` **variable** (the deployment's

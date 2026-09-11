@@ -26,8 +26,9 @@ OPEN_DATA=/tmp/iris-e2e-open
 OPEN_CFG=/tmp/iris-e2e-open-config.yaml
 OPEN_LOG=/tmp/iris-e2e-open.log
 OPEN_BASE="http://localhost:$OPEN_PORT/v1"
-# Shared secret for GET /v1/quality (step 11c). Not a GitHub token — that endpoint
-# returns an aggregate belonging to no user and its real caller is a CI job.
+# Shared secret for GET /v1/quality (step 11c). Deliberately NOT the same value as
+# API_TOKEN below: the tally's caller is a CI job, which should not hold the secret that
+# opens every session's document, and step 11c checks the separation both ways.
 QUALITY_TOKEN=e2e-quality-token
 # The shared secret gating /v1 (server.api_token). Set here so the script exercises a
 # CLOSED deployment: the gate is optional, and a run with it unset would never check that
@@ -1249,25 +1250,30 @@ echo "==> 11c. GET /v1/quality (the tally the weekly quality-report workflow rea
 # recordRunSignals, which is a silent failure that makes the tally read BETTER.
 QAUTH=(-H "Authorization: Bearer $QUALITY_TOKEN")
 
-# The guard first. This endpoint is not behind the auth middleware every other one
-# uses, so its shared secret is the only thing in front of it.
+# The guard first. This endpoint sits above the auth middleware, so `quality_token` is
+# the only thing in front of it.
 code=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/quality")
 [ "$code" = "401" ] && pass "no token => 401" || fail "quality" "unauthenticated request got $code, expected 401"
 code=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer wrong-token" "$BASE/quality")
 [ "$code" = "401" ] && pass "wrong token => 401" || fail "quality" "wrong token got $code, expected 401"
-# A user's GitHub token must NOT work here. It is a valid bearer token for every
-# other endpoint, so accepting it would be an easy mistake to make and an invisible
-# one — the workflow would keep working either way.
+# `server.api_token` must NOT work here. It is the valid bearer for /me and /sessions on
+# this deployment, so accepting it would be an easy mistake and an invisible one — the
+# weekly workflow keeps working either way, and the operator who handed someone the API
+# token would have handed them the tally too.
 code=$(curl -s -o /dev/null -w '%{http_code}' "${AUTH[@]}" "$BASE/quality")
-[ "$code" = "401" ] && pass "a valid GitHub token is not a quality token (401)" \
-  || fail "quality" "a GitHub token was accepted on /quality ($code)"
+[ "$code" = "401" ] && pass "the API token is not a quality token (401)" \
+  || fail "quality" "server.api_token was accepted on /quality ($code)"
 
+# And the other direction of the same separation: this deployment IS gated (API_TOKEN is
+# set), and the tally still answers with only `quality_token`. That is what the docs
+# promise the weekly workflow — closing a deployment must not silently stop the quality
+# report — and it holds because the endpoint is mounted above the gate.
 q=$(curl -s "${QAUTH[@]}" "$BASE/quality")
 # `!= null` rather than truthiness: `documents` is 0 on a deployment that has
 # converted nothing, and 0 is falsy in jq, so `.documents and …` would report a
 # perfectly good empty tally as a malformed response.
 echo "$q" | jq -e '.documents != null and .window_days != null' >/dev/null \
-  && pass "tally returned: $(echo "$q" | jq -c '{documents, mean_rounds, unresolved_rate, rules: (.rules | length)}')" \
+  && pass "the tally answers on a GATED deployment, with only the quality token: $(echo "$q" | jq -c '{documents, mean_rounds, unresolved_rate, rules: (.rules | length)}')" \
   || fail "quality" "$q"
 
 # The denominator is the whole design: a clean run writes no violation rows, so
