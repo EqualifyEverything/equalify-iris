@@ -271,27 +271,36 @@ test("CONTRIBUTING.md's automated-review bullet does not keep its own copy of th
     const want = trim(BOUND_BARE);
     const missing = want.filter((x) => !have.includes(x));
     const extra = have.filter((x) => !want.includes(x));
-    const tail = `The Documentation section is where this set is defined, and the ` +
-      `[Documentation](#documentation) link is how this bullet is meant to carry it:\n${item}`;
+    // Three of the four branches want the copy GONE, and one does not: a complete copy is tolerated here,
+    // so the branch that fires on a complete copy with a spelling defect asks only for the spelling. This
+    // sentence therefore belongs to the three that mean it, not to a shared tail — printed under the
+    // first branch it reads "add the trailing slash … and the link is how this bullet is meant to carry
+    // it", and a reader cannot tell whether the assertion wants a slash or wants the list deleted.
+    const home =
+      `The Documentation section is where this set is defined, and the [Documentation](#documentation) ` +
+      `link is how this bullet is meant to carry it. `;
     let why: string;
     if (missing.length === 0 && extra.length === 0) {
       why =
         `this bullet names every bound path but spells at least one differently ` +
         `(${paths.join(", ")} against ${BOUND_BARE.join(", ")}). Nothing is missing — add the trailing ` +
         `slash, and the backticks with it if the member is bare, which is how the other three copies of ` +
-        `this set are written. `;
+        `this set are written. A complete copy spelled that way is accepted here, so nothing needs ` +
+        `deleting. `;
     } else if (missing.length === 0) {
       why =
         `this bullet names every bound path AND ${extra.join(", ")}, so it is an OVER-WIDE copy, not a ` +
         `partial one. If the scope really did widen, BOUND_FILES and the Documentation section are where ` +
         `that happens and all four copies move together; if ${extra.join(", ")} is a cross-reference ` +
-        `rather than a scope member, drop it. `;
+        `rather than a scope member, drop it. ` +
+        home;
     } else if (missing.length === want.length) {
       why =
         `this bullet names ${have.join(", ")} and no member of the scope, so this is not a copy of the ` +
         `list — most likely a cross-reference. This test cannot tell a cross-reference from a copy, so ` +
         `it permits neither: name every member or none. Reword without the path, or put the mention in ` +
-        `the Documentation section. `;
+        `the Documentation section. ` +
+        home;
     } else {
       why =
         `this bullet names ${have.join(", ")} and not ${missing.join(", ")}, which is a partial copy of ` +
@@ -299,14 +308,18 @@ test("CONTRIBUTING.md's automated-review bullet does not keep its own copy of th
         `to backtick it` +
         (extra.length > 0 ? `, and ${extra.join(", ")} is not in the scope either` : ``) +
         `. ` +
-        // Only when `docs` is the member reported missing, because that is the one member this
-        // comparison can miss: `PATH_RE` does not match bare `docs`, on purpose.
+        // Only when `docs` is the member reported missing, because that is the one member this comparison
+        // can miss — and it can miss it two ways: `PATH_RE` does not match bare `docs`, on purpose, and it
+        // does not match `docs/` when a filename follows, because the lookahead requires the slash to end
+        // the token. `docs/ci.md` matches as a FILE, so it lands in `extra` while `docs` reads as missing.
         (missing.includes("docs")
-          ? `Count what the bullet names first: \`docs\` may be there and spelled without its slash, ` +
-            `which PATH_RE cannot see. `
-          : ``);
+          ? `Count what the bullet names first: \`docs\` may be there spelled without its slash, or ` +
+            `\`docs/\` may be there only as the start of a longer path like \`docs/ci.md\` — PATH_RE sees ` +
+            `neither. `
+          : ``) +
+        home;
     }
-    assert.fail(why + tail);
+    assert.fail(`${why}\n${item}`);
   }
   // AFTER the comparison above, deliberately, and the ordering is the whole point rather than a detail.
   // Both fire on a partial list written as prose, and their remedies are not equal: deleting the copy
