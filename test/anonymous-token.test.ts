@@ -455,6 +455,41 @@ test("a rejection is cached for a bounded window, not for the life of the proces
   }
 });
 
+test("serving a cached rejection does not push its own expiry out", async () => {
+  // Round 4 of #458, and the defect the TTL was introduced to prevent, reintroduced by the
+  // mechanism that answers it. The cached refusal is raised as `userLookupError(401)` so the
+  // reply comes from one place — but that error is indistinguishable from a fresh rejection
+  // to the `catch` that RECORDS rejections, so every anonymous request served from the cache
+  // rewrote the expiry to `now + TTL_MS`. Any deployment seeing an anonymous request more
+  // often than once per TTL — which is every deployment that turned the mode on for a reason
+  // — never reaches the expiry, so a TTL under traffic was exactly the process-lifetime latch
+  // it replaced: one spurious `Bad credentials` would 401 anonymous callers until a restart,
+  // and hold the round-1 session-list guard off for that whole time.
+  //
+  // The window test above cannot see it, because forcing the expiry with a seed OVERWRITES a
+  // slid entry. So this asserts the stored instant itself, and pins it to a known value
+  // first: a renewal then moves it by the whole TTL rather than by however many milliseconds
+  // the two requests happen to be apart, which would be a race against the clock.
+  const BROKEN = "gho_transiently_rejected";
+  const h = await harness(BROKEN);
+  try {
+    assert.equal(await h.fetch("/v1/me").then((r) => r.status), 401);
+    assert.equal(h.ghCalls(), 1);
+    const until = Date.now() + 1_000;
+    __seedRejectedCredential(BROKEN, until);
+
+    assert.equal(await h.fetch("/v1/me").then((r) => r.status), 401);
+    assert.equal(h.ghCalls(), 1, "the cached answer was served, so GitHub was not asked");
+    assert.equal(
+      __rejectedCredentialUntil(BROKEN),
+      until,
+      "an anonymous request served FROM the cache extended it, so the window never closes under traffic",
+    );
+  } finally {
+    h.close();
+  }
+});
+
 test("a CALLER's rejected token is never recorded as a rejected credential", async () => {
   // The bound on the negative cache. It has no ceiling and no eviction sweep, which is only
   // safe because nothing a caller sends can create an entry — a map keyed on whatever

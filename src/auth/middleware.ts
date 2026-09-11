@@ -68,9 +68,13 @@ const MAX_ENTRIES = 10_000;
 // already rate limited by address.
 const rejectedCredentials = new Map<string, number>();
 
-// Record a configured credential as rejected. Callers must have checked
-// `isRejectedCredential` first: anything other than a 401 means GitHub did not answer, and
-// caching that would be caching an outage.
+// Record a configured credential as rejected. Two preconditions, and each has been got wrong
+// once:
+//   - `isRejectedCredential` must hold. Anything other than a 401 means GitHub did not
+//     answer, and caching that would be caching an outage.
+//   - the 401 must be one GitHub gave on THIS request. Writing here from a refusal this cache
+//     itself produced sets a fresh expiry on every anonymous request, which turns the window
+//     into a latch that no amount of waiting clears (see `cachedRejection` below).
 function markRejectedCredential(token: string, now: number): void {
   rejectedCredentials.set(token, now + TTL_MS);
 }
@@ -260,16 +264,23 @@ export function makeAuthMiddleware(store: Store, cfg: IrisConfig) {
       return ghUser.id;
     };
 
+    // A rejection GitHub already gave us, inside its TTL, answers this request without asking
+    // again — and it has to be checked on BOTH halves, because the half an outside caller
+    // drives is the anonymous one.
+    //
+    // Decided BEFORE the `try`, and remembered, because the `catch` below has to tell this
+    // refusal from a fresh one even though the caller must not be able to. Raising it as
+    // `userLookupError(401)` gives it the status a real rejection has, which is the point for
+    // the reply and a defect for the recording: without this variable the catch re-marked the
+    // credential on every cached refusal, so each anonymous request pushed the expiry to
+    // `now + TTL_MS` and a deployment with any anonymous traffic never reached it. That is
+    // the process-lifetime latch this cache exists to avoid, wearing a TTL's comment.
+    const cachedRejection = servedAnonymously && isRejectedCredentialCached(token, Date.now());
     try {
-      // A rejection GitHub already gave us, inside its TTL, answers this request without
-      // asking again — and it has to be checked on BOTH halves, because the half an outside
-      // caller drives is the anonymous one. Thrown rather than answered here so the reply is
-      // produced by the one `catch` below: identical status, identical body, no way for a
-      // caller to tell a cached rejection from a fresh one, and one place to change if that
-      // wording ever does.
-      if (servedAnonymously && isRejectedCredentialCached(token, Date.now())) {
-        throw userLookupError(401);
-      }
+      // Thrown rather than answered here so the reply is produced by the one `catch` below:
+      // identical status, identical body, no way for a caller to tell a cached rejection from
+      // a fresh one, and one place to change if that wording ever does.
+      if (cachedRejection) throw userLookupError(401);
       const userId = await resolveUserId(token);
       req.user = store.getUser(userId)!;
       req.token = token;
@@ -317,7 +328,13 @@ export function makeAuthMiddleware(store: Store, cfg: IrisConfig) {
       // is `servedAnonymously`, not `token === anonToken`, that distinguishes them: a
       // caller may present the deployment's own credential, and doing so must not let them
       // write to this map.
-      if (servedAnonymously && isRejectedCredential(e)) markRejectedCredential(token, Date.now());
+      //
+      // And only for a rejection GitHub gave us on THIS request. `!cachedRejection` is what
+      // keeps the window a window: an entry may only be written by the lookup that learned
+      // the answer, never by the cache reporting it back to itself.
+      if (servedAnonymously && !cachedRejection && isRejectedCredential(e)) {
+        markRejectedCredential(token, Date.now());
+      }
       // Same 401 either way. An anonymous credential that GitHub rejects is an
       // operator's problem, not the caller's, and saying which token failed here would
       // tell an anonymous caller about the deployment's credential; the boot warning
