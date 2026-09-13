@@ -1514,322 +1514,73 @@ genuinely exceeds the ceiling loses the second draw as well, and its remedy is s
 
 The page agent answered, and no HTML could be read out of the answer (`page`, `image`, `chars` of
 text, and the `shape` it was in). A reply that claimed nothing about the page has already been
-[redrawn once](#page_redrawn) by the time this line is written, so this is the second draw's
-failure and the page is now given up on. The page is then lost the way any failed page is lost — the
-`page_extraction_failed` line below follows it — because "the reply could not be read" and "this
-text is the page" are different claims, and a reply delivered as content puts a JSON envelope, or
-an apology, into the document while the run reports every page delivered.
+[redrawn once](#page_redrawn) by the time this line is written, so this is the second draw's failure
+and the page is now given up on: [`page_extraction_failed`](#page_extraction_failed) follows it and
+the page is lost the way any failed page is lost. "The reply could not be read" and "this text is
+the page" are different claims, and a reply delivered as content would put a JSON envelope, or an
+apology, into the document while the run reported every page delivered.
 
-`shape` names the remedy: `truncated_envelope` is the output ceiling (raise
-`providers.*.max_tokens`), `envelope` is a complete reply whose escaping defeated the parser
-(rare, because a reply whose only fault is the page's own unescaped punctuation is repaired before
-it reaches here), `prose` is the agent answering conversationally, `empty_html` is an envelope
-that was read perfectly and carried no page in it (no `html` key at all, or one whose HTML holds
-nothing a reader receives and whose `log` does not say the page is blank — the model answering
-with no page and not saying why, or saying it could not read it), and `empty` is a reply with
-nothing in it at all. "Nothing a reader receives" is not the same as "an empty string": a comment,
-an empty wrapper and a bare page-break marker are all nothing, and 33 of 818 initial renders in
-the bench logs answered a blank page in one of those spellings rather than with the empty `html`
-the prompt asks for (issue #219), so a refused declaration reaches this line whichever way its
-fragment was written.
+`shape` names the remedy:
 
-The last three are prompt problems and say nothing about the parser. `bare_html` is a sixth value:
-the reply IS the page's markup rather than the envelope, which the pipeline normally accepts and
-delivers (`bareHtml` in `src/pipeline/extraction.ts`). On **this** line it is two different
-findings with opposite remedies, and the shape cannot separate them — `dropped`, on the same line,
-is what does. Either the markup arrived behind a fence that never closed, so a page was refused by
-the parser and the text on the line is that page; or the markup arrived fine and carried nothing a
-reader receives, which is a blank declaration written as `<!-- blank page -->` or a lone
-page-break marker (#219's own spellings) and reaches this line through "carries nothing" rather
-than through the parser — a prompt problem, exactly as `prose` said before.
+| `shape` | What the reply was | What to do |
+| --- | --- | --- |
+| `truncated_envelope` | The output ceiling cut it off | Raise `providers.*.max_tokens` |
+| `envelope` | Complete, and its escaping defeated the parser | Rare — a reply whose only fault is the page's own unescaped punctuation is repaired before it reaches here. Report it |
+| `prose` | The agent answered conversationally | A prompt problem |
+| `empty_html` | An envelope read perfectly that carried no page | A prompt problem |
+| `empty` | Nothing in the reply at all | A prompt problem |
+| `bare_html` | The page's markup rather than the envelope | Read `dropped` — two findings, opposite remedies |
 
-It is on `page_correction_failed` that the value earns its keep, where 24 of 180 corrections in
-one bench round answered in bare markup and were being read as `prose` (issue #365). A page the
-agent reports as **blank** is not one of them: that is `page_blank` below and not a failure. Where
-markup did arrive and carried nothing, `dropped` carries it — the same field, and the same
-200-character bound, as on `page_blank` below — because `chars` is the length of the whole reply
-and not of the fragment, so without it the line says a page produced nothing readable and not
-whether that was an empty envelope, a comment or a marker naming a folio the paper never printed.
+`empty_html` is no `html` key at all, or one whose HTML holds nothing a reader receives and whose
+`log` does not say the page is blank — the model answering with no page and not saying why, or
+saying it could not read it. **"Nothing a reader receives" is not "an empty string":** a comment, an
+empty wrapper and a bare page-break marker are all nothing, so a refused blank declaration reaches
+this line whichever way its fragment was written.
 
-On a refused declaration that is the difference between triaging the wording from a run and
-replaying the replies to find it, which is the half of #219's reconstruction its fix left behind
-(issue #223). Where the reply *did* claim the page was blank and the claim was refused, more
-fields say so:
+`bare_html` is markup the pipeline normally accepts and delivers (`bareHtml` in
+`src/pipeline/extraction.ts`). On **this** line it is one of two things with opposite remedies, and
+the shape cannot tell them apart: either the markup arrived behind a fence that never closed, so a
+page was refused by the parser and the text on the line is that page, or the markup arrived fine and
+carried nothing a reader receives, which is a prompt problem exactly as `prose` is. `dropped` is
+what separates them — it holds that markup, under the same 200-character bound as on
+[`page_blank`](#page_blank), because `chars` is the length of the whole reply and not of the fragment.
 
-`blank_vetoed` lists the doubt words that refused it and `log` carries the agent's own sentence.
-`blank_stated: true` beside them says the refused claim was made in the `blank` field rather than
-left to be read out of the sentence, and that pair is the one thing in these logs that can show
-the field being misused: a page whose log says it could not be read is the one page the prompt
-tells the model never to send the field for, and a run that carried `blank_stated` only on the
-line that honoured it could count the field working and not the field failing (issue #371).
+A page the agent reports as **blank** is not here: that is [`page_blank`](#page_blank), and not a
+failure.
+
+**Where the reply did claim the page was blank and the claim was refused,** four fields say which
+check refused it and what it read:
+
+| Field | What it holds |
+| --- | --- |
+| `blank_vetoed` | The doubt words that refused the claim — the reply says the page could not be *read* |
+| `blank_contradicted` | The words that named content on a page the log had just called empty |
+| `blank_stated` | `true` where the refused claim was made in the reply's `blank` field rather than left to be read out of its prose |
+| `log` | The agent's own sentence |
 
 Without them the line reads as "the model answered with no page", which is the opposite of what
-happened, and tracing four such pages back to a word meant rerunning the regexes on the replies by
-hand (issue #190).
+happened, and tracing four such pages back to a single word once meant rerunning the regexes on the
+replies by hand (issue #190).
 
-`blank_contradicted` is the other way a claim made **in prose** is refused — a claim the reply
-STATED in its `blank` field is not refused for this, and lands on [`page_blank`](#page_blank) with
-the same field name and a verify call instead (issue #371), and a different finding: the log
-declared the page empty and then said something was on it, and the field carries the words that
-said so (issue #194). Two things a log may name without contradicting itself. The first is the page's
-own printed number (issue #222): a folio is not content that page could have delivered, so
-`blank apart from the printed page number` and `blank except for its printed folio` are
-declarations rather than refusals, while `the printed page number and a heading are visible` still
-refuses — through the heading, which is what a reader would have got nothing of.
+`blank_stated` here is the one thing in these logs that can show the field being misused: a page
+whose log says it could not be read is the one page the prompt tells the model never to send the
+field for, and a run carrying `blank_stated` only on the line that honoured it could count the field
+working and not the field failing (issue #371).
 
-The second is the **name of the image file** (issue #429): in `Image filename indicates this is page
-14 of 25` the word `image` names the file Iris handed the model, not imagery on the paper, and the
-sentence is where a model that was told to read the folio and could not goes looking for the page
-number instead. That exemption needs no determiner in front of it — `Image filename`, `Filename`,
-`Image file name` and `The image filename` all declare — and it reaches no further than the two words:
-`Image name is printed at the top of the sheet` refuses, so does `Image filename indicates page 14, and
-a heading is visible`, and `The image filename is illegible` is still a doubt word.
+`blank_contradicted` on **this** line means the claim was made in prose. A claim the reply STATED in
+its `blank` field is not refused for a contradiction: it lands on [`page_blank`](#page_blank) with
+the same field name and a verify call instead (issue #371).
 
-What counts as naming content is a **word, not a position**. `Only handwritten smudges are visible`
-contradicts a declaration exactly as `Only handwriting smudges are visible` does, and `cursive is
-visible` as `writing is visible` — the reader holds the same vocabulary in both parts of speech, so
-which form of a name the model happened to write does not decide whether the page survives (issue
-#431). Before that it did: the noun forms were read and the participles and adjectives were not, and a
-log that named writing with one of those was a page delivered empty and reported to nobody.
+**These are two findings with two remedies, and one line can carry both.** A doubt word means the
+page could not be read and wants a better scan. A contradiction means the agent answered with no
+page for a page it says has content on it, which wants a re-extraction. They are read independently,
+so `"Page is blank. The scan is blurry. There is handwriting on the page."` fills `blank_vetoed`
+with `blurry` and `blank_contradicted` with `there is handwriting`. **On a line with both, act on the
+doubt first** — a reply that could not read the page is not a reliable witness to what is on it.
 
-Two places read the two forms differently, and both are deliberate. The first is the object of a
-denial's preposition, where a participle with a noun behind it is an adjective on that noun:
-`nowhere except a barcode at the top` refuses the declaration, `nothing legible within the stamped
-border` is a blank page describing its own pre-printed form and declares. The second is the walk back
-from an affirming name looking for the negator that denies it. That walk crosses the participles, so
-`No stamped or signed marks are present.` is one denied list rather than an affirmation of marks. What
-stops it crossing a sentence's **second clause** is described below and is not about the participles at
-all: it was, for one release, and `No clear text, and stamped words are visible` was refused while
-`No clear text, and printed words are visible` shipped the page empty — the same sentence answered
-differently by which vocabulary its modifier was in. Both are refused now, for the same stated reason.
-
-Everywhere else the two forms are one class. The copula reading that turns `Nothing is stamped
-anywhere on the sheet` into a denial, and the folio exemption that lets `The rubber-stamped page
-number is visible` stay blank, both test that class and not the shorter list of qualifiers they were
-written against.
-
-A **hyphenated compound** is read as the word it is a compound of, and until issue #437 it was not. The
-adjective list is matched at word boundaries, so a compound of a word it holds was always read
-(`hand-written`, `rubber-stamped`); the noun list and the qualifier list are matched whole, so a compound
-of a word only they held was not. `printed` was only in those two — so `The machine-printed notes are
-visible.` was a page whose log names notes on it, delivered empty, while `hand-printed notes` were seen,
-and `pre-typed` was read where `pre-printed` was not. Across the five readings that ask about a modifier,
-24 of 40 (bare word, compound) pairs answered differently from their own bare stem; all 40 agree now.
-Twelve of those 24 were the object of a denial's preposition and went the silent way: `A caption is
-missing from the machine-printed heading.` is a heading presupposed by the log and a page delivered
-empty, and it read that way for `typed` as much as for `printed`.
-
-The same rule reads a compound of any of the thirteen qualifiers, not only of the two that overlap the
-names for text, and that is measured on the same terms: 13 words × 3 prefixes × the 4 frames the three
-readings own is 156 cells, the compound disagreed with its own bare word in 75 of them before this and in
-none after, and every one of the 75 moved to the bare word's answer. Thirty-six of the 75 moved toward a
-declaration and 39 toward a refusal, so there is no safe side to it. Thirty-three of the 36 are one
-interaction, and it is a decision made elsewhere: a **definite** `image` is the scan rather than a thing
-on the page, so `The legible image is visible.` declares — and `The semi-legible image is visible.` now
-reaches the same reading instead of stopping short of the article. A compound built on a word none of the
-lists holds still stops it: `The foo-bar image is visible.` is refused. The other three are a different
-mechanism — `No content is present in the machine-typed.` and its two siblings, which declare because a
-denial's terminal object that is only a modifier is skipped, as the bare `typed` is.
-
-What that parity buys is parity with the bare word, not a claim that the bare word's answer is right —
-whether a page needs `The pre-printed notes are visible.` refused or `The pre-printed form is empty.`
-kept is still decided by the noun behind the modifier, by the same reading that decides it for `printed`.
-A compound whose prefix negates is read as the word it negates (`un-printed`, and `un-written` before
-it), which is what boundary-matching costs and errs toward reporting a page rather than losing one.
-
-Nothing on the corpus turns on this either way, and the reason is worth stating exactly: of 3,747 page
-replies with a log, 4 write a hyphenated compound of `printed` or `typed` anywhere in the log, and all 4
-are pages whose HTML carries content — so none of them ever reaches the blank reading. Replayed, 0 of
-3,747 verdicts move. That is an empty denominator rather than a measured zero: the evidence for the
-change is the 40 pairs, and the corpus evidence is only that it breaks nothing on record.
-
-A copula has **two ways of denying its subject**, and until #442 the reader knew one of them.
-`Handwriting is absent.` says the handwriting is not there and declares. `The heading is empty.` says the
-heading holds nothing, which is the same news about text — but nothing denied `heading`, so the sentence
-read as an affirmation and the blank page was reported as a hole, with the word that denied it quoted
-inside the evidence (`affirmed: "heading is empty"`). Six wordings do this: `is empty`, `is blank`,
-`is unmarked`, `is unfilled`, `is featureless` and `is void of content`. All six are read now, and the
-grid says the fix is about the complement and not the subject — 6 complements × 4 subjects that name text
-moved from 0 of 24 declared to 24 of 24, while the same complements against 4 subjects that name none
-were 24 of 24 before and are unchanged (`The sheet is empty.` always declared).
-
-`void` is taken only with its preposition. A stamp that "is void" is a mark **on** the paper — the word
-is printed across a cancelled form — so bare `void` is the one member of that vocabulary whose plain
-reading says something is there, and reading it would lose the page in silence. `is illegible` is out for
-a related reason and not by omission: marks that cannot be read are not an absence of marks, so an
-illegible heading is still a heading and the page is reported.
-
-Two page-**losing** defects came off the same fix. `The heading is not empty.` declared the page blank
-before it, because the `not` denied a clause and nothing read what it denied — a double negative arriving
-as an absence, on all 24 grid rows, and each one a page lost without a line. And the scan anchored on a
-denial now counts these complements as denials, which is what `Blank apart from a caption.` needed: that
-fragment had no negator in it and shipped empty, a caption lost, and this file named it as an open defect
-against itself. Six exceptive wordings come back with it. Which nouns survive an exceptive is decided
-where it was already decided rather than again here — each of the eight rows checked answers exactly as
-the negator wording saying the same thing answers, so `Blank apart from a watermark.` reports (a
-watermark is a name for marks) and `Blank apart from dust.` declares.
-
-The **contracted** spelling is read as well, and it was the losing side of the same sentence: a contraction
-is in none of this file's verb lists, on purpose — `The heading isn't visible.` denies its subject — so
-`The heading isn't empty.` found no verb at all and went out as a blank page while `is not empty` was
-reported. The apostrophe decided whether the page was lost. It is read at the one construction where the
-contraction's own negation is cancelled by the complement behind it, and the contraction is **walked to**
-rather than read at the next word, because the subject of one of these is a noun phrase: `The printed form
-isn't empty.` puts it two words along.
-
-The complement is read at the word **right after the verb**, and after a **linking** verb only. That first
-part is what the wordings a real form log writes need — `is empty; no handwritten entries.` past the
-statement boundary and `is empty and unused.` past the coordination both declare — and it is also the whole
-of the limit: anything standing between the verb and the word puts it out of reach, so `The heading is
-completely empty.` is still reported, and so is `is unused and empty.` where the same coordination runs the
-other way round. That is the same failure as before the fix and in the cheap direction — attention spent on
-an empty page, not a page lost — and closing it means walking those positions in the verb read, not adding
-to this vocabulary. The second part is why `The heading contains empty rows.` is not a denial: half of the
-affirming verbs take an object rather than a complement, and `empty`, `blank` and `unmarked` are the
-ordinary adjectives for a cell, a field or a row. `absent` and `missing` need no such gate, neither being
-attributive — nothing contains missing rows.
-
-The denial-anchored scan tries **every** denial position rather than the first. A negator stands where its
-denial begins, so first-hit was the right anchor while the vocabulary was negators alone; a complement
-stands *behind* the negator of its own sentence, and the backward walk that finds an exceptive object stops
-at a negator. So anchoring on `empty` in `The page is empty, nothing on it except handwriting.` put the
-stopped position between the anchor and the object, and eight wordings of that shape — the shape a real
-form log writes — shipped a page with content on it as blank. Trying each position in order can only add an
-affirmation, because the position first-hit used is still among them.
-
-One family of wordings **loses** a page to this, and it is the comma bound rather than the complement:
-`The heading is empty, handwriting only.` and seven siblings of it go out blank where they were reported
-before. A fragment cut off at its own comma is read as a member of the list a blank page writes, and the
-list is a list of what is *absent* — so a denial standing behind the noun reaches nothing, which is the
-defect `A signature, nothing else.` is pinned against. These eight only join it because `is empty` is now a
-denial. That is the pairing rule holding rather than breaking: `The heading is absent, handwriting only.`
-lost the same page before the fix and still does, so the two wordings say the same thing and answer the
-same way, and the repair belongs at the comma and not in the complement list. Base reported them by
-affirming `heading` off the very complement that denied it.
-
-No log on record moves. Of 3,747 page replies with a log, 153 write one of these complements and 135 of
-those sit inside a blank declaration, 0 in the negated form and 0 in the contracted one, and 0 verdicts
-move — because the subject a real log uses is the page and not its heading. The all-positions scan has a
-real population rather than an empty denominator, 1,583 of the 3,747 logs carrying more than one negator,
-and none of those moves either. So the corpus cannot separate reading the vocabulary at the verb alone from
-also reading it at the denial scan, and the wider read rests on the constructed rows above.
-
-Either form of the name also reaches a **clause with no verb in it**, which it did not until #435:
-`handwriting smudges only.`, `handwriting visible.`, `Only handwriting smudges.` and `A heading.` each
-declared the page blank, because the affirmation is found by handing a name for text the verb that
-predicates over it and a fragment has none to hand it. A fragment is now read on its own — a predicate
-after the noun (`visible`, `present`, `apparent`, `discernible`, the four words the denial reads already
-use for the same dropped copula) or the end of the statement, optionally past a closer — `only`,
-`alone`, `too` or `also`, read at the end of the statement and nowhere else, so that the `only` in
-`handwriting only in the margin.` is not mistaken for one.
-
-The risk there runs the other way from everything above, because a blank page's own log is written in
-fragments as often as not — 94 of the 204 blank declarations on record have a verbless statement in
-them, and every one of those is a denial. So the noun phrase must **open** its statement, with nothing
-in front of it but a determiner, a count, a qualifier, an opener (`only`, `just`, `merely`, `simply`,
-`solely` — `Only handwriting smudges.` is #435's own title), or another name for text or marks.
-That is what keeps `Devoid of text.`, `Lacking text.` and `Free of text.` blank: none of those words is
-in the negator lists this section reads, and each is a page that would otherwise be reported lost. A
-comma is a boundary on both sides of the noun, for a reason the corpus supplies rather than a
-hypothetical one: the doubt-word scope has the marks and the `not legible text` phrase stripped out of
-it, so `A few specks, not legible text, figures, captions visible.` arrives at this read as
-`A few figures, captions visible` with the words that denied those nouns already gone.
-
-What the commas cost is a fragment whose denial stands **behind** its noun: `A signature, nothing
-else.` is a page with a signature on it, delivered empty. The read that would catch it is the one
-anchored on the denial, and that one only looks forward from the negator. Unchanged by #435 and stated
-rather than left to be re-measured.
-
-A statement that is a name for text and **nothing else** no longer affirms, so `Blank page; text`,
-`Blank page. Content`, `Page is blank; images; nothing present.`, `Page is blank. No printed text.
-Images.` and `Page is blank. Images. No text.` declare the page blank instead of reporting it as a hole
-(issue #440). Statements here end at a `.`, `!`, `?`, `;` or a line break alike, and in three of those the
-denial is in a neighbouring statement — ahead of the label in one, behind it in another — which this read
-cannot reach either way, the boundaries being what limit how far a subject may look for its verb.
-
-Counting the tokens is not what does it, and the reason is the shape of the rest of this section. The
-doubt-word scope has the marks phrase stripped out of it, so **one token is not one word**: `Handwriting
-smudges.` and `Cursive smudges.` reach this read as a single token, their head noun having been removed
-upstream, and that phrase is the one #435 is about — six of its seven wordings are it with a predicate on
-the end. A plain one-token guard was written for #440 and taken back out for exactly that, because it
-delivered a page of handwriting empty. What ships instead is the strip leaving a **mark where it cut**, so
-a statement can say it lost a word: the mark is a form feed, which is whitespace to every other pattern
-here and invisible to the tokenizer, and a log cannot forge one because the scope's input has form feeds
-and vertical tabs removed before any is inserted. A statement of one token that was cut declares nothing;
-a statement of one token that was always one word affirms nothing.
-
-One token is not the **whole statement** either. The tokenizer reads letters, so a digit and a list bullet
-are invisible to it and `2 images.` and a `- text` line are one token each — a page that says what is on
-it, which counting tokens alone would deliver empty. The statement therefore has to BE the token: nothing
-in it but the name, whitespace and the cut mark. `2 images.`, `1 signature.` and a bulleted list of a
-page's contents all keep their affirmations, and `Two images.` was never at risk because it is two tokens.
-
-That makes the guard sensitive to **any** non-letter decoration, so `Page is blank. **handwriting**`,
-`handwriting:`, `(handwriting)` and `"handwriting"` all report where a bare `handwriting.` declares. The
-asymmetry is deliberate and the corpus settles it: of 3,402 one-token statements only 1,073 are bare, 2,329
-carry decoration, and all four that name text are decorated ones. A guard reading through decoration would
-move four real statements toward being shipped empty and none toward declaring, which is the losing
-direction.
-
-A **boundary is not always a sentence end**, and that is the third face of the same mistake. A numbered list
-marker ends in a `.`, so `1.` is a boundary and every line of `Page is blank.\n1. text\n2. images` arrives as
-a bare one-token statement — the whole enumeration of what is on the page eaten, and the page shipped empty,
-where the `-` spelling is rescued. The guard's premise is that a name alone *between two boundaries* is all
-there is to read, and that holds only where the boundary behind it ended a sentence: a preceding statement
-with **no letter in it** is a marker, so the name is a list item and affirms. The corpus says which
-spellings exist rather than a marker vocabulary guessing — 73 of 3,747 replies write a `1.` list line, 2
-write a `-` one, and `1)`, `a.`, `a)` and roman numerals appear in none. That test reaches a little wider
-than "a marker" on purpose: a statement the marks strip reduced to its cut mark has no letter in it either,
-so `Page is blank. Print artifacts. text` hands `text` back, which is what the pipeline did before any of
-this.
-
-And a marker is not what makes a list — **the sequence is**. A model that lists a page's contents one per
-line with no marker at all has a sentence behind every line, so the rule above helps none of them:
-`Page is blank.\ntext\nimages` had the whole enumeration eaten. A run of lone names is a list and one lone
-name is a lone name, so the neighbour on either side decides, and the lettered spellings `i.` and `A.` fall
-out of the same clause, a marker that is itself a letter being a lone name too. Of the 1,073 bare one-token
-statements on record, 147 are in an enumeration by this rule — 2 by the letterless neighbour and 145 by the
-sequence — and none of the 147 names text.
-
-**The guard's cost is a shape and not a wording:** any bare one-token statement whose neighbours are
-sentences, of which `Page is blank. handwriting.` is one spelling and a **one-item list**
-(`Page is blank.\ntext`) is the other. Nothing this read can see separates that from `Blank page; text`,
-which is the thing #440 asked to have declared, so both declare and the page ships empty. Both sides are
-unobserved: one-token statements are common on the corpus (1,129 of 3,747 replies write one) but only four
-name text, all in replies that make no blank claim, so 0 of the 204 declarations on record move. The near
-misses say how narrow the guard is: `Any text? None found.` is two tokens and reports, and `Text: none.`,
-`Text (none).`, `Text/handwriting: none detected.` and `Page is blank; no text; no images.` declared before
-it and still do. Every one of these is pinned in `envelope-as-content.test.ts`.
-
-The same strip decides one more case, and there the **head noun** is what the reading turns on (issue
-#439). A log that calls the scan's own noise `print artifacts` had the mark removed and the word that was
-dressing it left standing where a subject goes, with the mark's verb behind it — `Page is blank. Print
-artifacts are visible.` was reported as a lost page, quoting the two words `print are visible`. A name for
-text now leaves **with** the mark where the mark is one only the capture leaves (`artifact`, `debris`,
-`dust`), so those pages declare. It is the head and not the dressing word that decides, because the same
-dressing word means the opposite in front of a mark a pen also leaves: `Only print smudges are visible.`
-is smudged printing and goes on being reported, as `handwriting smudges` does. `Printed dots are visible.`
-is reported too — `dot` is outside the list, a page can have real printed dots, and `the table contains
-the printed dot leaders` is a corpus statement about typographic content. Of the 81 places the corpus
-writes a name for text in front of a mark, 74 have an `artifact(s)` head and 7 a `dot(s)` one; 0 of the
-204 declarations change verdict, and the two whole sentences that change reading are one of each kind —
-a blank page now read as one, and a page whose log describes repairing a character, which a declaration
-around it would now be believed about.
-
-What leaves is **that one word and nothing else**, and the doubt words in front of it stay. Seven of the
-adjectives this strip can absorb are themselves doubt words, so `Page is blank. Blurry print artifacts are
-visible.` has to go on being refused on `blurry` — a page whose log says the scan is blurry wants a better
-scan, and shipping it empty is the same loss from the other side. Transplanted across the corpus's 17
-wordings in three frames, all 18 cells this widening moves were refused by a contradiction and none by a
-doubt word; put `blurry`, `faint` or `grainy` in front and all 51 cells stay refused.
-
-They are two findings with two remedies — a doubt word means the page could not be read and wants
-a better scan, a contradiction means the agent answered with no page for a page it says has
-content on it, which wants a re-extraction — and they are read independently, so a log can carry
-both: "Page is blank. The scan is blurry. There is handwriting on the page." fills `blank_vetoed`
-with `blurry` and `blank_contradicted` with `there is handwriting`. On a line with both, the doubt
-is the one to act on first, because a reply that could not read the page is not a reliable witness
-to what is on it.
+Which words count as doubt, as a contradiction, or as a declaration is a long rule, and every clause
+of it was bought by a page that had been lost: see
+[design notes — reading a blank-page declaration](design-notes.md#reading-a-blank-page-declaration).
 
 ### `page_bare_html`
 
@@ -1866,246 +1617,60 @@ the reply, not about the page (issue #349).
 ### `page_blank`
 
 The page agent read the page and reported it empty (`page`, `image`, and its own `log` line), so the
-page is delivered as an empty fragment because there was nothing on it to deliver. That is true of
-the page as this line records it and not always of the document: since issue #371 one kind of
-declaration — one **stated** in the `blank` field whose own log names something on the page — is
-delivered empty and then judged, and a correction it earns can put content back on that page while
-this line still counts it. The count is kept that way deliberately, because it is the declarations
-that were made and [Diagnostics](#diagnostics-timing--hang-detection) reads the ones that cost a
-verify call off it as `pages_blank - pages_skipped_blank`; a page whose content came back that way
-is the `page_corrected` line beside it, with `trigger: "verify"`.
+page is delivered as an empty fragment because there was nothing on it to deliver.
 
-Not a failure and not in `pages_failed`: the remedies are opposite, since a failed page is work to
-redo and a blank page is work already finished. The reply that earns this is a complete envelope
-whose `html` is present and carries **nothing a reader receives** — no visible text, and none of
-the elements that are content with no text in them (a picture, a grid, a form control) — **and**
-that says the page is blank — either in the reply's own `"blank": true` field, or, where that
-field is absent, in a `log` that asserts it in so many words.
+**Not a failure and not in `pages_failed`.** The remedies are opposite: a failed page is work to
+redo, and a blank page is work already finished.
 
-The field is what the prompt asks for since issue #371, and `blank_stated: true` on this line says
-the declaration arrived that way: five blank pages had been lost to five different words while the
-sentence read was being got right — `resolve` (#190), a contradiction that was not one (#194), a
-negator four tokens behind its noun (#220), `image` (#343), `document` (#367) — and each fix
-bought the word it was written for, so a reply that can simply state the answer is the one change
-that is not about a word. The field is not the whole answer even so, because a reply that does not
-send it is read exactly as it was before the field existed:
+A reply earns this line when it is a complete envelope whose `html` is present and carries **nothing
+a reader receives** — no visible text, and none of the elements that are content with no text in
+them (a picture, a grid, a form control) — **and** it says the page is blank, either in the reply's
+own `"blank": true` field or, where that field is absent, in a `log` that asserts it in so many
+words. `blank_stated: true` says the declaration arrived in the field.
 
-`document` and `body` are read as modifiers on the name for text since issue #379, which is what
-`page` and `number` had always been (`no printed page number or heading`), so
-`No text, images, tables, or other document content is visible.` is a declaration and not a
-contradiction. That is the axis and not the length of the list — the same sentence with `document`
-deleted was already delivered, and with the coordination deleted was not — and it is the floor
-under the replies the field cannot reach, which is every reply sent before it and any model that
-ignores it.
+`dropped` carries the markup, bounded to 200 characters, where the declaration was spelled in markup
+rather than as an empty `html` — a comment, an empty wrapper, a page-break marker. The fragment
+delivered is `""` whichever spelling arrived, so without the field the line would not say which one
+did. Prose is content whatever it says: `<p>This page is blank.</p>` is not a declaration, it is
+delivered as the page's words.
 
-How large that set is now is **unmeasured**: `blank_stated` postdates every bench round on disk,
-so nothing recorded can say what share of the declarations arriving today state blankness in the
-field rather than leave it to be read out of a sentence. What the walk does read is one axis and
-not a vocabulary: a noun modifying the name for text, which is why `no other document content` is
-a declaration while `only document headings are visible` and `the document heading is visible` are
-contradictions — a determiner, an `only` or a verb in front of the noun ends the walk before it
-reaches the negator.
+**No verify call is bought for a blank page.** Its [`page_verify_ok`](#page_verify_ok--page_verify_failed)
+line says so with `skipped: "blank"` and `unjudged`. The one exception is a declaration **stated** in
+the field whose own log names something on the page: that page is delivered *and* judged, carries
+`blank_contradicted` on this line and no `skipped` on its verify line, and the log's claim is quoted
+to the verifier in its own words beside the empty fragment — so a log that was right about the
+heading it named buys a correction and the reader gets the page.
 
-A comma alone does **not** end it, and a comma with a whole clause behind it does. A denial with no verb
-of its own reaches across a bare comma, because the members of a denial are divided by bare commas
-exactly as two clauses are, and on the corpus the denials are the case that occurs: of the 204 blank
-declarations in the 3,747 page replies on record, 69 have a denial reaching across a comma **and a
-conjunction** to a name for text and 81 across a **bare comma**, and every one of those 150 is a list.
-Ending the walk at a comma stops honouring 38 of the 204, so a fifth of every blank page on record would
-be reported as a hole (issue #436, which measured it).
+**This line therefore counts the declarations that were made, not the pages that ended up empty.**
+[Diagnostics](#diagnostics-timing--hang-detection) reads the ones that cost a verify call off it as
+`pages_blank - pages_skipped_blank`, and a page whose content came back that way is the
+[`page_corrected`](#page_corrected) line beside it, with `trigger: "verify"`.
 
-What does end the walk is the sentence being **two clauses**: a denial with no verb in it, exactly one
-comma, a name for text behind it carrying a finite verb of its own, and no further conjunction or comma
-between them — the coordination stopping is what says the second half is not another member.
-`No printed text, and handwriting is present.` is refused on that, and so are `No clear text, scrawled
-words are visible.` with the joint spliced rather than coordinated, `No clear text, and printed words are
-visible.` and `No printed text or images, and body text is visible.` — the log said there is writing on
-the sheet. A denial keeps all of its escape routes: three or more members (`No printed words, lines, or
-characters are visible.`), a final `or` joint (`No text, images, or other content is visible.`), a joiner
-behind its last member (`No writing, figures or stamps are present.`), a comma on the named noun itself
-even where the list has no joiner anywhere (`No printed words, lines, characters are visible.`), or no
-verb behind the comma at all (`No printed text, and handwriting.`).
+**No page-break marker is delivered for a blank page,** whatever the paper prints, so a marker that
+arrives anyway goes to `dropped` with the rest of the fragment. A page whose only printed content
+**is** its folio is one of these pages by decision: the folio is never transcribed as text and the
+marker it may be carried in is never delivered, so such a sheet has nothing on it a reader receives.
 
-Two shapes this reads wrongly, stated because nothing in the sentence distinguishes them. A **two-member**
-denial written `No text, and images are visible.` or
-`No text or images, document headings are visible.` is read as a clause and the blank page is reported.
-That direction is a glance; the other is a sheet of handwriting delivered empty. The second of those was
-documented here as a declaration until #436 — `document` and `body` are read as modifiers, and the
-sentence was delivered — and it is refused now, because the identical sentence with `scrawled` in place
-of `document` was refused already and leaving the two apart is the vocabulary deciding which pages
-survive.
+Two limits to know before triaging a run off these lines:
 
-The other runs the fatal way, and is the price of reading a continuing coordination as a list: a named
-noun that heads an **affirmed** list is read as a member of the denied one, so `No clear text, stamped
-words, stamps are visible.` and `No printed text, and stamped words, marks are visible.` are delivered
-empty. The two readings are one sentence — `No printed words, and lines, characters are visible.` has that
-shape and denies three things — and the rule this replaced refused 24 of 24 such wordings on the **form of
-the modifier** alone, declaring the same sentence with `printed` in place of `stamped`, so what changes is
-that one reading covers both rather than two mechanisms disagreeing. None of the 3,747 replies on record
-writes it, and all of the wordings above are pinned in `test/envelope-as-content.test.ts` so the class
-cannot widen unobserved.
+- **A confident wrong declaration about a page whose source file says nothing is not caught.** It is
+  delivered as an empty page and this line is the whole of the evidence it leaves, so a run with no
+  surprising `page_blank` lines is not evidence that no such page occurred. Where the source file
+  *does* carry link annotations for the page, the document contradicts the declaration and
+  [`page_links_missing`](#page_links_missing) fires on it as on any other page, buys a re-render
+  against the image, and that fragment is verified in turn.
+- **The field states and cannot deny.** `"blank": false` is read as no answer at all and the sentence
+  decides, exactly as it did before the field existed, so every error the field can make runs in one
+  direction. It is read loosely enough for `"true"` as a string and no further: `1`, `"yes"` and
+  `"blank"` are silence, because a field loose enough to accept them deletes a page on a typo. And it
+  cannot declare a page blank that came back with a page on it.
 
-This replaced a rule that read the FORM of the word — a comma ended the walk only once it had crossed
-one of the participles #431 added — under which `and stamped words` was refused while `and printed
-words` was declared, one sentence answered by two mechanisms. That rule also refused pure denials whose
-participle member carried a comma of its own (`No inscriptions, watermarks, or logos are visible.`), so
-removing it honours those again. Replaying every one of the 3,747 replies through both implementations
-moves no verdict — a verdict replay rather than a count of sentence shapes, because a count can only see
-the shapes its own pattern was written for, and two rounds of review found the rule's failures one shape
-past whatever had been counted; over the 300-row grid #431 was measured on, the new rule refuses all 60
-second-clause rows the old one did, refuses the 60 spliced ones, leaves every list row blank and gives
-back the 30 denials the old rule cost.
-
-It is not the only way a page with content on it is delivered empty leaving no field to act on — a
-confident wrong declaration about a page whose file says nothing is described the same way below —
-but it is the only one where the log **named** the content and Iris discarded the sentence that
-named it, so there was something to act on and it is not on the line. A run triaged off
-`page_blank` lines is therefore not evidence that no such page occurred. The field states and
-cannot deny: `"blank": false` is read as no answer at all and the sentence decides, exactly as it
-did for every reply sent before the field existed, so every error the field can make is in one
-direction.
-
-It is read loosely enough for `"true"` as a string and no further — `1`, `"yes"` and `"blank"` are
-silence, because a field read loosely enough to accept them is one that deletes a page on a typo.
-And it cannot declare a page blank that came back with a page on it: what a reader receives is
-decided as below, so a reply that says both things is not a declaration.
-Present-and-carrying-nothing rather than present-and-empty, because the empty `html` the prompt
-asks for is not the only way the model writes a blank page: of 78 such replies in 818 initial
-renders of the bench logs, 33 spelled it in markup — 18 a bare page-break marker, 13 a comment
-(`<!-- blank page -->`), 2 an empty paragraph — and read as content each of those was a page
-counted as having produced markup, with the comment or the anchor delivered into the document
-(issue #219).
-
-Prose is content whatever it says, so a reply of `<p>This page is blank.</p>` is delivered as the
-page's words: a page that *prints* "This page intentionally left blank" has that sentence as its
-correct transcription, and nothing in the pipeline can tell the two apart. Where the declaration
-was spelled in markup, `dropped` carries that markup (bounded to 200 characters), because the
-fragment delivered is `""` whichever spelling arrived and the line would otherwise not say which
-one did. What `dropped` discards on the marker spelling is a `doc-pagebreak` anchor, and
-deliberately: every one of those logs says the paper prints no number, which makes the label the
-image's position in the file and the anchor a claim that the document's page 14 begins there.
-
-The test is positive and doubt is fatal: an absent `html` key, an empty one with nothing said
-about it, one whose `log` says the page could not be *read* (illegible, too dark to resolve,
-truncated — including a hedge like "appears blank, though the scan is very faint"), and one that
-describes the **image's** condition rather than the paper's ("the page is very dark and appears
-empty", "low resolution scan; no text") are all still the model giving up, and stay
-`page_no_output`. That reply is the one that most needs a human to look at the page, and reading
-it as a declaration would leave nothing in the document to look at.
-
-A blank page whose wording falls outside both patterns is reported as a failed page, which is the
-safe direction — a page wrongly reported as failed costs a glance, a page wrongly dropped costs
-the page. One thing is **not** doubt, though: a doubt word used to describe the *marks on an empty
-sheet* rather than the image. "Specks/dots are visible but do not resolve into any characters", "a
-few faint specks/artifacts … no legible text" — that is the blank declaration itself, stated
-positively, and reading `resolve`, `faint` and `noise` there as doubt about the scan cost four
-blank pages of 100 on one bench round, while an agent that answered "Page is blank." and stopped
-was believed (issue #190; two pages of one document opened with a verbatim identical sentence and
-only the one that explained itself was refused).
-
-What is exempt is the *phrase* — `faint specks` is the paper, `faint scan` is the image — so a log
-that describes both in one sentence still refuses: "the scan is blurry, showing only faint specks
-and no legible text" loses `faint` and keeps `blurry`. It also needs the marks named *as* marks:
-
-`stray marks do not resolve into characters` is the paper, while bare
-`marks do not resolve into characters` is the phrase the page prompt uses for content that could
-not be read, and a `dark streak`, `dark spot` or `dark shadow` is the capture and can cover
-content. It reaches across one sentence or semicolon boundary only where the next clause continues
-the same observation — the marks referred back to, no subject at all, or a denial — so "a few
-specks of dust are visible. The handwritten note in the corner does not resolve into words" is
-still a failed page.
-
-Two edges of that phrase are worth spelling out, because a wording just outside either one costs a
-blank page (issue #429). `noise` belongs to the paper only where the capture that made it is named:
-`scan`, `scanner`, `scanning` and `compression noise` are marks on the sheet, which is the corpus's
-entire vocabulary for it — four wordings across the 205 replies on disk that carried no page — while
-bare `noise`, `image noise` and `the scan is noisy` describe the image and stay doubt. And one word
-Iris has no list for may sit **immediately** before the marks noun, so "only faint, indistinct specks
-are visible" declares. It is one word, in that one position, in a clause with no copula, colon or dash
-in front of it — "the scan is noisy with artifacts" and "the image is grainy background specks" are
-still failed pages, because a stack behind `is` describes something the sentence has already named and
-the marks are not it. The word itself is put **back** into the text the doubt and contradiction checks
-read rather than removed with the phrase, so a doubt word or a name for what the page bears goes on
-being one without this rule holding a list of them. Three words are not put back. Two of them fall back
-to the reading that has no slot in it: a function word, which dresses nothing (handing `with` back keeps
-the preposition while `noisy`, the whole doubt, leaves with the phrase); and a name for what a page bears
-written as an **attributive** — `handwritten`, `stamped`, `cursive`, and their hyphenated compounds —
-which is the form this rule reads as a modifier. Until #431 that was also the form the contradiction
-check could not see, so the word was handed back and nothing downstream did anything with it; the check
-now reads both parts of speech, and handing it back is what lets it. The third is a word the slot-less reading had already
-removed, and there the phrase goes in full, slot included: nothing is handed back because base kept
-nothing to hand back, which is what makes this rule able only ever to strip **more** than the slot-less
-reading and never less. That slot moves no
-reply on disk: it is there because the words it admits appear in none of the 3,935 replies that did
-carry a page, so admitting one cannot let content through as a blank declaration.
-
-And a log that says *where* something illegible sits ("not legible printing in the margin") is
-naming what the page bears rather than denying it, while naming the substrate ("not legible text
-on the page") is another way of saying the sheet is empty; the whole rest of that statement has to
-be made of denial for it to count as one, so a word for a place on the paper — `margin`, `header`,
-`corner`, `seal`, `spine` — refuses whatever punctuation or preposition leads into it, and a name
-for what the page bears has to be introduced by a denial there (`or content`, `nor any figures`,
-`no writing`) rather than by a determiner, and not handed on to a verb that says it is there,
-because "not legible text, only a heading is visible" and "not legible text, and printing on the
-page is visible" are built from the same words as a denial and say the opposite — while a tail
-that goes on to deny something else carries verbs of its own ("not legible text or content, and no
-writing is visible", "…and no printed page number is visible") and is read as the denial it is.
-
-The same read applies to "do not resolve into …", one noun further on — that construction's object
-is what the `do not` denies, and everything after it has to deny too, so "do not resolve into any
-characters or content" is a blank page and "do not resolve into any characters, only a heading in
-the margin" is a failed one. And no exemption applies at all to a log that anywhere says the
-reading failed or hedges the answer (`illegible`, `obscured`, `too dark`, `could not`, `though`),
-which are claims about the page wherever they sit.
-
-The claim is not paid to be checked, and it used to be: the empty fragment went to the Feedback
-Agent like any other page, which was shown the source image and an empty code block and asked
-whether the one was faithful to the other. In 36 such judgements — 9 pages of a 100-page corpus,
-two page-model arms, two shas — it passed every one, for $0.0859 an arm (issue #294), so the call
-is not made and the page's `page_verify_ok` line says so with `skipped: "blank"` and `unjudged`,
-with one exception, which is the only spend issue #371 adds: a declaration **stated** in the field
-whose own log names something on the page is delivered *and* judged.
-
-That page carries `blank_contradicted` on this line, no `skipped` on its `page_verify_ok`, and the
-log's claim is quoted to the verifier in the log's own words beside the empty fragment — so a log
-that was right about the heading it named buys a correction and the reader gets the page, and a
-log the regex misread costs a verify call instead of a page. Before the field there were two
-answers and both were worse: believe the prose and drop the page in silence, or refuse it and
-report a page nobody has. What it costs is bounded by how rarely the two halves disagree — 1 of
-the 125 blank declarations in every bench round on disk, off 2,189 page renders — and that one is
-a page whose log says it is blank three times, refused today by a misread first clause.
-
-A declaration made in prose alone is unchanged and still refused on a contradiction
-(`blank_contradicted` on `page_no_output`), because for a prose declaration refusing remains the
-cheaper of the two errors available ([`page_no_output`](#page_no_output) above,
-`pages_skipped_blank` in [Diagnostics](#diagnostics-timing--hang-detection)). What still checks the
-claim are the checks that cost nothing, and they are the ones that can prove it wrong: the veto
-refuses a hedged declaration before it is ever accepted, whether the reply stated blankness or
-described it — a page the model says it could not read is not a page it can state anything about,
-including that it is empty — and the contradiction refuses a self-contradicting one that was
-described in prose, and a page reported blank whose **source file** carries link annotations for it
-is a page the document itself contradicts — `page_links_missing` fires on it as on any other page,
-buys a re-render against the image, and that fragment is verified in turn.
-
-What is no longer caught is a *confident* wrong declaration about a page whose file says nothing:
-it is delivered as an empty page, and this line is the whole of the evidence it leaves. Before
-this existed, six of 100 bench pages across three of four documents were well-formed envelopes
-correctly saying the page was blank, and every one shipped a `@page-failed` marker and counted as
-a lost source page (issue #179). No page-break marker is delivered for a blank page, and the
-prompt no longer asks for one on such a page whatever the paper prints — it did, which was an
-instruction the pipeline could not honour once every accepted declaration returned an empty
-fragment (issue #222) — so a marker that arrives anyway goes to `dropped` with the rest of the
-fragment rather than into the document.
-
-A blank page that did print its folio loses an anchor to a page with nothing to anchor to, which
-is the cheaper of the two mistakes. A page whose only printed content **is** its folio is one of
-these pages, and by decision rather than by accident: the folio is never transcribed as text and
-the marker it may be carried in is never delivered, so such a sheet has nothing on it a reader
-receives, and a marker-only fragment is not a page. The alternative — delivering a lone
-`doc-pagebreak` where no declaration was asserted — was refused because that gate also passes a
-reply whose log says the page's table was too faint to transcribe, which is a page silently
-dropped while the run reports it delivered, and because every one of the 18 bare markers measured
-in the corpus carried a label the paper never printed.
+Where a declaration is refused rather than accepted, the line is
+[`page_no_output`](#page_no_output) carrying `blank_vetoed` or `blank_contradicted`, or — on a
+feedback re-extraction of a page Iris already holds content for —
+[`page_blank_refused`](#page_blank_refused) below. Which words count as a declaration, a doubt or a
+contradiction, and what each clause of that rule cost before it existed, is in
+[design notes — reading a blank-page declaration](design-notes.md#reading-a-blank-page-declaration).
 
 ### `page_blank_refused`
 
