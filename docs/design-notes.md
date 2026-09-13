@@ -6,12 +6,13 @@ This file is for someone about to change the code. If you only want to run Iris,
 [README](../README.md) is enough.
 
 `fragment`, `block`, `verdict`, `declaration` and `round` are used here in the senses
-[README § Terms](../README.md#terms) gives them. Three of them carry a second sense below:
+[README § Terms](../README.md#terms) gives them. That section also lists the ordinary senses each of
+them carries, and this file uses those wherever they are the ones meant, so read the sentence rather
+than the word — `block`, for one, arrives here as a document element, a table's header rows, a
+provider block in the config and a code block. Two glosses a reader cannot infer:
 
 - A `round` is a round of the reader/editor loop, and also a captured run of a corpus, named as a
   **bench round** or by its run directory (`runs-reader-newsha`).
-- A `block` is one top-level element of the assembled document — what the Copy Editor patches — and
-  also the header rows of a table, written as a **header block**.
 - A `declaration` is the page agent's claim that a page holds no content everywhere except one bullet
   under [Assembly](#assembly-one-document-out-of-many-pages), where it is the `lang` declaration on
   the document's root element.

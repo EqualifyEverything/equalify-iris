@@ -77,7 +77,7 @@ which it means.
   so the Reader can read up to four times. *Also:* one captured run of a corpus through the pipeline,
   named like `runs-postswap-312` and kept with its own logs and prices — a **benchmark round** if it
   ran here, a **deployed round** if it ran on a deployment. [docs/models.md](docs/models.md) and
-  [docs/cost.md](docs/cost.md) use both senses and each glosses the difference itself.
+  [docs/cost.md](docs/cost.md) each gloss the difference themselves.
 
 ## Quick start
 
