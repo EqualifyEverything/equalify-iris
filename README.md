@@ -76,8 +76,8 @@ which it means.
 - **round** — one pass of the review loop. `max_review_iterations` (default 3) caps the editor rounds,
   so the Reader can read up to four times. *Also:* one captured run of a corpus through the pipeline,
   named like `runs-postswap-312` and kept with its own logs and prices — a **benchmark round** if it
-  ran here, a **deployed round** if it ran on a deployment. Every document that uses the word that way
-  says so at its top.
+  ran here, a **deployed round** if it ran on a deployment. [docs/models.md](docs/models.md) and
+  [docs/cost.md](docs/cost.md) use both senses and each glosses the difference itself.
 
 ## Quick start
 

@@ -6,12 +6,15 @@ This file is for someone about to change the code. If you only want to run Iris,
 [README](../README.md) is enough.
 
 `fragment`, `block`, `verdict`, `declaration` and `round` are used here in the senses
-[README § Terms](../README.md#terms) gives them. Two of them appear in both senses. A `round` is a
-round of the reader/editor loop, and also a captured run of a corpus, named as a **bench round** or
-by its run directory (`runs-reader-newsha`). A `declaration` is the page agent's claim that a page
-holds no content everywhere except one bullet under
-[Assembly](#assembly-one-document-out-of-many-pages), where it is the `lang` declaration on the
-document's root element.
+[README § Terms](../README.md#terms) gives them. Three of them carry a second sense below:
+
+- A `round` is a round of the reader/editor loop, and also a captured run of a corpus, named as a
+  **bench round** or by its run directory (`runs-reader-newsha`).
+- A `block` is one top-level element of the assembled document — what the Copy Editor patches — and
+  also the header rows of a table, written as a **header block**.
+- A `declaration` is the page agent's claim that a page holds no content everywhere except one bullet
+  under [Assembly](#assembly-one-document-out-of-many-pages), where it is the `lang` declaration on
+  the document's root element.
 
 Several of these decisions reverse an earlier design, so they are written as decisions rather than
 as a diff against it. Iris was specified up front in a requirements document. That document was
@@ -19,17 +22,13 @@ amended twenty-odd times as the build disagreed with it, and it has now been ret
 record is the git history and the issues each decision cites. What is true today is here, in
 [API.md](API.md), in [models.md](models.md) and in the code.
 
-**Every document here is written in concise plain language and direct, and each has exactly one job.**
-That is a requirement rather than a preference
-([CONTRIBUTING.md § Documentation](../CONTRIBUTING.md#documentation)), and one job per document is what
-keeps the set DRY: [API.md](API.md) says what a caller does about a line, this file says why the line
-reads the way it does, [models.md](models.md) and [cost.md](cost.md) hold the measurements, and the
-[README](../README.md) states the decisions an operator makes while `config.example.yaml` documents the
-keys. A sentence that restates another document gets deleted rather than softened, and the copy that
-stays is the one in the document whose job it is. So a rule's rationale and its evidence belong here
+**Write plainly and directly, and give each document one job.** Both are requirements rather than
+preferences ([CONTRIBUTING.md § Documentation](../CONTRIBUTING.md#documentation) states them;
+[README § Working on Iris](../README.md#working-on-iris--including-if-you-are-an-ai-agent) says which
+document holds what). What that means for this file: a rule's rationale and its evidence belong here
 even when a reference doc is where you met the rule, and a cross-link carries the reader the other
-way — which is also the cheaper thing to maintain, since a claim written once has one place to be
-corrected.
+way. A sentence that restates another document gets deleted rather than softened. A claim written
+once has one place to be corrected.
 
 Each decision below is one bullet, and the headings only group them:
 
