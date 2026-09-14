@@ -204,6 +204,22 @@ test("an unwritable data_dir names its remedy instead of throwing a stack trace"
     "the guard still claims what the cause is NOT, which it cannot know; it should say what it checked",
   );
 
+  // An absent directory must be probed at its nearest existing ancestor, not skipped. Skipping it
+  // dropped the commonest ownership failure after a mistyped path — a data_dir that cannot be
+  // CREATED because its parent is unwritable — into the branch that says it cannot explain the
+  // failure, and printed an empty list of paths while saying so. The database file is the one
+  // candidate right to skip while absent, since creating it writes into its directory.
+  assert.match(
+    guarded,
+    /nearestExisting\(cfg\.storage\.data_dir\)/,
+    "storage.data_dir is not probed via its nearest existing ancestor, so a data_dir that cannot be created reports no cause at all",
+  );
+  assert.doesNotMatch(
+    guarded,
+    /\.filter\(\s*\(p\) => existsSync\(p\)\s*\)/,
+    "the candidates are filtered by existsSync as a group, which drops an absent data_dir instead of probing the parent it would be created in",
+  );
+
   // The printed alternative has to be a command that works. Compose does not expand `$(id -u)` in
   // a YAML value — it escapes it to `$$(id -u)` and the daemon gets a literal — so telling an
   // operator to use it stacks a second failure onto the one they are already reading.

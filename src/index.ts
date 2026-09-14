@@ -1,6 +1,6 @@
 import express from "express";
 import { accessSync, constants, existsSync, mkdirSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   apiToken,
@@ -81,6 +81,20 @@ const writable = (dir: string) => {
   }
 };
 
+// The path whose permissions decide whether `p` can be created: `p` itself if it is there, and
+// otherwise its nearest existing ancestor, because creating it means writing into that ancestor.
+// Asking about `p` directly instead would answer ENOENT — true, and not the reason it failed.
+// Terminates: `dirname` reaches a fixed point at the root, which always exists.
+const nearestExisting = (p: string): string => {
+  let at = resolve(p);
+  while (!existsSync(at)) {
+    const parent = dirname(at);
+    if (parent === at) break;
+    at = parent;
+  }
+  return at;
+};
+
 const openStorage = (): Store => {
   try {
     mkdirSync(join(cfg.storage.data_dir, "sessions"), { recursive: true });
@@ -91,12 +105,24 @@ const openStorage = (): Store => {
     console.error(`FATAL: cannot open this deployment's storage (${e.code ?? e.message}).`);
     // Which path is at fault, asked directly. Three candidates, not one: the database may sit
     // outside data_dir, and the database FILE can be unwritable while both directories are fine
-    // (a group-writable ./data holding a foreign-owned iris.sqlite). It is only worth asking about
-    // once it exists — accessSync on a path that is absent fails for the wrong reason, and this
-    // guard also runs on a first boot, when not creating it yet is correct.
-    const checked = [...new Set([cfg.storage.data_dir, dirname(cfg.storage.database), cfg.storage.database])].filter(
-      (p) => existsSync(p),
-    );
+    // (a group-writable ./data holding a foreign-owned iris.sqlite).
+    //
+    // The directories go through `nearestExisting` rather than being skipped when absent. Skipping
+    // them was wrong in both directions: a `data_dir` that does not exist AND cannot be created is
+    // an ownership failure — the commonest one after a mistyped absolute path — and dropping it left
+    // nothing to report, so this printed an empty list of paths and a claim that it could not
+    // explain the failure. What matters is whether the directory that would have to be written is
+    // writable, which is what this asks.
+    //
+    // The database FILE is the one candidate that is right to skip while absent: creating it is a
+    // write into its directory, which is already above.
+    const checked = [
+      ...new Set([
+        nearestExisting(cfg.storage.data_dir),
+        nearestExisting(dirname(cfg.storage.database)),
+        ...(existsSync(cfg.storage.database) ? [cfg.storage.database] : []),
+      ]),
+    ];
     const unwritable = checked.filter((p) => !writable(p));
     if (unwritable.length > 0) {
       const uid = process.getuid?.() ?? 1000;
