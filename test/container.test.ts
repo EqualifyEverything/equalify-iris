@@ -249,23 +249,53 @@ test("an unwritable data_dir names its remedy instead of throwing a stack trace"
     "the guard computes a remedy naming the diagnosed path and prints something else",
   );
 
-  // `./data` is still the right answer in a container, and only there: the container's own path is
-  // not one an operator can act on, because chowning it dies with the container and the ownership
-  // comes from the host directory mounted over it. So that literal is confined to the branch that
-  // establishes it — bounded at BOTH ends, since "after the `if`" also means "in its `else`".
-  const opens = guarded.indexOf("if (inContainer())");
-  assert.ok(
-    opens > 0,
-    "the guard no longer distinguishes a containerised deployment, so it prints a host remedy for a container path or the reverse",
-  );
-  const closes = guarded.indexOf("} else {", opens);
-  assert.ok(closes > opens, "the containerised branch has no `} else {`, so the non-container deployment gets no remedy at all");
-  for (const m of guarded.matchAll(/chown[^\n]*\.\/data/g)) {
-    assert.ok(
-      m.index > opens && m.index < closes,
-      "the guard prints `chown … ./data` outside the containerised branch, where the path it diagnosed is the real one and ./data is a guess",
+  // Every command printed names the diagnosed path, and no other. An earlier round branched on
+  // `/.dockerenv` to print `chown … ./data` instead, and that decides from a marker what only a
+  // lookup could answer: a `database` inside the image is a container whose path is NOT the host's,
+  // and a containerd pod writes no marker at all and is one whose path is. The message now names
+  // the condition — "in Docker, that path is the one inside the container" — which holds either way.
+  //
+  // Code lines only. The comment above the remedy names `chown -R /var/lib` to say why the remedy
+  // is not spelled that way, and a check reading the whole slice cannot tell that from doing it —
+  // the same distinction the Dockerfile's `npm install` check makes between a rule and prose about
+  // the rule, and it caught this test on its first run.
+  const commands = guarded
+    .split("\n")
+    .filter((l) => !/^\s*(\/\/|\*)/.test(l))
+    .join("\n");
+  for (const line of commands.split("\n").filter((l) => l.includes("sudo chown"))) {
+    assert.match(
+      line,
+      /c\.want/,
+      `a printed chown names a path the guard did not diagnose (${line.trim()}); the operator is told to fix a path this run never checked`,
     );
   }
+  assert.match(
+    guarded,
+    /bind-mounted/,
+    "the message does not tell a containerised deployment that the path it names is the container's own, so chowning it there looks like the fix and dies with the container",
+  );
+
+  // Two spellings of one directory are one candidate. `resolve` — which config.ts applies to all
+  // three storage paths — collapses `.` and `..`, but not a symlink: a `database` reached through a
+  // link to `data_dir` is the same directory twice, and it was blamed and remedied twice.
+  assert.match(
+    guarded,
+    /key: canonical\(c\.want\)/,
+    "candidates are not keyed by their real path, so one directory reached through a symlink is diagnosed twice with two remedies for it",
+  );
+  // Read off the function's body, not the file: `realpathSync` stays in the import line when the
+  // call is taken out of `canonical`, and a check that matched anywhere in src/index.ts passed a
+  // version whose key was the resolved path again. Both ends asserted, for the reason above.
+  const defFrom = index.indexOf("const canonical =");
+  const defTo = index.indexOf("const openStorage", defFrom);
+  assert.ok(defFrom >= 0, "src/index.ts no longer defines canonical(), so the candidate keys are pinned to nothing");
+  assert.ok(defTo > defFrom, "canonical() is no longer defined above openStorage(), so the slice below would run past it");
+  assert.match(
+    index.slice(defFrom, defTo),
+    /realpathSync/,
+    "canonical() does not resolve symlinks, so its key cannot tell one directory under two names from two directories",
+  );
 
   // The printed alternative has to be a command that works. Compose does not expand `$(id -u)` in
   // a YAML value — it escapes it to `$$(id -u)` and the daemon gets a literal — so telling an

@@ -1,6 +1,6 @@
 import express from "express";
-import { accessSync, constants, existsSync, mkdirSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { accessSync, constants, existsSync, mkdirSync, realpathSync } from "node:fs";
+import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   apiToken,
@@ -100,11 +100,20 @@ const nearestExisting = (p: string): string => {
 // quote is escaped inside single quotes).
 const shellArg = (p: string) => (/^[A-Za-z0-9_./:@%+=-]+$/.test(p) ? p : `'${p.replaceAll("'", `'\\''`)}'`);
 
-// Whether the path this failed on is a name the operator can act on. Inside a container it is
-// not: `/app/data` is the container's path, chowning it there dies with the container, and the
-// ownership it has comes from the host directory bind-mounted over it. Both markers, because
-// podman writes /run/.containerenv and not /.dockerenv.
-const inContainer = () => existsSync("/.dockerenv") || existsSync("/run/.containerenv");
+// One directory under two names is one candidate. `resolve` — which config.ts has already applied
+// to all three paths — collapses `.` and `..`, but not a symlink, so a `database` reached through a
+// link to `data_dir` would otherwise be blamed and remedied twice. Identity is therefore the REAL
+// path, taken at the nearest existing ancestor because that is the deepest part which has one, with
+// whatever does not exist yet appended.
+const canonical = (p: string) => {
+  const at = nearestExisting(p);
+  const rest = relative(at, resolve(p));
+  try {
+    return join(realpathSync.native(at), rest);
+  } catch {
+    return join(at, rest);
+  }
+};
 
 const openStorage = (): Store => {
   try {
@@ -133,8 +142,8 @@ const openStorage = (): Store => {
       { want: dirname(cfg.storage.database), kind: "dir" as const },
       ...(existsSync(cfg.storage.database) ? [{ want: cfg.storage.database, kind: "file" as const }] : []),
     ]
-      .filter((c, i, all) => all.findIndex((o) => o.want === c.want) === i)
-      .map((c) => ({ ...c, probe: nearestExisting(c.want) }));
+      .map((c) => ({ ...c, probe: nearestExisting(c.want), key: canonical(c.want) }))
+      .filter((c, i, all) => all.findIndex((o) => o.key === c.key) === i);
     const checked = [...new Set(candidates.map((c) => c.probe))];
     const unwritable = candidates.filter((c) => !writable(c.probe));
     if (unwritable.length > 0) {
@@ -155,20 +164,23 @@ const openStorage = (): Store => {
             : `  sudo mkdir -p ${shellArg(c.want)} && sudo chown -R ${uid}:${gid} ${shellArg(c.want)}`,
         )
         .join("\n");
-      console.error(`This process runs as uid ${uid} (gid ${gid}) and cannot write ${blame}.`);
-      if (inContainer()) {
-        console.error(
-          `That path is inside the container, so fixing it there would not outlive the container. It is\n` +
-            `bind-mounted from the host and keeps the host's ownership, so fix it on the HOST, on the\n` +
-            `directory your compose file mounts there — \`./data\` in the shipped docker-compose.yml:\n` +
-            `  sudo mkdir -p ./data && sudo chown -R ${uid}:${gid} ./data\n` +
-            `or run the container as the user that owns it: add \`user: "1234:1234"\` to the iris service in\n` +
-            `docker-compose.yml, using your own numbers from \`id -u\` and \`id -g\`. They have to be literal —\n` +
-            `compose does not expand \`$(id -u)\` in a YAML value.`,
-        );
-      } else {
-        console.error(`Give it to uid ${uid}:\n${remedy}`);
-      }
+      // One message, not a branch on whether this is a container. A previous round decided that
+      // from `/.dockerenv` and `/run/.containerenv`, and those markers answer a question adjacent
+      // to the one that matters: a `database` inside the image rather than on the mount is a
+      // container whose path is NOT the host's, and a containerd pod writes neither marker and is
+      // one whose path is. Getting it wrong either way makes a positive claim about a path this
+      // code did not look up. Naming the condition instead is true in every case, and shorter.
+      console.error(
+        `This process runs as uid ${uid} (gid ${gid}) and cannot write ${blame}.\n` +
+          `Give it to uid ${uid}:\n` +
+          `${remedy}\n` +
+          `In Docker, that path is the one INSIDE the container, and chowning it there dies with the\n` +
+          `container. If it is bind-mounted — \`./data\` is, in the shipped docker-compose.yml — run the\n` +
+          `same command on the host directory mounted there, whose ownership is the one that carries in.\n` +
+          `Or run the container as the user that owns it: add \`user: "1234:1234"\` to the iris service in\n` +
+          `docker-compose.yml, using your own numbers from \`id -u\` and \`id -g\`. They have to be literal —\n` +
+          `compose does not expand \`$(id -u)\` in a YAML value.`,
+      );
     } else {
       // Says what was checked rather than what the cause is not. "This is not an ownership
       // problem" would be a positive claim this code cannot support — something unreadable, a
