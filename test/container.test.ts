@@ -160,9 +160,9 @@ test("an unwritable data_dir names its remedy instead of throwing a stack trace"
   // assertion below would match something further down src/index.ts and the test would pass while
   // pinning nothing. That is the vacuous pass, and it is worse than a failure.
   const from = index.indexOf("const openStorage");
-  const to = index.indexOf("const store = openStorage()");
+  const to = index.indexOf("= openStorage()");
   assert.ok(from >= 0, "src/index.ts no longer defines openStorage(), so this test is pinning nothing");
-  assert.ok(to > from, "src/index.ts no longer calls `const store = openStorage()` after defining it, so the slice below would run past the guard");
+  assert.ok(to > from, "src/index.ts no longer calls openStorage() after defining it, so the slice below would run past the guard");
   const guarded = index.slice(from, to);
   assert.match(guarded, /try\s*\{/, "the startup storage setup is unguarded, so an unwritable ./data exits with a stack trace");
   assert.match(guarded, /chown/, "the startup guard does not print the chown that fixes it");
@@ -182,6 +182,55 @@ test("an unwritable data_dir names its remedy instead of throwing a stack trace"
     "opening the database is outside the guard, so an unwritable ./data that already has sessions/ and tmp/ dies one line later with an ERR_SQLITE_ERROR that names nothing",
   );
 
+  // And the first WRITE is inside it too, which is a separate property from opening the database:
+  // SQLite OPENS a database it cannot write without complaint and raises only when something
+  // writes. So `new Store(` inside the guard is not enough on its own — a root-owned iris.sqlite
+  // under a container that drops root gets past every check above and then throws
+  // `attempt to write a readonly database` from the first write, with no errno, path or uid.
+  //
+  // Asserted against the whole file as well as the slice, because moving the call back out is the
+  // regression: it was outside for months, it cost the UIC deployment eight rolled-back deploys,
+  // and nothing about a passing suite or a working dev box shows it.
+  assert.match(
+    guarded,
+    /failStaleSessions\(\)/,
+    "the first database WRITE is outside the guard, so an unwritable iris.sqlite dies with a bare ERR_SQLITE_ERROR and the chown below never prints",
+  );
+  // Counted over CODE, with comments dropped, because the count is a claim about calls and `split`
+  // cannot tell one from a mention. The comments in the guard paraphrase the call today ("clearing
+  // the sessions a previous shutdown orphaned"); one that names it instead would fail this and send
+  // the reader after a second call that does not exist. The slice assertion above is the one
+  // carrying the real invariant — this only stops a copy being added outside it.
+  //
+  // Block comments and TRAILING comments as well as whole lines: a `/* */` or a `// ...` after a
+  // statement is the same false failure one line to the right. `//` preceded by `:` is left alone
+  // so a URL survives (`http://localhost:${port}` is in the file). Anything this over-strips can
+  // only make the count MISS a call, never invent one — a weaker pin, not a wrong failure — which
+  // is the right way round for a check whose whole job is the quality of a message.
+  const code = index
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/(^|[^:])\/\/.*$/gm, "$1");
+  assert.equal(
+    code.split("failStaleSessions()").length - 1,
+    1,
+    "src/index.ts calls failStaleSessions() more than once, so one of them may sit outside the storage guard",
+  );
+
+  // The line naming the failure carries the code AND the message, never one or the other. Every
+  // node:sqlite error has the same code, `ERR_SQLITE_ERROR`, so a `??` between them always took the
+  // code: the operator read `(ERR_SQLITE_ERROR)` and never `attempt to write a readonly database`,
+  // which is the only string saying which condition it was. The ownership branch prints no stack
+  // either, so on the failure this whole guard exists for, that detail existed nowhere at all.
+  const detail = guarded.match(/const detail = .*/)?.[0] ?? "";
+  assert.ok(detail, "src/index.ts no longer builds the failure detail on one line named `detail`, so the three assertions below are pinning nothing");
+  assert.match(detail, /e\.code/, "the failure line does not name the error code, so an ENOENT or EACCES reads as prose with no handle on it");
+  assert.match(detail, /e\.message/, "the failure line drops the error message, so `attempt to write a readonly database` never reaches the operator");
+  assert.doesNotMatch(
+    detail,
+    /\?\?/,
+    "the failure line prints the code OR the message; every node:sqlite error carries the same code, so `??` always takes it and the SQLite condition is never named",
+  );
+
   // Which is why the remedy is chosen by probing writability rather than by reading `err.code`:
   // the error that most needs this message is the one that cannot identify itself.
   assert.match(
@@ -198,6 +247,17 @@ test("an unwritable data_dir names its remedy instead of throwing a stack trace"
     /cfg\.storage\.database/,
     "the writability probe does not include storage.database, so an unwritable iris.sqlite under writable directories reports the wrong cause",
   );
+  // And the two WAL sidecars, which are separate files with their own owners: this deployment runs
+  // in WAL, so a refused write can come from `-wal` or `-shm` while iris.sqlite itself is fine.
+  // Without them the one-file chown printed above is a remedy that does not work and then reports
+  // itself as not an ownership problem — the same wrong positive claim, one step later.
+  for (const sidecar of ["-wal", "-shm"]) {
+    assert.match(
+      guarded,
+      new RegExp(`\\$\\{cfg\\.storage\\.database\\}${sidecar}`),
+      `the writability probe does not include the ${sidecar} sidecar, so a root-owned one survives the chown this guard prints and the next boot claims the cause is not ownership`,
+    );
+  }
   assert.doesNotMatch(
     guarded,
     /is not an ownership problem/,
@@ -219,16 +279,24 @@ test("an unwritable data_dir names its remedy instead of throwing a stack trace"
     "the candidates are not probed at their nearest existing ancestor, so a data_dir that cannot be created answers ENOENT instead of naming the parent",
   );
 
-  // The database file is the one candidate right to drop while absent, since creating it writes
-  // into its directory. Stated as: every `existsSync` in the guard is that one call. A regex
-  // forbidding one spelling of the group filter (`.filter((p) => existsSync(p))`) would pass
-  // against `.filter(existsSync)`, against `existsSync(p) === true`, and against the same
+  // The three FILES are the candidates right to drop while absent, since creating any of them
+  // writes into their directory. Stated as: every `existsSync` in the guard is one of those three.
+  // A regex forbidding one spelling of the group filter (`.filter((p) => existsSync(p))`) would
+  // pass against `.filter(existsSync)`, against `existsSync(p) === true`, and against the same
   // predicate rewrapped across two lines — all of them the defect it was written for.
+  //
+  // Which is also why src/index.ts spells the three checks out instead of filtering a list: a
+  // filter reads as `existsSync(p)` here, and `p` cannot say whether a directory was among what it
+  // ranged over. The repetition there buys this enumeration.
   const existsUses = guarded.match(/existsSync\b[^)]*\)?/g) ?? [];
   assert.deepEqual(
     existsUses,
-    ["existsSync(cfg.storage.database)"],
-    `existsSync is used in the guard for something other than the database file (${JSON.stringify(existsUses)}); applied to the directories it drops the ones that cannot be created`,
+    [
+      "existsSync(cfg.storage.database)",
+      "existsSync(`${cfg.storage.database}-wal`)",
+      "existsSync(`${cfg.storage.database}-shm`)",
+    ],
+    `existsSync is used in the guard for something other than the three database files (${JSON.stringify(existsUses)}); applied to the directories it drops the ones that cannot be created`,
   );
 
   // The remedy has to name the path that was just diagnosed. A hardcoded `chown -R … ./data` was

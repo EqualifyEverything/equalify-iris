@@ -115,14 +115,36 @@ const canonical = (p: string) => {
   }
 };
 
-const openStorage = (): Store => {
+const openStorage = (): { store: Store; stale: number } => {
   try {
     mkdirSync(join(cfg.storage.data_dir, "sessions"), { recursive: true });
     mkdirSync(join(cfg.storage.data_dir, "tmp"), { recursive: true });
-    return new Store(cfg.storage.database);
+    const store = new Store(cfg.storage.database);
+    // Clearing the sessions a previous shutdown orphaned is this process's first WRITE, and it is
+    // in here for the same reason `new Store` is, one step further along: OPENING a database
+    // proves nothing about writing to it. SQLite opens one it cannot write without complaint and
+    // raises only when something writes, so a root-owned iris.sqlite bind-mounted into a
+    // container that drops to an unprivileged uid gets past every check above.
+    //
+    // Outside this guard, where it was, it threw a bare `attempt to write a readonly database`
+    // carrying no errno, path or uid — past every message below, including the chown that fixes
+    // it. That cost the UIC deployment eight rolled-back deploys on 2026-09-14, none of which
+    // named ownership, after the image started dropping root.
+    return { store, stale: store.failStaleSessions() };
   } catch (err) {
     const e = err as NodeJS.ErrnoException;
-    console.error(`FATAL: cannot open this deployment's storage (${e.code ?? e.message}).`);
+    // "use", not "open": a write refused by ownership is this message's commonest cause, and
+    // saying "cannot open" of a database that opened fine sends the reader to the wrong question.
+    //
+    // Both the code AND the message, never one or the other. `e.code ?? e.message`, which is what
+    // this was, always took the code — every node:sqlite error carries the same one,
+    // `ERR_SQLITE_ERROR` — so the operator got `(ERR_SQLITE_ERROR)` and never `attempt to write a
+    // readonly database`, the only string that says which SQLite condition this actually was. And
+    // the ownership branch below prints no stack, so on precisely the failure this guard is for,
+    // dropping it dropped it everywhere. On an ENOENT or EACCES the code is already the whole
+    // story and the message repeats it, which is a cheap price for keeping the SQLite case legible.
+    const detail = e.code ? `${e.code}: ${e.message}` : e.message;
+    console.error(`FATAL: cannot use this deployment's storage (${detail}).`);
     // Which path is at fault, asked directly. Three candidates, not one: the database may sit
     // outside data_dir, and the database FILE can be unwritable while both directories are fine
     // (a group-writable ./data holding a foreign-owned iris.sqlite).
@@ -136,11 +158,36 @@ const openStorage = (): Store => {
     // beside a claim that the failure could not be explained.
     //
     // The database FILE is the one candidate that is right to drop while absent: creating it is a
-    // write into its directory, which is already above.
+    // write into its directory, which is already above. Same for the two WAL sidecars.
+    //
+    // The sidecars are here because this deployment runs in WAL (`PRAGMA journal_mode = WAL`,
+    // store/db.ts), where a refused write can come from `iris.sqlite-wal` or `-shm` rather than
+    // from the database, and each is a separate file with its own owner. The sequel this exists to
+    // stop: a group-writable ./data holding a root-owned set, the operator runs the one-file
+    // `chown` printed below, and the next boot fails again — but with all three of the paths above
+    // now writable, so it lands in the `else` and claims this is not an ownership failure at all.
+    // A positive claim, and the wrong one, of exactly the kind that branch's comment warns about.
+    //
+    // Latent until this round, and no longer: the write that raises on a root-owned set is the
+    // first one, and only now does it reach this guard rather than dying past the end of it.
+    //
+    // Three near-identical lines rather than a filter over a list of the three paths, because the
+    // property that matters here is which candidates are dropped when absent — files yes,
+    // directories never — and a group filter states that over a bound variable, which says nothing
+    // about what it ranged over. Spelled out, each check names its own path, and the test that
+    // enumerates every existence check in this guard can still read which ones they are. (That test
+    // reads this file as TEXT, so it counts the ones named in a comment too, which is the other
+    // reason the name is not written here.)
     const candidates = [
       { want: cfg.storage.data_dir, kind: "dir" as const },
       { want: dirname(cfg.storage.database), kind: "dir" as const },
       ...(existsSync(cfg.storage.database) ? [{ want: cfg.storage.database, kind: "file" as const }] : []),
+      ...(existsSync(`${cfg.storage.database}-wal`)
+        ? [{ want: `${cfg.storage.database}-wal`, kind: "file" as const }]
+        : []),
+      ...(existsSync(`${cfg.storage.database}-shm`)
+        ? [{ want: `${cfg.storage.database}-shm`, kind: "file" as const }]
+        : []),
     ]
       .map((c) => ({ ...c, probe: nearestExisting(c.want), key: canonical(c.want) }))
       .filter((c, i, all) => all.findIndex((o) => o.key === c.key) === i);
@@ -194,9 +241,9 @@ const openStorage = (): Store => {
   }
 };
 
-const store = openStorage();
-// Clear sessions orphaned by a previous shutdown (their in-process run is gone).
-const stale = store.failStaleSessions();
+// `stale` comes back from openStorage() rather than being read here, because the call that
+// produces it is the guarded first write above.
+const { store, stale } = openStorage();
 if (stale > 0) console.log(`Marked ${stale} interrupted session(s) as failed on startup.`);
 const app = express();
 // Whose address `req.ip` is. Off unless a deployment says how many proxies are in front
