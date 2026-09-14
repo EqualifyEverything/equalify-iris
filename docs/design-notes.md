@@ -2045,6 +2045,136 @@ make run in one direction on purpose.
   the ceiling. Its prompt now says outright that a section request carries no numbered blocks, because
   it is built on the same system prompt, and a prompt that is true about one request and silent about
   the other reads as true about both.
+### What the review loop's structure counts count
+
+The `editor` line carries three readings of every round — the whole body's size, its prose size, and a
+count of its structures. All three stay on the line whatever fired, because two of them are what a
+person reads once the third has spoken.
+
+- **The sizes are logged because without them a working round left no measurement at all.** What a
+  round produces is adopted for the body verbatim, so the body that entered a successful round is gone
+  and the ratio it moved by is unrecoverable. Before `chars_before` / `chars_after` existed, the
+  distribution of a legitimate round was measurable only on the rounds that FAILED — three samples on
+  one document (#174).
+
+- **A length is what argued for a structure count, by failing to see one.** Of the first rounds to
+  record their sizes, one dropped 5 of 7 lists and 13 of 47 list items while its length moved 1.6% —
+  which is an argument for counting structures rather than for either size. So `structure_before` /
+  `structure_after` count headings, paragraphs, lists, items, terms, definitions, tables, captions,
+  rows, header cells, data cells, images and links, and they are **full counts rather than a delta**,
+  because a ratio needs its denominator.
+
+- **`h1`-`h6` are folded into one number.** The page agent's rules promote a sub-topic the page named,
+  make a printed group label the parent of the cluster under it, and put a procedure's step one level
+  under its heading — so a round that re-levels a section is doing its job, and a per-level count
+  would report every one of those as a heading lost. What no rule asks for is a heading that stops
+  existing, which is what one folded number sees.
+
+- **Header cells are counted apart from data cells, in the direction that costs nothing.** No axe rule
+  fires on a `<th>` demoted to a `<td>`, which is the loss that strips a table's header association
+  from a screen reader, so folding the two would report that round as no structure moved. `<caption>`
+  is counted for the same missing-second-opinion reason. Wrappers (`<section>`, `<div>`) are not
+  counted at all, since unwrapping a mis-structured page is one of the corrections this loop is for.
+
+- **The counts were expected to be the stabler reading and the measurement went the other way**, which
+  is why the floor reads the prose pair and these do not gate. On the first rounds to log all three the
+  structure counts moved in both directions on rounds that were working, and the extreme case is the
+  `<dl>` round the prose floor turns on. Read them knowing that: they are evidence about a round, not a
+  threshold on it.
+
+- **A count on a salvaged round is over what was left, not over the document.** A truncated round that
+  was salvaged and then answered piece by piece corrected some blocks with the whole document in view
+  and some sections of the tail the reply never reached, and the section counts are over the tail. So
+  the line carries `covers: "remainder"` beside them (#295). Without it, the line a reader greps per
+  round reads as document-wide coverage on the one round where it is not.
+
+### A heading fall with nothing else wrong
+
+A heading that stops being a heading while every word stays in place is the loss no other reading on
+any line can see: every size is equal, the re-lint is silent, and a screen-reader user has lost the
+only means they had of finding that content. It is not rare — 13 of 151 bench rounds lost headings and
+5 of those lost no text at all (#271, measured outside this repo in equalify-iris-bench's
+`editorround.mjs`, run `runs-editor-1`). Since #331 it is acted on rather than only counted, and it is
+the one gate in the loop that refuses part of a reply with no defect anywhere in it.
+
+- **The trade is `refusal_with_loss`'s at a finer grain**, and made without the defect that rule waits
+  for. Here every edit applied, nothing was refused, not a word is missing, and the document that would
+  have shipped has lost part of its outline — a barrier of exactly the kind this pipeline exists to
+  remove, introduced by the pipeline. Which is why the price is one block rather than the round.
+
+- **What is held back is the block, not the round.** The blocks whose own heading count fell keep their
+  original text, the reply is re-applied without them, and everything else the round corrected is
+  delivered. That is the principle `applyBlockEdits` is built on — an unusable edit costs the block it
+  was about and not the document's corrections — and a gate is not exempt from it. An editor that
+  demotes on every round therefore still delivers what it corrected on the way, round after round,
+  instead of spending `max_review_iterations` re-sending the same body and shipping the document as it
+  entered with its issues in `@unresolved` (`stopped_at: "cap"`).
+
+- **A block may only be re-seated when nothing else in the reply is holding what it held**, and that
+  has two failure modes, which are the same hazard from opposite ends. The heading MOVED — a reply that
+  reorders blocks moves three blocks' counts for a document that fell by one, so handing all three back
+  would leave the moved heading in two places at once (`headings_gained`).
+
+  The other end is the heading's WORDS moving as something no structure count counts. The extractor's
+  stray `<h4>Name</h4>` is emptied while `<label for="name">Name</label>` is seated inside the `<form>`.
+  Every word is kept, so the fall reads as ordinary. No heading arrived anywhere, so `headings_gained`
+  is 0. Both signals say the block is safe to hand back, and handing it back prints the name twice.
+
+- **A departure is an inequality, not a shortfall.** A block can shed the heading's words and grow in
+  the same edit by rewording what survives, so a "did it get shorter" test sees no departure at all.
+
+- **Nor is the re-seat licensed by size**, which is the comparison that suggests itself and is refuted
+  by measurement (#376): the re-applied body's prose against the fully patched body's is 34 against 34
+  on the safe shape and **24 against 59** on the duplication hazard, so `kept <= patched` passes the
+  hazard by a mile — the edit that grew is the one being reverted.
+
+- **Arrivals are counted rather than looked up, and at word grain rather than as text.** The landing
+  block may have had the word already, and words are re-expressed where they land (`Name` seated as
+  `Name:`), so a set comparison or a string comparison would license exactly the re-seat that prints
+  them twice. The reading is where the words WENT and not whether they changed, which is the narrowing
+  #376 asked for: read as "are these the words it had", a block that demotes a heading and fixes a typo
+  in the same `<div>` was unseatable too, so a reply whose only demotion was that block was refused
+  entire with nothing having moved anywhere.
+
+- **The joined count, `navigation_lost.headings`, is silent wherever the prose shortened, because a
+  structure falling beside a word loss is the ordinary shape of every deletion the prompt sanctions** and
+  is already `shrunk`. Counting it here as well would put the sanctioned case and the silent one in one
+  number and leave neither readable. The condition is that count's alone: `headings_dropped` is read per
+  block inside `applyBlockEdits` and carries none of it, which is what keeps the two readings from having
+  to be the same one. And `shrunk` is deliberately the other way round, per block, because its job is to
+  spot the source half of a move — so that a refusal on the landing half cannot take the heading with it.
+
+- **The re-check after the revert is fail-closed and read per block**, which is the one place in this
+  reading where the grain has to be the other way round. The joined reading cannot be the test, because
+  of that silence and because **the revert is itself an edit that can get under the floor**: hand back
+  the block that added prose and the re-applied body can be shorter than the one that came in, so a fall
+  that was visible before the revert reports nothing after it and the held block's demotion would ship
+  (found in review of #376).
+
+- **The joined count under-collects, knowingly.** One sanctioned deletion anywhere in the reply
+  silences it for the whole round, so a round that drops a reprinted title in one block and demotes a
+  real heading in another logs nothing and nothing is handed back. The alternative is worse rather than
+  better — two headings are gone, one of them legitimately, and nothing in the counts says which — and
+  since this number is also the sample that would decide whether list items and table rows can ever
+  gate, a filter that under-collects is right where one that over-collects is not. The per-block
+  `shrunk` reading does see that demotion, and turns it into a refused round only where the same reply
+  also holds a refusal.
+
+- **One case is counted and should not be, and it is named rather than compensated for.**
+  `EDITOR_SYSTEM` sanctions "correct labels and table headers", so the label migration keeps every word
+  and takes the count down. Discounting a fall wherever
+  captions, terms or header cells rose would cover a heading turned into a `<caption>`, a `<dt>` or a
+  `<th>` but not that one, since `<label>` and `<legend>` are not counted at all. So the cost is
+  accepted, and since #331 it is paid with no refusal beside it: the `<form>` block is handed back with
+  its `<h4>` intact and every other correction in the reply is delivered.
+
+- **The narrower predicate #331 asked for is not available to write.** Refusing the fall only in a block
+  no reported issue asked about would need an edit's block bound to the issue it answers, and
+  `ReviewIssue` attributes an issue to the source **pages** it was found on. So the coarse condition is
+  what there is.
+
+### The flattened view, and the one conversion it polices
+
 - **The flattened screen-reader view must never lose text.** `flatten.ts` has two consumers, and both
   fail *silently* when text goes missing. The Reader reviews this view instead of the source images,
   so anything absent from it cannot be reported as an issue; and `contentCoverage` measures a
@@ -2181,9 +2311,14 @@ make run in one direction on purpose.
   exists for; counting `doubled` **per item** catches it, because the item that kept its own marker is
   the one a reader meets whatever the totals say. And a marker shape wide enough to match any letter
   followed by a stop matched an **initial**, so recasting "J. Smith chaired the committee" logged a lost
-  marker: a printed marker is now three digits at most, a roman *number* (which `cm.` and `ml.` are not),
-  or a single letter closed by `)` or `]`. The stated cost is a marker genuinely printed `a.` with no
-  bracket, which this misses — the trade for not calling an ordinary sentence a deletion.
+  marker: a printed marker is now three digits at most, a roman *number* (which `cm.` and `ml.` are not,
+  and neither is `(see)` — three letters and no numeral), or a single letter closed by `)` or `]`. The
+  roman alphabet is `i`, `v`, `x` only, which caps a roman
+  marker at `xxxix` — admitting `l`, `c`, `d` and `m` is what made `cm.` and `ml.` matches in the first
+  place, and two or more roman letters keep the looser closer because the ambiguity is the point: `ii.`
+  cannot be an initial and `i.` can. The stated cost is a marker genuinely printed `a.` with no bracket,
+  or `(aa)` on a list past its twenty-sixth item — the trade for not calling an ordinary sentence a
+  deletion.
 
   **Both of those repairs then had to be applied on the side I had not looked at, which is the actual
   lesson.** The kind narrowing went one way only: a digit leaving an item's text stopped counting as a
