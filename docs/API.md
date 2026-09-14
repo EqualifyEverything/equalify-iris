@@ -3016,10 +3016,13 @@ owner-scoped, so the only reader is whoever submitted the document, and `/v1/qua
 aggregates with no log text in them. Worth knowing before a run log is attached to a bug report or
 exported somewhere the document itself would not go.
 
-**How often this line fires is not a property of the code.** The same rules on the same corpus have
-taken 24–53% of pairs across rounds with nothing in the repo changing, because the disagreement is
-usually between two extractions of one printed header. What that means for anyone re-measuring the
-free share, and why the guards are not loosened, is in
+**How often this line fires is not a property of the code.** The free path has taken 24–53% of pairs
+across rounds of the same rules on the same corpus — so this line fired on the other 47–76% — with
+nothing in the repo changing, because the disagreement is usually between two extractions of one
+printed header. Per-run totals are folded into `tables` in
+[Diagnostics](#diagnostics-timing--hang-detection) as `code_declined` and
+`code_declined_with_halves`. What the variability means for anyone re-measuring the free share, and
+why the guards are not loosened, is in
 [design notes — joining a table split across a page turn](design-notes.md#joining-a-table-split-across-a-page-turn).
 
 ### `table_join_failed`
@@ -3050,7 +3053,7 @@ order is only which reason a failed pair reports:
 | `still_continued` | The continuation marker is still in the caption |
 | `columns_lost` | A column went |
 | `header_cells_lost` | The merged header block came back as `<td>`, which axe does not report and which removes the header association from the one table this stage exists to improve. Counted over the cells that describe columns, so a bracketed note row printed inside the block is not one of them |
-| `rows_lost` | Rows went, counted against the sum of both halves less one header block and less the note rows the joined **caption** absorbed — a note promoted into the caption is content kept |
+| `rows_lost` | Rows went, counted against both halves' rows less the collapsed header block and less an allowance that is the **larger** of one row and the note rows the joined **caption** absorbed, never their sum — a note promoted into the caption is content kept |
 | `labels_lost:<n>` | `n` row labels went. A bracketed unit note the merge moved from a row into the caption counts as kept, because the label check reads `th,td` and would otherwise refuse the very drop rule 6 licenses |
 | `caption_note_lost` | A bracketed note **either** half's caption carried is in neither the joined caption nor a row some half printed |
 | `caption_note_struck` | The note is still in the table, as a row a half printed where it printed it, and missing only from the caption rule 4 says to **copy** |

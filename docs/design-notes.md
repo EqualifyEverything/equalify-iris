@@ -537,9 +537,9 @@ is.
   that cut both at the same prefix would read as agreement and manufacture the stability the field
   exists to measure — the cap is 1,200 characters, which this corpus's widest real headers (about
   750) do not reach. The block sizes are four numbers rather than two `rows x cells` strings so that
-  nothing has to parse a count back out of a string, and because a header row holding no cells
-  reports `rows: 1, cells: 0` with an empty signature, which a rows-only reading takes for a real
-  header and counts as a disagreement.
+  nothing has to parse a count back out of a string, and because the cell counts are the only thing
+  separating a declared header block from a header row that holds none — a distinction a rows-only
+  reading turns into a disagreement, and the first of the entry's own limits on these fields.
 
 - **The guards are not loosened here, and the reason for not loosening them has been removed rather
   than restated.** #326's recommendation against it rested on there being no artifact a looser rule
@@ -823,8 +823,9 @@ every reason below was bought by a pair that shipped split or a defect that ship
   still made of `<th>` cells, and the rows accounted for two ways. Labels as a **set**, because the
   duplicated header block legitimately goes and a legitimately dropped duplicate row must not read as
   loss — and over all cells, not first cells, so a label the merge moved along a column still counts.
-  And a **count** floored on the sum of both halves, less one header block and the note rows the
-  joined caption absorbed.
+  And a **count** floored on both halves' rows, less one header block and less the larger of one row
+  and the note rows the joined caption absorbed — [never their
+  sum](#the-bracketed-unit-note).
 
   The header credit is the more permissive of two readings: one shared block, at the smaller of the
   two declared depths, or whatever the joined table's own depth says went. Each of them is wrong once.
@@ -847,7 +848,13 @@ every reason below was bought by a pair that shipped split or a defect that ship
   neither a label set nor a floor at the larger half can see those disappear. Header cells are checked
   because nothing else would: a merged header block returned as `<td>` keeps every label, every column
   and every row, and axe reports nothing on a data table with no headers, so it would ship having
-  removed the header association from the tables this stage exists to improve.
+  removed the header association from the tables this stage exists to improve. That check is floored
+  on the **smaller** half's count, because collapsing two header blocks into one legitimately loses
+  header cells and the halves may describe their columns at different depths — and only over the
+  halves that declared a block, since a half with no header cells has no block to collapse and its
+  zero is the absence of an allowance rather than a smaller one. Read as a plain minimum it took the
+  floor to zero and the check with it: on a pair whose second half is a rowless header stub, a reply
+  flattening the first half's whole block to `<td>` would have passed.
 
   The order of the reasons is only which one a failed pair reports, since every one of them refuses
   the join. The four note reasons are last on purpose: a merge that dropped the note *and* lost rows
