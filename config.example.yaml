@@ -400,9 +400,14 @@ providers:
 defaults:
   # How many reader/editor rounds a document gets before the review loop stops and
   # lists whatever is left in `unresolved.md`. This is the only place it is set:
-  # it seeds each user's account default on first auth, and a session cannot
-  # override it per request — how many rounds a document needs is discovered by
-  # the loop, not something the uploader can know in advance.
+  # it seeds the deployment account's default the first time Iris resolves its
+  # GitHub identity, and a session cannot override it per request — how many
+  # rounds a document needs is discovered by the loop, not something the
+  # uploader can know in advance.
+  # It seeds once, when that account row is created. Changing it on a deployment
+  # that already has one does nothing, even after a restart: the stored default
+  # stands until `data/iris.sqlite` is recreated, which also drops session
+  # history. Set it before the first run.
   max_review_iterations: 3
   # How many pages to extract in parallel within a single run. Pages are
   # independent (one vision pass each), so this is a pure speed knob: a 25-page

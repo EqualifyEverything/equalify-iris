@@ -619,6 +619,10 @@ curl -s -H "$AUTH" "$BASE/me"
 files them. `defaults.max_review_iterations` is the review cap every session gets. There is no
 `fork_repo` field: contributions are filed as issues, so no fork is ever created.
 
+*Operators:* the cap is copied into this account when the deployment first authenticates, so raising
+it in config later does not change what this endpoint reports. It stands until `data/iris.sqlite` is
+recreated.
+
 **Call this first.** It is the cheapest way to find out whether the deployment works at all, because
 it runs exactly what an upload runs:
 
