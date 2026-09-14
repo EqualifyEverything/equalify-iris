@@ -2136,20 +2136,22 @@ the one gate in the loop that refuses part of a reply with no defect anywhere in
   in the same `<div>` was unseatable too, so a reply whose only demotion was that block was refused
   entire with nothing having moved anywhere.
 
+- **The joined count, `navigation_lost.headings`, is silent wherever the prose shortened, because a
+  structure falling beside a word loss is the ordinary shape of every deletion the prompt sanctions** and
+  is already `shrunk`. Counting it here as well would put the sanctioned case and the silent one in one
+  number and leave neither readable. The condition is that count's alone: `headings_dropped` is read per
+  block inside `applyBlockEdits` and carries none of it, which is what keeps the two readings from having
+  to be the same one. And `shrunk` is deliberately the other way round, per block, because its job is to
+  spot the source half of a move — so that a refusal on the landing half cannot take the heading with it.
+
 - **The re-check after the revert is fail-closed and read per block**, which is the one place in this
   reading where the grain has to be the other way round. The joined reading cannot be the test, because
-  it is silent wherever the body it reads is shorter in prose and **the revert is itself an edit that
-  can get under that floor**: hand back the block that added prose and the re-applied body can be
-  shorter than the one that came in, so a fall that was visible before the revert reports nothing after
-  it and the held block's demotion would ship (found in review of #376).
+  of that silence and because **the revert is itself an edit that can get under the floor**: hand back
+  the block that added prose and the re-applied body can be shorter than the one that came in, so a fall
+  that was visible before the revert reports nothing after it and the held block's demotion would ship
+  (found in review of #376).
 
-- **The count is silent wherever the prose shortened, because a structure falling beside a word loss is
-  the ordinary shape of every deletion the prompt sanctions** and is already `shrunk`. Counting it here
-  as well would put the sanctioned case and the silent one in one number and leave neither readable. And
-  `shrunk` is deliberately the other way round, per block, because its job is to spot the source half of
-  a move — so that a refusal on the landing half cannot take the heading with it.
-
-- **The count that gates under-collects, knowingly.** One sanctioned deletion anywhere in the reply
+- **The joined count under-collects, knowingly.** One sanctioned deletion anywhere in the reply
   silences it for the whole round, so a round that drops a reprinted title in one block and demotes a
   real heading in another logs nothing and nothing is handed back. The alternative is worse rather than
   better — two headings are gone, one of them legitimately, and nothing in the counts says which — and

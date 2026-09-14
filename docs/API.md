@@ -3478,9 +3478,11 @@ loop is for.
   went in, reconstructed from `agent_call`. This line reports 1.000 for those same three rounds.
 
 **The structure counts do not gate, and the residual is unwatched rather than covered.**
-[`editor_patch`](#editor_patch)'s `navigation_lost` reads the same heading fold per BLOCK, where the
+[`editor_patch`](#editor_patch)'s `headings_dropped` reads the same heading fold per BLOCK, where the
 question is whether one replacement gave up its heading rather than what proportion of the document's
-headings are left — which is why a fall can be acted on there when no ratio can be placed here. A
+headings are left — which is why a fall can be acted on there when no ratio can be placed here. Its
+`navigation_lost` is not that reading: it compares the whole body before against the whole body after.
+A
 round that rewrote every heading to the *same* level leaves no downward skip, so the re-lint's
 `heading-order` is silent on it, `headings` is unchanged and the prose pair is equal: every level
 distinction gone with nothing on the line to say so.
