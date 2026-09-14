@@ -299,3 +299,19 @@ test("the reporter spec runs the suite with is the one this file tests", () => {
   // destination silently sends both to the same place in the wrong order.
   assert.equal(pkg.scripts.test.match(/--test-reporter-destination=/g)?.length, 2);
 });
+
+test("the suite runs with Sparkplug off, which is what stops the #405 segfault", () => {
+  // The crash this reporter was written to name is a V8 bug in Sparkplug's out-of-line
+  // prologue (nodejs/node#62393): an uninitialized register is pushed where the GC later
+  // reads a tagged pointer, so a test child dies of SIGSEGV roughly once in ten full runs
+  // on macOS arm64. `--no-sparkplug` removes the path.
+  //
+  // Pinned here because the flag is invisible in a passing run: dropping it costs nothing
+  // today and reintroduces a rare silent death weeks later, which is the hardest kind of
+  // regression to attribute. Drop the flag AND this test when nodejs/node#65753 — the
+  // backport of the V8 fix — ships in a 24.x release. No released 24.x has it yet.
+  const pkg = JSON.parse(
+    readFileSync(join(import.meta.dirname, "..", "package.json"), "utf8"),
+  ) as { scripts: Record<string, string> };
+  assert.match(pkg.scripts.test, /--no-sparkplug/);
+});
