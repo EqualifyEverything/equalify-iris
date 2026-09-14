@@ -153,13 +153,44 @@ test("a fresh clone contains ./data, so the daemon never creates the mount sourc
 test("an unwritable data_dir names its remedy instead of throwing a stack trace", () => {
   // The failure this catches is a loop, not an exit: `restart: unless-stopped` restarts a container
   // that died at import, so this message is the entire diagnostic an operator gets, repeating. An
-  // uncaught mkdirSync names a path inside a container whose ownership they cannot see from outside.
+  // uncaught failure names a path inside a container whose ownership they cannot see from outside.
   const index = read("src/index.ts");
-  const guarded = index.slice(index.indexOf("// Ensure the on-disk layout exists"), index.indexOf("const store = new Store"));
-  assert.match(guarded, /try\s*\{/, "the startup mkdirSync pair is unguarded, so an unwritable ./data exits with a Node stack trace");
-  assert.match(guarded, /EACCES/, "the startup guard does not distinguish the permission case, which is the one with a remedy");
+  const guarded = index.slice(index.indexOf("const openStorage"), index.indexOf("const store = openStorage()"));
+  assert.ok(guarded.length > 0, "src/index.ts no longer opens storage through a guarded openStorage(), so this test is pinning nothing");
+  assert.match(guarded, /try\s*\{/, "the startup storage setup is unguarded, so an unwritable ./data exits with a stack trace");
   assert.match(guarded, /chown/, "the startup guard does not print the chown that fixes it");
-  assert.match(guarded, /process\.exit\(1\)/, "the startup guard does not exit non-zero, so a broken deployment would carry on to bind a port it cannot serve from");
+  assert.match(
+    guarded,
+    /process\.exit\(1\)/,
+    "the startup guard does not exit non-zero, so a broken deployment would carry on to bind a port it cannot serve from",
+  );
+
+  // The database is inside the guard, not after it, and that is the whole point rather than a
+  // detail: `mkdirSync(p, { recursive: true })` succeeds on an existing directory the process
+  // cannot write, so the directory checks alone pass on a ./data that already holds sessions/ and
+  // tmp/ — and node:sqlite then fails with ERR_SQLITE_ERROR carrying no errno, path or uid.
+  assert.match(
+    guarded,
+    /new Store\(/,
+    "opening the database is outside the guard, so an unwritable ./data that already has sessions/ and tmp/ dies one line later with an ERR_SQLITE_ERROR that names nothing",
+  );
+
+  // Which is why the remedy is chosen by probing writability rather than by reading `err.code`:
+  // the error that most needs this message is the one that cannot identify itself.
+  assert.match(
+    guarded,
+    /accessSync|writable\(/,
+    "the guard picks its message off the error code, but the SQLite failure carries no code to read",
+  );
+
+  // The printed alternative has to be a command that works. Compose does not expand `$(id -u)` in
+  // a YAML value — it escapes it to `$$(id -u)` and the daemon gets a literal — so telling an
+  // operator to use it stacks a second failure onto the one they are already reading.
+  assert.doesNotMatch(
+    index,
+    /user:\s*"\$\(id -u\)/,
+    'the guard prints `user: "$(id -u):$(id -g)"`, which compose does not expand; the numbers have to be literal',
+  );
 });
 
 test("GET /v1/health reports the running build, and package.json is the one place it is written", () => {

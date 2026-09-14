@@ -1,6 +1,6 @@
 import express from "express";
-import { mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { accessSync, constants, mkdirSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   apiToken,
@@ -56,33 +56,64 @@ if (agentKeyWarning) console.warn(`WARNING: ${agentKeyWarning}`);
 const visionWarning = visionModelWarning(cfg);
 if (visionWarning) console.warn(`WARNING: ${visionWarning}`);
 
-// Ensure the on-disk layout exists.
+// Ensure the on-disk layout exists, and open the database.
 //
-// This is the first thing that can fail on a correctly configured deployment, and the way it
-// fails is worth catching: the container runs as uid 1000 and compose bind-mounts `./data`,
-// which keeps its HOST ownership, so on Linux a `./data` owned by anyone else is an EACCES
-// here — at import, before the port is bound. With `restart: unless-stopped` that is a loop,
-// so the message is the whole diagnostic an operator gets, and it repeats. An uncaught
-// mkdirSync gives them a Node stack trace naming a path inside a container they cannot see
-// the ownership of; this names the remedy instead.
-try {
-  mkdirSync(join(cfg.storage.data_dir, "sessions"), { recursive: true });
-  mkdirSync(join(cfg.storage.data_dir, "tmp"), { recursive: true });
-} catch (err) {
-  const e = err as NodeJS.ErrnoException;
-  console.error(`FATAL: cannot create the session layout under ${cfg.storage.data_dir} (${e.code ?? e.message}).`);
-  if (e.code === "EACCES" || e.code === "EPERM") {
-    console.error(
-      `This process runs as uid ${process.getuid?.() ?? "?"}, and storage.data_dir must be writable by it.\n` +
-        `In Docker, ./data is bind-mounted from the host and keeps the host's ownership:\n` +
-        `  sudo chown -R ${process.getuid?.() ?? 1000}:${process.getgid?.() ?? 1000} ./data\n` +
-        `or add \`user: "$(id -u):$(id -g)"\` to the iris service in docker-compose.yml.`,
-    );
+// These are the first things that can fail on an otherwise correctly configured deployment, and
+// the way they fail is worth catching: the container runs as uid 1000 and compose bind-mounts
+// `./data`, which keeps its HOST ownership, so on Linux a `./data` owned by anyone else fails
+// here — at import, before the port is bound. With `restart: unless-stopped` that is a loop, so
+// this message is the whole diagnostic an operator gets, and it repeats. Uncaught, they get a
+// stack trace naming a path inside a container whose ownership they cannot see from outside.
+//
+// The store is inside the guard because the layout check alone does not catch the case:
+// `mkdirSync(p, { recursive: true })` SUCCEEDS on an existing directory the process cannot
+// write, so a `./data` that already holds sessions/ and tmp/ — which is what `npm start` leaves
+// behind before a first `docker compose up` — passes it and dies one line later. And it dies
+// worse: node:sqlite reports `ERR_SQLITE_ERROR`, "unable to open database file", with no errno,
+// no path and no uid (measured). Hence `checkWritable` rather than a look at `err.code`: the
+// error that needs this message is the one that cannot identify itself.
+const writable = (dir: string) => {
+  try {
+    accessSync(dir, constants.W_OK);
+    return true;
+  } catch {
+    return false;
   }
-  process.exit(1);
-}
+};
 
-const store = new Store(cfg.storage.database);
+const openStorage = (): Store => {
+  try {
+    mkdirSync(join(cfg.storage.data_dir, "sessions"), { recursive: true });
+    mkdirSync(join(cfg.storage.data_dir, "tmp"), { recursive: true });
+    return new Store(cfg.storage.database);
+  } catch (err) {
+    const e = err as NodeJS.ErrnoException;
+    console.error(`FATAL: cannot open this deployment's storage (${e.code ?? e.message}).`);
+    // Which directory is at fault, asked directly. The database may sit outside data_dir.
+    const unwritable = [...new Set([cfg.storage.data_dir, dirname(cfg.storage.database)])].filter(
+      (d) => !writable(d),
+    );
+    if (unwritable.length > 0) {
+      const uid = process.getuid?.() ?? 1000;
+      const gid = process.getgid?.() ?? 1000;
+      console.error(
+        `This process runs as uid ${uid} (gid ${gid}) and cannot write ${unwritable.join(" or ")}.\n` +
+          `In Docker, ./data is bind-mounted from the host and keeps the host's ownership. Either give it\n` +
+          `to uid ${uid}:\n` +
+          `  sudo chown -R ${uid}:${gid} ./data\n` +
+          `or run the container as the user that owns it: add \`user: "1234:1234"\` to the iris service in\n` +
+          `docker-compose.yml, using your own numbers from \`id -u\` and \`id -g\`. They have to be literal —\n` +
+          `compose does not expand \`$(id -u)\` in a YAML value.`,
+      );
+    } else {
+      console.error(`storage.data_dir (${cfg.storage.data_dir}) is writable, so this is not an ownership problem.`);
+      console.error(e.stack ?? String(err));
+    }
+    process.exit(1);
+  }
+};
+
+const store = openStorage();
 // Clear sessions orphaned by a previous shutdown (their in-process run is gone).
 const stale = store.failStaleSessions();
 if (stale > 0) console.log(`Marked ${stale} interrupted session(s) as failed on startup.`);
