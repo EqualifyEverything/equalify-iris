@@ -207,18 +207,65 @@ test("an unwritable data_dir names its remedy instead of throwing a stack trace"
   // An absent directory must be probed at its nearest existing ancestor, not skipped. Skipping it
   // dropped the commonest ownership failure after a mistyped path — a data_dir that cannot be
   // CREATED because its parent is unwritable — into the branch that says it cannot explain the
-  // failure, and printed an empty list of paths while saying so. The database file is the one
-  // candidate right to skip while absent, since creating it writes into its directory.
+  // failure, and printed an empty list of paths while saying so.
   assert.match(
     guarded,
-    /nearestExisting\(cfg\.storage\.data_dir\)/,
-    "storage.data_dir is not probed via its nearest existing ancestor, so a data_dir that cannot be created reports no cause at all",
+    /want: cfg\.storage\.data_dir/,
+    "storage.data_dir is not among the probed candidates, so the commonest ownership failure reports no cause at all",
   );
-  assert.doesNotMatch(
+  assert.match(
     guarded,
-    /\.filter\(\s*\(p\) => existsSync\(p\)\s*\)/,
-    "the candidates are filtered by existsSync as a group, which drops an absent data_dir instead of probing the parent it would be created in",
+    /nearestExisting\(c\.want\)/,
+    "the candidates are not probed at their nearest existing ancestor, so a data_dir that cannot be created answers ENOENT instead of naming the parent",
   );
+
+  // The database file is the one candidate right to drop while absent, since creating it writes
+  // into its directory. Stated as: every `existsSync` in the guard is that one call. A regex
+  // forbidding one spelling of the group filter (`.filter((p) => existsSync(p))`) would pass
+  // against `.filter(existsSync)`, against `existsSync(p) === true`, and against the same
+  // predicate rewrapped across two lines — all of them the defect it was written for.
+  const existsUses = guarded.match(/existsSync\b[^)]*\)?/g) ?? [];
+  assert.deepEqual(
+    existsUses,
+    ["existsSync(cfg.storage.database)"],
+    `existsSync is used in the guard for something other than the database file (${JSON.stringify(existsUses)}); applied to the directories it drops the ones that cannot be created`,
+  );
+
+  // The remedy has to name the path that was just diagnosed. A hardcoded `chown -R … ./data` was
+  // wrong twice over once absent directories started being reported through an ancestor: outside a
+  // container the configured path can be anywhere, and the operator was sent to chown a relative
+  // path that may not exist — so the command succeeds, changes nothing, and looks like the fix.
+  assert.match(
+    guarded,
+    /chown[^\n]*c\.want/,
+    "the printed chown does not name the path the guard diagnosed, so the operator is told to fix a path this run never checked",
+  );
+  // And that the command built from it is the command printed. Asserting only that the string is
+  // BUILT leaves the version that builds it, ignores it, and prints a hardcoded path — which is
+  // the defect, and it passed the check above while the unused variable sat right next to it.
+  assert.match(
+    guarded,
+    /console\.error\([^;]*\$\{remedy\}/,
+    "the guard computes a remedy naming the diagnosed path and prints something else",
+  );
+
+  // `./data` is still the right answer in a container, and only there: the container's own path is
+  // not one an operator can act on, because chowning it dies with the container and the ownership
+  // comes from the host directory mounted over it. So that literal is confined to the branch that
+  // establishes it — bounded at BOTH ends, since "after the `if`" also means "in its `else`".
+  const opens = guarded.indexOf("if (inContainer())");
+  assert.ok(
+    opens > 0,
+    "the guard no longer distinguishes a containerised deployment, so it prints a host remedy for a container path or the reverse",
+  );
+  const closes = guarded.indexOf("} else {", opens);
+  assert.ok(closes > opens, "the containerised branch has no `} else {`, so the non-container deployment gets no remedy at all");
+  for (const m of guarded.matchAll(/chown[^\n]*\.\/data/g)) {
+    assert.ok(
+      m.index > opens && m.index < closes,
+      "the guard prints `chown … ./data` outside the containerised branch, where the path it diagnosed is the real one and ./data is a guess",
+    );
+  }
 
   // The printed alternative has to be a command that works. Compose does not expand `$(id -u)` in
   // a YAML value — it escapes it to `$$(id -u)` and the daemon gets a literal — so telling an

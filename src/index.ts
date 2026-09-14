@@ -95,6 +95,17 @@ const nearestExisting = (p: string): string => {
   return at;
 };
 
+// Paths go into commands below that an operator is meant to paste, so one with a space in it has
+// to survive the copy: bare when it is plain, single-quoted otherwise (`'\''` is how a single
+// quote is escaped inside single quotes).
+const shellArg = (p: string) => (/^[A-Za-z0-9_./:@%+=-]+$/.test(p) ? p : `'${p.replaceAll("'", `'\\''`)}'`);
+
+// Whether the path this failed on is a name the operator can act on. Inside a container it is
+// not: `/app/data` is the container's path, chowning it there dies with the container, and the
+// ownership it has comes from the host directory bind-mounted over it. Both markers, because
+// podman writes /run/.containerenv and not /.dockerenv.
+const inContainer = () => existsSync("/.dockerenv") || existsSync("/run/.containerenv");
+
 const openStorage = (): Store => {
   try {
     mkdirSync(join(cfg.storage.data_dir, "sessions"), { recursive: true });
@@ -107,35 +118,57 @@ const openStorage = (): Store => {
     // outside data_dir, and the database FILE can be unwritable while both directories are fine
     // (a group-writable ./data holding a foreign-owned iris.sqlite).
     //
-    // The directories go through `nearestExisting` rather than being skipped when absent. Skipping
-    // them was wrong in both directions: a `data_dir` that does not exist AND cannot be created is
-    // an ownership failure — the commonest one after a mistyped absolute path — and dropping it left
-    // nothing to report, so this printed an empty list of paths and a claim that it could not
-    // explain the failure. What matters is whether the directory that would have to be written is
-    // writable, which is what this asks.
+    // Each candidate keeps two paths, because they answer different questions. `want` is what the
+    // config asked for and is what a remedy has to name. `probe` is whose permissions decide it:
+    // `want` when it is there, and otherwise its nearest existing ancestor, since creating it means
+    // writing into that ancestor. Dropping absent directories instead — which is what this did —
+    // lost the commonest ownership failure after a mistyped absolute path, a data_dir that does not
+    // exist AND cannot be created, leaving nothing to report and an empty list of paths printed
+    // beside a claim that the failure could not be explained.
     //
-    // The database FILE is the one candidate that is right to skip while absent: creating it is a
+    // The database FILE is the one candidate that is right to drop while absent: creating it is a
     // write into its directory, which is already above.
-    const checked = [
-      ...new Set([
-        nearestExisting(cfg.storage.data_dir),
-        nearestExisting(dirname(cfg.storage.database)),
-        ...(existsSync(cfg.storage.database) ? [cfg.storage.database] : []),
-      ]),
-    ];
-    const unwritable = checked.filter((p) => !writable(p));
+    const candidates = [
+      { want: cfg.storage.data_dir, kind: "dir" as const },
+      { want: dirname(cfg.storage.database), kind: "dir" as const },
+      ...(existsSync(cfg.storage.database) ? [{ want: cfg.storage.database, kind: "file" as const }] : []),
+    ]
+      .filter((c, i, all) => all.findIndex((o) => o.want === c.want) === i)
+      .map((c) => ({ ...c, probe: nearestExisting(c.want) }));
+    const checked = [...new Set(candidates.map((c) => c.probe))];
+    const unwritable = candidates.filter((c) => !writable(c.probe));
     if (unwritable.length > 0) {
       const uid = process.getuid?.() ?? 1000;
       const gid = process.getgid?.() ?? 1000;
-      console.error(
-        `This process runs as uid ${uid} (gid ${gid}) and cannot write ${unwritable.join(" or ")}.\n` +
-          `In Docker, ./data is bind-mounted from the host and keeps the host's ownership. Either give it\n` +
-          `to uid ${uid}:\n` +
-          `  sudo chown -R ${uid}:${gid} ./data\n` +
-          `or run the container as the user that owns it: add \`user: "1234:1234"\` to the iris service in\n` +
-          `docker-compose.yml, using your own numbers from \`id -u\` and \`id -g\`. They have to be literal —\n` +
-          `compose does not expand \`$(id -u)\` in a YAML value.`,
-      );
+      // Names `probe` as well as `want` when they differ, because "cannot write /srv" in answer to a
+      // configured /srv/iris/data reads like the wrong path otherwise.
+      const blame = unwritable
+        .map((c) => (c.probe === c.want ? c.want : `${c.want} (nothing can be created in ${c.probe})`))
+        .join(" or ");
+      // `mkdir -p` first for a directory, since the one that cannot be created does not exist yet;
+      // it is a no-op on the ones that do. And on `want`, never on the ancestor that was probed —
+      // `chown -R` on /var/lib to fix /var/lib/iris/data would be a far worse day than this one.
+      const remedy = unwritable
+        .map((c) =>
+          c.kind === "file"
+            ? `  sudo chown ${uid}:${gid} ${shellArg(c.want)}`
+            : `  sudo mkdir -p ${shellArg(c.want)} && sudo chown -R ${uid}:${gid} ${shellArg(c.want)}`,
+        )
+        .join("\n");
+      console.error(`This process runs as uid ${uid} (gid ${gid}) and cannot write ${blame}.`);
+      if (inContainer()) {
+        console.error(
+          `That path is inside the container, so fixing it there would not outlive the container. It is\n` +
+            `bind-mounted from the host and keeps the host's ownership, so fix it on the HOST, on the\n` +
+            `directory your compose file mounts there — \`./data\` in the shipped docker-compose.yml:\n` +
+            `  sudo mkdir -p ./data && sudo chown -R ${uid}:${gid} ./data\n` +
+            `or run the container as the user that owns it: add \`user: "1234:1234"\` to the iris service in\n` +
+            `docker-compose.yml, using your own numbers from \`id -u\` and \`id -g\`. They have to be literal —\n` +
+            `compose does not expand \`$(id -u)\` in a YAML value.`,
+        );
+      } else {
+        console.error(`Give it to uid ${uid}:\n${remedy}`);
+      }
     } else {
       // Says what was checked rather than what the cause is not. "This is not an ownership
       // problem" would be a positive claim this code cannot support — something unreadable, a
