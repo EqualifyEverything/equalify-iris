@@ -15,13 +15,20 @@ Requests are rate limited per client, and every response says how much of the bu
 [Rate limits](#rate-limits-how-often-you-may-ask) has the numbers, the headers, and what a `429` looks like.
 
 `fragment`, `block`, `verdict`, `declaration` and `round` all mean something specific here, and
-[README § Terms](../README.md#terms) defines them. Two of them appear below in both of their senses.
-A `round` is either a round of the reader/editor loop or a captured run of a corpus, which the text
-calls a **bench round** or a **deployed round**. A `fragment` is either one page's extracted HTML or
-the `#id` part of a link — that second sense is what `links_unresolved_rate` under
-[Quality tally](#quality-tally-shared-secret-off-by-default) is about. A `declaration` is the page
-agent's claim that a page holds no content everywhere except one line of the [run log](#run-log)'s
-`page_main_stripped`, where it is the `lang` declaration on the document's root element.
+[README § Terms](../README.md#terms) defines them. These ones appear below in both of their senses:
+
+- **`round`** — a round of the reader/editor loop, or one captured run of a corpus. The text says
+  which: a **bench round** or a **deployed round**.
+- **`fragment`** — one page's extracted HTML, or the `#id` part of a link. The second sense is what
+  `links_unresolved_rate` under [Quality tally](#quality-tally-shared-secret-off-by-default) is about.
+- **`block`** — one top-level element of the assembled document, which is what
+  `@editor-truncated blocks B of T` counts, or a group of table rows: the "header block" in
+  `table_no_body_rate` is a `<thead>`.
+- **`declaration`** — the page agent's claim that a page holds no content, except on the
+  [run log](#run-log)'s `page_main_stripped` line, where it is the `lang` declaration on the
+  document's root element.
+
+`verdict` has one sense here: the Feedback Agent's decision about one page.
 
 ```bash
 export BASE=http://localhost:8080/v1
@@ -31,8 +38,11 @@ export BASE=http://localhost:8080/v1
 
 ```bash
 curl -s "$BASE/health"
-# {"status":"ok","service":"equalify-iris"}
+# {"status":"ok","service":"equalify-iris","version":"1.0.0"}
 ```
+
+`version` is the running build's, so this is how you check a deployment is the one you meant to
+deploy. It is never gated and never rate limited — the container's own `HEALTHCHECK` polls it.
 
 ## Public tally (unauthenticated)
 

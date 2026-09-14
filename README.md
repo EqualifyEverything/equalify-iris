@@ -109,10 +109,11 @@ cp .env.example .env          # fill in values
 docker compose up
 ```
 
-Check it's alive:
+Check it's alive, and which build it is:
 
 ```bash
 curl http://localhost:8080/v1/health
+# {"status":"ok","service":"equalify-iris","version":"1.0.0"}
 ```
 
 Or just open the **accessible browser app** at `http://localhost:8080/` for a no-API walkthrough — no
@@ -267,7 +268,9 @@ src/
   github/                # files agent-suggestion issues, identified by title prefix
   store/                 # node:sqlite metadata store + on-disk session layout
   routes/                # /v1 endpoints
+  version.ts             # the running build's version, reported by GET /v1/health
   index.ts               # server entry point
+public/demo.html         # the browser app served at /, driving the same /v1 API
 data/                    # sessions/, tmp/, and the SQLite DB (created at runtime)
 ```
 
