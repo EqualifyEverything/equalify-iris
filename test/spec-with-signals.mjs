@@ -10,6 +10,12 @@
 // a flake in that file's own harness, while the machine had six crash reports across the
 // same four days, every one of them a SIGSEGV inside node's own garbage collector.
 //
+// That crash now has a name and a workaround: V8 pushed an uninitialized register as a tagged
+// pointer in Sparkplug's out-of-line prologue (nodejs/node#62393, V8 CL 0b94a9fd23ba), so
+// `npm test` runs with `--no-sparkplug` and the path is gone. This reporter stays anyway — it is
+// what would catch the next dead child, including the same one if the flag is ever dropped before
+// the fix lands (nodejs/node#65753).
+//
 // Registered as a second `--test-reporter` rather than a `spec` subclass because
 // `node:test/reporters`' spec carries no `_transform` on its prototype (its class body
 // declares no prototype methods at all), so an override of it is never called. Two

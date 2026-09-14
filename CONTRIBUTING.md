@@ -61,12 +61,23 @@ npm test                        # the unit suite (node --test; run it through np
 ./test/e2e.sh                   # full API lifecycle against mock GitHub + mock model (needs jq)
 ```
 
-Run the unit suite through `npm`, not as a bare `node --test`. The `npm test` script
-registers a second reporter (`test/spec-with-signals.mjs`) that prints `signal` and
-`exitCode` when a test file's *process* dies. Node's default reporter shows that as `✖
-some.test.ts` and `'test failed'` — identical to a failed assertion, with nothing on
-stderr — and the tests after the death simply never run, so the pass count reads clean
-while being short. See #405.
+Run the unit suite through `npm`, not as a bare `node --test`. The script carries two
+things a bare run does not:
+
+- **A second reporter** (`test/spec-with-signals.mjs`) that prints `signal` and `exitCode`
+  when a test file's *process* dies. Node's default reporter shows that as `✖ some.test.ts`
+  and `'test failed'` — identical to a failed assertion, with nothing on stderr — and the
+  tests after the death simply never run, so the pass count reads clean while being short.
+- **`--no-sparkplug`**, which avoids a V8 bug that segfaults test children inside the
+  garbage collector roughly once in ten full runs on macOS arm64. The crash needs code
+  Sparkplug generates, so turning that tier off removes the path; it cost nothing
+  measurable here (two runs each, 55.8 s either way). It is on the test script only: `npm start`
+  and `npm run dev` keep the Sparkplug path on purpose, because one dev server dying is loud,
+  where a dead test child reads as a clean run with a short count. **Drop the flag when
+  [nodejs/node#65753](https://github.com/nodejs/node/pull/65753) ships in a 24.x release** —
+  it is the backport of the V8 fix, and no released 24.x has it yet.
+
+Both exist because of #405, which has the crash stack and the evidence.
 
 The demo page must stay accessible — it's audited with the project's own axe-core lint and
 should report **0 violations**.

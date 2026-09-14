@@ -316,8 +316,10 @@ Four things that catch most mistakes:
 - **Do not write a closing keyword next to an issue number** you do not mean to close. GitHub closes
   issues from PR bodies and commit messages, including from prose.
 
-Commands: `npm test` is `node --test` over `test/*.test.ts` (not vitest), `npm run typecheck` is
-`tsc --noEmit`, and `./test/e2e.sh` runs the whole lifecycle against mocks with no credentials.
+Commands: `npm test` is `node --test` over `test/*.test.ts` (not vitest), plus a reporter and a V8
+flag a bare run loses — see [CONTRIBUTING.md § Development](CONTRIBUTING.md#development). `npm run
+typecheck` is `tsc --noEmit`, and `./test/e2e.sh` runs the whole lifecycle against mocks with no
+credentials.
 
 ## Further reading
 
