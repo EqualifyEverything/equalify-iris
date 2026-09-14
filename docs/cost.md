@@ -15,10 +15,10 @@ throws rather than falling back to some default model. So the bill is yours to s
 ## Where the 10.7¢ goes
 
 **10.7¢ a page.** 100 pages for a total **$10.7004**, on the suggested models:
-`us.openai.gpt-5.6-luna` for the `page` agent, `claude-sonnet-4-6` for the other four. Every row is
-measured, but not all in one round: the `extract`, `correct` and `verify` rows come from a three-arm
-round run **2026-09-03**; `read`, `edit`, `table_join` and `recheck_sampled` from an end-to-end round
-run **2026-09-02**. Same 100 pages, one day apart. A **round** here is one captured run of a fixed
+`us.openai.gpt-5.6-luna` for the `page` agent, `us.anthropic.claude-sonnet-4-6` for the other four.
+Every row is measured, but not all in one round: the `extract`, `correct` and `verify` rows come from
+a three-arm round run **2026-09-03**; `read`, `edit`, `table_join` and `recheck_sampled` from an
+end-to-end round run **2026-09-02**. Same 100 pages, one day apart. A **round** here is one captured run of a fixed
 corpus, kept with its own logs and prices — not a round of the review loop, which is the other thing
 that word means in this repo ([README § Terms](../README.md#terms)).
 
