@@ -135,7 +135,16 @@ const openStorage = (): { store: Store; stale: number } => {
     const e = err as NodeJS.ErrnoException;
     // "use", not "open": a write refused by ownership is this message's commonest cause, and
     // saying "cannot open" of a database that opened fine sends the reader to the wrong question.
-    console.error(`FATAL: cannot use this deployment's storage (${e.code ?? e.message}).`);
+    //
+    // Both the code AND the message, never one or the other. `e.code ?? e.message`, which is what
+    // this was, always took the code — every node:sqlite error carries the same one,
+    // `ERR_SQLITE_ERROR` — so the operator got `(ERR_SQLITE_ERROR)` and never `attempt to write a
+    // readonly database`, the only string that says which SQLite condition this actually was. And
+    // the ownership branch below prints no stack, so on precisely the failure this guard is for,
+    // dropping it dropped it everywhere. On an ENOENT or EACCES the code is already the whole
+    // story and the message repeats it, which is a cheap price for keeping the SQLite case legible.
+    const detail = e.code ? `${e.code}: ${e.message}` : e.message;
+    console.error(`FATAL: cannot use this deployment's storage (${detail}).`);
     // Which path is at fault, asked directly. Three candidates, not one: the database may sit
     // outside data_dir, and the database FILE can be unwritable while both directories are fine
     // (a group-writable ./data holding a foreign-owned iris.sqlite).

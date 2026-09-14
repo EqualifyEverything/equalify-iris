@@ -196,19 +196,39 @@ test("an unwritable data_dir names its remedy instead of throwing a stack trace"
     /failStaleSessions\(\)/,
     "the first database WRITE is outside the guard, so an unwritable iris.sqlite dies with a bare ERR_SQLITE_ERROR and the chown below never prints",
   );
-  // Counted over CODE, with whole-line comments dropped, because the count is a claim about calls
-  // and `split` cannot tell one from a mention. The comments in the guard paraphrase the call today
-  // ("clearing the sessions a previous shutdown orphaned"); one that names it instead would fail
-  // this and send the reader after a second call that does not exist. The slice assertion above is
-  // the one carrying the real invariant — this only stops a copy being added outside it.
+  // Counted over CODE, with comments dropped, because the count is a claim about calls and `split`
+  // cannot tell one from a mention. The comments in the guard paraphrase the call today ("clearing
+  // the sessions a previous shutdown orphaned"); one that names it instead would fail this and send
+  // the reader after a second call that does not exist. The slice assertion above is the one
+  // carrying the real invariant — this only stops a copy being added outside it.
+  //
+  // Block comments and TRAILING comments as well as whole lines: a `/* */` or a `// ...` after a
+  // statement is the same false failure one line to the right. `//` preceded by `:` is left alone
+  // so a URL survives (`http://localhost:${port}` is in the file). Anything this over-strips can
+  // only make the count MISS a call, never invent one — a weaker pin, not a wrong failure — which
+  // is the right way round for a check whose whole job is the quality of a message.
   const code = index
-    .split("\n")
-    .filter((l) => !l.trim().startsWith("//"))
-    .join("\n");
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/(^|[^:])\/\/.*$/gm, "$1");
   assert.equal(
     code.split("failStaleSessions()").length - 1,
     1,
     "src/index.ts calls failStaleSessions() more than once, so one of them may sit outside the storage guard",
+  );
+
+  // The line naming the failure carries the code AND the message, never one or the other. Every
+  // node:sqlite error has the same code, `ERR_SQLITE_ERROR`, so a `??` between them always took the
+  // code: the operator read `(ERR_SQLITE_ERROR)` and never `attempt to write a readonly database`,
+  // which is the only string saying which condition it was. The ownership branch prints no stack
+  // either, so on the failure this whole guard exists for, that detail existed nowhere at all.
+  const detail = guarded.match(/const detail = .*/)?.[0] ?? "";
+  assert.ok(detail, "src/index.ts no longer builds the failure detail on one line named `detail`, so the three assertions below are pinning nothing");
+  assert.match(detail, /e\.code/, "the failure line does not name the error code, so an ENOENT or EACCES reads as prose with no handle on it");
+  assert.match(detail, /e\.message/, "the failure line drops the error message, so `attempt to write a readonly database` never reaches the operator");
+  assert.doesNotMatch(
+    detail,
+    /\?\?/,
+    "the failure line prints the code OR the message; every node:sqlite error carries the same code, so `??` always takes it and the SQLite condition is never named",
   );
 
   // Which is why the remedy is chosen by probing writability rather than by reading `err.code`:
