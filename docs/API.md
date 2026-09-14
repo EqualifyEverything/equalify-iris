@@ -4386,17 +4386,17 @@ its agent-suggestion filing (`contribution_failed`). Both run after the document
 report rather than raise, since neither may revoke a document the user already has, so this is where
 they surface.
 
-**Failures only**, which it was not: a `page_correction_recheck` carries an `ok` of its own meaning
-"the verifier named no problem", so every second verdict that named one landed here too — 31 of 31
-on disk across 22 rounds, all of them the measurement-only sample, which runs *after* the correction
-is kept and changes nothing about what ships. On a four-document round that made two clean documents
-read as having errors, and the only thing distinguishing a working measurement from a truncated call
-was that the measurement's `message` said `"unknown"` — this entry read `error`, and that event
-carries its diagnosis under `problems` (issue #296). A failing verdict is now reported where its
-counts are, as `verification.rechecks.failures`, so a non-empty `errors` means the run is in doubt.
-Every entry that reaches it carries a real message: the three named above are built from a caught
-throw and a failed `model_call` is logged with the provider's own, so `"unknown"` is what an old log
-would read as rather than a standing entry on every run that sampled.
+**Failures only**, which `errors` was not: a `page_correction_recheck` carries an `ok` of its own
+meaning "the verifier named no problem", so every second verdict that named one landed here too — 31
+of 31 on disk across 22 rounds, all of them the measurement-only sample, which runs *after* the
+correction is kept and changes nothing about what ships. On a four-document round that made two
+clean documents read as having errors, and the only thing distinguishing a working measurement from
+a truncated call was that the measurement's `message` said `"unknown"` — this entry read `error`,
+and that event carries its diagnosis under `problems` (issue #296). A failing verdict is now
+reported where its counts are, as `verification.rechecks.failures`, so a non-empty `errors` means
+the run is in doubt. Every entry that reaches it carries a real message: the three named above are
+built from a caught throw and a failed `model_call` is logged with the provider's own, so
+`"unknown"` is what an old log would read as rather than a standing entry on every run that sampled.
 
 `tokens` is what the run **consumed**, and `by_agent` carries the same four counts per agent
 (under the names the run log uses: `input_tokens`, `output_tokens`, `cache_read_input_tokens`,
@@ -4810,11 +4810,11 @@ wrong. Failing verdicts only, so an unjudged recheck never appears — it logs `
 nothing. This is where these were meant to be read all along: they were in `errors` under the word
 `"unknown"` (issue #296).
 
-Bounded, which nothing else in this payload needs to be: every other field here is a count, and
-these entries are model prose, so they are the one part that grows with what the documents needed.
-At most **20** verdicts, each `message` cut at **600** characters with a `…` marking the cut (so a
-cut message is 601 characters, the mark being extra), and `verdicts_omitted` says how many the cap
-left out — a capped list is never a short one read as whole.
+`failures` is **bounded**, which nothing else in this payload needs to be: every other field here is
+a count, and these entries are model prose, so they are the one part that grows with what the
+documents needed. At most **20** verdicts, each `message` cut at **600** characters with a `…`
+marking the cut (so a cut message is 601 characters, the mark being extra), and `verdicts_omitted`
+says how many the cap left out — a capped list is never a short one read as whole.
 
 The two populations reach that cap at very different rates, and the sampled one effectively never
 does: `recheck_sample_size` is 1 by default, so a run supplies at most one sampled failure. The
