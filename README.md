@@ -233,13 +233,11 @@ Copy-pasteable `curl` for every endpoint, and every run-log event's fields:
 **[docs/API.md](docs/API.md)**. To prove the endpoints work end to end with no credentials (mock
 GitHub, mock model): `./test/e2e.sh`.
 
-**What it costs is a config choice, because no model is named in Iris's code:** nothing per token
-against a self-hosted open-weight model, or about **10.7 cents a page** for the suggested setup —
-measured over 100 pages end to end, on a round that ran the page model this one replaced, so the
-suggested setup is a little cheaper than the figure and has not been re-priced. Which model to run
-each agent on: **[docs/models.md](docs/models.md)**. Per step:
-**[docs/cost.md](docs/cost.md)**. How it got from 19.4 cents to 10.7 with two lines of config and no
-code change, and what that sprint got wrong: **[docs/sprint-246.md](docs/sprint-246.md)**.
+**What it costs is a config choice, because every model is named in your config and never in Iris's
+code:** nothing per token against a self-hosted open-weight model, or about **10.7 cents a page** for
+the suggested setup, measured over 100 scanned pages. Which model to run each agent on, and how a
+swap fails quietly: **[docs/models.md](docs/models.md)**. The price per step, and why cost per page
+is a worse number than it looks: **[docs/cost.md](docs/cost.md)**.
 
 ## Layout
 
@@ -315,12 +313,11 @@ Commands: `npm test` is `node --test` over `test/*.test.ts` (not vitest), `npm r
 |---|---|
 | [docs/API.md](docs/API.md) | Every endpoint, with copy-pasteable `curl`. The run log's fields. |
 | [docs/design-notes.md](docs/design-notes.md) | Why the code is the way it is. Read this before changing it. |
-| [docs/models.md](docs/models.md) | Which model runs which agent, and what each choice is worth. |
+| [docs/models.md](docs/models.md) | Which model to run on which agent, what each was measured at, and how a swap fails quietly. |
 | [docs/github-auth.md](docs/github-auth.md) | The GitHub token: making it, what one identity costs, gating the API, an older database. |
-| [docs/cost.md](docs/cost.md) | What a page costs, measured. |
+| [docs/cost.md](docs/cost.md) | What a page costs, measured, and why that number hides more than it says. |
 | [docs/ci.md](docs/ci.md) | The five workflows that run this repo, including the bot that will review your PR. |
 | [docs/verifier-calibration.md](docs/verifier-calibration.md) | How to re-measure whether the page verifier catches damage. |
-| [docs/sprint-246.md](docs/sprint-246.md) | The cost sprint's findings, including what it got wrong. |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | How to open a PR here, and what the agent library is. |
 
 ## Contributing
