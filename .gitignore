@@ -1,5 +1,12 @@
 node_modules/
-data/
+# `data/*` rather than `data/`, because git does not look inside an excluded directory and the
+# next line has to be reachable.
+data/*
+# The one empty file that makes `data/` exist in a fresh clone. The container runs as
+# uid 1000 and compose bind-mounts ./data, and a bind-mount source the Docker daemon has to
+# create itself is made root-owned — which on Linux is a startup failure, not a later one. A
+# clone that already contains the directory owns it. See test/container.test.ts.
+!data/.gitkeep
 config.yaml
 .env
 *.log

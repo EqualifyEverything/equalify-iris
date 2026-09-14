@@ -29,11 +29,55 @@ services:
       IRIS_QUALITY_TOKEN: ${IRIS_QUALITY_TOKEN:-}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
       # For Bedrock instead, supply the standard AWS credential env vars.
+    # Come back up after a crash or a host reboot, but not after `docker compose stop` —
+    # a deliberate stop should stay stopped. `on-failure:N` would give up after N tries;
+    # surviving a reboot is worth more here, and it is what `on-failure` does not do (a
+    # reboot stops the container cleanly, so there is no failure to retry).
+    #
+    # The cost, worth knowing before you read the log: a startup error that will never
+    # come right on its own — a missing IRIS_GITHUB_TOKEN, an unwritable ./data — becomes
+    # a loop rather than one exit. `docker compose logs` shows the same message repeating,
+    # and each of those messages says what to change.
+    restart: unless-stopped
+    # Report the container unhealthy when the service stops answering, so `docker ps` and any
+    # supervisor above it can tell "running" from "working". The command is the Dockerfile's
+    # HEALTHCHECK; it is repeated here only to give this single-machine deployment its own
+    # timings, and both poll /v1/health, which is mounted above the rate limiter for exactly
+    # this caller.
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:8080/v1/health').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
     volumes:
       # Persist sessions/, tmp/, and the SQLite DB across restarts.
+      #
+      # The container runs as uid 1000 (the image's `node` user, see Dockerfile), and a
+      # bind-mounted host directory keeps its HOST ownership. On Linux, `./data` must
+      # therefore be writable by uid 1000, and it fails at STARTUP rather than on the first
+      # upload: src/index.ts creates sessions/ and tmp/ at import, so the container exits
+      # before binding the port and `restart:` below turns that into a loop. The log says
+      # which chown to run. Two remedies: `sudo chown -R 1000:1000 ./data`, or add
+      # `user: "1234:1234"` to this service to run as whichever uid owns the directory.
+      #
+      # A fresh clone already contains `./data` (data/.gitkeep is tracked for exactly this
+      # reason), so the daemon never has to create the mount source itself — which it would
+      # make root-owned, failing for every host user rather than only for uid != 1000.
+      #
+      # On macOS and Windows nothing is needed: Docker runs in a VM whose file sharing
+      # remaps ownership, so `./data` fills up owned by you.
       - ./data:/app/data
       # The agent library is a git checkout modified only by `git pull`
-      # (README.md "Configuration").
+      # (README.md "Configuration"). Iris never writes here — `src/store/paths.ts` says every
+      # path it writes is under `data_dir`, and an agent a session builds goes to
+      # `tmp/<id>/agents/` — so this mount only has to be readable by uid 1000.
       - ./agents:/app/agents
       # Override the default env-driven config with your own if desired.
       # - ./config.yaml:/app/config.yaml:ro

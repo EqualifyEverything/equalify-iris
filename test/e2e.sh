@@ -164,6 +164,15 @@ fi
 curl -sf "$BASE/health" | jq -e '.status=="ok"' >/dev/null \
   && pass "health ok (booted in ${boot_elapsed}s)" || fail "health" "no ok"
 
+# The probe reports which build answered, which is the only way to check a deployed container
+# from outside it. Compared against package.json rather than a literal, so a release bump moves
+# one number: a hardcoded version here would pass the day it was written and never again.
+pkg_version=$(jq -r .version "$ROOT/package.json")
+health_version=$(curl -sf "$BASE/health" | jq -r .version)
+[ "$health_version" = "$pkg_version" ] \
+  && pass "health reports the running build ($health_version)" \
+  || fail "health version" "reported '$health_version', package.json says '$pkg_version'"
+
 echo "==> 1a. a per_agent key naming no agent is reported at boot"
 # The config above puts `table:` under `providers.per_agent`. Nothing dispatches that name,
 # so `resolveAgentModel` finds no override and the call takes the provider's own model: the

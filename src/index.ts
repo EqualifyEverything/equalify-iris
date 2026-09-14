@@ -1,6 +1,6 @@
 import express from "express";
-import { mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { accessSync, constants, existsSync, mkdirSync, realpathSync } from "node:fs";
+import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   apiToken,
@@ -21,6 +21,7 @@ import { limitsRouter } from "./routes/limits.ts";
 import { qualityRouter } from "./routes/quality.ts";
 import { visionModelWarning } from "./providers/imageLimits.ts";
 import { generalRateLimit } from "./util/requestLimits.ts";
+import { VERSION } from "./version.ts";
 
 const cfg = loadConfig();
 
@@ -55,11 +56,145 @@ if (agentKeyWarning) console.warn(`WARNING: ${agentKeyWarning}`);
 const visionWarning = visionModelWarning(cfg);
 if (visionWarning) console.warn(`WARNING: ${visionWarning}`);
 
-// Ensure the on-disk layout exists.
-mkdirSync(join(cfg.storage.data_dir, "sessions"), { recursive: true });
-mkdirSync(join(cfg.storage.data_dir, "tmp"), { recursive: true });
+// Ensure the on-disk layout exists, and open the database.
+//
+// These are the first things that can fail on an otherwise correctly configured deployment, and
+// the way they fail is worth catching: the container runs as uid 1000 and compose bind-mounts
+// `./data`, which keeps its HOST ownership, so on Linux a `./data` owned by anyone else fails
+// here — at import, before the port is bound. With `restart: unless-stopped` that is a loop, so
+// this message is the whole diagnostic an operator gets, and it repeats. Uncaught, they get a
+// stack trace naming a path inside a container whose ownership they cannot see from outside.
+//
+// The store is inside the guard because the layout check alone does not catch the case:
+// `mkdirSync(p, { recursive: true })` SUCCEEDS on an existing directory the process cannot
+// write, so a `./data` that already holds sessions/ and tmp/ — which is what `npm start` leaves
+// behind before a first `docker compose up` — passes it and dies one line later. And it dies
+// worse: node:sqlite reports `ERR_SQLITE_ERROR`, "unable to open database file", with no errno,
+// no path and no uid (measured). Hence `checkWritable` rather than a look at `err.code`: the
+// error that needs this message is the one that cannot identify itself.
+const writable = (dir: string) => {
+  try {
+    accessSync(dir, constants.W_OK);
+    return true;
+  } catch {
+    return false;
+  }
+};
 
-const store = new Store(cfg.storage.database);
+// The path whose permissions decide whether `p` can be created: `p` itself if it is there, and
+// otherwise its nearest existing ancestor, because creating it means writing into that ancestor.
+// Asking about `p` directly instead would answer ENOENT — true, and not the reason it failed.
+// Terminates: `dirname` reaches a fixed point at the root, which always exists.
+const nearestExisting = (p: string): string => {
+  let at = resolve(p);
+  while (!existsSync(at)) {
+    const parent = dirname(at);
+    if (parent === at) break;
+    at = parent;
+  }
+  return at;
+};
+
+// Paths go into commands below that an operator is meant to paste, so one with a space in it has
+// to survive the copy: bare when it is plain, single-quoted otherwise (`'\''` is how a single
+// quote is escaped inside single quotes).
+const shellArg = (p: string) => (/^[A-Za-z0-9_./:@%+=-]+$/.test(p) ? p : `'${p.replaceAll("'", `'\\''`)}'`);
+
+// One directory under two names is one candidate. `resolve` — which config.ts has already applied
+// to all three paths — collapses `.` and `..`, but not a symlink, so a `database` reached through a
+// link to `data_dir` would otherwise be blamed and remedied twice. Identity is therefore the REAL
+// path, taken at the nearest existing ancestor because that is the deepest part which has one, with
+// whatever does not exist yet appended.
+const canonical = (p: string) => {
+  const at = nearestExisting(p);
+  const rest = relative(at, resolve(p));
+  try {
+    return join(realpathSync.native(at), rest);
+  } catch {
+    return join(at, rest);
+  }
+};
+
+const openStorage = (): Store => {
+  try {
+    mkdirSync(join(cfg.storage.data_dir, "sessions"), { recursive: true });
+    mkdirSync(join(cfg.storage.data_dir, "tmp"), { recursive: true });
+    return new Store(cfg.storage.database);
+  } catch (err) {
+    const e = err as NodeJS.ErrnoException;
+    console.error(`FATAL: cannot open this deployment's storage (${e.code ?? e.message}).`);
+    // Which path is at fault, asked directly. Three candidates, not one: the database may sit
+    // outside data_dir, and the database FILE can be unwritable while both directories are fine
+    // (a group-writable ./data holding a foreign-owned iris.sqlite).
+    //
+    // Each candidate keeps two paths, because they answer different questions. `want` is what the
+    // config asked for and is what a remedy has to name. `probe` is whose permissions decide it:
+    // `want` when it is there, and otherwise its nearest existing ancestor, since creating it means
+    // writing into that ancestor. Dropping absent directories instead — which is what this did —
+    // lost the commonest ownership failure after a mistyped absolute path, a data_dir that does not
+    // exist AND cannot be created, leaving nothing to report and an empty list of paths printed
+    // beside a claim that the failure could not be explained.
+    //
+    // The database FILE is the one candidate that is right to drop while absent: creating it is a
+    // write into its directory, which is already above.
+    const candidates = [
+      { want: cfg.storage.data_dir, kind: "dir" as const },
+      { want: dirname(cfg.storage.database), kind: "dir" as const },
+      ...(existsSync(cfg.storage.database) ? [{ want: cfg.storage.database, kind: "file" as const }] : []),
+    ]
+      .map((c) => ({ ...c, probe: nearestExisting(c.want), key: canonical(c.want) }))
+      .filter((c, i, all) => all.findIndex((o) => o.key === c.key) === i);
+    const checked = [...new Set(candidates.map((c) => c.probe))];
+    const unwritable = candidates.filter((c) => !writable(c.probe));
+    if (unwritable.length > 0) {
+      const uid = process.getuid?.() ?? 1000;
+      const gid = process.getgid?.() ?? 1000;
+      // Names `probe` as well as `want` when they differ, because "cannot write /srv" in answer to a
+      // configured /srv/iris/data reads like the wrong path otherwise.
+      const blame = unwritable
+        .map((c) => (c.probe === c.want ? c.want : `${c.want} (nothing can be created in ${c.probe})`))
+        .join(" or ");
+      // `mkdir -p` first for a directory, since the one that cannot be created does not exist yet;
+      // it is a no-op on the ones that do. And on `want`, never on the ancestor that was probed —
+      // `chown -R` on /var/lib to fix /var/lib/iris/data would be a far worse day than this one.
+      const remedy = unwritable
+        .map((c) =>
+          c.kind === "file"
+            ? `  sudo chown ${uid}:${gid} ${shellArg(c.want)}`
+            : `  sudo mkdir -p ${shellArg(c.want)} && sudo chown -R ${uid}:${gid} ${shellArg(c.want)}`,
+        )
+        .join("\n");
+      // One message, not a branch on whether this is a container. A previous round decided that
+      // from `/.dockerenv` and `/run/.containerenv`, and those markers answer a question adjacent
+      // to the one that matters: a `database` inside the image rather than on the mount is a
+      // container whose path is NOT the host's, and a containerd pod writes neither marker and is
+      // one whose path is. Getting it wrong either way makes a positive claim about a path this
+      // code did not look up. Naming the condition instead is true in every case, and shorter.
+      console.error(
+        `This process runs as uid ${uid} (gid ${gid}) and cannot write ${blame}.\n` +
+          `Give it to uid ${uid}:\n` +
+          `${remedy}\n` +
+          `In Docker, that path is the one INSIDE the container, and chowning it there dies with the\n` +
+          `container. If it is bind-mounted — \`./data\` is, in the shipped docker-compose.yml — run the\n` +
+          `same command on the host directory mounted there, whose ownership is the one that carries in.\n` +
+          `Or run the container as the user that owns it: add \`user: "1234:1234"\` to the iris service in\n` +
+          `docker-compose.yml, using your own numbers from \`id -u\` and \`id -g\`. They have to be literal —\n` +
+          `compose does not expand \`$(id -u)\` in a YAML value.`,
+      );
+    } else {
+      // Says what was checked rather than what the cause is not. "This is not an ownership
+      // problem" would be a positive claim this code cannot support — something unreadable, a
+      // full disk or a corrupt database all land here — and a wrong one sends the operator away
+      // from the cause.
+      console.error(`Every path checked is writable by uid ${process.getuid?.() ?? "?"}: ${checked.join(", ")}.`);
+      console.error(`So this is not one of the ownership failures this message can explain. The error was:`);
+      console.error(e.stack ?? String(err));
+    }
+    process.exit(1);
+  }
+};
+
+const store = openStorage();
 // Clear sessions orphaned by a previous shutdown (their in-process run is gone).
 const stale = store.failStaleSessions();
 if (stale > 0) console.log(`Marked ${stale} interrupted session(s) as failed on startup.`);
@@ -77,13 +212,16 @@ const proxyWarning = applyTrustProxy(app, cfg.server.trust_proxy);
 if (proxyWarning) console.warn(`WARNING: ${proxyWarning}`);
 app.use(express.json({ limit: "2mb" }));
 
-// Liveness probe (unauthenticated) — confirms the service is up.
+// Liveness probe (unauthenticated) — confirms the service is up and says which build it is.
 //
 // Registered ABOVE the rate limiter on purpose, and it is the only /v1 route that is: a
 // probe that answers 429 reports the deployment as down, which is the opposite of what it
-// is for. It also polls from one address (a container healthcheck runs on the same host),
-// so it is precisely the caller a per-address budget would spend itself on.
-app.get("/v1/health", (_req, res) => res.json({ status: "ok", service: "equalify-iris" }));
+// is for. It also polls from one address (the Dockerfile's HEALTHCHECK runs on the same
+// host), so it is precisely the caller a per-address budget would spend itself on.
+//
+// `version` is package.json's, and it is here rather than only in the boot log because a
+// deployed container is read from outside (see version.ts).
+app.get("/v1/health", (_req, res) => res.json({ status: "ok", service: "equalify-iris", version: VERSION }));
 
 // How much anyone may ask of this deployment (util/requestLimits.ts). Mounted here —
 // above every route below, below the probe above — so a flood is refused before it
