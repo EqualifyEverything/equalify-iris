@@ -1,5 +1,5 @@
 import express from "express";
-import { accessSync, constants, mkdirSync } from "node:fs";
+import { accessSync, constants, existsSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -89,10 +89,15 @@ const openStorage = (): Store => {
   } catch (err) {
     const e = err as NodeJS.ErrnoException;
     console.error(`FATAL: cannot open this deployment's storage (${e.code ?? e.message}).`);
-    // Which directory is at fault, asked directly. The database may sit outside data_dir.
-    const unwritable = [...new Set([cfg.storage.data_dir, dirname(cfg.storage.database)])].filter(
-      (d) => !writable(d),
+    // Which path is at fault, asked directly. Three candidates, not one: the database may sit
+    // outside data_dir, and the database FILE can be unwritable while both directories are fine
+    // (a group-writable ./data holding a foreign-owned iris.sqlite). It is only worth asking about
+    // once it exists — accessSync on a path that is absent fails for the wrong reason, and this
+    // guard also runs on a first boot, when not creating it yet is correct.
+    const checked = [...new Set([cfg.storage.data_dir, dirname(cfg.storage.database), cfg.storage.database])].filter(
+      (p) => existsSync(p),
     );
+    const unwritable = checked.filter((p) => !writable(p));
     if (unwritable.length > 0) {
       const uid = process.getuid?.() ?? 1000;
       const gid = process.getgid?.() ?? 1000;
@@ -106,7 +111,12 @@ const openStorage = (): Store => {
           `compose does not expand \`$(id -u)\` in a YAML value.`,
       );
     } else {
-      console.error(`storage.data_dir (${cfg.storage.data_dir}) is writable, so this is not an ownership problem.`);
+      // Says what was checked rather than what the cause is not. "This is not an ownership
+      // problem" would be a positive claim this code cannot support — something unreadable, a
+      // full disk or a corrupt database all land here — and a wrong one sends the operator away
+      // from the cause.
+      console.error(`Every path checked is writable by uid ${process.getuid?.() ?? "?"}: ${checked.join(", ")}.`);
+      console.error(`So this is not one of the ownership failures this message can explain. The error was:`);
       console.error(e.stack ?? String(err));
     }
     process.exit(1);

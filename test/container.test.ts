@@ -155,8 +155,15 @@ test("an unwritable data_dir names its remedy instead of throwing a stack trace"
   // that died at import, so this message is the entire diagnostic an operator gets, repeating. An
   // uncaught failure names a path inside a container whose ownership they cannot see from outside.
   const index = read("src/index.ts");
-  const guarded = index.slice(index.indexOf("const openStorage"), index.indexOf("const store = openStorage()"));
-  assert.ok(guarded.length > 0, "src/index.ts no longer opens storage through a guarded openStorage(), so this test is pinning nothing");
+  // Both ends asserted before slicing, not just the start. A missing end marker makes `indexOf`
+  // return -1, and `slice(start, -1)` is everything to the last character of the file — so every
+  // assertion below would match something further down src/index.ts and the test would pass while
+  // pinning nothing. That is the vacuous pass, and it is worse than a failure.
+  const from = index.indexOf("const openStorage");
+  const to = index.indexOf("const store = openStorage()");
+  assert.ok(from >= 0, "src/index.ts no longer defines openStorage(), so this test is pinning nothing");
+  assert.ok(to > from, "src/index.ts no longer calls `const store = openStorage()` after defining it, so the slice below would run past the guard");
+  const guarded = index.slice(from, to);
   assert.match(guarded, /try\s*\{/, "the startup storage setup is unguarded, so an unwritable ./data exits with a stack trace");
   assert.match(guarded, /chown/, "the startup guard does not print the chown that fixes it");
   assert.match(
@@ -181,6 +188,20 @@ test("an unwritable data_dir names its remedy instead of throwing a stack trace"
     guarded,
     /accessSync|writable\(/,
     "the guard picks its message off the error code, but the SQLite failure carries no code to read",
+  );
+
+  // The database FILE, not just the two directories. Both directories can be writable while
+  // iris.sqlite is not, and that case used to reach a branch printing "this is not an ownership
+  // problem" — a positive claim, and the wrong one, sending the operator away from the cause.
+  assert.match(
+    guarded,
+    /cfg\.storage\.database/,
+    "the writability probe does not include storage.database, so an unwritable iris.sqlite under writable directories reports the wrong cause",
+  );
+  assert.doesNotMatch(
+    guarded,
+    /is not an ownership problem/,
+    "the guard still claims what the cause is NOT, which it cannot know; it should say what it checked",
   );
 
   // The printed alternative has to be a command that works. Compose does not expand `$(id -u)` in
