@@ -38,7 +38,11 @@ Each decision below is one bullet, and the headings only group them:
 - [What the lint checks](#what-the-lint-checks) — and the things it repairs without telling anyone
 - [Assembly: one document out of many pages](#assembly-one-document-out-of-many-pages) — id
   collisions, and tables and sentences cut in half by a page break
+- [Joining a table split across a page turn](#joining-a-table-split-across-a-page-turn) — when two
+  half-tables are one table, and what the join refuses to guess
 - [Extraction: verdicts and empty pages](#extraction-verdicts-and-empty-pages)
+- [Correcting a page against its image](#correcting-a-page-against-its-image) — what a correction's
+  fields can see, the ceiling it asks for, and why a page is redrawn only once
 - [Reading a blank-page declaration](#reading-a-blank-page-declaration) — the rule that decides
   whether a page is empty or lost, and what each clause of it cost before it existed
 - [The review loop](#the-review-loop) — the Reader, the Copy Editor, and the floors a round cannot go under
@@ -1108,6 +1112,10 @@ the image. The run log entries [`page_corrected`](API.md#page_corrected),
 the rules behind them have the shape they have. What happens when the verdict itself cannot be
 obtained is [above](#extraction-verdicts-and-empty-pages).
 
+- **Four things can send a page back, and that number grew**: two until #290, three until #373 and
+  four until #334. So a share taken over [`trigger`](API.md#page_corrected) across rounds is taken
+  over a population that changed under it — the older rounds had fewer sources to fire on.
+
 ### What a correction's alt fields can and cannot see
 
 A correction re-emits the image description entire, so new WORDS are ordinary and a rewritten clause
@@ -1160,11 +1168,6 @@ members instead.
   because the marker is itself the prose. The copy editor's `editor_markers_changed` records both
   directions off the same shared constants, for the opposite reason — that stage is handed no image,
   so a marker leaving its body is a claim dropped rather than answered.
-
-- **`both` has always meant more than one source**, so no reading of an older log changes as sources
-  are added: there were two until #290, three until #373 and four until #334. It no longer names
-  which combination, because the per-source events keyed by the same `image` are where that detail is
-  exact.
 
 ### The output ceiling a correction asks for
 
@@ -1272,17 +1275,17 @@ Iris refused whole is 0 characters of HTML however much page it was carrying.
   3,902 the fidelity check on the same pages — but `agent_call` records no `step`
   (`src/store/runlog.ts`), and THREE call sites log under that agent and that phase: the draw, the
   correction pass and the specialist merge. So 4,147 bounds the draws from above and does not count
-  them. In this corpus the third site contributes nothing and the inflation is corrections alone,
-  since `4,147 + 3,902` is the whole phase and `mergeSpecialist` runs only after a specialist returns
-  a fragment — a sum that carries the claim by itself, where 0 `specialist_merge` `model_call`s is a
-  fact about the 60 files that emit `step` and says nothing about the other 2,579. `model_call` does
-  carry `step`, and only recent rounds emit it: in those 60 log files, 954 of 1,558 page-agent calls
-  are draws and 604 are corrections, which puts the rate nearer **0.8%** if that mix holds. A
-  correction always follows a draw of the same page in the same run (`correctPage`'s only caller is
-  inside `extractPage`), which is what makes *pages drawn at least once* a sound reading of a
-  population that counts corrections. The **1,913 is exact** — distinct round-and-page pairs counted
-  off page-agent calls alone, where a mixed count gives 2,042, because 129 pairs carry a checker call
-  and no draw.
+  them. In this corpus the third site contributes nothing and the inflation is corrections alone:
+  `4,147 + 3,902` is the whole phase and `mergeSpecialist` runs only after a specialist returns a
+  fragment, so no specialist agent ever logged a row here. That sum carries the claim by itself,
+  where 0 `specialist_merge` `model_call`s is a fact about the 60 files that emit `step` and says
+  nothing about the other 2,579. `model_call` does carry `step`, and only recent rounds emit it: in
+  those 60 log files, 954 of 1,558 page-agent calls are draws and 604 are corrections, which puts the
+  rate nearer **0.8%** if that mix holds. A correction always follows a draw of the same page in the
+  same run (`correctPage`'s only caller is inside `extractPage`), which is what makes *pages drawn at
+  least once* a sound reading of a population that counts corrections. The **1,913 is exact** —
+  distinct round-and-page pairs counted off page-agent calls alone, where a mixed count gives 2,042,
+  because 129 pairs carry a checker call and no draw.
 
 - **Which files the corpus is is part of the figure.** A repo-wide `find` counts 2,657 `*.jsonl`, and
   the 18 not counted are two different things: 11 corpus manifests in the bench root, holding no

@@ -1442,7 +1442,7 @@ loses two in a row is not that page.
 **The gate is that the reply asserted nothing, not that it was short.** A reply Iris refused whole is
 0 characters of HTML however much page it was carrying, so a character floor would redraw every page
 that correctly declared itself blank. Reaching this branch at all is rare: about **1%** of pages
-drawn at least once, over every bench log on disk.
+drawn at least once, over every bench round on disk.
 
 A redrawn page's second draw re-runs the four repair seams, so `page_soft_hyphens`,
 `page_style_attributes`, `page_digit_groups` and `page_links` can fire twice for one page. The second
