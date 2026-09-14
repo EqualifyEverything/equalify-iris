@@ -5,18 +5,31 @@ Decisions the code makes that are worth knowing before you read it.
 This file is for someone about to change the code. If you only want to run Iris, the
 [README](../README.md) is enough.
 
-`fragment`, `block`, `verdict` and `round` are used here in the senses
-[README § Terms](../README.md#terms) gives them. Both senses of `round` appear: a round of the
-reader/editor loop, and a captured run of a corpus, which is named as a **bench round** or by its
-run directory (`runs-reader-newsha`). **`declaration` is the exception** — the one use of it below is
-the `lang` declaration on the document's root element, not the page agent's claim that a page holds
-no content, which is the sense the README defines first.
+`fragment`, `block`, `verdict`, `declaration` and `round` are used here in the senses
+[README § Terms](../README.md#terms) gives them. That section also lists the ordinary sense each one
+carries. This file uses those wherever they are the ones meant, so **read the sentence rather than
+the word.** `block`, for one, arrives here as a document element, as a table's header rows, as a
+provider block in the config and as a code block. Two glosses a reader cannot infer:
+
+- A `round` is a round of the reader/editor loop, and also a captured run of a corpus, named as a
+  **bench round** or by its run directory (`runs-reader-newsha`).
+- A `declaration` is the page agent's claim that a page holds no content everywhere except one bullet
+  under [Assembly](#assembly-one-document-out-of-many-pages), where it is the `lang` declaration on
+  the document's root element.
 
 Several of these decisions reverse an earlier design, so they are written as decisions rather than
 as a diff against it. Iris was specified up front in a requirements document. That document was
 amended twenty-odd times as the build disagreed with it, and it has now been retired. The design
 record is the git history and the issues each decision cites. What is true today is here, in
 [API.md](API.md), in [models.md](models.md) and in the code.
+
+**Write plainly and directly, and give each document one job.** Both are requirements rather than
+preferences ([CONTRIBUTING.md § Documentation](../CONTRIBUTING.md#documentation) states them;
+[README § Working on Iris](../README.md#working-on-iris--including-if-you-are-an-ai-agent) says which
+document holds what). What that means for this file: a rule's rationale and its evidence belong here
+even when a reference doc is where you met the rule, and a cross-link carries the reader the other
+way. A sentence that restates another document gets deleted rather than softened. A claim written
+once has one place to be corrected.
 
 Each decision below is one bullet, and the headings only group them:
 
@@ -26,6 +39,8 @@ Each decision below is one bullet, and the headings only group them:
 - [Assembly: one document out of many pages](#assembly-one-document-out-of-many-pages) — id
   collisions, and tables and sentences cut in half by a page break
 - [Extraction: verdicts and empty pages](#extraction-verdicts-and-empty-pages)
+- [Reading a blank-page declaration](#reading-a-blank-page-declaration) — the rule that decides
+  whether a page is empty or lost, and what each clause of it cost before it existed
 - [The review loop](#the-review-loop) — the Reader, the Copy Editor, and the floors a round cannot go under
 - [Learning from feedback](#learning-from-feedback) — the eval gate
 - [The provider adapters](#the-provider-adapters) — output ceilings, timeouts, and Bedrock's two dialects
@@ -802,6 +817,486 @@ Places where a decision was left open, and where v1 intentionally stops:
   is the one line of `git diff 158e3d9 e842faa -- src/pipeline/review.ts` that lands inside the
   template.
 
+## Reading a blank-page declaration
+
+The run log entries [`page_blank`](API.md#page_blank) and [`page_no_output`](API.md#page_no_output)
+say what a caller does about each outcome. This section is why the rule that separates them has the
+shape it has. Every word of it was bought by a page that had been lost, and the errors it can still
+make run in one direction on purpose.
+
+- **A blank page is a reply that says the page is blank AND carries nothing a reader receives.** Both
+  halves are required, and the second is *present and carrying nothing* rather than *empty markup*,
+  because the empty `html` the prompt asks for is not the only way a model writes a blank page: of 78
+  such replies in 818 initial renders of the bench logs, 33 spelled it in markup — 18 a bare
+  page-break marker, 13 a comment (`<!-- blank page -->`), 2 an empty paragraph. Read as content,
+  each of those was a page counted as having produced markup, with the comment or the anchor
+  delivered into the document (issue #219). Prose is content whatever it says, so
+  `<p>This page is blank.</p>` is delivered as the page's words — a page that *prints* "This page
+  intentionally left blank" has that sentence as its correct transcription, and nothing in the
+  pipeline can tell the two apart.
+
+- **`dropped` is what makes a refused declaration triageable from a run rather than by replaying every
+  reply.** The fragment delivered is `""` whichever spelling arrived, so without the field the line says
+  a page produced nothing readable and not whether that was an empty envelope, a comment, or a marker
+  naming a folio the paper never printed — `chars` is the length of the whole reply and not of the
+  fragment. That is the half of #219's reconstruction its own fix left behind (issue #223). What
+  `dropped` discards on the marker spelling is a `doc-pagebreak` anchor, and deliberately: every one of
+  those logs says the paper prints no number, which makes the label the image's position in the file and
+  the anchor a claim that the document's page 14 begins there.
+
+- **`bare_html` earns its keep on [`page_correction_failed`](API.md#page_correction_failed)**, where 24
+  of 180 corrections in one bench round answered in bare markup and were being read as `prose` (issue
+  #365). On [`page_no_output`](API.md#page_no_output) the value is two findings with opposite remedies
+  and cannot separate them by itself, which is why `dropped` sits on the same line.
+
+- **The declaration is a field first, a sentence second, and the field states without being able to
+  deny.** `"blank": true` is what the prompt has asked for since issue #371, and `blank_stated: true`
+  records that it arrived that way. Five blank pages had been lost to five different words while the
+  sentence reading was being got right — `resolve` (#190), a contradiction that was not one (#194), a
+  negator four tokens behind its noun (#220), `image` (#343), `document` (#367) — and each fix bought
+  only the word it was written for, so a reply that can simply state the answer is the one change
+  that is not about a word. `"blank": false` is read as no answer at all and the sentence decides,
+  exactly as it did before the field existed, so every error the field can make is in one direction.
+  It is read loosely enough for `"true"` as a string and no further: `1`, `"yes"` and `"blank"` are
+  silence, because a field loose enough to accept them deletes a page on a typo. And it cannot
+  declare a page blank that came back with a page on it.
+
+  How much the field now covers is **unmeasured** — `blank_stated` postdates every bench round on
+  disk, so nothing recorded says what share of today's declarations state blankness rather than leave
+  it to be read out of a sentence. The sentence reading is therefore the floor under every reply the
+  field cannot reach, which is every reply sent before it and any model that ignores it.
+
+- **The sentence reading is one axis, not a vocabulary.** A noun modifying the name for text is a
+  modifier: `document` and `body` since issue #379, as `page` and `number` always were
+  (`no printed page number or heading`). So
+  `No text, images, tables, or other document content is visible.` is a declaration, while
+  `only document headings are visible` and `the document heading is visible` are contradictions — a
+  determiner, an `only` or a verb in front of the noun ends the walk before it reaches the negator.
+  The axis is what decides, not the length of the list: the same sentence with `document` deleted was
+  already delivered, and with the coordination deleted was not.
+
+- **A comma alone does not end the walk, and a comma with a whole clause behind it does.** A denial
+  with no verb of its own reaches across a bare comma, because the members of a denial are divided by
+  bare commas exactly as two clauses are — and on the corpus the denials are the case that occurs: of
+  the 204 blank declarations in the 3,747 page replies on record, 69 have a denial reaching across a
+  comma **and a conjunction** to a name for text and 81 across a **bare comma**, and every one of
+  those 150 is a list. Ending the walk at a comma stops honouring 38 of the 204, so a fifth of every
+  blank page on record would be reported as a hole (issue #436, which measured it).
+
+  What ends it is the sentence being **two clauses**: a denial with no verb in it, exactly one comma,
+  a name for text behind it carrying a finite verb of its own, and no further conjunction or comma
+  between them — the coordination stopping is what says the second half is not another member.
+  `No printed text, and handwriting is present.` is refused on that, as are
+  `No clear text, scrawled words are visible.` (spliced rather than coordinated),
+  `No clear text, and printed words are visible.` and
+  `No printed text or images, and body text is visible.` — the log said there is writing on the
+  sheet. A denial keeps every escape route: three or more members
+  (`No printed words, lines, or characters are visible.`), a final `or` joint
+  (`No text, images, or other content is visible.`), a joiner behind its last member
+  (`No writing, figures or stamps are present.`), a comma on the named noun itself even with no
+  joiner anywhere (`No printed words, lines, characters are visible.`), or no verb behind the comma
+  at all (`No printed text, and handwriting.`).
+
+- **Two shapes this reads wrongly, stated because nothing in the sentence distinguishes them.** A
+  **two-member** denial written `No text, and images are visible.` or
+  `No text or images, document headings are visible.` is read as a clause and the blank page is
+  reported as a hole; that direction costs a glance, and the other costs a sheet of handwriting
+  delivered empty. The second was documented as a declaration until #436 — `document` and `body` are
+  modifiers, so the sentence was delivered — and is refused now, because the identical sentence with
+  `scrawled` in place of `document` was refused already, and leaving the two apart is the vocabulary
+  deciding which pages survive.
+
+  The fatal direction is the price of reading a continuing coordination as a list: a named noun
+  heading an **affirmed** list is read as a member of the denied one, so
+  `No clear text, stamped words, stamps are visible.` and
+  `No printed text, and stamped words, marks are visible.` are delivered empty. The two readings are
+  one sentence — `No printed words, and lines, characters are visible.` has that shape and denies
+  three things — and none of the 3,747 replies on record writes it. Every wording above is pinned in
+  `test/envelope-as-content.test.ts` so the class cannot widen unobserved.
+
+- **The rule this replaced read the FORM of the word, and one sentence was answered by two
+  mechanisms.** A comma ended the walk only once it had crossed one of the participles #431 added, so
+  `and stamped words` was refused while `and printed words` was declared; that rule also refused pure
+  denials whose participle member carried a comma of its own
+  (`No inscriptions, watermarks, or logos are visible.`), and removing it honours those again. It had
+  refused 24 of 24 such wordings on the modifier's form alone. Replaying every one of the 3,747
+  replies through both implementations moves **no verdict** — a verdict replay rather than a count of
+  sentence shapes, because a count can only see the shapes its own pattern was written for, and two
+  rounds of review found the old rule's failures one shape past whatever had been counted. Over the
+  300-row grid #431 was measured on, the new rule refuses all 60 second-clause rows the old one did,
+  refuses the 60 spliced ones, leaves every list row blank, and gives back the 30 denials the old rule
+  cost.
+
+- **Two things a log may name without contradicting its own declaration.** The first is the page's own
+  printed number (issue #222): a folio is not content that page could have delivered, so
+  `blank apart from the printed page number` and `blank except for its printed folio` are declarations
+  rather than refusals, while `the printed page number and a heading are visible` still refuses —
+  through the heading, which is what a reader would have got nothing of. The second is the **name of the
+  image file** (issue #429): in `Image filename indicates this is page 14 of 25` the word `image` names
+  the file Iris handed the model, not imagery on the paper, and that sentence is where a model told to
+  read the folio and unable to goes looking for the page number instead. It needs no determiner —
+  `Image filename`, `Filename`, `Image file name` and `The image filename` all declare — and reaches no
+  further than the two words: `Image name is printed at the top of the sheet` refuses, so does
+  `Image filename indicates page 14, and a heading is visible`, and `The image filename is illegible` is
+  still a doubt word.
+
+- **What counts as naming content is a word, not a position (issue #431).**
+  `Only handwritten smudges are visible` contradicts a declaration exactly as
+  `Only handwriting smudges are visible` does, and `cursive is visible` as `writing is visible` — the
+  reader holds the same vocabulary in both parts of speech, so which form of a name the model happened
+  to write does not decide whether the page survives. Before that it did: the noun forms were read and
+  the participles and adjectives were not, and a log naming writing with one of those was a page
+  delivered empty and reported to nobody.
+
+  Two places read the two forms differently, both deliberately. The first is the object of a denial's
+  preposition, where a participle with a noun behind it is an adjective on that noun:
+  `nowhere except a barcode at the top` refuses, `nothing legible within the stamped border` is a blank
+  page describing its own pre-printed form and declares. The second is the walk back from an affirming
+  name looking for the negator that denies it — that walk crosses the participles, so
+  `No stamped or signed marks are present.` is one denied list rather than an affirmation of marks. What
+  stops it crossing a second clause is the two-clause rule above and has nothing to do with the
+  participles; for one release it did, and `No clear text, and stamped words are visible` was refused
+  while `No clear text, and printed words are visible` shipped the page empty. Everywhere else the two
+  forms are one class, and the copula reading and the folio exemption both test that class rather than
+  the shorter list of qualifiers they were written against.
+
+- **A hyphenated compound is read as the word it is a compound of, and until issue #437 it was not.**
+  The adjective list is matched at word boundaries, so a compound of a word it holds was always read
+  (`hand-written`, `rubber-stamped`); the noun and qualifier lists are matched whole, so a compound of a
+  word only they held was not. `printed` was only in those two — so
+  `The machine-printed notes are visible.` was a page whose log names notes on it, delivered empty,
+  while `hand-printed notes` were seen, and `pre-typed` was read where `pre-printed` was not. Across the
+  five readings that ask about a modifier, 24 of 40 (bare word, compound) pairs answered differently
+  from their own bare stem; all 40 agree now. Twelve of the 24 were the object of a denial's preposition
+  and went the silent way: `A caption is missing from the machine-printed heading.` is a heading
+  presupposed by the log and a page delivered empty, and it read that way for `typed` as much as for
+  `printed`.
+
+  The rule reads a compound of any of the thirteen qualifiers, not only the two overlapping the names
+  for text: 13 words × 3 prefixes × the 4 frames the three readings own is 156 cells, the compound
+  disagreed with its own bare word in 75 of them before and in none after, and every one of the 75 moved
+  to the bare word's answer. Thirty-six moved toward a declaration and 39 toward a refusal, so there is
+  no safe side to it. Thirty-three of the 36 are one interaction decided elsewhere: a **definite**
+  `image` is the scan rather than a thing on the page, so `The legible image is visible.` declares, and
+  `The semi-legible image is visible.` now reaches the same reading instead of stopping short of the
+  article. A compound built on a word none of the lists holds still stops it
+  (`The foo-bar image is visible.` is refused). The other three are a different mechanism —
+  `No content is present in the machine-typed.` and two siblings, which declare because a denial's
+  terminal object that is only a modifier is skipped, as the bare `typed` is.
+
+  What that buys is parity with the bare word, not a claim that the bare word's answer is right: whether
+  `The pre-printed notes are visible.` should be refused or `The pre-printed form is empty.` kept is
+  still decided by the noun behind the modifier. A compound whose prefix negates is read as the word it
+  negates (`un-printed`, `un-written`), which is what boundary-matching costs and errs toward reporting a
+  page rather than losing one. Nothing on the corpus turns on it either way: of 3,747 page replies with
+  a log, 4 write a hyphenated compound of `printed` or `typed` anywhere, and all 4 are pages whose HTML
+  carries content, so none reaches the blank reading. Replayed, 0 of 3,747 verdicts move — an empty
+  denominator rather than a measured zero. The evidence is the 40 pairs; the corpus only says it breaks
+  nothing on record.
+
+- **A copula has two ways of denying its subject, and until #442 the reader knew one of them.**
+  `Handwriting is absent.` says the handwriting is not there and declares. `The heading is empty.` says
+  the heading holds nothing, which is the same news about text — but nothing denied `heading`, so the
+  sentence read as an affirmation and the blank page was reported as a hole, with the word that denied it
+  quoted inside the evidence (`affirmed: "heading is empty"`). Six wordings do this: `is empty`,
+  `is blank`, `is unmarked`, `is unfilled`, `is featureless` and `is void of content`. All six are read
+  now, and the grid says the fix is about the complement and not the subject — 6 complements × 4 subjects
+  that name text moved from 0 of 24 declared to 24 of 24, while the same complements against 4 subjects
+  naming none were 24 of 24 before and are unchanged (`The sheet is empty.` always declared).
+
+  `void` is taken only with its preposition: a stamp that "is void" is a mark **on** the paper — the word
+  is printed across a cancelled form — so bare `void` is the one member of that vocabulary whose plain
+  reading says something is there, and reading it would lose the page in silence. `is illegible` is out
+  for a related reason rather than by omission: marks that cannot be read are not an absence of marks, so
+  an illegible heading is still a heading and the page is reported.
+
+  Two page-**losing** defects came off the same fix. `The heading is not empty.` declared the page blank
+  before it, because the `not` denied a clause and nothing read what it denied — a double negative
+  arriving as an absence, on all 24 grid rows, each a page lost without a line. And the scan anchored on
+  a denial now counts these complements as denials, which is what `Blank apart from a caption.` needed:
+  that fragment had no negator in it and shipped empty, a caption lost. Six exceptive wordings come back
+  with it, and which nouns survive an exceptive is decided where it already was rather than again here —
+  each of the eight rows checked answers exactly as the negator wording saying the same thing answers, so
+  `Blank apart from a watermark.` reports (a watermark is a name for marks) and `Blank apart from dust.`
+  declares.
+
+  The **contracted** spelling was the losing side of the same sentence. A contraction is in none of the
+  verb lists on purpose — `The heading isn't visible.` denies its subject — so
+  `The heading isn't empty.` found no verb at all and went out as a blank page while `is not empty` was
+  reported: the apostrophe decided whether the page was lost. It is read at the one construction where
+  the contraction's own negation is cancelled by the complement behind it, and the contraction is
+  **walked to** rather than read at the next word, because the subject of one of these is a noun phrase
+  (`The printed form isn't empty.` puts it two words along).
+
+  The complement is read at the word **right after the verb**, and after a **linking** verb only. The
+  first part is what the wordings a real form log writes need — `is empty; no handwritten entries.` past
+  the statement boundary and `is empty and unused.` past the coordination both declare — and is also the
+  whole of the limit: anything between the verb and the word puts it out of reach, so
+  `The heading is completely empty.` is still reported, as is `is unused and empty.` where the
+  coordination runs the other way. That is the same failure as before the fix and in the cheap direction —
+  attention spent on an empty page, not a page lost — and closing it means walking those positions in the
+  verb read, not adding to this vocabulary. The second part is why `The heading contains empty rows.` is
+  not a denial: half the affirming verbs take an object rather than a complement, and `empty`, `blank`
+  and `unmarked` are the ordinary adjectives for a cell, a field or a row. `absent` and `missing` need no
+  such gate, neither being attributive — nothing contains missing rows.
+
+  The denial-anchored scan tries **every** denial position rather than the first. A negator stands where
+  its denial begins, so first-hit was the right anchor while the vocabulary was negators alone; a
+  complement stands *behind* the negator of its own sentence, and the backward walk that finds an
+  exceptive object stops at a negator. So anchoring on `empty` in
+  `The page is empty, nothing on it except handwriting.` put the stopped position between the anchor and
+  the object, and eight wordings of that shape — the shape a real form log writes — shipped a page with
+  content on it as blank. Trying each position in order can only add an affirmation, the first-hit
+  position still being among them.
+
+  One family of wordings **loses** a page to this, and it is the comma bound rather than the complement:
+  `The heading is empty, handwriting only.` and seven siblings go out blank where they were reported
+  before. A fragment cut off at its own comma is read as a member of the list a blank page writes, and
+  that list is a list of what is *absent*, so a denial standing behind the noun reaches nothing — the
+  defect `A signature, nothing else.` is pinned against. These eight only join it because `is empty` is
+  now a denial, which is the pairing rule holding rather than breaking:
+  `The heading is absent, handwriting only.` lost the same page before the fix and still does, so the two
+  wordings say the same thing and answer the same way, and the repair belongs at the comma. Base reported
+  them by affirming `heading` off the very complement that denied it.
+
+  No log on record moves. Of 3,747 page replies with a log, 153 write one of these complements and 135 of
+  those sit inside a blank declaration, 0 in the negated form and 0 in the contracted one, and 0 verdicts
+  move — because the subject a real log uses is the page and not its heading. The all-positions scan has
+  a real population rather than an empty denominator, 1,583 of the 3,747 logs carrying more than one
+  negator, and none of those moves either. So the corpus cannot separate reading the vocabulary at the
+  verb alone from also reading it at the denial scan, and the wider read rests on the constructed rows.
+
+- **Either form of the name also reaches a clause with no verb in it, which it did not until #435.**
+  `handwriting smudges only.`, `handwriting visible.`, `Only handwriting smudges.` and `A heading.` each
+  declared the page blank, because the affirmation is found by handing a name for text the verb that
+  predicates over it, and a fragment has none to hand it. A fragment is now read on its own — a predicate
+  after the noun (`visible`, `present`, `apparent`, `discernible`, the four words the denial read already
+  uses for the same dropped copula) or the end of the statement, optionally past a closer (`only`,
+  `alone`, `too`, `also`, read at the end of the statement and nowhere else, so the `only` in
+  `handwriting only in the margin.` is not mistaken for one).
+
+  The risk runs the other way from everything above, because a blank page's own log is written in
+  fragments as often as not — 94 of the 204 blank declarations on record have a verbless statement in
+  them, and every one of those is a denial. So the noun phrase must **open** its statement, with nothing
+  in front of it but a determiner, a count, a qualifier, an opener (`only`, `just`, `merely`, `simply`,
+  `solely` — `Only handwriting smudges.` is #435's own title), or another name for text or marks. That is
+  what keeps `Devoid of text.`, `Lacking text.` and `Free of text.` blank: none of those words is in the
+  negator lists, and each is a page that would otherwise be reported lost. A comma is a boundary on both
+  sides of the noun, for a reason the corpus supplies rather than a hypothetical one: the doubt-word
+  scope has the marks and the `not legible text` phrase stripped out of it, so
+  `A few specks, not legible text, figures, captions visible.` arrives at this read as
+  `A few figures, captions visible` with the words that denied those nouns already gone. What the commas
+  cost is a fragment whose denial stands **behind** its noun: `A signature, nothing else.` is a page with
+  a signature on it, delivered empty. The read that would catch it is the denial-anchored one, and that
+  only looks forward from the negator. Unchanged by #435 and stated rather than left to be re-measured.
+
+- **A statement that is a name for text and nothing else no longer affirms (issue #440).** So
+  `Blank page; text`, `Blank page. Content`, `Page is blank; images; nothing present.`,
+  `Page is blank. No printed text. Images.` and `Page is blank. Images. No text.` declare the page blank
+  instead of reporting it as a hole. Statements end at a `.`, `!`, `?`, `;` or a line break alike, and in
+  three of those the denial is in a neighbouring statement — ahead of the label in one, behind it in
+  another — which this read cannot reach either way, the boundaries being what limit how far a subject
+  may look for its verb.
+
+  Counting the tokens is not what does it, and the reason is the shape of the rest of this section. The
+  doubt-word scope has the marks phrase stripped out of it, so **one token is not one word**:
+  `Handwriting smudges.` and `Cursive smudges.` reach this read as a single token, their head noun having
+  been removed upstream, and that phrase is the one #435 is about — six of its seven wordings are it with
+  a predicate on the end. A plain one-token guard was written for #440 and taken back out for exactly
+  that, because it delivered a page of handwriting empty. What ships instead is the strip leaving a
+  **mark where it cut**, so a statement can say it lost a word: the mark is a form feed, whitespace to
+  every other pattern here and invisible to the tokenizer, and a log cannot forge one because the scope's
+  input has form feeds and vertical tabs removed before any is inserted. A statement of one token that
+  was cut declares nothing; a statement of one token that was always one word affirms nothing.
+
+  One token is not the **whole statement** either. The tokenizer reads letters, so a digit and a list
+  bullet are invisible to it and `2 images.` and a `- text` line are one token each — a page that says
+  what is on it, which counting tokens alone would deliver empty. The statement therefore has to BE the
+  token: nothing in it but the name, whitespace and the cut mark. `2 images.`, `1 signature.` and a
+  bulleted list of a page's contents all keep their affirmations, and `Two images.` was never at risk
+  because it is two tokens. That makes the guard sensitive to **any** non-letter decoration, so
+  `Page is blank. **handwriting**`, `handwriting:`, `(handwriting)` and `"handwriting"` all report where
+  a bare `handwriting.` declares. The asymmetry is deliberate and the corpus settles it: of 3,402
+  one-token statements only 1,073 are bare, 2,329 carry decoration, and all four that name text are
+  decorated ones. A guard reading through decoration would move four real statements toward being shipped
+  empty and none toward declaring, which is the losing direction.
+
+  A **boundary is not always a sentence end**, and that is the third face of the same mistake. A numbered
+  list marker ends in a `.`, so `1.` is a boundary and every line of
+  `Page is blank.\n1. text\n2. images` arrives as a bare one-token statement — the whole enumeration of
+  what is on the page eaten and the page shipped empty, where the `-` spelling is rescued. The guard's
+  premise is that a name alone *between two boundaries* is all there is to read, and that holds only
+  where the boundary behind it ended a sentence: a preceding statement with **no letter in it** is a
+  marker, so the name is a list item and affirms. The corpus says which spellings exist rather than a
+  marker vocabulary guessing — 73 of 3,747 replies write a `1.` list line, 2 write a `-` one, and `1)`,
+  `a.`, `a)` and roman numerals appear in none. That test reaches a little wider than "a marker" on
+  purpose: a statement the marks strip reduced to its cut mark has no letter in it either, so
+  `Page is blank. Print artifacts. text` hands `text` back, which is what the pipeline did before any of
+  this. And a marker is not what makes a list — **the sequence is**. A model that lists a page's contents
+  one per line with no marker at all has a sentence behind every line, so the rule above helps none of
+  them: `Page is blank.\ntext\nimages` had the whole enumeration eaten. A run of lone names is a list and
+  one lone name is a lone name, so the neighbour on either side decides, and the lettered spellings `i.`
+  and `A.` fall out of the same clause, a marker that is itself a letter being a lone name too. Of the
+  1,073 bare one-token statements on record, 147 are in an enumeration by this rule — 2 by the letterless
+  neighbour and 145 by the sequence — and none of the 147 names text.
+
+  **The guard's cost is a shape and not a wording:** any bare one-token statement whose neighbours are
+  sentences, of which `Page is blank. handwriting.` is one spelling and a **one-item list**
+  (`Page is blank.\ntext`) is the other. Nothing this read can see separates that from `Blank page; text`,
+  which is the thing #440 asked to have declared, so both declare and the page ships empty. Both sides
+  are unobserved: one-token statements are common on the corpus (1,129 of 3,747 replies write one) but
+  only four name text, all in replies that make no blank claim, so 0 of the 204 declarations on record
+  move. The near misses say how narrow the guard is — `Any text? None found.` is two tokens and reports,
+  and `Text: none.`, `Text (none).`, `Text/handwriting: none detected.` and
+  `Page is blank; no text; no images.` declared before it and still do. Every one is pinned in
+  `envelope-as-content.test.ts`.
+
+- **The marks strip decides one more case, and there the head noun is what the reading turns on (issue
+  #439).** A log calling the scan's own noise `print artifacts` had the mark removed and the word
+  dressing it left standing where a subject goes, with the mark's verb behind it —
+  `Page is blank. Print artifacts are visible.` was reported as a lost page, quoting the two words
+  `print are visible`. A name for text now leaves **with** the mark where the mark is one only the
+  capture leaves (`artifact`, `debris`, `dust`), so those pages declare. It is the head and not the
+  dressing word that decides, because the same dressing word means the opposite in front of a mark a pen
+  also leaves: `Only print smudges are visible.` is smudged printing and goes on being reported, as
+  `handwriting smudges` does. `Printed dots are visible.` is reported too — `dot` is outside the list, a
+  page can have real printed dots, and `the table contains the printed dot leaders` is a corpus statement
+  about typographic content. Of the 81 places the corpus writes a name for text in front of a mark, 74
+  have an `artifact(s)` head and 7 a `dot(s)` one; 0 of the 204 declarations change verdict, and the two
+  whole sentences that change reading are one of each kind — a blank page now read as one, and a page
+  whose log describes repairing a character, which a declaration around it would now be believed about.
+
+  What leaves is **that one word and nothing else**, and the doubt words in front of it stay. Seven of
+  the adjectives this strip can absorb are themselves doubt words, so
+  `Page is blank. Blurry print artifacts are visible.` has to go on being refused on `blurry` — a page
+  whose log says the scan is blurry wants a better scan, and shipping it empty is the same loss from the
+  other side. Transplanted across the corpus's 17 wordings in three frames, all 18 cells this widening
+  moves were refused by a contradiction and none by a doubt word; put `blurry`, `faint` or `grainy` in
+  front and all 51 cells stay refused.
+
+- **The test is positive and doubt is fatal.** An absent `html` key, an empty one with nothing said
+  about it, one whose `log` says the page could not be *read* (illegible, too dark to resolve,
+  truncated — including a hedge like "appears blank, though the scan is very faint"), and one
+  describing the **image's** condition rather than the paper's ("the page is very dark and appears
+  empty", "low resolution scan; no text") are all the model giving up, and stay `page_no_output`.
+  That reply is the one that most needs a human to look at the page, and reading it as a declaration
+  would leave nothing in the document to look at. A blank page whose wording falls outside both
+  patterns is reported as a failed page, which is the safe direction: a page wrongly reported failed
+  costs a glance, a page wrongly dropped costs the page.
+
+- **Marks on an empty sheet are not doubt, and the exemption is a phrase rather than a word.**
+  "Specks/dots are visible but do not resolve into any characters", "a few faint specks/artifacts …
+  no legible text" is the blank declaration itself, stated positively; reading `resolve`, `faint` and
+  `noise` there as doubt about the scan cost four blank pages of 100 on one bench round, while an
+  agent that answered "Page is blank." and stopped was believed (issue #190 — two pages of one
+  document opened with a verbatim identical sentence and only the one that explained itself was
+  refused). So `faint specks` is the paper and `faint scan` is the image, and a log describing both in
+  one sentence still refuses: "the scan is blurry, showing only faint specks and no legible text"
+  loses `faint` and keeps `blurry`. The marks have to be named *as* marks —
+  `stray marks do not resolve into characters` is the paper, bare
+  `marks do not resolve into characters` is the phrase the page prompt uses for content that could
+  not be read, and a `dark streak`, `dark spot` or `dark shadow` is the capture and can cover
+  content. It reaches across one sentence or semicolon boundary only where the next clause continues
+  the same observation — the marks referred back to, no subject at all, or a denial — so "a few specks
+  of dust are visible. The handwritten note in the corner does not resolve into words" is still a
+  failed page.
+
+- **Two edges of that phrase, because a wording just outside either one costs a blank page (issue
+  #429).** `noise` belongs to the paper only where the capture that made it is named: `scan`,
+  `scanner`, `scanning` and `compression noise`, which is the corpus's entire vocabulary for it —
+  four wordings across the 205 replies on disk that carried no page — while bare `noise`,
+  `image noise` and `the scan is noisy` describe the image and stay doubt. And one word Iris has no
+  list for may sit **immediately** before the marks noun, so "only faint, indistinct specks are
+  visible" declares. It is one word, in that one position, in a clause with no copula, colon or dash
+  in front of it: "the scan is noisy with artifacts" and "the image is grainy background specks" are
+  still failed pages, because a stack behind `is` describes something the sentence has already named
+  and the marks are not it. That slot moves no reply on disk — it is there because the words it admits
+  appear in none of the 3,935 replies that *did* carry a page, so admitting one cannot let content
+  through as a blank declaration.
+
+  The word is put **back** into the text the doubt and contradiction checks read, rather than removed
+  with the phrase, so a doubt word or a name for what the page bears goes on being one without this
+  rule holding a list of them. Three words are not put back. Two fall back to the reading that has no
+  slot in it: a function word, which dresses nothing (handing `with` back keeps the preposition while
+  `noisy`, the whole doubt, leaves with the phrase); and a name for what a page bears written as an
+  **attributive** — `handwritten`, `stamped`, `cursive`, and their hyphenated compounds — which is
+  the form this rule reads as a modifier. Until #431 that was also the form the contradiction check
+  could not see, so the word was handed back and nothing downstream did anything with it; the check
+  now reads both parts of speech, and handing it back is what lets it. The third is a word the
+  slot-less reading had already removed, and there the phrase goes in full, slot included: nothing is
+  handed back because base kept nothing to hand back, which is what makes this rule able only ever to
+  strip **more** than the slot-less reading and never less.
+
+- **A place on the paper names content; the substrate is another way of saying the sheet is empty.**
+  "not legible printing in the margin" names what the page bears, while "not legible text on the
+  page" says the sheet is empty. The whole rest of the statement has to be denial for it to count as
+  one, so a word for a place on the paper — `margin`, `header`, `corner`, `seal`, `spine` — refuses
+  whatever punctuation or preposition leads into it; a name for what the page bears has to be
+  introduced by a denial (`or content`, `nor any figures`, `no writing`) rather than by a determiner,
+  and not handed on to a verb that says it is there, because "not legible text, only a heading is
+  visible" and "not legible text, and printing on the page is visible" are built from the same words
+  as a denial and say the opposite — while a tail that goes on to deny something else carries verbs of
+  its own ("not legible text or content, and no writing is visible") and is read as the denial it is.
+  The same read applies to "do not resolve into …", one noun further on: that construction's object is
+  what the `do not` denies and everything after it has to deny too, so "do not resolve into any
+  characters or content" is a blank page and "do not resolve into any characters, only a heading in
+  the margin" is a failed one. No exemption applies at all to a log that anywhere says the reading
+  failed or hedges the answer (`illegible`, `obscured`, `too dark`, `could not`, `though`), which are
+  claims about the page wherever they sit.
+
+- **The claim is not paid to be checked, and it used to be.** The empty fragment went to the Feedback
+  Agent like any other page, shown the source image and an empty code block and asked whether the one
+  was faithful to the other. In 36 such judgements — 9 pages of a 100-page corpus, two page-model
+  arms, two shas — it passed every one, for $0.0859 an arm (issue #294). So the call is not made and
+  `page_verify_ok` says so with `skipped: "blank"` and `unjudged`.
+
+  The single exception is the only spend issue #371 adds: a declaration **stated** in the field whose
+  own log names something on the page is delivered *and* judged, with the log's claim quoted to the
+  verifier in its own words beside the empty fragment. A log that was right about the heading it named
+  buys a correction and the reader gets the page; a log the regex misread costs a verify call instead
+  of a page. Before the field there were two answers and both were worse: believe the prose and drop
+  the page in silence, or refuse it and report a page nobody has. The cost is bounded by how rarely
+  the two halves disagree — 1 of the 125 blank declarations in every bench round on disk, off 2,189
+  page renders — and that one is a page whose log says it is blank three times, refused today by a
+  misread first clause. A declaration made in prose alone is unchanged and still refused on a
+  contradiction, because for a prose declaration refusing remains the cheaper of the two errors
+  available.
+
+  What still checks the claim are the checks that cost nothing, and they are the ones that can prove
+  it wrong: the veto refuses a hedged declaration before it is ever accepted, whether the reply stated
+  blankness or described it — a page the model says it could not read is not a page it can state
+  anything about, including that it is empty — the contradiction refuses a self-contradicting one
+  described in prose, and a page reported blank whose **source file** carries link annotations for it
+  is one the document itself contradicts, so `page_links_missing` fires on it as on any other page,
+  buys a re-render against the image, and that fragment is verified in turn.
+
+- **What is no longer caught is a *confident* wrong declaration about a page whose file says
+  nothing.** It is delivered as an empty page, and the `page_blank` line is the whole of the evidence
+  it leaves — so a run triaged off those lines is not evidence that no such page occurred. Before any
+  of this existed, six of 100 bench pages across three of four documents were well-formed envelopes
+  correctly saying the page was blank, and every one shipped a `@page-failed` marker and counted as a
+  lost source page (issue #179).
+
+- **No page-break marker is delivered for a blank page, and a blank page that printed its folio loses
+  an anchor.** The prompt no longer asks for a marker on such a page whatever the paper prints — it
+  did, which was an instruction the pipeline could not honour once every accepted declaration returned
+  an empty fragment (issue #222) — so a marker that arrives anyway goes to `dropped` with the rest of
+  the fragment. Losing the anchor is the cheaper mistake, and a page whose only printed content **is**
+  its folio is a blank page by decision rather than by accident: the folio is never transcribed as
+  text and the marker it may be carried in is never delivered, so such a sheet has nothing on it a
+  reader receives, and a marker-only fragment is not a page. The alternative — delivering a lone
+  `doc-pagebreak` where no declaration was asserted — was refused because that gate also passes a
+  reply whose log says the page's table was too faint to transcribe, which is a page silently dropped
+  while the run reports it delivered, and because every one of the 18 bare markers measured in the
+  corpus carried a label the paper never printed.
+
+- **The blank count is the declarations that were made, not the pages that ended up empty.** Since
+  #371 a page delivered empty can have content put back by the correction its judgement earns, and it
+  still counts here; the count is kept that way deliberately, because
+  [Diagnostics](API.md#diagnostics-timing--hang-detection) reads the declarations that cost a verify
+  call off it as `pages_blank - pages_skipped_blank`. A page whose content came back that way is the
+  `page_corrected` line beside it, with `trigger: "verify"`.
+
 ## The review loop
 
 - **The Reader replies with JSON and nothing else, and that sentence is tuned to the model in the
@@ -1331,6 +1826,13 @@ Places where a decision was left open, and where v1 intentionally stops:
   regression behind it. It stays visible in the `eval_gate` log line's `unpaired` list. If no fixture
   is measurable on both sides, both means are `null` — "nothing to compare", deferring to the
   regression gate, rather than a pass.
+- **A suggestion issue is identified by its title prefix, not by a label.** GitHub silently drops
+  labels set by anyone without push access to the repo, which is most of the people this is built for.
+  A label would therefore have been missing on exactly the issues that most needed it, with nothing to
+  say so — and the duplicate check that filtered on it would have refiled the same suggestion every
+  session, under a different person's name each time. An operator who wants labels adds a repository
+  rule keyed on the prefix: it applies them as the repo rather than as the filer, so it works no matter
+  who filed.
 
 ## The provider adapters
 
@@ -1586,6 +2088,17 @@ These are the rules both adapters enforce on a model call. The README states the
   while extraction hardcodes `edges: []` — so they are not in the enum and not emitted. New sessions
   start at `extraction`; they used to be created at `triage` and overwritten before a client could
   observe it.
+- **A PDF's page range is divided between several `pdftoppm` processes, and the uploader waits for it.**
+  `pdftoppm` renders one page at a time on one core, so Iris shards the range — up to one process per
+  core the host reports, and never more than the document has pages. A 25-page document that took
+  12.5 s in one process takes 3.9 s across four; past about a dozen cores it stops getting faster,
+  the shards already being down to two pages each. The route rasterizes before it answers, which is
+  why cores are worth giving a deployment that takes PDFs.
+
+  The budget is shared across concurrent uploads rather than granted to each, so a second document
+  arriving mid-render takes what is left, down to the single process it would have had before. Sharing
+  it is the same decision as the global run cap: the resource being protected is the machine's, not the
+  caller's.
 
 ## Designed for, and not built
 

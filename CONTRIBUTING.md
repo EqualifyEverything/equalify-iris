@@ -86,6 +86,11 @@ What it asks for:
   assert about behaviour should be checkable against code, a test, or a named benchmark round.
 - **No jargon without a gloss on first use**, and no new term where a plain one exists.
 - **No repetition.** A paragraph that restates the one above it gets deleted, not softened.
+- **One job per document, and no restating another one.** A claim lives in the document whose job it
+  is, and the others link to it — that is what keeps this set DRY and cheap to correct, since a claim
+  written twice is a claim that goes stale in one place.
+  [README § Working on Iris](README.md#working-on-iris--including-if-you-are-an-ai-agent) says which
+  document holds what.
 - **Shorter over completer.** A page nobody finishes documents nothing.
 
 Two things this is not. It is not a ban on detail — an exact number, a file path, or a caveat that
