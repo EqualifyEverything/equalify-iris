@@ -21,6 +21,7 @@ import { limitsRouter } from "./routes/limits.ts";
 import { qualityRouter } from "./routes/quality.ts";
 import { visionModelWarning } from "./providers/imageLimits.ts";
 import { generalRateLimit } from "./util/requestLimits.ts";
+import { SERVICE_VERSION } from "./util/version.ts";
 
 const cfg = loadConfig();
 
@@ -77,13 +78,20 @@ const proxyWarning = applyTrustProxy(app, cfg.server.trust_proxy);
 if (proxyWarning) console.warn(`WARNING: ${proxyWarning}`);
 app.use(express.json({ limit: "2mb" }));
 
-// Liveness probe (unauthenticated) — confirms the service is up.
+// Liveness probe (unauthenticated) — confirms the service is up, and says which build is up.
 //
 // Registered ABOVE the rate limiter on purpose, and it is the only /v1 route that is: a
 // probe that answers 429 reports the deployment as down, which is the opposite of what it
-// is for. It also polls from one address (a container healthcheck runs on the same host),
+// is for. It also polls from one address — the container healthcheck is the `HEALTHCHECK`
+// line in the Dockerfile, which runs inside the container and so calls in from 127.0.0.1 —
 // so it is precisely the caller a per-address budget would spend itself on.
-app.get("/v1/health", (_req, res) => res.json({ status: "ok", service: "equalify-iris" }));
+//
+// `version` is here because this is the only place an operator can ask it from outside the
+// box (util/version.ts), and it is `null` rather than absent where the build cannot name
+// itself.
+app.get("/v1/health", (_req, res) =>
+  res.json({ status: "ok", service: "equalify-iris", version: SERVICE_VERSION }),
+);
 
 // How much anyone may ask of this deployment (util/requestLimits.ts). Mounted here —
 // above every route below, below the probe above — so a flood is refused before it

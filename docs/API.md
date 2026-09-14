@@ -15,13 +15,16 @@ Requests are rate limited per client, and every response says how much of the bu
 [Rate limits](#rate-limits-how-often-you-may-ask) has the numbers, the headers, and what a `429` looks like.
 
 `fragment`, `block`, `verdict`, `declaration` and `round` all mean something specific here, and
-[README § Terms](../README.md#terms) defines them. Two of them appear below in both of their senses.
-A `round` is either a round of the reader/editor loop or a captured run of a corpus, which the text
-calls a **bench round** or a **deployed round**. A `fragment` is either one page's extracted HTML or
-the `#id` part of a link — that second sense is what `links_unresolved_rate` under
-[Quality tally](#quality-tally-shared-secret-off-by-default) is about. A `declaration` is the page
-agent's claim that a page holds no content everywhere except one line of the [run log](#run-log)'s
-`page_main_stripped`, where it is the `lang` declaration on the document's root element.
+[README § Terms](../README.md#terms) defines them. These ones appear below in both of their senses:
+
+- A `round` is either a round of the reader/editor loop or a captured run of a corpus, which the
+  text calls a **bench round** or a **deployed round**.
+- A `fragment` is either one page's extracted HTML or the `#id` part of a link — that second sense
+  is what `links_unresolved_rate` under
+  [Quality tally](#quality-tally-shared-secret-off-by-default) is about.
+- A `declaration` is the page agent's claim that a page holds no content everywhere except one
+  line of the [run log](#run-log)'s `page_main_stripped`, where it is the `lang` declaration on the
+  document's root element.
 
 ```bash
 export BASE=http://localhost:8080/v1
@@ -31,8 +34,13 @@ export BASE=http://localhost:8080/v1
 
 ```bash
 curl -s "$BASE/health"
-# {"status":"ok","service":"equalify-iris"}
+# {"status":"ok","service":"equalify-iris","version":"0.1.0"}
 ```
+
+`version` is the running build's `package.json` version — the one check on which build a deployment
+is actually running that does not need access to its logs. It is `null`, not absent, on a build that
+cannot read its own `package.json`, so a client can always read the field and has to handle a null
+rather than a missing key.
 
 ## Public tally (unauthenticated)
 

@@ -82,15 +82,19 @@ test("the version floor that licenses dropping the flag is still 24 or higher", 
 });
 
 test("every other place that states the Node version agrees with that floor", () => {
-  // The floor is written down in five places and only one of them is authoritative. A
+  // The floor is written down in six places and only one of them is authoritative. A
   // runtime BELOW it loses unflagged node:sqlite; the two prose lines are what a reader
   // installs, so for them the floor and the printed number are the same claim.
   //
   // Out of scope, deliberately: the three workflow comments naming "Node 24". They explain
   // why setup-node reads .nvmrc rather than telling anyone which Node to install, so no
   // action depends on their number.
-  const pkg = JSON.parse(read("package.json")) as { engines: { node: string } };
+  const pkg = JSON.parse(read("package.json")) as {
+    engines: { node: string };
+    devDependencies?: Record<string, string>;
+  };
   const floor = majorOf(pkg.engines.node.replace(/^\D+/, ""), "engines.node");
+  const typesNode = pkg.devDependencies?.["@types/node"];
 
   // A member yields either a major to compare or a `problem` saying why it cannot — its file is
   // gone, its line is gone, or the version it states names no major. Nothing here asserts:
@@ -140,6 +144,16 @@ test("every other place that states the Node version agrees with that floor", ()
                 : "the Dockerfile no longer builds on a `node:` image",
           },
         ]),
+    // `@types/node` is not a runtime, so it cannot lose unflagged node:sqlite — but it is the
+    // API surface the typecheck believes in, and a major behind the floor means `tsc` is
+    // checking this code against a Node older than the only one the package supports. That
+    // direction is the harmful one: the types then have no opinion about anything added since,
+    // so a real API reads as a type error and the fix people reach for is a cast. Newer than
+    // the floor is allowed for the same reason it is allowed for .nvmrc — it describes a Node
+    // this code is permitted to run on.
+    typesNode === undefined
+      ? { label: "@types/node", major: null, problem: "@types/node is no longer a devDependency" }
+      : fromText("@types/node", typesNode.replace(/^\D+/, "")),
   ];
   // "Node 24+" IS the floor claim, so here the numbers have to be equal, not merely clear it.
   const exactly: Member[] = [

@@ -164,6 +164,20 @@ fi
 curl -sf "$BASE/health" | jq -e '.status=="ok"' >/dev/null \
   && pass "health ok (booted in ${boot_elapsed}s)" || fail "health" "no ok"
 
+# Same endpoint, so no step number of its own: the probe also names the build that answered.
+# That is the one place an operator outside the container can ask which build is running —
+# everything else that answers it (the base_url line at boot) needs the container's stdout.
+# Compared against package.json rather than a literal, so a release bump does not have to
+# remember this line: what is tested is that the route reads the file it claims to read, not
+# that the version is any particular string.
+health_version=$(curl -sf "$BASE/health" | jq -r '.version')
+pkg_version=$(jq -r '.version' package.json)
+if [ "$health_version" = "$pkg_version" ]; then
+  pass "health reports version $health_version"
+else
+  fail "health version" "GET /v1/health said \"$health_version\"; package.json says \"$pkg_version\""
+fi
+
 echo "==> 1a. a per_agent key naming no agent is reported at boot"
 # The config above puts `table:` under `providers.per_agent`. Nothing dispatches that name,
 # so `resolveAgentModel` finds no override and the call takes the provider's own model: the

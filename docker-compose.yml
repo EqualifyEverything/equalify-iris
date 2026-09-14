@@ -9,6 +9,13 @@ services:
   iris:
     build: .
     image: equalify-iris:latest
+    # Come back after a crash or a host reboot, but stay down when an operator stops it —
+    # this is the reference deployment for a machine nobody is watching. `docker compose up`
+    # keeps a container in the foreground either way; the policy is what survives the reboot.
+    restart: unless-stopped
+    # No `healthcheck:` here on purpose: the image declares one (`HEALTHCHECK` in the
+    # Dockerfile) and compose inherits it, so `docker compose ps` reports health without a
+    # second copy of the command to keep in step with the first.
     ports:
       - "8080:8080"
     environment:

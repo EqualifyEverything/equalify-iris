@@ -143,11 +143,15 @@ cp .env.example .env          # fill in values
 docker compose up
 ```
 
-Check it's alive:
+Check it's alive, and which build answered:
 
 ```bash
 curl http://localhost:8080/v1/health
+# {"status":"ok","service":"equalify-iris","version":"0.1.0"}
 ```
+
+The container polls that same route itself (`HEALTHCHECK` in the `Dockerfile`), so
+`docker compose ps` reports the service healthy or not without you asking.
 
 Or just open the **accessible browser app** at the root for a no-API walkthrough — no sign-in, no
 token (upload page images → convert → view the accessible HTML):
@@ -334,6 +338,7 @@ src/
   store/                 # node:sqlite metadata store + on-disk session layout
   routes/                # /v1 endpoints
   index.ts               # server entry point
+public/                  # demo.html — the whole browser app, served at / (one file, no build)
 data/                    # sessions/, tmp/, and the SQLite DB (created at runtime)
 ```
 
