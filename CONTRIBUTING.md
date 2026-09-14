@@ -82,7 +82,7 @@ What it asks for:
 
 - **One idea per sentence.** If a sentence needs a second read, split it.
 - **The claim first, the caveat after.** Never the reverse.
-- **A number instead of an adjective.** "About 11¢ a page" beats "cost-effective". Anything you
+- **A number instead of an adjective.** "About 10.7¢ a page" beats "cost-effective". Anything you
   assert about behaviour should be checkable against code, a test, or a named benchmark round.
 - **No jargon without a gloss on first use**, and no new term where a plain one exists.
 - **No repetition.** A paragraph that restates the one above it gets deleted, not softened.
