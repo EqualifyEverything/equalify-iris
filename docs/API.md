@@ -3194,104 +3194,51 @@ loop allows.
 Half of the one list conversion the Copy Editor is licensed to make (`iteration`, `shape`, plus
 `before` and `after`, each `{ items, lettered, printed, printed_lettered, doubled }`).
 
-The licence: a bare `<ol>` whose every item's text opens with one sequence's marker — `(a)`, `(b)`,
-`(c)` — is a list whose marker was transcribed into its items instead of set on the list, and the
-editor may set the `type` those markers show **and** strip them from the text. That is one change,
-and each half of it alone is a defect:
+The licence is atomic: a bare `<ol>` whose every item's text opens with one sequence's marker —
+`(a)`, `(b)`, `(c)` — may have the `type` those markers show set **and** the markers stripped from
+the text. That is one change, and this line fires on either half of it alone:
 
-* `shape: "marker_announced_twice"` — an item prints **the marker the list announces**, so a reader hears
-  "a" and then "(a)", or "1" and then "(1)". The same defect an extraction can produce, arriving from the
-  review loop instead. Read off `doubled`, which is counted **per item**, so a round that sets the `type`
-  and strips only some of the items is caught: the item that kept its own marker is the one a reader
-  meets.
-* `shape: "text_markers_gone"` — **lettered** markers left the items and the list did not gain them, so
-  a list the page printed `(a)`, `(b)`, `(c)` now prints 1, 2, 3 and **no copy of the letters is left in
-  the document**. This is the loss.
+| `shape` | What happened |
+| --- | --- |
+| `marker_announced_twice` | An item prints **the marker the list announces**, so a reader hears "a" and then "(a)" — the same defect an extraction can produce, arriving from the review loop instead |
+| `text_markers_gone` | **Lettered** markers left the items and the list did not gain them, so a list the page printed `(a)`, `(b)`, `(c)` now prints 1, 2, 3 and no copy of the letters is left in the document. This is the loss |
 
-The counts, all read off the flattened view because that is where a `type` and a transcribed marker are
-visible at once: `lettered` is items whose **announced** marker is not a digit; `printed` is items whose
-own text opens with a marker of any shape; `printed_lettered` is those of them whose marker is not a
-digit; `doubled` is items that print **the marker the list announces**, token against token and
-case-insensitively.
+A complete conversion logs nothing: the markers leaving the text are balanced by the list announcing
+them, and no item ends up holding both.
 
-That comparison is by **value**, and every weaker version of it reported something a reader does not hear
-twice. A lettered list whose item prints `12.` is a statute's clause number under its own marker —
-`(a) 12. Payments…` is an ordinary shape — so a reader hears "a" and then "12", one marker and a number.
-`(a) (i) Payments` is a marker and a roman **sub**-marker, and a bare `<ol>` whose item prints `12.`
-announces `1` and reads `12`: those are the same clause number in each alphabet, and both are matches on
-kind. A bare `<ol>` whose item prints `(1)` **is** the doubling, and it is the kind the corpus holds.
-Where the two disagree the other way — announced `1`, text reads `(a)` — nothing is doubled either: that
-list is missing the `type` that would announce its letters, and the Reader prompt says the text's copy
-must **stay** until it has one. Those are the Reader prompt's two named branches — the second named by the
-shape its repair is true of, a **digit-announced** list whose items print letters or roman numerals, and
-not by "they disagree in kind", which also covers announced `a` beside a printed `12.` and so claimed the
-third case's own example. The code's third state is the prompt's third case: an item whose text opens with
-a marker that is **not the one the list announces**, and is not a letter or roman numeral under a list
-announcing digits — announced `1`, text reads `12.`, or announced `a`, text reads `12.` — is not one marker
-printed twice, so neither copy may be dropped and `doubled` does not count it. The prompt splits it
-further, because the code does not have to and a report does, and it splits on **what `start` can
-announce**: `type` carries a marker's kind and `start` only its count, so printed markers of the **same
-kind** as the announced one running consecutively from somewhere else are a list missing the `start` that
-would announce those very markers, and that is the report. Markers of a different kind, or markers that are
-not one consecutive run, are the document's own clause numbering and stay in the text, because no `start`
-reaches them: `start="12"` on an `<ol type="a">` announces `l.`, `m.`, `n.`, a marker no page printed and
-the same invention the prompt forbids nine lines later. So the split here is three ways
-and not two, and it was worth saying, because reading the prompt as two complementary branches is what
-made `doubled` a kind test for two commits. `type`, `start` and `value` all
-feed the announced marker, so `<ol type="a" start="3">` with an item printing `(c)` counts.
+The five counts, all read off the flattened view because that is where a `type` and a transcribed
+marker are visible at once:
 
-An item printing a marker that **contradicts** the announced one — `(b)` on an `<ol type="a">`'s first
-item — is not counted, and is not this event's question. Neither half of the licensed conversion can
-produce it: the licence sets the `type` those very markers show, so its half-edits leave the two agreeing
-by construction, and a disagreeing pair is a mis-set `type` or `start` rather than half a conversion.
+| Count | Items it counts |
+| --- | --- |
+| `items` | Every item in the block |
+| `lettered` | Those whose **announced** marker is not a digit |
+| `printed` | Those whose own text opens with a marker of any shape |
+| `printed_lettered` | Those of `printed` whose marker is not a digit |
+| `doubled` | Those printing **the marker they are announced with**, compared by value, token against token, case-insensitively |
 
-`text_markers_gone` reads `printed_lettered` and not `printed`, because **a digit leaving an item's text
-is a repair and not a loss**: an `<ol>` announces 1, 2, 3 by itself, so a digit the text repeats is a
-second copy of what the list already says, and the review prompt asks for that copy to go. That is the
-more common of the two shapes in the corpus, so reading `printed` would have put "the loss" on the
-branch a reviewer fires on first.
+**`doubled` is per item, not a total**, so a round that sets the `type` and strips only some of the
+items is caught — the item that kept its own marker is the one a reader meets. And
+`text_markers_gone` reads `printed_lettered` rather than `printed`, because a digit leaving an item's
+text is a repair: an `<ol>` announces 1, 2, 3 by itself, so a digit the text repeats is a second copy
+of what the list already says.
 
-A complete conversion logs nothing: the lettered markers leaving the text are exactly balanced by the
-list announcing them, and no item ends up holding both.
-
-Two silences, both stated so they are limits rather than surprises. **Silent where the round changed
-`items`**: a deleted item takes its printed marker out of the count with it, and removing content the
-document printed twice is what the loop is for. **Silent where one list's conversion pays for another's
-destruction**, because every count here is a block total — a round that converts the first `<ol>`
-properly and strips the second one's letters without giving it a `type` leaves `lettered` risen and
-`printed_lettered` fallen, which is what a single correct conversion looks like. `flatten` marks items
-and never the list they belong to, so splitting these counts per list means a second renderer of the
-announced marker beside `markerStyle`, and the cheap substitute (a new list wherever the sequence
-restarts) is wrong on any list carrying `start`. The block is the grain the rest of the review's loss
-accounting uses.
-
-Both of those are silences about edits the editor may make. A third thing this cannot see is why
-`EDITOR_SYSTEM`'s conversion licence stays scoped to a sequence beginning where the list's own count
-does. The Reader reports a same-kind offset run — items printing `12.`, `13.` under a list counting 1, 2 —
-as a list missing its `start`, and the editor is told to report that shape rather than convert it, so no
-count here moves either way today. Were the licence widened to let it set `start` and strip the text, the
-destructive half of that change would be invisible on the **digit** half of the shape: markers stripped
-with no `start` set deletes the document's only record of its numbering, and it produces the same five
-counts as the whole change, because `printed_lettered` was already 0 and stays 0. The lettered half —
-`(c)`, `(d)` stripped from an `<ol type="a">` — is caught. That asymmetry is a silence to close before the
-licence moves, not after.
-
-A printed marker is up to three digits, a roman **number**, or a single letter **closed by** `)` or `]`.
-Each narrowing is a false positive this had: `cm.` and `ml.` are runs of roman letters that are not
-numerals, `(see)` is three letters and no numeral, `J. Smith chaired the committee` is an initial, and
-`(e.g. the totals)` is that same initial with an opening bracket in front of it — a copy-edit round
-recasting either sentence is ordinary work and must not log a lost marker, so an opening bracket alone
-does not qualify a single letter. Two or more roman letters keep the looser closer, and the asymmetry is
-the ambiguity itself: `ii.` cannot be an initial, `i.` can. The roman alphabet is `i`, `v`, `x` only,
-which caps a roman marker at `xxxix` — admitting `l`, `c`, `d` and `m` is what made `cm.` and `ml.`
-matches in the first place. A lettered marker is one letter, so a list past its twenty-sixth item —
-announcing `aa` with an item printing `(aa)` — is invisible to **both** branches and not only to the
-doubling one. The cost of all of it is a marker genuinely printed `a.` or `i.` with no bracket, or `(aa)`
-on a list that long, which this does not see.
+**Three limits before counting a corpus off this.** Two are silences about edits the editor may make.
+It is **silent where the round changed `items`**, since a deleted item takes its printed marker out
+of the count with it. And every count is a **block total**, so one list's correct conversion pays for
+another's destruction in the same reply: converting the first `<ol>` properly and stripping the
+second one's letters leaves `lettered` risen and `printed_lettered` fallen, which is what a single
+correct conversion looks like. The third is the shape of a printed marker — up to three digits, a
+roman **number**, or a single letter **closed by** `)` or `]` — so a marker genuinely printed `a.`
+with no bracket, or `(aa)` on a list past its twenty-sixth item, is invisible to **both** branches.
 
 This is also the line that says which kind of shrink a `refusal_with_loss` was looking at. The
 licensed strip removes visible text, so the block lands in `shrunk` exactly as a real loss does, and
 neither that report nor the flattened coverage comparison can tell the two apart on its own.
+
+Why the licence is scoped the way it is, why `doubled` compares values rather than kinds, and what
+the marker shape costs, is in [design notes — the flattened view and the one conversion it
+polices](design-notes.md#the-flattened-view-and-the-one-conversion-it-polices).
 
 ### `editor_truncated`
 
@@ -3480,86 +3427,67 @@ lose part of a document and read the rest.
 
 ### `reader` / `editor`
 
-Per-iteration review-loop progress: the Reader's `issues` count, and whether that round's
-correction `changed` the document. A round answered piece by piece carries `sections` and
-`corrected` as well, which is how a log tells one from an ordinary round (`editor_patch`) — and
-how much of the document the corrections actually reached. On a **salvaged** round it carries
-`blocks_reached` of `blocks` too (the pair `editor_salvaged` calls `reached` and `of`), and then
-`covers: "remainder"` beside the section counts, because those sections are the sections of the
-tail the reply never got to and not of the document (#295): a truncated round that was salvaged
-and sectioned corrected `blocks_reached` blocks with the whole document in view *and* `corrected`
-of `sections` pieces of what was left.
+Per-iteration review-loop progress: the Reader's `issues` count, and whether that round's correction
+`changed` the document.
 
-Without those fields this line — the one a reader greps per round — would read as document-wide
-coverage on the one round where the section counts are over something smaller. A truncated round
-that rescued nothing has **no** `editor` line, which is how it is told apart from a round that ran
-and changed nothing (`review_converged`).
+**Which fields are on the line says what shape the round took.** A round answered piece by piece
+carries `sections` and `corrected`, which is how a log tells one from an ordinary round
+([`editor_patch`](#editor_patch)) and how much of the document the corrections reached. A **salvaged**
+round carries `blocks_reached` of `blocks` too — the pair [`editor_salvaged`](#editor_salvaged) calls
+`reached` and `of` — and then **`covers: "remainder"`** beside the section counts, because those
+sections are the sections of the tail the reply never got to and not of the document (#295). So a
+truncated round that was salvaged and sectioned corrected `blocks_reached` blocks with the whole
+document in view *and* `corrected` of `sections` pieces of what was left. Without `covers`, the line a
+reader greps per round would read as document-wide coverage on the one round where the section counts
+are over something smaller.
 
-`chars_before` / `chars_after` and `text_chars_before` / `text_chars_after` are the size of the
-body that entered the round and the size of the one that left it, whole and with the markup taken
-out — the same two readings `page_corrected` carries, so a round and a page correction can be read
-against each other. What the round produces is adopted for the body **verbatim** — each block the
-editor returned in place of the one it named, every block it did not name carried across character
-for character — so without these the body that entered a successful round is gone and the ratio it
-moved by is unrecoverable: before they existed the distribution of a legitimate round was
-measurable only on the rounds that FAILED, which is three samples on one document (issue #174).
+**A truncated round that rescued nothing has no `editor` line at all**, which is how it is told apart
+from a round that ran and changed nothing ([`review_converged`](#review_converged)).
 
-Both pairs, because a length alone cannot say whether a round lost content or lost wrappers:
-markup-only work leaves the prose pair equal and moves the whole-fragment one, and a round that
-deleted a paragraph moves both. Both published ranges are whole-fragment ratios, and they are not
-both this line's quantity: 0.62–2.32 over 265 page corrections is delivered-against-given, as
-here, while 0.982–0.984 over the three rounds is the *reply* against the body that went in,
-reconstructed from `agent_call`. This line reports 1.000 for those same three rounds, because a
-reply with nothing usable in it is a body handed back untouched — so the published span and a
-fresh one are the same rounds measured two ways.
+**Three readings of size, all on the line whatever fired.**
 
-The prose pair is what the floor on this path is read on, and the four rounds that first carried
-it are what placed the number: they land at 0.997–1.006 of the body they were given, and a reply
-under half is refused (`editor_shrank`). What the three earlier rounds *do* show beyond length is
-structure: one of them dropped 5 of 7 lists and 13 of 47 list items while its length moved 1.6%,
-which is an argument for a structure count rather than for either size — so `structure_before` /
-`structure_after` carry one, counting headings, paragraphs, lists, items, terms, definitions,
-tables, captions, rows, header cells, data cells, images and links in the body on each side of the
-round.
+| Fields | What they measure |
+| --- | --- |
+| `chars_before` / `chars_after` | The body that entered the round and the body that left it, whole |
+| `text_chars_before` / `text_chars_after` | The same two, with the markup taken out |
+| `structure_before` / `structure_after` | Counts of headings, paragraphs, lists, items, terms, definitions, tables, captions, rows, header cells, data cells, images and links in the body on each side |
 
-Full counts, because a ratio needs its denominator. Grouped, and `h1`-`h6` into one number in
-particular: the page agent's rules promote a sub-topic the page named, make a printed group label
-the parent of the cluster under it, and put a procedure's step one level under its heading, so a
-round that re-levels a section is doing its job and a per-level count would report every one of
-those as a heading lost. What no rule asks for is a heading that stops existing, which is what
-this number sees. Since #271 that is acted on and not only counted — on the other line and at a
-different grain:
+The first two are the same pair [`page_corrected`](#page_corrected) carries, so a round and a page
+correction can be read against each other. Both, because a length alone cannot say whether a round
+lost content or lost wrappers: markup-only work leaves the prose pair equal and moves the whole
+one, and a round that deleted a paragraph moves both. **The prose pair is the one the floor reads**
+(`editor_shrank`) — a reply under half the prose it was given is refused.
 
-`editor_patch`'s `navigation_lost` reads the same fold per BLOCK, where the question is whether
-one replacement gave up its heading, not what proportion of the document's headings are left. That
-is why a fall can be read there when no ratio can be placed here: a block's heading either
-survived its rewrite or it did not, and there is no denominator to be wrong about. Read the
-residual as unwatched, not as covered: a round that rewrote every heading to the *same* level
-leaves no downward skip, so the re-lint's `heading-order` is silent on it (that rule fires only
-where a level goes down by more than one), `headings` is unchanged, and the prose pair is equal —
-every level distinction gone with nothing on the line to say so.
+`structure_before` / `structure_after` are full counts, because a ratio needs its denominator, and
+`h1`-`h6` are folded into one number so that the re-levelling the page rules ask for is not read as
+headings lost. Header cells are counted apart from data cells, and `<caption>` is counted; wrappers
+(`<section>`, `<div>`) are not, since unwrapping a mis-structured page is one of the corrections this
+loop is for.
 
-Header cells are counted APART from data cells for the same missing-second-opinion reason in the
-direction that costs nothing: no axe rule fires on a `<th>` demoted to a `<td>`, which is the loss
-that strips a table's header association from a screen reader, so folding the two would report
-that round as no structure moved. `<caption>` is counted for the same reason. Wrappers
-(`<section>`, `<div>`) are not counted, since unwrapping a mis-structured page is one of the
-corrections this loop is for. Read them knowing which way that evidence points, because the next
-bench round settled it and it went the other way: on those three rounds the structure counts were
-already the *less* stable number, moving in both directions on rounds that were working, and the
-first round to log all three had one turn a 55-item `<dl>` into list items — `terms` 55 → 3, a
-ratio of 0.055 — while its prose moved 0.3%.
+**Four things to know before counting a corpus off these.**
 
-So no threshold on a structure count both permits that round and refuses a reply carrying a fifth
-of the document, and the floor reads the prose pair instead (`editor_shrank`). All three readings
-stay on the line regardless: two of them are what a person reads once the third has fired. The
-sizes are the **body**: the wrapper and the `@`-comments after `</main>` are added downstream and
-are not what any round returned, and they are taken after the deprecated-role strip, so they
-describe the body that ships. On a sectioned round they are still the whole body's, which is why
-`sections` on the same line matters to anyone reading them as a distribution: one section's
-*reply* is a fraction of the body it belongs to (0.016–0.379 on the bench rounds) because it is
-one section, and a round whose reply carried nothing usable reports equal sizes by construction,
-with `editor_no_output` beside it to say so.
+- **The sizes are the body.** The wrapper and the `@`-comments after `</main>` are added downstream
+  and are not what any round returned, and the sizes are taken after the deprecated-role strip, so
+  they describe the body that ships.
+- **On a sectioned round they are still the whole body's**, which matters to anyone reading them as a
+  distribution, since one section's *reply* is a fraction of the body it belongs to.
+- **A round whose reply carried nothing usable reports equal sizes by construction**, with
+  [`editor_no_output`](#editor_no_output) beside it to say so.
+- **The published ratios are not all this line's quantity.** 0.62–2.32 over 265 page corrections is
+  delivered-against-given, as here; 0.982–0.984 over three rounds is the *reply* against the body that
+  went in, reconstructed from `agent_call`. This line reports 1.000 for those same three rounds.
+
+**The structure counts do not gate, and the residual is unwatched rather than covered.**
+[`editor_patch`](#editor_patch)'s `navigation_lost` reads the same heading fold per BLOCK, where the
+question is whether one replacement gave up its heading rather than what proportion of the document's
+headings are left — which is why a fall can be acted on there when no ratio can be placed here. A
+round that rewrote every heading to the *same* level leaves no downward skip, so the re-lint's
+`heading-order` is silent on it, `headings` is unchanged and the prose pair is equal: every level
+distinction gone with nothing on the line to say so.
+
+Why the floor reads the prose pair rather than the whole-body size or the structure counts, and what
+the structure counts were measured to be worth, is in [design notes — what the review loop's structure
+counts count](design-notes.md#what-the-review-loops-structure-counts-count).
 
 ### `reader_issues_dropped`
 
@@ -3632,227 +3560,104 @@ attribute was meant to be is not this stage's to decide.
 
 ### `editor_patch`
 
-What one ordinary correction round's reply actually did to the body, block by block (#250). The
-editor is shown the body as numbered top-level blocks and answers with the blocks it changed, so
-this line is the whole accounting:
+What one ordinary correction round's reply actually did to the body, block by block (#250). The editor
+is shown the body as numbered top-level blocks and answers with the blocks it changed, so this line is
+the whole accounting.
 
-`blocks` in the body, `edits` named in the reply, and how many were `applied`, `deleted` (a block
-emptied with `"html": ""`) — those four always, so a round that named nothing is still on the
-record. Then, only when non-zero, what was not used:
+**Four fields are always there**, so a round that named nothing is still on the record: `blocks` in the
+body, `edits` named in the reply, and how many were `applied` and `deleted` (a block emptied with
+`"html": ""`). `applied` means applied to the body that goes on, so a block that was refused, or held
+back for dropping a heading, is not in it.
 
-`unchanged` (a block returned byte-identical to the one it replaces — paid for and delivered as it
-stood), `unknown` (block numbers that are not in the body: out of range, negative, or not whole),
-`duplicate` (a second edit for a block already named; the first is kept), `incomplete` (a
-replacement whose markup does not close what it opens, which is what a reply cut off mid-block
-looks like), `markers` (`<!-- @block N -->` comments copied back into a replacement and stripped
-out of it) and `unreadable` (entries in the array that are not an edit at all).
+**Six more appear only when non-zero**, and a line carrying any of them is a reply that did not follow
+the contract in some way:
 
-Four of those are a **refusal** — `unknown`, `duplicate`, `incomplete`, `unreadable`: that block
-keeps its original text, and the rest of the reply is still applied. The other two are costs on
-the record rather than rejections, which is why they are named apart: an `unchanged` block is
-delivered exactly as it stood, and a stripped `markers` comment leaves a replacement that is then
-applied like any other.
+| Field | What it counts | Effect |
+| --- | --- | --- |
+| `unchanged` | Blocks returned byte-identical to the one they replace | Delivered as it stood — output paid for to say nothing |
+| `markers` | `<!-- @block N -->` comments copied back into a replacement | Stripped out, then applied like any other |
+| `unknown` | Block numbers the body does not have: out of range, negative, or not whole | Refused |
+| `duplicate` | A second edit for a block already named — the first is kept | Refused |
+| `incomplete` | A replacement whose markup does not close what it opens, or that carries an end tag closing nothing | Refused |
+| `unreadable` | Entries in the array that are not an edit at all | Refused |
 
-`incomplete` covers both ends of the same question — a replacement that leaves an element open,
-and one carrying an end tag that closes nothing (`</figure><p>x</p>`, which a parser ignores and
-which would splice an unbalanced tag into the delivered bytes for `delivered_markup` to report).
+A refusal costs that block and nothing else: it keeps its original text and the rest of the reply is
+still applied. `unchanged` and `markers` are on the record as costs rather than rejections, which is
+why they are named apart.
 
-`shrunk` counts applied replacements carrying less of the document than the block they replace —
+**Two readings of what the round took away, at two grains.**
+
+`shrunk` counts applied replacements carrying less of the document than the block they replace, and is
 on the line whenever it happened, because that is one of the ordinary ways this contract removes
-content the document printed twice. Read as the **prose**, plus the two things a block holds that
-carry no words — `<img>` and `<a>` — plus one structure count, `headings`. The prose, so that
-unwrapping a mis-structured block — shorter markup, every word kept — is not counted as content
-leaving; the images and links because a source block that hands back its figcaption and drops the
-image is a loss no prose comparison can see, the words being unchanged, and an image with its alt
-text leaving the deliverable is worse than a sentence and not smaller.
+content the document printed twice. It is read as the **prose**, plus the two things a block holds
+that carry no words — `<img>` and `<a>` — plus `headings`, folded across `h1`-`h6`.
 
-Headings for the same reason in the third direction (#271): a heading rewritten as a paragraph of
-the same words keeps every size on every line equal and takes away the only means a screen-reader
-user had of finding that content.
+`navigation_lost` is `{ "headings": 1, "items": 2, "rows": 1 }`: how many of each stopped existing,
+read on the **joined body** rather than block by block, and present only where that body's prose did
+**not** shorten. The grain differs because a reorder is a pair of edits under this contract — a heading
+moved down past a paragraph is one block giving it up and another taking it — so a sum of per-block
+falls would report a document that kept every heading as having lost one.
 
-`h1`-`h6` are folded into one number, so the re-levelling this loop asks for does not move it, and
-the one heading removal the prompt does sanction — a title the pages reprinted — takes that
-title's words with it and is already a prose shortfall. Still not every structure count: splitting
-one paragraph in two, merging two the extractor split across a page turn, or correcting a table's
-headers (`<td>` → `<th>`, which takes `cells` down by exactly the number corrected) are
-corrections this loop asks for and each moves a count down while taking nothing out of the
-document.
+**Three limits before counting a corpus off `navigation_lost`.**
 
-`navigation_lost` is the same reading at a different grain, widened past the one count that gates
-to the two that do not: `{ "headings": 1, "items": 2, "rows": 1 }`, how many of each stopped
-existing, read on the **joined body** rather than block by block and present only where that
-body's prose did **not** shorten. Two conditions, each doing work. The grain, because a reorder is
-a pair of edits under this contract — `EDITOR_SYSTEM` sanctions "reorder blocks", so a heading
-moved down past a paragraph is one block giving it up and another taking it — and a sum of
-per-block falls would report a document that kept every heading as having lost one.
+- **One sanctioned deletion anywhere in the reply silences it for the whole round.** A round that drops
+  a reprinted title in one block and demotes a real heading in another logs nothing here. It
+  under-collects on purpose.
+- **`items` and `rows` do not gate**, because content leaving one of those can land in a different
+  structure a reader can still navigate: a `<ul>` rewritten as the `<dl>` the page rules ask for takes
+  `items` to 0, and a list mis-extracted as a single-column table, corrected, takes `rows` to 0.
+- **A rate quoted off this field alone is a rate over block-patch rounds.** The same reading is
+  collected on the other two apply paths — a whole-body reply and the section fallback — under its own
+  line ([`editor_navigation`](#editor_navigation), #375); before that it was computed here and only
+  here.
 
-`shrunk` is deliberately the other way round, per block, because its job is to spot the source
-half of a move so that a refusal on the landing half cannot take the heading with it. The prose
-condition, because a structure falling alongside a word loss is the ordinary shape of every
-deletion the prompt sanctions and is already `shrunk`, so counting it here too would put the
-sanctioned case and the silent one in one number and leave neither readable. At this grain that
-condition is coarse and knowingly so: one sanctioned deletion anywhere in the reply silences the
-count for the whole round, so a round that drops a reprinted title in one block and demotes a real
-heading in another logs nothing here.
+**`discarded` names the case where the reply is not applied in part**, and which of three it was:
 
-The alternative is worse rather than better — two headings are gone, one of them legitimately, and
-nothing in the counts says which — and since this number is a sample used to decide whether
-`items` and `rows` can gate, a filter that under-collects is right where one that over-collects is
-not. Since #331 the `headings` half of this reading is no longer only a reading, and that
-coarseness is what it costs: a body that would have carried fewer headings than the body it was
-given, with its prose no shorter and nothing refused beside it, has the blocks that dropped them
-handed back and the rest of the reply applied (`headings_reverted` below), but the round that
-demotes one real heading *and* drops a reprinted title takes words with it, so nothing appears
-here and nothing is handed back here.
+| `discarded` | What it means |
+| --- | --- |
+| `all_refused` | Edits were sent and not one could be used |
+| `refusal_with_loss` | A refusal in the same reply as a block that gave content up — `deleted` or `shrunk` |
+| `headings_lost` | The body this round would have delivered has fewer headings than the body it was given, with its prose no shorter and nothing refused anywhere — and handing back the blocks that dropped them could not be shown to fix it (#331) |
 
-Per-block `shrunk` sees that demotion, and turns it into a refused round only where the same reply
-also holds a refusal (`refusal_with_loss`) — so the round that is both sanctioned and silent in
-one reply is still the shape this contract cannot tell apart, and it is the reason the count above
-under-collects rather than over-collects.
+Either way the body is handed back untouched and the next round is a retry (see
+[`editor_no_output`](#editor_no_output) for why that is not convergence).
 
-`items` and `rows` are reported without gating, because there the content can land in a DIFFERENT
-structure a reader can still navigate with every word intact — a `<ul>` rewritten as the `<dl>`
-the page rules ask for takes `items` to 0, and a list mis-extracted as a single-column table,
-corrected, takes `rows` to 0 — so reading either as a loss would report a working round as damage.
-A grouped total does not rescue them: summing the list-ish counts makes `<ul>` → `<dl>` rise but
-makes the measured `runs-231` round (a 55-item `<dl>` rewritten as list items) fall.
+**The heading fall is held back per block, not per round.** `headings_reverted` lists, in ascending
+order, the block numbers whose own heading count fell **and** that gave nothing to another edit in the
+reply; those blocks keep their original text, the reply is re-applied without them, and the round is
+delivered with everything else it corrected. So a line carrying `headings_reverted` with no `discarded`
+beside it reads as *`applied` shipped and `headings_reverted` did not* — it is the only place that
+difference is visible.
 
-What would settle it is the rate at which a working round moves them, which no round on file
-measures, so a line carrying `navigation_lost` with no `shrunk` beside it is that population being
-collected. That population is now collected on the other two apply paths as well, under its own
-line (`editor_navigation` below, #375) — this reading was computed here and only here until then,
-so a rate quoted off this field was a rate over the block-patch rounds alone and did not name that
-as its population. The evidence for the headings half: 13 of 151 bench rounds lost headings and 5
-of those lost no text at all (#271, measured outside this repo in equalify-iris-bench's
-`editorround.mjs`, run `runs-editor-1`).
+Where the revert was not available, one of these says which attribution failed, since `headings_lost`
+has three reasons behind it:
 
-One case the headings reading counts and should not, named rather than compensated for:
-`EDITOR_SYSTEM` also sanctions "correct labels and table headers", so a field label the extractor
-emitted as `<h4>Name</h4>` corrected into a `<label>` inside the same `<form>` block keeps every
-word and takes `headings` down. Discounting a fall wherever `captions`/`terms`/`header_cells` rose
-would cover a heading turned into a `<caption>`, a `<dt>` or a `<th>` but not that one, since
-`<label>` and `<legend>` are not counted at all — so the cost is accepted rather than compensated
-for, and since #331 it is paid with no refusal needed beside it.
+| Field | Why the blocks could not be handed back |
+| --- | --- |
+| `headings_gained` | A heading arrived somewhere it was not, so a departure cannot be matched to an arrival. Counted, because one arrival beside one fall is a move and eleven is a restructure |
+| `headings_dropped` | No heading arrived, but a block that dropped one gave content to another edit in the same reply, so re-seating it would print those words twice. **Every** block whose own count fell, which is the reading of what the model did |
+| `headings_abandoned` | Beside `headings_dropped`: the blocks that COULD have been handed back and were refused with the round anyway. Subtracting it leaves the blocks that could not be, so both readings come off one line |
+| `headings_recheck: true` | Beside `headings_dropped`: a fall survived the revert that no block still dropping a heading explains. Unreachable by construction, so its firing at all is the finding |
 
-That is why what it costs had to come down to one block: the `<form>` block holding the corrected
-label is handed back with its `<h4>` intact and every other correction in the reply — an alt text,
-a table header, a split paragraph — is applied and delivered.
+`headings_gained` and `headings_dropped` are mutually exclusive on a line, and `headings_reverted`
+present *with* `discarded` is the fourth shape — blocks were handed back and nothing was left to
+apply. What is worth reading off a `navigation_lost` `headings` count is its magnitude: one heading
+gone is a repeated title resolved a little too thoroughly and 84 is a document flattened.
 
-`editor_headings_gated_rate` in the [quality tally](#quality-tally-shared-secret-off-by-default) is
-what says how often it happens. `discarded` names the case where the reply is NOT applied in part,
-and which of the three it was:
+**One case the headings reading counts and should not**, named rather than compensated for:
+`EDITOR_SYSTEM` sanctions "correct labels and table headers", so a field label the extractor emitted as
+`<h4>Name</h4>` corrected into a `<label>` inside the same `<form>` block keeps every word and takes
+`headings` down. `<label>` and `<legend>` are not counted at all, so no discount reaches it. Since #331
+the cost is one block on one round: that `<form>` block is handed back with its `<h4>` intact and every
+other correction in the reply is applied and delivered.
 
-`all_refused` (edits were sent and not one could be used), `refusal_with_loss` (a refusal in the
-same reply as a block that gave content up — `deleted` or `shrunk`) or `headings_lost` (#331:
-`navigation_lost` on this same line reports a `headings` fall — the body this round would have
-delivered has fewer headings than the body it was given and its prose is no shorter, with nothing
-refused anywhere in the reply, which is what the first two need and this one does not — **and**
-handing back the blocks that dropped them could not be shown to fix it, because the reply also
-moved a heading somewhere else (`headings_gained`), or a block that dropped one gave content to
-another edit in the same reply and so could not be handed back (`headings_dropped`), or left
-nothing to apply once they were handed back; the ordinary heading fall is `headings_reverted`, not
-this).
+[`editor_headings_gated_rate`](#quality-tally-shared-secret-off-by-default) is what says how often it
+happens.
 
-The second is there because this contract makes a MOVE a pair of edits — the block the content
-lands in, and the block it came from — so taking the source half and refusing the landing half
-deletes content that nothing downstream can miss: the size floor cannot see one paragraph, and the
-next Reader round reads a document that no longer mentions it. Both forms of the source half
-count, because the prompt offers both ("with what is left of it, or `""` if nothing is"), and the
-shrinking one is the commoner: a move usually leaves something behind.
-
-Either way the body is handed back untouched and the next round is a retry (see `editor_no_output`
-for why that is not convergence). Each is an ordinary correction on its own, so
-`refusal_with_loss` fires only on a reply that ALREADY has a defect in it: the cost of being wrong
-about whether two such edits were really a pair is one round, and the cost of being wrong the
-other way is in the deliverable. The heading fall is the one that acts on a reply with no defect
-anywhere in it, and it is the same trade at a finer grain: every edit applied, nothing refused,
-not a word missing, and the document that would have shipped has lost part of the outline a
-screen-reader user navigates it by — a barrier of exactly the kind this pipeline exists to remove,
-introduced by the pipeline.
-
-So what is held back is the block, not the round: `headings_reverted` lists, in ascending order,
-the block numbers whose own heading count fell **and that gave nothing to another edit in the
-reply**; those blocks keep their original text, the reply is re-applied without them, and the
-round is delivered with everything else it corrected. A block may only be re-seated when nothing
-else in the reply is now holding what it held, and that has two failure modes, which are the same
-hazard from opposite ends.
-
-`headings_gained` appears in place of `headings_reverted`, carrying how many headings arrived
-somewhere they were not, when the thing that moved was a heading — a reply that both moves one and
-loses one, which this contract sanctions ("reorder blocks") and which moves three blocks' counts
-for a document that fell by one, so handing all three back would leave the moved heading in two
-places at once. The other end is the heading's WORDS moving into another block as something no
-structure count counts: the extractor's stray `<h4>Name</h4>` sibling emptied while
-`<label for="name">Name</label>` is seated inside the `<form>`, which keeps every word (so the
-fall reads as ordinary) and gains no heading anywhere (so `headings_gained` is 0).
-
-A block that **gave what it lost to another edit in the same reply** is therefore never re-seated:
-the words it no longer has, or an `<img>` or an `<a>`, turning up where another edit put something
-new. Where the words WENT, and not whether they changed, which is the narrowing #376 asked for —
-read as "are these the words it had", a block that demotes a heading and fixes a typo in the same
-`<div>` was unseatable too, so a reply whose only demotion was that block was refused entire with
-nothing having moved anywhere.
-
-A departure is still an inequality and not a shortfall, because a block can shed the heading's
-words and grow in the same edit by rewording what survives, and a "did it get shorter" test sees
-no departure at all. Nor is the re-seat licensed by size, which is the comparison that suggests
-itself and is refuted by measurement (#376): the re-applied body's prose against the fully patched
-body's is 34 against 34 on the safe shape and **24 against 59** on the duplication hazard, so
-`kept <= patched` passes the hazard by a mile — the edit that grew is the one being reverted.
-
-Arrivals are counted rather than looked up, and at word grain rather than as text: the landing
-block may have had the word already, and the words are re-expressed where they land (`Name` seated
-as `Name:`), so a set comparison or a string comparison would license exactly the re-seat that
-prints them twice. On those rounds the line carries `headings_dropped` instead: every block whose
-own heading count fell, which is the reading of what the model did rather than of what could be
-salvaged — where some of those blocks could have been handed back and were refused with the round
-anyway, they are named beside it as `headings_abandoned`, so subtracting one from the other leaves
-the blocks that could not be handed back and the presence of the field is the rate at which
-refusing the round throws a safe salvage away.
-
-A round whose revert left nothing to apply, or did not bring the count back, is also refused — the
-re-check is fail-closed, and it is read **per block** rather than on the joined body, which is the
-one place in this reading where the grain has to be the other way round. Only the blocks that
-could be handed back were, so a block that dropped a heading *and* gave its content to another
-edit keeps its edit and keeps its fall: one reply that demotes in two places — one of them the
-`<label>` migration — lands there, and it is the case above reached from the other side, so it
-logs `headings_dropped` like the other.
-
-The joined reading cannot be the test here, because it is silent wherever the body it reads is
-shorter in prose and **the revert is itself an edit that can get under that floor** — hand back
-the block that added prose and the re-applied body can be shorter than the one that came in, so a
-fall that was visible before the revert reports nothing after it, and the held block's demotion
-would ship (found in review of #376).
-
-`headings_recheck: true` is beside `headings_dropped` only where the joined body lost a heading
-and NO block still dropping one accounts for it, which is unreachable by construction — the joined
-count is the sum of the blocks' own — so its firing at all is the finding. All of them log
-`discarded: "headings_lost"` and hand the body back untouched for a retry, and which of the three
-it was is readable from the line:
-
-`headings_gained` (a heading moved), `headings_dropped` (its words moved), or `headings_reverted`
-present beside `discarded` (blocks were handed back and nothing was left to apply). The first two
-are mutually exclusive on a line. What the reading can be wrong about is a heading correctly
-re-expressed as something this count does not count (the `<label>` case above, or a reprinted
-title dropped in a way that left the prose no shorter), and being wrong now costs that one block
-on that one round rather than every other correction in the reply — which is the principle
-`applyBlockEdits` is built on, that an unusable edit costs the block it was about and not the
-document's corrections, and a gate is not exempt from it.
-
-An editor that demotes on every round therefore still delivers what it corrected on the way, round
-after round, instead of spending `max_review_iterations` re-sending the same body and shipping the
-document as it entered with its issues in `@unresolved` (`stopped_at: "cap"`) — and the run log
-names the held-back blocks round by round, which is a statement about the prompt or the model.
-What #331 asked for and this deliberately does NOT do is the narrower predicate — refuse the fall
-only in a block no reported issue asked about — because `ReviewIssue` attributes an issue to the
-source **pages** it was found on and nothing binds an edit's block to the issue it answers, so
-that reading is not available to write.
-
-The counters are the point of the design: the failure this contract could have had is a
-replacement landing on the wrong block, which is well-formed markup in the wrong place and
-invisible to everything downstream, so the block number is written above each block for the model
-to copy rather than counted by it, and every number that does not resolve is reported here instead
-of being guessed at.
+Why the gate acts on a reply with nothing else wrong with it, why an arrival is counted at word grain
+rather than looked up, why size cannot license the re-seat, and why the re-check is per block, is in
+[design notes — a heading fall with nothing else
+wrong](design-notes.md#a-heading-fall-with-nothing-else-wrong).
 
 ### `editor_whole_body`
 
