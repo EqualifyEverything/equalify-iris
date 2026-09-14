@@ -37,8 +37,8 @@ Each decision below is one bullet, and the headings only group them:
   corrections get back to the library
 - [What the lint checks](#what-the-lint-checks) — and the things it repairs without telling anyone
 - [Assembly: one document out of many pages](#assembly-one-document-out-of-many-pages) — id
-  collisions, sentences and words cut in half by a page break, and a page label that names the wrong
-  number
+  collisions, a sentence a page break cut in half, a word the printing broke at a line end, and a page
+  label that names the wrong number
 - [Joining a table split across a page turn](#joining-a-table-split-across-a-page-turn) — when two
   half-tables are one table, and what the join refuses to guess
 - [Extraction: verdicts and empty pages](#extraction-verdicts-and-empty-pages)
@@ -506,6 +506,13 @@ Places where a decision was left open, and where v1 intentionally stops:
   words the page step had already raised. The words this pass declines stay with `page_split_words` and
   its correction call, so nothing is asked twice and nothing is answered twice.
 
+  The condition reads the hyphen's own page at a third width, and it has to be exactly
+  `page_split_words`' own: `script` and `style` content in, attribute values out. That is what makes the
+  condition decline precisely the words that step raises. A closed spelling living only in an `alt` on
+  the hyphen's page therefore does not trip it — correctly, since the page step cannot see that `alt`
+  either, so nothing has been asked about the word and nothing is being reversed. Widening this width to
+  the refusing condition's would leave those words answered by no pass at all.
+
 - **The licensing condition and the refusing condition read the document at different widths, and the
   asymmetry is the point.** Licensing is the narrow one — the text a reader is shown, with `script` and
   `style` content dropped, because a `.crosshatch` selector is author metadata and the evidence this
@@ -540,8 +547,8 @@ Places where a decision was left open, and where v1 intentionally stops:
 
 - **It runs after the page-break prose join, which is the only place it can.** Before that seam closes,
   `Simi-` and `larly` are two whole words in two paragraphs. So a word broken across a page and a word
-  broken across a line are settled by the same pass, and the hyphen `prose_joined` records as kept is
-  this pass's input.
+  broken across a line are settled by the same pass, and the hyphen
+  [`prose_joined`](API.md#prose_joined)'s `word_splits` records as kept is this pass's input.
 
 ### A page label naming the image's position rather than the page's number
 
@@ -581,17 +588,17 @@ Places where a decision was left open, and where v1 intentionally stops:
   claiming a removal the page did not get. What is left is a break saying only that something ended,
   which is what the page contract prescribes for a page whose number is not known.
 
-- **Three blind spots read as a clean document, so each is counted rather than argued away.** A model
-  that leaks on EVERY page is the same input as a report printing its own positions, so the document is
-  refused and the log says so. A document whose arabic numbering restarts partway through is the
-  dangerous one: the minority run's folios coincide with the numbers in their filenames while the
-  majority's do not, so it is an active removal of TRUE labels rather than a missed leak. The check
-  cannot act on that difference but a round can count it — a restart takes out a block of consecutive
-  positions with no surviving label among them, where a leak is interleaved with the labels that
-  contradict it, which is why the shape those removals form is logged and not just their number. And a
-  positional number announced through `aria-labelledby` is not read: #333's shape is `aria-label` on both
-  failing arms, and resolving an ID reference into another element's text is a different pass on a
-  different input.
+- **Three blind spots read as a clean document, and only two of them are counted.** A model that leaks
+  on EVERY page is the same input as a report printing its own positions, so the document is refused and
+  the log says so. A document whose arabic numbering restarts partway through is the dangerous one: the
+  minority run's folios coincide with the numbers in their filenames while the majority's do not, so it
+  is an active removal of TRUE labels rather than a missed leak. The check cannot act on that difference
+  but a round can count it — a restart takes out a block of consecutive positions with no surviving
+  label among them, where a leak is interleaved with the labels that contradict it, which is why
+  `departures` logs the shape those removals form and not just their number. The third is counted
+  nowhere: a positional number announced through `aria-labelledby` is never read at all. #333's shape is
+  `aria-label` on both failing arms, and resolving an ID reference into another element's text is a
+  different pass on a different input.
 
 - **This pass runs at assembly only**, where the role strip and the `<main>` strip run at all three
   points. Deriving an offset needs every page's filename and position, and by then there is one string
@@ -2590,30 +2597,32 @@ the one gate in the loop that refuses part of a reply with no defect anywhere in
 
 - **The regression gate and the eval gate log the same shape, and no field on the line separates them.**
   Both replay fixtures under the same `agent`, both carry a null `agent_sha` and a null `agent_content`,
-  and both hardcode `step: "agent_regression"` on the `model_call` beside them. The `eval_gate` line that
-  follows sits after BOTH halves, so it does not split them either. Order and count do. The regression
+  and both hardcode `step: "agent_regression"` on the `model_call` beside them. The
+  [`eval_gate`](API.md#eval_gate) line that follows sits after BOTH halves, so it does not split them
+  either. Order and count do. The regression
   gate is awaited to completion before the eval gate starts, so every one of its lines precedes every one
-  of the eval gate's; and the two halves are the same length, because both gates read the same fixture
-  directory, sorted and capped the same way at `MAX_GATE_FIXTURES`, skip a fixture for the same two
-  reasons — a case file that will not parse, an image file that is not there — and then issue exactly one
-  call per surviving fixture. So the first half is the candidate prompt's and the second the current
-  prompt's.
+  of the eval gate's. The two halves are also the same length. Both gates read the same fixture
+  directory, sorted and capped the same way at three cases (`MAX_GATE_FIXTURES`), and both skip a fixture
+  for the same two reasons: a case file that will not parse, an image file that is not there. Each then
+  issues exactly one call per surviving fixture. So the first half is the candidate prompt's and the
+  second the current prompt's.
 
 - **Both of the count rule's caveats are themselves visible in the log**, so the rule can be checked
   before it is applied. A gate that THREW leaves a short half: a provider error or timeout on any one
   replay rejects the whole gate, neither gate call is wrapped, so the round logs
-  `feedback_training_failed` and finishes with whichever replay lines were already written still in place.
-  That is the case to watch for, because a truncated eval half read under the count rule is attributed to
-  the candidate prompt — the exact confusion the rule exists to prevent. And the fixture set can change
+  [`feedback_training_failed`](API.md#feedback_training_failed) and finishes with whichever replay lines
+  were already written still in place. That is the case to watch for, because a truncated eval half read
+  under the count rule is attributed to the candidate prompt — the exact confusion the rule exists to
+  prevent. And the fixture set can change
   between the two reads: the directory is keyed by the agent rather than by the session and the two reads
   are a whole gate apart, so another session accepting a fixture in that window can leave a two-line half
   followed by a three-line one. The paired scoring absorbs that for the scores; only the count rule
   depends on it.
 
 - **A missing `eval_gate` line does not mean the log was cut short.** A regression gate that FAILED logs
-  `agent_update_blocked` and returns before the eval gate is reached, so a round with no `eval_gate` and
-  no `feedback_training_failed` ran no eval gate and every null-SHA replay in it was the regression
-  gate's. A round carrying `feedback_training_failed` is the throwing case, and there the replays could
+  [`agent_update_blocked`](API.md#agent_update_blocked) and returns before the eval gate is reached, so a
+  round with no `eval_gate` and no `feedback_training_failed` ran no eval gate and every null-SHA replay
+  in it was the regression gate's. A round carrying `feedback_training_failed` is the throwing case, and there the replays could
   belong to either gate.
 
 - **The regression gate's verifier call is not in that population.** It emits one per fixture that
