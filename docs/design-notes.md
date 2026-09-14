@@ -539,7 +539,8 @@ is.
   750) do not reach. The block sizes are four numbers rather than two `rows x cells` strings so that
   nothing has to parse a count back out of a string, and because the cell counts are the only thing
   separating a declared header block from a header row that holds none — a distinction a rows-only
-  reading turns into a disagreement, and the first of the entry's own limits on these fields.
+  reading turns into a disagreement, which is why the entry names the cell count as the field that
+  says whether a half declared a block at all.
 
 - **The guards are not loosened here, and the reason for not loosening them has been removed rather
   than restated.** #326's recommendation against it rested on there being no artifact a looser rule
@@ -569,7 +570,8 @@ is.
   What the bytes still cannot score is upstream. A change to which tables are **paired** (the caption
   rule, the span match, adjacency) reads the whole assembled body, and a pair that was never formed
   left no bytes behind. A change to the **extraction** that produced the halves is a different
-  document, so replaying it means buying a round — which is where the instability above lives. The
+  document, so replaying it means buying a round — which is where the round-to-round instability #326
+  measured lives. The
   price of all of it is that the run log holds page markup verbatim where it used to hold captions
   and signatures: still readable only by the owner of the session the page was submitted to, and
   still absent from `/v1/quality`, but a log is now a copy of part of the document rather than a
@@ -581,7 +583,7 @@ Four of the verification's reasons are about one thing: the `[In millions of dol
 continued page reprints. It is the part of this stage that took the most rounds to get right, and
 every reason below was bought by a pair that shipped split or a defect that shipped clean.
 
-- **The four reasons, and why they are four.** The 18-pair figure above counts the note as a
+- **The four reasons, and why they are four.** The 18 measured continuation pairs count the note as a
   full-width ROW, which is how it arrived before `page.md` said where it goes; the page rule now puts
   it inside the `<caption>`, so the shape the merge meets should shift from a repeated row to a
   repeated caption and rule 6's forgiveness of the promoted row should get rarer rather than holding at

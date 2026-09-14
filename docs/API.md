@@ -2969,7 +2969,7 @@ Every decline carries both halves' header blocks, because a header comparison is
 
 | Field | What it holds |
 | --- | --- |
-| `headers_identical` | String equality on the two **full** signatures, computed at the line rather than left to a reader of the capped strings below |
+| `headers_identical` | String equality on the two **full** signatures, computed at the line rather than left to a reader of the capped `header_first` / `header_second` strings |
 | `header_rows_first` / `header_cells_first` / `header_rows_second` / `header_cells_second` | The size of each half's whole header block. `cells` counts every child of a header row, `<td>` included, because the signature does and because a header block returning as `<td>` is its own defect (`header_cells_lost`) |
 | `header_first` / `header_second` | The signatures as rule 3 compares them: per header cell, tag name, `colspan` and normalized text, cells joined with `\|` and rows with ` // `. Capped at 1,200 characters with a trailing `…` when cut |
 
@@ -3007,7 +3007,7 @@ produced from a replay must not be spliced into anything.
 to be able to say *N of M declines replayable* straight off the log, and the bound is a constant in
 the code that a reader of an old log has no way to know. A line written before this field is neither
 value, and reads as not replayable, which is what it is. The bound is 64,000 characters for the pair
-and it **refuses rather than truncates**, unlike the capped signatures above — half a table's bytes
+and it **refuses rather than truncates**, unlike the capped header signatures — half a table's bytes
 parse to a different table.
 
 **The run log carries page content, not only metadata about it.** These fields hold table markup from
