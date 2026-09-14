@@ -115,14 +115,27 @@ const canonical = (p: string) => {
   }
 };
 
-const openStorage = (): Store => {
+const openStorage = (): { store: Store; stale: number } => {
   try {
     mkdirSync(join(cfg.storage.data_dir, "sessions"), { recursive: true });
     mkdirSync(join(cfg.storage.data_dir, "tmp"), { recursive: true });
-    return new Store(cfg.storage.database);
+    const store = new Store(cfg.storage.database);
+    // Clearing the sessions a previous shutdown orphaned is this process's first WRITE, and it is
+    // in here for the same reason `new Store` is, one step further along: OPENING a database
+    // proves nothing about writing to it. SQLite opens one it cannot write without complaint and
+    // raises only when something writes, so a root-owned iris.sqlite bind-mounted into a
+    // container that drops to an unprivileged uid gets past every check above.
+    //
+    // Outside this guard, where it was, it threw a bare `attempt to write a readonly database`
+    // carrying no errno, path or uid — past every message below, including the chown that fixes
+    // it. That cost the UIC deployment eight rolled-back deploys on 2026-09-14, none of which
+    // named ownership, after the image started dropping root.
+    return { store, stale: store.failStaleSessions() };
   } catch (err) {
     const e = err as NodeJS.ErrnoException;
-    console.error(`FATAL: cannot open this deployment's storage (${e.code ?? e.message}).`);
+    // "use", not "open": a write refused by ownership is this message's commonest cause, and
+    // saying "cannot open" of a database that opened fine sends the reader to the wrong question.
+    console.error(`FATAL: cannot use this deployment's storage (${e.code ?? e.message}).`);
     // Which path is at fault, asked directly. Three candidates, not one: the database may sit
     // outside data_dir, and the database FILE can be unwritable while both directories are fine
     // (a group-writable ./data holding a foreign-owned iris.sqlite).
@@ -194,9 +207,9 @@ const openStorage = (): Store => {
   }
 };
 
-const store = openStorage();
-// Clear sessions orphaned by a previous shutdown (their in-process run is gone).
-const stale = store.failStaleSessions();
+// `stale` comes back from openStorage() rather than being read here, because the call that
+// produces it is the guarded first write above.
+const { store, stale } = openStorage();
 if (stale > 0) console.log(`Marked ${stale} interrupted session(s) as failed on startup.`);
 const app = express();
 // Whose address `req.ip` is. Off unless a deployment says how many proxies are in front

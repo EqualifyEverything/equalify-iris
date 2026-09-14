@@ -160,9 +160,9 @@ test("an unwritable data_dir names its remedy instead of throwing a stack trace"
   // assertion below would match something further down src/index.ts and the test would pass while
   // pinning nothing. That is the vacuous pass, and it is worse than a failure.
   const from = index.indexOf("const openStorage");
-  const to = index.indexOf("const store = openStorage()");
+  const to = index.indexOf("= openStorage()");
   assert.ok(from >= 0, "src/index.ts no longer defines openStorage(), so this test is pinning nothing");
-  assert.ok(to > from, "src/index.ts no longer calls `const store = openStorage()` after defining it, so the slice below would run past the guard");
+  assert.ok(to > from, "src/index.ts no longer calls openStorage() after defining it, so the slice below would run past the guard");
   const guarded = index.slice(from, to);
   assert.match(guarded, /try\s*\{/, "the startup storage setup is unguarded, so an unwritable ./data exits with a stack trace");
   assert.match(guarded, /chown/, "the startup guard does not print the chown that fixes it");
@@ -180,6 +180,26 @@ test("an unwritable data_dir names its remedy instead of throwing a stack trace"
     guarded,
     /new Store\(/,
     "opening the database is outside the guard, so an unwritable ./data that already has sessions/ and tmp/ dies one line later with an ERR_SQLITE_ERROR that names nothing",
+  );
+
+  // And the first WRITE is inside it too, which is a separate property from opening the database:
+  // SQLite OPENS a database it cannot write without complaint and raises only when something
+  // writes. So `new Store(` inside the guard is not enough on its own — a root-owned iris.sqlite
+  // under a container that drops root gets past every check above and then throws
+  // `attempt to write a readonly database` from the first write, with no errno, path or uid.
+  //
+  // Asserted against the whole file as well as the slice, because moving the call back out is the
+  // regression: it was outside for months, it cost the UIC deployment eight rolled-back deploys,
+  // and nothing about a passing suite or a working dev box shows it.
+  assert.match(
+    guarded,
+    /failStaleSessions\(\)/,
+    "the first database WRITE is outside the guard, so an unwritable iris.sqlite dies with a bare ERR_SQLITE_ERROR and the chown below never prints",
+  );
+  assert.equal(
+    index.split("failStaleSessions()").length - 1,
+    1,
+    "src/index.ts calls failStaleSessions() more than once, so one of them may sit outside the storage guard",
   );
 
   // Which is why the remedy is chosen by probing writability rather than by reading `err.code`:
