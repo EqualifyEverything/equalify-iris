@@ -1112,7 +1112,7 @@ the image. The run log entries [`page_corrected`](API.md#page_corrected),
 the rules behind them have the shape they have. What happens when the verdict itself cannot be
 obtained is [above](#extraction-verdicts-and-empty-pages).
 
-- **Four things can send a page back, and that number grew**: two until #290, three until #373 and
+- **Five things can send a page back, and that number grew**: two until #290, three until #373 and
   four until #334. So a share taken over [`trigger`](API.md#page_corrected) across rounds is taken
   over a population that changed under it — the older rounds had fewer sources to fire on.
 
