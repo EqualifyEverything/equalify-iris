@@ -71,7 +71,9 @@ things a bare run does not:
 - **`--no-sparkplug`**, which avoids a V8 bug that segfaults test children inside the
   garbage collector roughly once in ten full runs on macOS arm64. The crash needs code
   Sparkplug generates, so turning that tier off removes the path; it cost nothing
-  measurable here (two runs each, 55.8 s either way). **Drop the flag when
+  measurable here (two runs each, 55.8 s either way). It is on the test script only: `npm start`
+  and `npm run dev` keep the Sparkplug path on purpose, because one dev server dying is loud,
+  where a dead test child reads as a clean run with a short count. **Drop the flag when
   [nodejs/node#65753](https://github.com/nodejs/node/pull/65753) ships in a 24.x release** —
   it is the backport of the V8 fix, and no released 24.x has it yet.
 

@@ -313,5 +313,17 @@ test("the suite runs with Sparkplug off, which is what stops the #405 segfault",
   const pkg = JSON.parse(
     readFileSync(join(import.meta.dirname, "..", "package.json"), "utf8"),
   ) as { scripts: Record<string, string> };
-  assert.match(pkg.scripts.test, /--no-sparkplug/);
+  // Position, not presence. `node --test "test/*.test.ts" --no-sparkplug` exits 0 and prints
+  // no warning, and the child's `execArgv` does not carry the flag — anything after the
+  // positional is an argument to the runner rather than a V8 option. A reorder would leave a
+  // presence-only assertion green while dropping the protection, which is the same silence
+  // this test exists to break. So: the flag has to be a token, and it has to come first.
+  const argv = pkg.scripts.test.split(" ");
+  const flagAt = argv.indexOf("--no-sparkplug");
+  const testAt = argv.indexOf("--test");
+  assert.notEqual(flagAt, -1, "package.json's test script does not pass --no-sparkplug");
+  assert.ok(
+    testAt !== -1 && flagAt < testAt,
+    `--no-sparkplug must come before --test to reach the test children (got ${flagAt} and ${testAt})`,
+  );
 });
