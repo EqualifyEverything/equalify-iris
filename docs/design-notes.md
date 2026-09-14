@@ -37,7 +37,8 @@ Each decision below is one bullet, and the headings only group them:
   corrections get back to the library
 - [What the lint checks](#what-the-lint-checks) — and the things it repairs without telling anyone
 - [Assembly: one document out of many pages](#assembly-one-document-out-of-many-pages) — id
-  collisions, and tables and sentences cut in half by a page break
+  collisions, sentences and words cut in half by a page break, and a page label that names the wrong
+  number
 - [Joining a table split across a page turn](#joining-a-table-split-across-a-page-turn) — when two
   half-tables are one table, and what the join refuses to guess
 - [Extraction: verdicts and empty pages](#extraction-verdicts-and-empty-pages)
@@ -46,7 +47,8 @@ Each decision below is one bullet, and the headings only group them:
 - [Reading a blank-page declaration](#reading-a-blank-page-declaration) — the rule that decides
   whether a page is empty or lost, and what each clause of it cost before it existed
 - [The review loop](#the-review-loop) — the Reader, the Copy Editor, and the floors a round cannot go under
-- [Learning from feedback](#learning-from-feedback) — the eval gate
+- [Learning from feedback](#learning-from-feedback) — the eval gate, and what a training round's log
+  can and cannot tell you about the prompt it sent
 - [The provider adapters](#the-provider-adapters) — output ceilings, timeouts, and Bedrock's two dialects
 - [Running the service](#running-the-service) — the queue, upload limits, one instance per `data_dir`
 - [Designed for, and not built](#designed-for-and-not-built)
@@ -440,6 +442,9 @@ Places where a decision was left open, and where v1 intentionally stops:
   — [joining a table split across a page turn](#joining-a-table-split-across-a-page-turn). Logged as
   `table_continuations`, `table_joined`, `table_join_code_declined`, `table_join_failed` and
   `table_joins_capped`.
+
+### A sentence printed across a page break
+
 - **A sentence printed across a page break is delivered whole.** Same seam as the table, same reason
   no page could have fixed it, and a different answer: this one needs no model call, because there is
   no judgement in it (issue #248). 22 of 90 page-break markers in the reference corpus stand where a
@@ -483,6 +488,120 @@ Places where a decision was left open, and where v1 intentionally stops:
   The lowercase test has no signal in Hangul, Chinese, Japanese, Arabic or Hebrew, so those sentences
   still ship split — a join missed rather than a join got wrong, and left there because the 22 were
   measured on an English corpus. Logged as `prose_joined`.
+
+### Closing a word the printing broke at a line end
+
+- **A hyphen the printing put at a line end is closed up only where the document itself proves the
+  closed spelling**, which is what makes the decision available to a pass that never saw the page. The
+  refusing half is what makes it decidable at all: a compound joins words, so a hyphen whose right-hand
+  side is not a word cannot be a compound joint, and that is the whole of the reasoning. The three
+  conditions and what each of them stops are on
+  [`assembly_words_joined`](API.md#assembly_words_joined); this section is why each is drawn where it is.
+
+- **The third condition is a boundary between two passes rather than a safety margin.** The page
+  carrying the hyphen is `page_split_words`' ground: it raises exactly this shape, the page agent
+  answers it holding the image, and it is allowed to answer that the page really does print both
+  spellings and change nothing. Joining there would revoke that answer from a pass that never saw the
+  page. Not theoretical — without the condition, 7 of the 36 joins measured over #334's corpus are
+  words the page step had already raised. The words this pass declines stay with `page_split_words` and
+  its correction call, so nothing is asked twice and nothing is answered twice.
+
+- **The licensing condition and the refusing condition read the document at different widths, and the
+  asymmetry is the point.** Licensing is the narrow one — the text a reader is shown, with `script` and
+  `style` content dropped, because a `.crosshatch` selector is author metadata and the evidence this
+  pass logs has to name a spelling somebody can find on the page. Refusing is the wide one — prose plus
+  every attribute value, quoted or bare and with entities decoded, plus any quote pair or `name=value`
+  run anywhere in the markup, comments included, because a bare `state` living only in an `alt` is still
+  the document using the word and a guard that cannot see it closes up `inter-state`. A pair rather than
+  a quoted span, since two apostrophes in ordinary prose are a pair, which leaves only comment prose
+  with neither a pair nor an `=` outside the width. So a comment can suppress a join and never license
+  one, which is the direction to fail in. Widening the refusing side costs zero joins across #334's
+  1,221 page files, measured.
+
+  Two classes of comment reach this pass: a model-written one inside a page fragment, and Iris's own
+  [`@page-failed`](API.md#page_extraction_failed), which is the whole body of its fragment and carries up
+  to 300 characters of provider error text. A delivered document's `@` markers are not among them —
+  `wrapDocument` appends those after this pass has run.
+
+- **Reading an attribute is a different act from writing one**, which is what lets the two widths differ
+  without being inconsistent. The repair is written into prose only, on the reasoning `page_split_words`
+  gives for not reading attributes at all: a repair that writes into attribute values is a repair that
+  can reach an `href`. `script`, `style`, `pre` and `code` are skipped for the neighbouring reason — a
+  hyphen in a code listing is a flag rather than a line break, and a reader has to be able to copy it.
+
+- **One consequence is a WCAG failure rather than an inconsistency, and it is latent.** A word can be
+  closed in the body while the same word keeps its hyphen inside a long `alt` on the same page —
+  measured on a map-heavy arm where `Cross-hatch` occurs eight times and only the three in body text
+  move. Nothing downstream reads the leftover as a defect, because `page_split_words` does not examine
+  attributes either. But a visible label joined beside an `aria-label` or `title` that kept its hyphen no
+  longer has its visible text contained in its accessible name (2.5.3), and no gate here catches it:
+  axe's `label-content-name-mismatch` is experimental and outside the `runOnly` list. It stays latent
+  because `agents/page.md` tells the page agent not to put printed text in an `aria-label` at all.
+
+- **It runs after the page-break prose join, which is the only place it can.** Before that seam closes,
+  `Simi-` and `larly` are two whole words in two paragraphs. So a word broken across a page and a word
+  broken across a line are settled by the same pass, and the hyphen `prose_joined` records as kept is
+  this pass's input.
+
+### A page label naming the image's position rather than the page's number
+
+- **The number is checkable because Iris supplied it** (#333). The page agent is handed
+  `filename: acir-p052.png, page 2 of 25`, so a leak can only be one of two numbers, and the one tested
+  is the filename's — its LAST integer, which is the part Iris writes. The conditions a label has to
+  meet before it is touched are on [`page_markers`](API.md#page_markers).
+
+  The last integer and not every integer, because `<base>-p<N>.png` takes `<base>` from the uploaded
+  file's own name: a check reading all of them finds the label `Page 1` in `volume-1-p13.png` and takes a
+  true page number off a document whose only distinction was being called `volume-1.pdf`.
+
+- **The third condition is what a whole document is refused on.** Where the honest majority repeats its
+  own filenames, a label repeating its filename is the shape of a CORRECT label there and the test
+  carries no information — which covers a caller who names images after the printed folios, and a plain
+  report whose sheets really do print their submitted positions. Three markers to ask and three agreeing
+  to act are also different gates: a strict majority of three markers is two, so without the second,
+  `Page 1` and `Page 2` would hold an offset and delete `Page 9`'s number, and the smallest document
+  that can lose a label carries four markers.
+
+- **The other half of what the agent is handed, `page N of M`, is deliberately not tested.** Replayed
+  over 61 chunks of paid rounds it removed 29 labels, all 29 repeating the filename, and the only label
+  that ever matched the position alone was CORRECT — a round re-submitting a non-contiguous subset of a
+  rendered document, where the sheet printing `iv` happened to arrive 4th. Where Iris rasterizes a whole
+  PDF itself the two numbers are the same one anyway, so what is uncovered is a caller uploading images
+  whose names carry no position, and that is counted rather than repaired.
+
+- **Roman and arabic are counted apart**, because a document with both has two offsets and a pooled
+  reading would exempt a `Page xv` leak and read correct front matter as a departure.
+
+- **The label is removed rather than corrected, and the `id` stays.** The derived folio is right where it
+  can be checked — the four it named on the reference corpus are the four read off the scans — but
+  delivering it would have Iris assert a number nobody saw printed, on a page whose own model just
+  proved it was guessing. Taking out `id="page-52"` would turn a `#page-52` reference that lands on the
+  wrong sheet today into one that lands nowhere. Every copy of the attribute goes, not the one a parser
+  keeps, since deleting the first would promote a repeated `aria-label` into its place and leave the log
+  claiming a removal the page did not get. What is left is a break saying only that something ended,
+  which is what the page contract prescribes for a page whose number is not known.
+
+- **Three blind spots read as a clean document, so each is counted rather than argued away.** A model
+  that leaks on EVERY page is the same input as a report printing its own positions, so the document is
+  refused and the log says so. A document whose arabic numbering restarts partway through is the
+  dangerous one: the minority run's folios coincide with the numbers in their filenames while the
+  majority's do not, so it is an active removal of TRUE labels rather than a missed leak. The check
+  cannot act on that difference but a round can count it — a restart takes out a block of consecutive
+  positions with no surviving label among them, where a leak is interleaved with the labels that
+  contradict it, which is why the shape those removals form is logged and not just their number. And a
+  positional number announced through `aria-labelledby` is not read: #333's shape is `aria-label` on both
+  failing arms, and resolving an ID reference into another element's text is a different pass on a
+  different input.
+
+- **This pass runs at assembly only**, where the role strip and the `<main>` strip run at all three
+  points. Deriving an offset needs every page's filename and position, and by then there is one string
+  with the pages' provenance spent — so a marker the Copy Editor introduces later is not reached.
+
+- **Why this is code and not more prose.** `agents/page.md` forbids exactly this by name (`never the
+  position of the image you were given in the file`) at every prompt blob there is a round for, and two
+  of three vendors did it anyway on the same document and the same blob: 6 of `kimi-k2.5`'s 88 markers
+  and 5 of `claude-sonnet-4-6`'s 90, on the same two pages, against 0 of 88 for `gpt-5.6-luna` — the
+  page model deployed since 2026-09-10 (#344).
 
 ## Joining a table split across a page turn
 
@@ -2045,6 +2164,7 @@ make run in one direction on purpose.
   the ceiling. Its prompt now says outright that a section request carries no numbered blocks, because
   it is built on the same system prompt, and a prompt that is true about one request and silent about
   the other reads as true about both.
+
 ### What the review loop's structure counts count
 
 The `editor` line carries three readings of every round — the whole body's size, its prose size, and a
@@ -2415,6 +2535,8 @@ the one gate in the loop that refuses part of a reply with no defect anywhere in
 
 ## Learning from feedback
 
+### Scoring both sides of the eval gate
+
 - **Both sides of the eval gate must score fixtures by the same rule.** Before proposing an agent
   update, Iris compares the candidate prompt's mean fixture coverage (from `regressionGate`) against
   the current prompt's (from `evalAgent`) and blocks a drop of more than `EVAL_REGRESSION_EPS`
@@ -2463,6 +2585,75 @@ the one gate in the loop that refuses part of a reply with no defect anywhere in
   regression behind it. It stays visible in the `eval_gate` log line's `unpaired` list. If no fixture
   is measurable on both sides, both means are `null` — "nothing to compare", deferring to the
   regression gate, rather than a pass.
+
+### Telling a training round's two replays apart
+
+- **The regression gate and the eval gate log the same shape, and no field on the line separates them.**
+  Both replay fixtures under the same `agent`, both carry a null `agent_sha` and a null `agent_content`,
+  and both hardcode `step: "agent_regression"` on the `model_call` beside them. The `eval_gate` line that
+  follows sits after BOTH halves, so it does not split them either. Order and count do. The regression
+  gate is awaited to completion before the eval gate starts, so every one of its lines precedes every one
+  of the eval gate's; and the two halves are the same length, because both gates read the same fixture
+  directory, sorted and capped the same way at `MAX_GATE_FIXTURES`, skip a fixture for the same two
+  reasons — a case file that will not parse, an image file that is not there — and then issue exactly one
+  call per surviving fixture. So the first half is the candidate prompt's and the second the current
+  prompt's.
+
+- **Both of the count rule's caveats are themselves visible in the log**, so the rule can be checked
+  before it is applied. A gate that THREW leaves a short half: a provider error or timeout on any one
+  replay rejects the whole gate, neither gate call is wrapped, so the round logs
+  `feedback_training_failed` and finishes with whichever replay lines were already written still in place.
+  That is the case to watch for, because a truncated eval half read under the count rule is attributed to
+  the candidate prompt — the exact confusion the rule exists to prevent. And the fixture set can change
+  between the two reads: the directory is keyed by the agent rather than by the session and the two reads
+  are a whole gate apart, so another session accepting a fixture in that window can leave a two-line half
+  followed by a three-line one. The paired scoring absorbs that for the scores; only the count rule
+  depends on it.
+
+- **A missing `eval_gate` line does not mean the log was cut short.** A regression gate that FAILED logs
+  `agent_update_blocked` and returns before the eval gate is reached, so a round with no `eval_gate` and
+  no `feedback_training_failed` ran no eval gate and every null-SHA replay in it was the regression
+  gate's. A round carrying `feedback_training_failed` is the throwing case, and there the replays could
+  belong to either gate.
+
+- **The regression gate's verifier call is not in that population.** It emits one per fixture that
+  survived its own checks, naming the Feedback Agent's file with a real `agent_sha` and reading `phase:
+  "extraction"` rather than `review`. Fixtures it never reaches — the replay produced nothing, or the
+  content check failed — have a replay line and no verifier line, which is a gap in THAT set rather than
+  in this one.
+
+### What recovers the text a prompt actually sent
+
+- **A prompt comes back from its blob SHA, from the line itself, or from the application's commit — and
+  one case comes back from nowhere.** `agent_sha` is the git blob SHA of the text that was SENT, so a
+  round's prompt is recoverable from a checkout however the file has moved since. It is null at eight
+  call sites, of two kinds. Six send a prompt that is a literal in this codebase rather than a file — the
+  Reader, the two editor contracts, the table join, the specialist merge, and the page agent's own
+  `DEFAULT_PAGE_PROMPT` fallback, taken when `agents/page.md` does not load — and those are versioned by
+  the application's commit. The other two are the training round's replays, and only one of them loses
+  anything: the eval gate sends the CURRENT library prompt, recoverable at the deployed commit with only
+  its real SHA discarded on the way here, while the regression gate sends the CANDIDATE prompt the round
+  proposed, which is in no commit, in no file, and not on the line either.
+
+- **`agent_content` covers the case neither of those reaches**, which is why it is on every line and null
+  on all but one. It carries the prompt inline for a session-built agent — one loaded from
+  `tmp/<id>/agents` in preference to the agent library — and such an agent does still carry an
+  `agent_sha`, computed over the text it was built from, which simply names no blob a checkout holds.
+  Nothing in this pipeline puts a file there: the one write into that directory is the feedback-training
+  step overwriting an agent that is ALREADY session-built, so every line reads null unless an operator
+  dropped a file in by hand.
+
+- **`agent` is a file name, and it groups two contracts that only a `step` tells apart.** A table join
+  and a correction round are both the Copy Editor, and they are `copy_editor_table_join.md` and
+  `copy_editor.md`, so the file name is what separates those. One value spans two cases it cannot: the
+  specialist merge sends `MERGE_SYSTEM` under the name `page.md` with a null `agent_sha`, beside ordinary
+  page calls carrying `page.md`'s real SHA — so the SHA, and the `step` on the `model_call` next to it,
+  are what identify the text that went out. On a deployment that fell back to `DEFAULT_PAGE_PROMPT` even
+  that breaks down: every `page.md` line reads a null SHA, and `step` is the only field left that tells a
+  page call from a merge.
+
+### Filing a suggestion
+
 - **A suggestion issue is identified by its title prefix, not by a label.** GitHub silently drops
   labels set by anyone without push access to the repo, which is most of the people this is built for.
   A label would therefore have been missing on exactly the issues that most needed it, with nothing to
