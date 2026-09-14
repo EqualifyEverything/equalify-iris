@@ -265,212 +265,56 @@ test("every per_agent key any example names is an agent Iris dispatches", () => 
 // two independent zeroes (they are one gate — see the file).
 test("docs/models.md's recommendation table is exactly the agents a deployment can route", () => {
   const doc = readFileSync(join(ROOT, "docs/models.md"), "utf8");
-  // The RECOMMENDATION table specifically, not the file. Every dispatched agent also appears in
-  // §1's table of call sites, so a check against the whole document passes while the summary a
-  // reader actually acts on is missing a row — which is the failure being guarded, and the one
-  // an earlier version of this test did not catch when the `builder` row was taken out of §0.
-  const section = doc.split(/^## /m).find((s) => s.startsWith("0."));
-  assert.ok(section, "docs/models.md has no `## 0.` summary section any more");
+  // The RECOMMENDATION table specifically, not the file. Other tables in the document name agents
+  // too, so a check against the whole file passes while the one table a reader acts on is missing a
+  // row — which is the failure being guarded, and the one an earlier version of this test did not
+  // catch when the `builder` row was taken out of the summary.
+  const section = doc.split(/^## /m).find((s) => s.startsWith("The suggested config"));
+  assert.ok(section, "docs/models.md has no `## The suggested config` section any more");
 
   // Both directions, because both are the same mistake in the reader's hands. A MISSING row
   // reads as an agent with no cost; an EXTRA one names a `per_agent` key that would be silently
   // ignored, which is the failure the rest of this file exists for — and a recommendation is
-  // the most likely place someone copies such a key from. Rows whose agent cell is backticked
-  // are the claim; §0's `specialists` row is deliberately not, since it is a class of agents
-  // named at run time and not a key anyone can write.
+  // the most likely place someone copies such a key from. The first backticked name in a row is the
+  // agent it is about; the word `specialists` deliberately carries no backticks, since it is a class
+  // of agents named at run time and not a key anyone can write.
   const rows = [...section.matchAll(/^\| `([^`]+)`/gm)].map((m) => m[1]!);
   assert.deepEqual(
     [...rows].sort(),
     [...declaredAgents()].sort(),
-    "docs/models.md §0's recommendation table and DISPATCHED_AGENTS disagree — a missing row " +
+    "docs/models.md's suggested-config table and DISPATCHED_AGENTS disagree — a missing row " +
       "leaves a reader unable to tell whether that agent was measured, left alone deliberately " +
       "or forgotten, and an extra one recommends a per_agent key Iris would silently ignore",
   );
 });
 
-// The same table's OTHER column is a partition, and the way it goes wrong is one row being
-// updated from a new round while its neighbours keep the old round's numbers. That has happened
-// twice already in this sprint's reporting: #311 published four shares that summed to 94.6%, and
-// §0 carried a set from one round while §6 predicted where a later round would put them. A share
-// that does not belong to the same denominator as the one beside it is unusable, and the sum is
-// the only free check for it — nothing in the document can tell a reader that 42.0% and 25.0%
-// came from different rounds, but they cannot both be true at once.
+// The two arithmetic checks that used to sit here are gone with the tables they read. docs/models.md
+// carried two share partitions — one per agent for the unswapped round, one for the post-swap round —
+// and #466 cut both: the document is now which model to run and what it was measured at, and the
+// share partition lives in docs/cost.md, where the check below reads it. Deleting a check with the
+// table it guards is the honest move; keeping it pointed at a heading that no longer exists is how a
+// test starts asserting that a document has a section rather than that its numbers add up.
 //
-// NOT a check that the figures are current: it passes on any self-consistent set, so it does not
-// substitute for the round names §6 attaches to each. It fails on the realistic edit — one row
-// moved, the rest left standing.
-test("docs/models.md §0's share column is a partition of one round, not a mix of several", () => {
-  const doc = readFileSync(join(ROOT, "docs/models.md"), "utf8");
-  const section = doc.split(/^## /m).find((s) => s.startsWith("0."));
-  assert.ok(section, "docs/models.md has no `## 0.` summary section any more");
-
-  // Second cell of each row, which is the share. Read as a number only when it looks like a
-  // percentage, so a row that stops quoting one (or the header separator) is skipped rather than
-  // read as zero — a silent 0 would make a broken table sum closer to 100, not further from it.
-  const shares = [...section.matchAll(/^\|[^|]+\|\s*\*{0,2}([\d.]+)%\*{0,2}\s*\|/gm)].map((m) =>
-    Number(m[1]!),
-  );
-  assert.ok(shares.length >= 4, `§0 has ${shares.length} share cells; expected one per agent`);
-  const sum = shares.reduce((a, b) => a + b, 0);
-  // A tenth of a point per row, since each is published rounded to one decimal.
-  assert.ok(
-    Math.abs(sum - 100) <= shares.length * 0.1,
-    `docs/models.md §0's shares sum to ${sum.toFixed(1)}%, not 100% — ${shares.join(" + ")}. ` +
-      `Either a row was updated from a newer round while its neighbours kept the old one, or an ` +
-      `agent is missing from the denominator. Both read to an operator as "this is where the ` +
-      `money is" and neither is.`,
-  );
-});
-
-// §5's per-agent table is the OTHER partition in this document, and it needs the same guard §0 has.
-//
-// What it does NOT catch, said plainly because it was proposed as the fix for exactly this: the
-// version reviewed on PR #327 left `builder` out of §5 altogether, and no arithmetic check could
-// have found that. The four rows summed to the stated total to the cent and the shares summed to
-// 100.0%, because the total was ITSELF the four-agent subtotal the harness prints — an agent absent
-// from the rows *and* the denominator leaves a table that is internally perfect and mis-labelled.
-// The only fix for that shape is naming the denominator in the prose, which §5 now does. A test that
-// passes on the defect it was written for is worse than no test, so this one claims a different job.
-//
-// The job it does have is the realistic later edit: a fifth row added while the total stands, a total
-// updated while the rows stand, or one column re-run and the other left stale. It also pins the
-// arithmetic the section's own headline is read off — the reviewed draft summarised this table as
-// "only about a third of the saving comes from the agent that was swapped" when its two money
-// columns give 63.8%, and a table that adds up cannot be summarised backwards without one of the two
-// being wrong on its face.
-//
-// Both money columns, because they fail differently: the SWAPPED column is the one an agent goes
-// missing from (a new agent appears in a later round and nobody adds a row), and the UNSWAPPED column
-// is the one that goes stale (a re-run moves the baseline and only the interesting half is updated).
-test("docs/models.md §5's per-agent rows sum to the total row they are published under", () => {
-  const doc = readFileSync(join(ROOT, "docs/models.md"), "utf8");
-  const section = doc.split(/^## /m).find((s) => s.startsWith("5."));
-  assert.ok(section, "docs/models.md has no `## 5.` section any more");
-
-  // Cells with the bold markers stripped, since emphasis lands on whichever figures moved.
-  const rows = section
-    .split("\n")
-    .filter((l) => l.startsWith("|"))
-    .map((l) =>
-      l
-        .replace(/\*\*/g, "")
-        .split("|")
-        .slice(1, -1)
-        .map((c) => c.trim()),
-    );
-  const money = (cell: string | undefined) => {
-    const m = cell?.match(/\$([\d,]+\.\d+)/);
-    return m ? Number(m[1]!.replace(/,/g, "")) : undefined;
-  };
-
-  // Anchored on the total row and walked BACK to its own header separator, rather than picking rows
-  // that look like agents: §5 carries a second table of Iris's verifier counters whose first cell is
-  // also a backticked snake_case name (`content_missing`, `editor_truncated`), and a name-shaped
-  // filter swept those in. Structural membership also means "a row with no dollar figure" is a real
-  // failure rather than a row this test declined to recognise.
-  const iTotal = rows.findIndex((r) => /^total\b/.test(r[0] ?? ""));
-  assert.ok(iTotal > 0, "docs/models.md §5's per-agent table has no `total` row to check against");
-  const total = rows[iTotal]!;
-  const agents: string[][] = [];
-  for (let i = iTotal - 1; i >= 0 && !/^-+$/.test(rows[i]![0] ?? ""); i--) agents.unshift(rows[i]!);
-  assert.ok(agents.length >= 4, `§5 lists ${agents.length} agent rows; expected one per agent`);
-
-  for (const [col, label] of [
-    [1, "unswapped"],
-    [2, "swapped"],
-  ] as const) {
-    const parts = agents.map((r) => money(r[col]));
-    assert.ok(
-      parts.every((p) => p !== undefined),
-      `§5's ${label} column has a row with no dollar figure in it: ` +
-        `${agents.map((r) => `${r[0]}=${r[col]}`).join(", ")}`,
-    );
-    const sum = parts.reduce((a, b) => a! + b!, 0)!;
-    const stated = money(total[col]);
-    assert.ok(stated !== undefined, `§5's total row has no ${label} figure`);
-    // Half a cent per row: the rows are published to four decimals, the total to four.
-    assert.ok(
-      Math.abs(sum - stated) <= agents.length * 0.005,
-      `docs/models.md §5's ${label} agent rows sum to $${sum.toFixed(4)}, but the total row says ` +
-        `$${stated.toFixed(4)}. An agent that ran and is not in this table reads as an agent that ` +
-        `cost nothing, and the share column beside it then partitions a subtotal while the prose ` +
-        `calls it the round.`,
-    );
-  }
-
-  // And the share column, which is only meaningful over the total the rows above actually sum to.
-  const shares = agents.map((r) => Number(r[r.length - 1]!.match(/([\d.]+)%/)?.[1]));
-  assert.ok(
-    shares.every((s) => Number.isFinite(s)),
-    `§5's last column is not a share on every agent row: ${agents.map((r) => r[r.length - 1]).join(" | ")}`,
-  );
-  const shareSum = shares.reduce((a, b) => a + b, 0);
-  assert.ok(
-    Math.abs(shareSum - 100) <= shares.length * 0.1,
-    `docs/models.md §5's post-swap shares sum to ${shareSum.toFixed(1)}%, not 100% — ` +
-      `${shares.join(" + ")}.`,
-  );
-
-  // And the figures the section's HEADLINE is actually read off, which is the gap the two sums above
-  // leave open: each agent's share of the SAVING is a difference of the two money columns, so an edit
-  // that moves the table and leaves this sentence standing reproduces the reviewed defect exactly —
-  // both columns would still sum, the shares would still be 100.0%, and everything above would pass
-  // while the prose said "a third" of a saving that is two thirds. Recomputed from the same rows
-  // rather than pinned as literals, so it is the relationship that is asserted and not the numbers.
-  const totalDelta = money(total[1])! - money(total[2])!;
-  const attributed = [
-    ...section.matchAll(/`([a-z_]+)`\s+(?:is|gives)\s+\$([\d.]+)(?:\s+back)?\s+\((−?[\d.]+)%\)/g),
-  ];
-  assert.equal(
-    attributed.length,
-    agents.length,
-    `§5 attributes the saving to ${attributed.length} agents but its table has ${agents.length} ` +
-      `rows — every row's contribution to the saving has to be stated, including a negative one, or ` +
-      `the sentence adds to less than the total it claims to break down`,
-  );
-  for (const [, name, dollars, percent] of attributed) {
-    const row = agents.find((r) => r[0] === `\`${name}\``);
-    assert.ok(row, `§5 attributes part of the saving to \`${name}\`, which has no row in its table`);
-    const delta = money(row[1])! - money(row[2])!;
-    // Written unsigned with "back" where an agent got dearer, so compare magnitudes here and let the
-    // percentage carry the sign.
-    assert.ok(
-      Math.abs(Math.abs(delta) - Number(dollars)) <= 0.0001,
-      `§5 says \`${name}\` accounts for $${dollars} of the saving, but its own row is ` +
-        `${row[1]} → ${row[2]}, a difference of $${Math.abs(delta).toFixed(4)}`,
-    );
-    const stated = Number(percent.replace("−", "-"));
-    const actual = (delta / totalDelta) * 100;
-    assert.ok(
-      Math.abs(actual - stated) <= 0.1,
-      `§5 says \`${name}\` is ${percent}% of the saving; its own columns give ` +
-        `${actual.toFixed(1)}% ($${delta.toFixed(4)} of $${totalDelta.toFixed(4)}). This is the ` +
-        `sentence a reader takes the keep-or-revert decision from.`,
-    );
-  }
-});
-
-// §0's table is the summary, and the sections restate it. That restatement is the document's most
+// The suggested-config table is the summary, and a paragraph per agent restates it. That restatement
+// is the document's most
 // frequent defect: five of the false statements PR #327 removed were a claim corrected in one place
 // and left standing in another, and #327 itself merged with §8 still saying "the revert is the one
 // config line" an hour after §5 had been corrected to two. Then #329 flipped `copy_editor` from a
 // keep to a recommended swap, which had to be rewritten in four places — the intro, §0, §4 and §8 —
 // and nothing in the repo could have told anyone if one had been missed.
 //
-// So this pins the join, in both of the ways the two statements can disagree: the SHARE (§0's column
-// is re-quoted in the section's own opener, and a re-run that moves one leaves the other stale) and
-// the DISPOSITION (keep / declined / recommended / applied, which is the thing a reader acts on).
+// So this pins the join on the DISPOSITION — keep / declined / recommended / applied, which is the
+// thing a reader acts on. #466 cut the share column the check also used to compare; that partition now
+// lives in docs/cost.md and is checked there, and re-quoting a share in two places is the drift this
+// document no longer has room for.
 //
-// Deliberately not a check that either is correct — §0's share is already pinned as a partition by
-// the test above, and no test can say whether "keep" is the right call. This says only that the
-// document gives one answer rather than two. That is the whole of the defect it is written for: at no
-// point was either copy of a drifted claim unverifiable, and at every point both were present.
+// Deliberately not a check that the disposition is correct — no test can say whether "keep" is the
+// right call. This says only that the document gives one answer rather than two. That is the whole of
+// the defect it is written for: at no point was either copy of a drifted claim unverifiable, and at
+// every point both were present.
 //
-// Openers only, not every mention. §6 re-quotes all four shares in its drift note and also quotes
-// #311's two INCORRECT ones (43.2%, 20.8%) on purpose, so a document-wide sweep would fail on the
-// paragraph whose job is to publish a wrong figure — the same trap that made an earlier draft of the
-// §5 test above read a table of verifier counters. The cost of scoping this way is real and worth
-// naming: §6's drift-note shares go unchecked, and so does any share quoted mid-paragraph.
+// Openers only, not every mention, so a paragraph that discusses a disposition it is not about cannot
+// fail the check.
 //
 // The agents checked are LISTED rather than discovered, which is the whole of what makes the
 // disposition half load-bearing (PR #332 review, note 1). The first version of this test skipped any
@@ -518,55 +362,46 @@ function dispositions(text: string): string[] {
   return DISPOSITIONS.filter(([, re]) => re.test(clause)).map(([d]) => d);
 }
 
-test("docs/models.md's sections agree with §0 about each agent's share and disposition", () => {
+test("docs/models.md's paragraphs agree with its table about each agent's disposition", () => {
   const doc = readFileSync(join(ROOT, "docs/models.md"), "utf8");
-  const summary = doc.split(/^## /m).find((s) => s.startsWith("0."));
-  assert.ok(summary, "docs/models.md has no `## 0.` summary section any more");
+  const summary = doc.split(/^## /m).find((s) => s.startsWith("The suggested config"));
+  assert.ok(summary, "docs/models.md has no `## The suggested config` section any more");
 
-  // agent -> [share, status cell], from the rows the test above already treats as the claim.
-  const stated = new Map<string, [number, string]>();
-  for (const m of summary.matchAll(/^\| `([^`]+)` \|\s*\*{0,2}([\d.]+)%\*{0,2}\s*\|([^|]*)\|/gm)) {
-    stated.set(m[1]!, [Number(m[2]!), m[3]!]);
+  // agent -> status cell, from the rows the test above already treats as the claim. The status is the
+  // LAST cell of the row, so a column inserted before it does not silently read as the disposition.
+  const stated = new Map<string, string>();
+  for (const m of summary.matchAll(/^\| `([^`]+)`[^|]*\|(.*)\|\s*$/gm)) {
+    const cells = m[2]!.split("|");
+    stated.set(m[1]!, cells[cells.length - 1]!);
   }
-  assert.ok(stated.size >= 4, `§0 yielded ${stated.size} agent rows; expected one per dispatched agent`);
+  assert.ok(stated.size >= 4, `the table yielded ${stated.size} agent rows; expected one per agent`);
 
-  // A section's opener: a bolded lead-in naming a backticked agent and re-quoting its share. Any
-  // further parenthetical between the share and the dash is tolerated — `(0% in this round)` carries
-  // a caveat rather than a second figure, and §4's `builder` opener names the specialists too.
-  const openers = new Map<string, [string, string]>();
-  for (const m of doc.matchAll(/^\*\*`([a-z_]+)` \((\d[\d.]*)%[^—]*—\s*([^*]+)\*\*/gm)) {
-    openers.set(m[1]!, [m[2]!, m[3]!]);
+  // A paragraph's opener: a bolded lead-in naming a backticked agent, then its disposition after a
+  // dash. One paragraph per decided agent, which is the whole of the restatement.
+  const openers = new Map<string, string>();
+  for (const m of doc.matchAll(/^\*\*`([a-z_]+)`\s+—\s*([^*]+)\*\*/gm)) {
+    openers.set(m[1]!, m[2]!);
   }
 
   for (const name of DECIDED) {
-    const row = stated.get(name);
-    assert.ok(row, `\`${name}\` has a model decision on it but no row in §0's table`);
-    const [share0, status] = row;
-    const opener = openers.get(name);
+    const status = stated.get(name);
+    assert.ok(status, `\`${name}\` has a model decision on it but no row in the suggested-config table`);
+    const text = openers.get(name);
     assert.ok(
-      opener,
-      `no section of docs/models.md opens with \`**\`${name}\` (share%) — disposition**\`, so its ` +
-        `share and its disposition are stated only in §0 and nothing checks the section a reader ` +
-        `is sent to. \`page\` and \`reader\` were both in this position until PR #332.`,
-    );
-    const [share, text] = opener;
-    assert.equal(
-      Number(share),
-      share0,
-      `\`${name}\` is ${share0}% in §0's table and ${share}% in its own section's opener. One of ` +
-        `the two was updated from a newer round and the other was not; §0's is the partition that ` +
-        `is checked to sum to 100%, so the opener is the likelier stale copy.`,
+      text,
+      `no paragraph of docs/models.md opens with \`**\`${name}\` — disposition**\`, so its ` +
+        `disposition is stated only in the table and nothing checks the prose a reader is sent to.`,
     );
     // Both sides must classify, exactly once. Neither a null nor a tie here is a pass — see the two
     // notes above the vocabulary.
-    const wants = dispositions(status!);
+    const wants = dispositions(status);
     const gots = dispositions(text);
     const want = wants[0] ?? null;
     const got = gots[0] ?? null;
     const vocabulary = DISPOSITIONS.map(([d]) => d).join(", ");
     for (const [side, matches, quoted] of [
-      ["§0's table cell", wants, status!],
-      ["its own section's opener", gots, text],
+      ["the suggested-config table cell", wants, status],
+      ["its own paragraph's opener", gots, text],
     ] as const) {
       assert.ok(
         matches.length < 2,
@@ -579,19 +414,20 @@ test("docs/models.md's sections agree with §0 about each agent's share and disp
     }
     assert.ok(
       want,
-      `§0's \`${name}\` cell no longer states a disposition this test can read (${vocabulary}): ` +
-        `"${status!.trim().slice(0, 80)}". §0 is the table a reader takes the decision from, so ` +
+      `the \`${name}\` row no longer states a disposition this test can read (${vocabulary}): ` +
+        `"${status.trim().slice(0, 80)}". That table is where a reader takes the decision from, so ` +
         `either say which of those it is, or add the new phrasing to DISPOSITIONS deliberately.`,
     );
     assert.ok(
       got,
-      `\`${name}\`'s own section opens without a disposition this test can read (${vocabulary}): ` +
+      `\`${name}\`'s own paragraph opens without a disposition this test can read (${vocabulary}): ` +
         `"${text.trim().slice(0, 80)}". Skipping this pair is how the check disabled itself.`,
     );
     assert.equal(
       got,
       want,
-      `§0 says \`${name}\` is "${want}" and its own section says "${got}". This is the sentence a ` +
+      `the table says \`${name}\` is "${want}" and its own paragraph says "${got}". This is the ` +
+        `sentence a ` +
         `reader acts on, and it is the defect that recurred most in this document: a decision ` +
         `changed in the summary and left standing in the section, or the reverse.`,
     );
@@ -626,12 +462,10 @@ test("docs/models.md's sections agree with §0 about each agent's share and disp
 // docs/models.md the minus signs are U+2212, which the ASCII `[-*+]` class does not match, and no line
 // wraps onto an ordered marker — §4's numbered list is where a future edit would hit it first. In
 // docs/cost.md the same holds (1 × U+2212, no ASCII minus as a numeric sign) and the five sampling
-// bounds are genuine ordered markers. docs/sprint-246.md was audited the same way when the report was
-// split out of docs/cost.md (15 × U+2212, no ASCII minus as a sign, and §5's `1./2./3.` genuine): both
-// lines were checked on it rather than assumed from its parent, which is what a fourth document added
-// to the loop below owes as well. Count occurrences with `grep -o … | wc -l`, not `grep -c`, which
-// counts matching LINES — this comment first recorded 15 as "12" for exactly that reason, and 12 is
-// the number of lines those 15 signs sit on.
+// bounds are genuine ordered markers. A document added to the loop below owes the same audit on its own
+// bytes rather than inheriting the answer from the file it was split out of. Count occurrences with
+// `grep -o … | wc -l`, not `grep -c`, which counts matching LINES — this comment once recorded 15 as
+// "12" for exactly that reason.
 function unclosedBoldRuns(doc: string): string[] {
   const unclosed: string[] = [];
   let fenced = false;
@@ -647,9 +481,9 @@ function unclosedBoldRuns(doc: string): string[] {
   //
   // Stripping is per line, like everything else here, and a code span WRAPPED across a line break
   // therefore strips the wrong range: the half-span on each line pairs with the next backtick it
-  // finds, which can swallow a real `**` in between. docs/sprint-246.md had one (`git worktree
-  // list`, split across two lines), and the run it swallowed was the one this check exists to catch,
-  // so adding the strip turned a masked defect into a false positive on the same line. It is
+  // finds, which can swallow a real `**` in between. One document had exactly that (a `git worktree
+  // list` span split across two lines), and the run it swallowed was the one this check exists to
+  // catch, so adding the strip turned a masked defect into a false positive on the same line. It is
   // reflowed rather than parsed for, which is what the note above says to do with a false positive
   // of this shape — but unlike that one, this failure mode also HIDES defects, so if a wrapped span
   // is ever legitimately needed the strip has to become a real scan, not an exemption.
@@ -685,16 +519,12 @@ function unclosedBoldRuns(doc: string): string[] {
   return unclosed;
 }
 
-// Every measurement document, not just the one the defect happened in. docs/cost.md and
-// docs/sprint-246.md are the same kind of writing — bold lead-ins on nearly every paragraph, tables
-// whose emphasis lands on whichever figure moved — so they fail the same way, and both were written
-// after this check existed. sprint-246.md is most of the prose docs/cost.md used to carry, so leaving
-// it out of the loop would have quietly dropped ~250 already-covered lines out of coverage on the
-// commit that moved them.
-//
-// `docs/design-notes.md`, `docs/ci.md`, `docs/verifier-calibration.md` and `docs/github-auth.md` are
-// in the loop for the same reason sprint-246.md is: they are ~1,950 lines lifted out of README.md,
-// written in exactly this style, and a move is the commit where a `**` run gets cut in half.
+// Every measurement document, not just the one the defect happened in. They are all the same kind of
+// writing — bold lead-ins on nearly every paragraph, tables whose emphasis lands on whichever figure
+// moved — so they fail the same way. `docs/design-notes.md`, `docs/ci.md`,
+// `docs/verifier-calibration.md` and `docs/github-auth.md` are in the loop because they are ~1,950
+// lines lifted out of README.md, written in exactly this style, and a move is the commit where a `**`
+// run gets cut in half.
 //
 // One list, read off the directory, for every markdown check in this file. Three things went wrong
 // with the hand-written version and each is fixed by the same line:
@@ -772,118 +602,37 @@ test("no prose paragraph is swallowed into the table above it", () => {
   }
 });
 
-// docs/sprint-246.md's §3 is the sprint's three-arm page-model comparison, whose rows are an
-// ARITHMETIC decomposition rather than a partition: each arm's total is its `verify + correct`
-// column plus its `page only` column, and the percentage beside them is the first over the total.
-// So the realistic edit — a newer round moves one arm's total and its components are left standing,
-// or the reverse — is catchable for free, and it is the edit that has already gone wrong twice in
-// this sprint's reporting (#311's four shares summing to 94.6%, and §0 of docs/models.md carrying
-// one round's shares while §6 predicted another's).
+// The three-arm page-model comparison that used to be checked here went with docs/sprint-246.md,
+// deleted in #466: it was a 454-line sprint narrative whose own opening line sent a reader wanting the
+// price to docs/cost.md, and #370 is that sprint's permanent report. Its transferable half — what a
+// benchmark here gets wrong — moved to docs/models.md, and the figures it stated differently from #370
+// were posted there. Nothing is left to check, so the check is gone rather than repointed.
 //
-// It lived on docs/cost.md until #395 split that document into a price sheet and this report, which
-// is why the section number is unchanged: the table moved file, not position. The per-STEP table that
-// replaced it in docs/cost.md is a different shape and has its own check below — the two are not
-// interchangeable and neither test covers the other's document.
-//
-// Deliberately NOT a check that the figures are current or that the round named beside them is the
-// one they came from: it passes on any self-consistent set. What it does say is that the table and
-// the prose under it cannot drift apart, since the per-page figures the prose quotes are re-derived
-// here from the table's own cells rather than pinned as literals.
-test("docs/sprint-246.md's cost table decomposes to its own totals, and its prose quotes those totals", () => {
-  const doc = readFileSync(join(ROOT, "docs/sprint-246.md"), "utf8");
-  const section = doc.split(/^## /m).find((s) => s.startsWith("3."));
-  assert.ok(section, "docs/sprint-246.md has no `## 3.` cost section any more");
-
-  const money = (cell: string | undefined) => {
-    const m = cell?.replace(/\*\*/g, "").match(/\$([\d,]+\.\d+)/);
-    return m ? Number(m[1]!.replace(/,/g, "")) : undefined;
-  };
-  // Rows naming a backticked model, which is what an arm is. The header and the separator carry no
-  // backtick, and no other table in the section does either.
-  const arms = section
-    .split("\n")
-    .filter((l) => /^\| `/.test(l))
-    .map((l) =>
-      l
-        .split("|")
-        .slice(1, -1)
-        .map((c) => c.trim()),
-    );
-  assert.ok(arms.length >= 3, `§3's table has ${arms.length} arm rows; expected one per model`);
-
-  for (const row of arms) {
-    const [name, total, checked, share, , , pageOnly] = row;
-    const [t, c, p] = [money(total), money(checked), money(pageOnly)];
-    assert.ok(
-      t !== undefined && c !== undefined && p !== undefined,
-      `§3's ${name} row is missing one of its three dollar figures: ${row.join(" | ")}`,
-    );
-    // A cent, since the three are published to four decimals and the round's own totals carry the
-    // same rounding.
-    assert.ok(
-      Math.abs(c! + p! - t!) <= 0.01,
-      `docs/sprint-246.md §3 says ${name} cost ${total}, but its own components are ${checked} of ` +
-        `checking and correcting plus ${pageOnly} of page calls — $${(c! + p!).toFixed(4)}. One ` +
-        `column was updated from a newer round and the others were left standing, and the ` +
-        `verify+correct SHARE beside them is read off exactly this decomposition.`,
-    );
-    const stated = Number(share!.replace(/\*\*/g, "").match(/([\d.]+)%/)?.[1]);
-    assert.ok(Number.isFinite(stated), `§3's ${name} row has no verify+correct share: ${share}`);
-    assert.ok(
-      Math.abs((c! / t!) * 100 - stated) <= 0.5,
-      `docs/sprint-246.md §3 says checking and correcting is ${share} of ${name}'s bill; its own cells ` +
-        `give ${((c! / t!) * 100).toFixed(1)}% (${checked} of ${total}). That share is the number ` +
-        `§5 opens on — "85% of the extraction step is checking and correcting" — so it decides ` +
-        `which lever the document sends a reader to.`,
-    );
-    // And the per-page figure the prose quotes, over the denominator the prose names. The table is
-    // per 100 pages SUBMITTED and every cross-arm figure in the document is on that denominator, so
-    // a total that moves has to move the prose with it or the two disagree by a factor of a hundred.
-    // Scoped to §3, not the whole document: a match anywhere else would let a figure quoted in some
-    // other section stand in for the sentence this is here to hold, and the failure message would
-    // then be false about where it looked. Prose only — the table row it came from is excluded, or
-    // every row would satisfy this against itself.
-    const perPage = `$${(t! / 100).toFixed(4)}`;
-    const prose = section
-      .split("\n")
-      .filter((l) => !/^\| /.test(l))
-      .join("\n");
-    assert.ok(
-      prose.includes(perPage),
-      `docs/sprint-246.md §3's ${name} row is ${total} per 100 pages submitted, so ${perPage} a page, ` +
-        `and no prose in §3 quotes ${perPage}. Either the table moved and the ` +
-        `per-page sentence under it did not, or a figure is being quoted on the other ` +
-        `denominator — pages that produced a file, which §3 says is not comparable across arms.`,
-    );
-  }
-});
-
-// docs/cost.md is now a price sheet whose entire value is that a reader can take a figure off it
-// without excavating: one headline, one per-STEP table, and three prose figures read off that table.
-// That is a different shape from the three-arm comparison above — the rows are steps of one round
-// rather than arms of three, so they decompose to the headline total instead of to each other — and
-// the realistic edit is the one this sprint has already made twice: a newer round moves a row and the
-// headline, the block subtotals or a share is left standing.
+// docs/cost.md is a price sheet whose entire value is that a reader can take a figure off it without
+// excavating: one headline, one per-STEP table, and the prose figures read off that table. The
+// realistic edit is the one this sprint has already made twice — a newer round moves a row and the
+// headline, a block subtotal or a share is left standing.
 //
 // What makes it worth a check rather than a proofread is that the document deliberately states four
 // sets of numbers that are NOT independent of the table: the cents-a-page headline is the total over
-// 100, each share is a row over the total, the three block subtotals are groups of rows added, and the
-// "checking costs two and a half times producing" claim is three of those shares added. Nothing in a
-// markdown file tells a reader which of those went stale.
+// 100, each share is a row over the total, the two block subtotals are groups of rows added, and the
+// "checking costs 4.7x producing" claim is one row over another. Nothing in a markdown file tells a
+// reader which of those went stale.
 //
-// All four are derived off the rows here, the blocks included. Review round 1 of PR #396 caught that
-// this comment claimed the block subtotals were covered when nothing read them — the row filter is
-// `/^\| /`, so the prose sentence carrying them was excluded and `$6.4071` → `$6.5071` passed. A
-// comment naming what a check catches is itself a claim, and the same round found the sentence the
-// row-sum assertion anchors on was about the BLOCKS rather than the rows, so the strictest assertion in
-// the test was right by coincidence: the two decompositions are numerically equal today and regrouping
-// the blocks would have moved the expected value of a row-sum check. The document now states each
-// decomposition in its own sentence and this reads the one it means.
+// Review round 1 of PR #396 caught that an earlier version of this comment claimed the block subtotals
+// were covered when nothing read them, and the same round found the sentence the row-sum assertion
+// anchored on was about the BLOCKS rather than the rows — so the strictest assertion in the test was
+// right by coincidence. The document now states each decomposition in its own sentence and this reads
+// the one it means.
+//
+// The cost column is found by its HEADER, not by position. #466 added an `agent` column between the
+// step and its cost, and the old index-based filter read every row as having no money in it and passed
+// by finding zero rows — the assertion on row count is what caught that, and reading the header is what
+// stops it recurring.
 //
 // Rounding is asserted rather than tolerated away. The per-step cells are published to four decimals,
-// so they sum to $0.0001 less than the round's ledger total and the shares sum to 99.9%; the document
-// says both of those out loud, and this reads the sum it states rather than accepting any total within
-// a cent — a drifted row would otherwise hide inside the allowance.
+// so the share column sums to 100.1% rather than 100%; the document says so out loud, and this reads
+// the sum it states rather than accepting any total within a point.
 test("docs/cost.md's price sheet decomposes to the headline it opens with", () => {
   const doc = readFileSync(join(ROOT, "docs/cost.md"), "utf8");
   const money = (cell: string | undefined) => {
@@ -891,10 +640,7 @@ test("docs/cost.md's price sheet decomposes to the headline it opens with", () =
     return m ? Number(m[1]!.replace(/,/g, "")) : undefined;
   };
 
-  // Step rows are the table lines whose second cell is a dollar figure; the header and separator
-  // carry none. The `failed` row is one of them on purpose — it is billed spend and belongs in the
-  // decomposition, which is the error #311 made by excluding it from four numerators.
-  const rows = doc
+  const tableLines = doc
     .split("\n")
     .filter((l) => /^\| /.test(l))
     .map((l) =>
@@ -902,21 +648,31 @@ test("docs/cost.md's price sheet decomposes to the headline it opens with", () =
         .split("|")
         .slice(1, -1)
         .map((c) => c.trim()),
-    )
-    .filter((cells) => money(cells[1]) !== undefined);
-  assert.ok(rows.length >= 8, `docs/cost.md's table has ${rows.length} step rows; expected one per step`);
+    );
+  const header = tableLines.find((cells) => cells.includes("step") && cells.includes("cost"));
+  assert.ok(
+    header,
+    "docs/cost.md has no table with `step` and `cost` columns, so nothing below can be located by " +
+      "header. The price sheet's whole job is that a reader can take a figure off one table.",
+  );
+  const iStep = header.indexOf("step");
+  const iCost = header.indexOf("cost");
+  const iShare = header.indexOf("share");
+  assert.ok(iShare >= 0, "docs/cost.md's price table has no `share` column any more");
+
+  const rows = tableLines.filter((cells) => money(cells[iCost]) !== undefined);
+  assert.ok(rows.length >= 7, `docs/cost.md's table has ${rows.length} step rows; expected one per step`);
 
   const total = money(doc.match(/total\s+\*\*(\$[\d,]+\.\d+)\*\*/)?.[1]);
   assert.ok(
     total !== undefined,
-    "docs/cost.md's opening paragraph no longer states the round's total as `total **$N**`, so " +
-      "nothing below can be checked against it — every share and the cents-a-page headline are that " +
-      "total's denominator.",
+    "docs/cost.md no longer states the round's total as `total **$N**`, so nothing below can be " +
+      "checked against it — every share and the cents-a-page headline are that total's denominator.",
   );
 
-  const summed = rows.reduce((a, cells) => a + money(cells[1])!, 0);
-  // The sentence about the STEPS, not the one about the three blocks. Those two sums are equal today,
-  // so anchoring on the wrong one passes and stops meaning anything the moment the blocks are regrouped.
+  const summed = rows.reduce((a, cells) => a + money(cells[iCost])!, 0);
+  // The sentence about the STEPS, not the one about the blocks. Those two sums are equal today, so
+  // anchoring on the wrong one passes and stops meaning anything the moment the blocks are regrouped.
   const stated = money(doc.match(/steps sum to (\$[\d,]+\.\d+)/)?.[1]);
   assert.ok(
     stated !== undefined,
@@ -939,26 +695,25 @@ test("docs/cost.md's price sheet decomposes to the headline it opens with", () =
 
   const statedShares: number[] = [];
   for (const cells of rows) {
-    const [name, cost, share] = cells;
-    const stated = Number(share!.replace(/\*\*/g, "").match(/([\d.]+)%/)?.[1]);
-    assert.ok(Number.isFinite(stated), `docs/cost.md's ${name} row has no share: ${share}`);
-    statedShares.push(stated);
+    const [name, cost, share] = [cells[iStep], cells[iCost], cells[iShare]];
+    const one = Number(share!.replace(/\*\*/g, "").match(/([\d.]+)%/)?.[1]);
+    assert.ok(Number.isFinite(one), `docs/cost.md's ${name} row has no share: ${share}`);
+    statedShares.push(one);
     const actual = (money(cost)! / total!) * 100;
     assert.ok(
-      Math.abs(actual - stated) <= 0.05,
+      Math.abs(actual - one) <= 0.05,
       `docs/cost.md says ${name} is ${share} of the bill; ${cost} over the headline ` +
         `$${total!.toFixed(4)} is ${actual.toFixed(2)}%. The share column is read off the total the ` +
         `document opens with, so one of the two is from a different round.`,
     );
   }
 
-  // The share column's own total, which the document states because it is 99.9% rather than 100% and
-  // says so instead of rounding one cell up to hide it. Every share above is pinned to its own row, so
-  // reaching this needs a restated round — and then the column can land on 99.8% with the prose still
-  // claiming 99.9%, which is the sentence telling a reader the column is a rounded decomposition and
-  // not a partition. Round 2 of PR #396 asked for it.
+  // The share column's own total, which the document states because it is not 100% and says so instead
+  // of rounding one cell to hide it. Every share above is pinned to its own row, so reaching this needs
+  // a restated round — and then the column can land elsewhere with the prose still claiming the old
+  // gap, which is the sentence telling a reader the column is a rounded decomposition.
   const columnSum = statedShares.reduce((a, b) => a + b, 0);
-  const statedColumnSum = Number(doc.match(/share column\s+sums to ([\d.]+)%/)?.[1]);
+  const statedColumnSum = Number(doc.match(/share column sums to ([\d.]+)%/)?.[1]);
   assert.ok(
     Number.isFinite(statedColumnSum),
     "docs/cost.md no longer states what its share column sums to (`the share column sums to N%`), " +
@@ -972,24 +727,22 @@ test("docs/cost.md's price sheet decomposes to the headline it opens with", () =
       `the sentence that explains why the column is not 100% now explains the wrong gap.`,
   );
 
-  // The three block subtotals, which are the sentence a reader quotes when they want one number for
+  // The two block subtotals, which are the sentence a reader quotes when they want one number for
   // "where does the money go" and are the only figures in the document that are a GROUP of rows added.
-  // The grouping is the document's own, restated here: a step that appears in no block, or in two,
-  // fails rather than being silently dropped from a subtotal — which is exactly how #311 published four
-  // shares summing to 94.6%, by leaving each agent's failed spend out of a numerator that kept it in
-  // the denominator.
+  // The grouping is the document's own, restated here: a step in no block, or in two, fails rather than
+  // being silently dropped from a subtotal — which is exactly how #311 published four shares summing to
+  // 94.6%, by leaving each agent's failed spend out of a numerator that kept it in the denominator.
   const BLOCKS: [string, string[]][] = [
-    ["producing and checking pages", ["extract", "verify", "correct", "recheck_sampled", "table_join"]],
-    ["reviewing and editing the finished document", ["read", "edit"]],
-    ["wasted", ["failed"]],
+    ["producing and checking pages", ["extract", "correct", "verify", "recheck_sampled"]],
+    ["reviewing and editing the assembled document", ["read", "edit", "table_join"]],
   ];
   const stepName = (cell: string) => cell.replace(/[`*]/g, "").trim();
   const assigned = BLOCKS.flatMap(([, steps]) => steps);
-  const tableSteps = rows.map((cells) => stepName(cells[0]!));
+  const tableSteps = rows.map((cells) => stepName(cells[iStep]!));
   assert.deepEqual(
     [...tableSteps].sort(),
     [...assigned].sort(),
-    `docs/cost.md's table and the three block subtotals under it name different steps. The table has ` +
+    `docs/cost.md's table and the block subtotals under it name different steps. The table has ` +
       `${tableSteps.join(", ")}; the blocks account for ${assigned.join(", ")}. A step in no block is ` +
       `spend the "where the money goes" sentence silently omits, and a step in two is spend it ` +
       `double-counts.`,
@@ -1010,9 +763,9 @@ test("docs/cost.md's price sheet decomposes to the headline it opens with", () =
   for (const [i, [label, steps]] of BLOCKS.entries()) {
     const [, statedPct, statedDollars] = blockFigures[i]!;
     const actual = steps.reduce((a, step) => {
-      const row = rows.find((cells) => stepName(cells[0]!) === step);
+      const row = rows.find((cells) => stepName(cells[iStep]!) === step);
       assert.ok(row, `docs/cost.md's table has no \`${step}\` row, so the "${label}" block is unpriced`);
-      return a + money(row![1])!;
+      return a + money(row![iCost])!;
     }, 0);
     assert.ok(
       Math.abs(actual - money(statedDollars)!) <= 0.0001,
@@ -1029,35 +782,38 @@ test("docs/cost.md's price sheet decomposes to the headline it opens with", () =
 
   // The headline a reader quotes, in the unit it is written in.
   const cents = Number(doc.match(/\*\*([\d.]+)¢ a page\.\*\*/)?.[1]);
-  assert.ok(Number.isFinite(cents), "docs/cost.md no longer opens with `**N¢ a page.**`");
+  assert.ok(Number.isFinite(cents), "docs/cost.md no longer states `**N¢ a page.**`");
   assert.equal(
     cents,
     Number(((total! / 100) * 100).toFixed(1)),
-    `docs/cost.md opens on ${cents}¢ a page, but its own total $${total!.toFixed(4)} over the 100 ` +
+    `docs/cost.md states ${cents}¢ a page, but its own total $${total!.toFixed(4)} over the 100 ` +
       `pages it names is ${((total! / 100) * 100).toFixed(1)}¢. The headline is the figure everything ` +
       `else in the repo quotes.`,
   );
 
-  // And the one comparison the document draws between its own rows, which is three shares added.
-  const claimed = Number(
-    doc.match(/`verify`\s*\+\s*`correct`\s*\+\s*`recheck_sampled`\s*is\s*\*\*([\d.]+)%\*\*/)?.[1],
+  // And the one comparison the document draws between two of its own rows, which is the finding it
+  // leads with: checking a page costs a multiple of producing it. Stated as a ratio rather than as two
+  // shares added, because #466's table put `correct` on the page agent and `verify` on the checker, and
+  // adding shares across that boundary is what made the earlier version of this claim ambiguous.
+  const ratio = Number(
+    doc.match(/Checking a page costs ([\d.]+)x what producing it costs/)?.[1],
   );
   assert.ok(
-    Number.isFinite(claimed),
-    "docs/cost.md no longer states the `verify` + `correct` + `recheck_sampled` share, which is the " +
-      "claim its 'checking costs more than producing' line rests on.",
+    Number.isFinite(ratio),
+    "docs/cost.md no longer states `Checking a page costs Nx what producing it costs`, which is the " +
+      "claim its lead finding rests on.",
   );
-  const checking = ["verify", "correct", "recheck_sampled"].map((step) => {
-    const row = rows.find((c) => c[0] === `\`${step}\``);
-    assert.ok(row, `docs/cost.md's table has no \`${step}\` row, so its ${claimed}% cannot be checked`);
-    return money(row![1])!;
-  });
-  const checkingShare = (checking.reduce((a, b) => a + b, 0) / total!) * 100;
+  const rowCost = (step: string) => {
+    const row = rows.find((cells) => stepName(cells[iStep]!) === step);
+    assert.ok(row, `docs/cost.md's table has no \`${step}\` row, so its ${ratio}x cannot be checked`);
+    return money(row![iCost])!;
+  };
+  const actualRatio = rowCost("verify") / rowCost("extract");
   assert.ok(
-    Math.abs(checkingShare - claimed) <= 0.1,
-    `docs/cost.md says checking a page is ${claimed}% of the bill; its own \`verify\`, \`correct\` ` +
-      `and \`recheck_sampled\` rows come to ${checkingShare.toFixed(2)}%. That figure is the ` +
-      `document's headline finding about where the money goes.`,
+    Math.abs(actualRatio - ratio) <= 0.05,
+    `docs/cost.md says checking costs ${ratio}x producing; its own \`verify\` and \`extract\` rows ` +
+      `give ${actualRatio.toFixed(2)}x. That figure is the document's headline finding about where ` +
+      `the money goes.`,
   );
 });
 
