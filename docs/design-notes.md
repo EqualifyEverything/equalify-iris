@@ -2051,6 +2051,12 @@ The `editor` line carries three readings of every round — the whole body's siz
 count of its structures. All three stay on the line whatever fired, because two of them are what a
 person reads once the third has spoken.
 
+- **The sizes are logged because without them a working round left no measurement at all.** What a
+  round produces is adopted for the body verbatim, so the body that entered a successful round is gone
+  and the ratio it moved by is unrecoverable. Before `chars_before` / `chars_after` existed, the
+  distribution of a legitimate round was measurable only on the rounds that FAILED — three samples on
+  one document (#174).
+
 - **A length is what argued for a structure count, by failing to see one.** Of the first rounds to
   record their sizes, one dropped 5 of 7 lists and 13 of 47 list items while its length moved 1.6% —
   which is an argument for counting structures rather than for either size. So `structure_before` /
@@ -2107,10 +2113,12 @@ the one gate in the loop that refuses part of a reply with no defect anywhere in
 - **A block may only be re-seated when nothing else in the reply is holding what it held**, and that
   has two failure modes, which are the same hazard from opposite ends. The heading MOVED — a reply that
   reorders blocks moves three blocks' counts for a document that fell by one, so handing all three back
-  would leave the moved heading in two places at once (`headings_gained`). Or the heading's WORDS moved
-  as something no structure count counts: the extractor's stray `<h4>Name</h4>` emptied while
-  `<label for="name">Name</label>` is seated inside the `<form>`, which keeps every word, so the fall
-  reads as ordinary, and gains no heading anywhere, so `headings_gained` is 0.
+  would leave the moved heading in two places at once (`headings_gained`).
+
+  The other end is the heading's WORDS moving as something no structure count counts. The extractor's
+  stray `<h4>Name</h4>` is emptied while `<label for="name">Name</label>` is seated inside the `<form>`.
+  Every word is kept, so the fall reads as ordinary. No heading arrived anywhere, so `headings_gained`
+  is 0. Both signals say the block is safe to hand back, and handing it back prints the name twice.
 
 - **A departure is an inequality, not a shortfall.** A block can shed the heading's words and grow in
   the same edit by rewording what survives, so a "did it get shorter" test sees no departure at all.
@@ -2134,6 +2142,12 @@ the one gate in the loop that refuses part of a reply with no defect anywhere in
   can get under that floor**: hand back the block that added prose and the re-applied body can be
   shorter than the one that came in, so a fall that was visible before the revert reports nothing after
   it and the held block's demotion would ship (found in review of #376).
+
+- **The count is silent wherever the prose shortened, because a structure falling beside a word loss is
+  the ordinary shape of every deletion the prompt sanctions** and is already `shrunk`. Counting it here
+  as well would put the sanctioned case and the silent one in one number and leave neither readable. And
+  `shrunk` is deliberately the other way round, per block, because its job is to spot the source half of
+  a move — so that a refusal on the landing half cannot take the heading with it.
 
 - **The count that gates under-collects, knowingly.** One sanctioned deletion anywhere in the reply
   silences it for the whole round, so a round that drops a reprinted title in one block and demotes a
@@ -2295,8 +2309,9 @@ the one gate in the loop that refuses part of a reply with no defect anywhere in
   exists for; counting `doubled` **per item** catches it, because the item that kept its own marker is
   the one a reader meets whatever the totals say. And a marker shape wide enough to match any letter
   followed by a stop matched an **initial**, so recasting "J. Smith chaired the committee" logged a lost
-  marker: a printed marker is now three digits at most, a roman *number* (which `cm.` and `ml.` are not),
-  or a single letter closed by `)` or `]`. The roman alphabet is `i`, `v`, `x` only, which caps a roman
+  marker: a printed marker is now three digits at most, a roman *number* (which `cm.` and `ml.` are not,
+  and neither is `(see)` — three letters and no numeral), or a single letter closed by `)` or `]`. The
+  roman alphabet is `i`, `v`, `x` only, which caps a roman
   marker at `xxxix` — admitting `l`, `c`, `d` and `m` is what made `cm.` and `ml.` matches in the first
   place, and two or more roman letters keep the looser closer because the ambiguity is the point: `ii.`
   cannot be an initial and `i.` can. The stated cost is a marker genuinely printed `a.` with no bracket,

@@ -3217,8 +3217,8 @@ marker are visible at once:
 | `printed_lettered` | Those of `printed` whose marker is not a digit |
 | `doubled` | Those printing **the marker they are announced with**, compared by value, token against token, case-insensitively |
 
-**`doubled` is per item, not a total**, so a round that sets the `type` and strips only some of the
-items is caught — the item that kept its own marker is the one a reader meets. And
+**`doubled` is decided per item**, so a round that sets the `type` and strips only some of the items is
+caught — the item that kept its own marker is the one a reader meets. And
 `text_markers_gone` reads `printed_lettered` rather than `printed`, because a digit leaving an item's
 text is a repair: an `<ol>` announces 1, 2, 3 by itself, so a digit the text repeats is a second copy
 of what the list already says.
