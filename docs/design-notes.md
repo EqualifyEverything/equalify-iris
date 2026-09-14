@@ -1098,6 +1098,223 @@ every reason below was bought by a pair that shipped split or a defect that ship
   is the one line of `git diff 158e3d9 e842faa -- src/pipeline/review.ts` that lands inside the
   template.
 
+## Correcting a page against its image
+
+A page whose fidelity check failed, or that code found a defect in, goes back to the page agent with
+the image. The run log entries [`page_corrected`](API.md#page_corrected),
+[`page_correction_failed`](API.md#page_correction_failed),
+[`page_correction_recheck`](API.md#page_correction_recheck) and
+[`page_redrawn`](API.md#page_redrawn) say what a caller does with each outcome. This section is why
+the rules behind them have the shape they have. What happens when the verdict itself cannot be
+obtained is [above](#extraction-verdicts-and-empty-pages).
+
+### What a correction's alt fields can and cannot see
+
+A correction re-emits the image description entire, so new WORDS are ordinary and a rewritten clause
+is full of them. What is not ordinary is a named member moving between two of the description's
+enumerations, or joining a list the earlier reply had already written. Those are the two reviewable
+shapes issues #355 and #373 asked for, and neither is a boolean: a flag saying something moved
+somewhere is not a claim anyone can check afterwards, so `alt_relocated` and `alt_added` name the
+members instead.
+
+- **The two readings are not the same match, and the asymmetry is deliberate.** "Named nowhere" folds
+  case and reads the normalised member, since a generous reading there only makes the field quieter.
+  "Still names it" matches the member exactly as the earlier reply wrote it, capital and abbreviating
+  dot included, because a generous reading on that side puts a WRONG name on the line — a member
+  whose abbreviation is also an ordinary English word (`Or.`, `Miss.`) is otherwise found in the
+  corrected description's prose and its expansion reported as an arrival. That is the one thing these
+  fields must not do: a name here sends a reader to look for a member that arrived, and a wrong one
+  sends them looking for one that never did.
+
+- **What the exact test costs, in its own terms**, since it is wider than the re-spelling it was
+  written for. It is reached only for a member in NO category of the corrected description, so it
+  bites where a member was re-banded out of every list AND re-typed — and then for ANY re-typing, an
+  abbreviation losing its dot (`Wis.` written `Wis`) or a name losing its capitals (`MISSOURI`
+  written `Missouri`) as much as an expansion — and every arrival in that description goes
+  unreported. Either condition on its own still reports, for a re-typing that leaves the KEY intact,
+  since case and trailing dots are normalised out of it. A re-typing that changes the key needs no
+  re-banding at all — `N.D.` written `North Dakota` inside the list it was already in — and is caught
+  by the guard rather than costing anything. That is the direction every bound in this module errs
+  in.
+
+- **Read across the whole description rather than per band**, because a re-spelling can re-band in
+  the same stroke, and a check scoped to the band the new name landed in would report a place newly
+  asserted into a band whose predecessor had already classified it.
+
+- **Six names per field, budgeted separately rather than between them.** A shared budget would let a
+  description that moved six members hide every one it added behind a cap spent on the other field.
+
+- **The partition holds by construction rather than by a rule**, and what makes it hold is that the
+  first test reads the earlier description's TEXT rather than its parsed lists. A band of one leaves
+  no list behind, so a member read off the lists alone read as new — and the one move `alt_relocated`
+  declines on purpose, out of a category of one, which has no first company to compare a second
+  against, landed in `alt_added` instead.
+
+- **A member merely dropped is on neither line**, because #373's evidence is about assertions the
+  corrector makes rather than ones it withdraws, and the two text sizes already say a description
+  lost prose.
+
+- **`markers_added` is additions only, deliberately.** This corrector is handed the page image and
+  resolving an illegible passage is its job, so a marker LEAVING is as often the repair as the harm;
+  and where prose arrived the two text sizes say so, whereas for a marker no such number exists,
+  because the marker is itself the prose. The copy editor's `editor_markers_changed` records both
+  directions off the same shared constants, for the opposite reason — that stage is handed no image,
+  so a marker leaving its body is a claim dropped rather than answered.
+
+- **`both` has always meant more than one source**, so no reading of an older log changes as sources
+  are added: there were two until #290, three until #373 and four until #334. It no longer names
+  which combination, because the per-source events keyed by the same `image` are where that detail is
+  exact.
+
+### The output ceiling a correction asks for
+
+A correction is capped at twice what the first pass of that page spent — scaled up where a specialist
+handed it a document longer than that pass produced — with a 4,000-token floor (`correctionCeiling`
+in `src/pipeline/extraction.ts`). Before issue #285 it ran at the deployment's ceiling: one uncapped
+correction ran to 32,000 tokens on a page whose render cost 6,233 and was discarded for being
+truncated, and the error it raised advised raising the ceiling, which would only have bought a larger
+discarded reply.
+
+- **`ceiling_bound` exists because `ceiling` cannot say which term produced the number**, and the
+  answer decides which constant a truncated correction is evidence about. Of the three corrections
+  that truncated in one bench round, one is a `floor` line — a 1,618-token first pass capped at 4,000
+  rather than 3,236 — so triaging all three as evidence about the multiple counts a line the multiple
+  never bound, and raising the multiple would move that page's cap not at all (issue #365). Reading
+  the term off the number instead is wrong on exactly one page: the one whose doubling lands on
+  4,000, where the multiple is what bound it and `ceiling === 4000` says otherwise.
+
+- **The head-and-tail excerpts are the evidence `ceiling` only poses a question about (issue #293).**
+  The same cap is either too tight for a page that genuinely needs more room than its first pass
+  took, or exactly right for a model that went on rewriting the page it was given, and nothing else
+  on the line can tell those apart: two truncations at 34,573 and 41,959 characters against pages of
+  11,908 and 11,456 were argued both ways off the same log, and the round cannot be asked again,
+  because a truncation has already been billed for a full ceiling of output. Read as a ratio against
+  the page, those two are 2.9x and 3.7x.
+
+- **`shape` says where the reply BEGAN and not where the output went.** `bare_html` is how 24 of the
+  180 corrections in that round answered, and the shape both of its page-shaped truncations had; a
+  correction that starts the page and then narrates at it carries the same value as one that
+  transcribed to its last character, both happened in that round on the same model, and the tail is
+  still what tells them apart (issue #365).
+
+- **Nothing is retried**, because a correction truncating because the PAGE is large will truncate
+  again for a second full ceiling of output. The same argument turns the other way for a first draw,
+  where the page does not survive its failure — see below.
+
+- **`problems` and `kinds` are spelled exactly as `page_corrected` spells them (issue #182)**, so a
+  failed correction and a kept one can be grouped by what was asked. Without it, the failures were
+  the one part of the correction path that could not be grouped: 205 successful corrections in a
+  bench round were split by whether the verdict named `content_missing`, the kind that asks a model
+  for content its first pass never produced, and not one failed correction could be put in either
+  half.
+
+- **A correction that throws costs the correction and not the page (issue #171).** Before this, the
+  error propagated out of the page's own task, the run logged `page_extraction_failed`, and a
+  `@page-failed` marker shipped for a page the run still had — naming a stage that had worked.
+
+### The recheck, and what a sample of one can say
+
+- **At the default the sample is a count and not a rate.** One draw per run, so `1 of 1 cleared` is
+  everything it says. Reading a proportion off it is what the field invited and got — four draws
+  split 2/2 quoted as "half", and the same instrument reading 50% on one model's four draws and 25%
+  on another's over one 100-page corpus (issue #288).
+
+- **A census is what answers the question, and it has been run.** At a sample size at or above the
+  page count the recheck costs one Feedback Agent call per correction; replayed off 57 corrected
+  bench pages, **26%** of corrected pages clear their recheck against a **2%** floor for re-asking
+  about the page as it was — 19 pages better and 2 worse, p = 0.000.
+
+- **Which pages answer, between those two settings, is a deterministic threshold spread across the
+  batch** rather than a random draw, and it is not evidence that any position is representative. It
+  replaced a rule that handed the slot to whichever corrected page finished FIRST, which under
+  concurrency is the front of the batch: on one 8-run corpus that put all 8 slots on six pages of
+  100.
+
+- **The four code-found counts are kept out of `problems_before`** because this verdict judges the
+  fragment against the IMAGE and names the Feedback Agent's own problems. A link target does not
+  appear in the image at all, and a placeholder alt or a duplicated id was found by code, so none of
+  them could be counted coming out; folding them in would make a page with one fidelity problem and
+  two gutted alts read as three-in-one-out — a correction that fixed nothing, logged as converging.
+  `words_before` is the exception, because a visible hyphen is on the page and #334 found both
+  candidate verifiers raising that family unprompted.
+
+- **A failing recheck's problems go to `rechecks.failures` and not to `diagnostics.errors`**, which
+  is failures of the run, and which rendered every one of these `"unknown"` while the diagnosis sat
+  on the recheck line (issue #296).
+
+### A draw that claimed nothing, and the corpus behind redrawing once
+
+The gate on a redraw is that the reply asserted nothing, not that it was short — issue #365's
+directive 5 asked for a floor of HTML characters. A floor reads what the parse produced, and a reply
+Iris refused whole is 0 characters of HTML however much page it was carrying.
+
+- **Replaying every candidate is what decided it.** Over every bench run log on disk — 2,639 files in
+  the 80 round directories — 20 replies reach this branch, landing on **20 distinct round-and-page
+  pairs**: **1.05%** of the 1,913 pages drawn at least once, and at least **0.48%** of individual
+  draws. The distinctness is counted rather than assumed, because those pairs average 2.2 page-agent
+  calls each. All 20 are `page_no_output` events and can only be, since every round on disk predates
+  this branch. Replayed through today's parser, **three** survive: the other 17 are blank pages whose
+  declaration [`page_blank`](API.md#page_blank) honours, and a character floor would have redrawn
+  every one of them. The three that still arrive carry no declaration to read at all — no envelope
+  survives the parse, so there is no `log` — and each of the three wanted the redraw. So the
+  declaration test is right about all 20 where a character floor is right about 3.
+
+- **Two of those 17 were refusals until issue #429**, one on the doubt word `noise` for a log reading
+  *"blank apart from minor scanning artifacts (specks and compression noise)"*, one as
+  self-contradicting for a log naming the image filename; both readings are
+  [below](#reading-a-blank-page-declaration). Both pages are blank on more than one log's word —
+  every page-agent reply on disk for those two images declares the page blank, 14 replies on one and
+  8 on the other from three different models, and none of the 22 carries content — so the redraw they
+  used to get bought a second copy of the same sentence at a full page's price.
+
+- **The per-draw rate is a lower bound rather than a figure, and two shipped versions of this got it
+  wrong.** `phase: "extraction"` carries 8,049 `agent_call`s, of which 4,147 name the page agent and
+  3,902 the fidelity check on the same pages — but `agent_call` records no `step`
+  (`src/store/runlog.ts`), and THREE call sites log under that agent and that phase: the draw, the
+  correction pass and the specialist merge. So 4,147 bounds the draws from above and does not count
+  them. In this corpus the third site contributes nothing and the inflation is corrections alone,
+  since `4,147 + 3,902` is the whole phase and `mergeSpecialist` runs only after a specialist returns
+  a fragment — a sum that carries the claim by itself, where 0 `specialist_merge` `model_call`s is a
+  fact about the 60 files that emit `step` and says nothing about the other 2,579. `model_call` does
+  carry `step`, and only recent rounds emit it: in those 60 log files, 954 of 1,558 page-agent calls
+  are draws and 604 are corrections, which puts the rate nearer **0.8%** if that mix holds. A
+  correction always follows a draw of the same page in the same run (`correctPage`'s only caller is
+  inside `extractPage`), which is what makes *pages drawn at least once* a sound reading of a
+  population that counts corrections. The **1,913 is exact** — distinct round-and-page pairs counted
+  off page-agent calls alone, where a mixed count gives 2,042, because 129 pairs carry a checker call
+  and no draw.
+
+- **Which files the corpus is is part of the figure.** A repo-wide `find` counts 2,657 `*.jsonl`, and
+  the 18 not counted are two different things: 11 corpus manifests in the bench root, holding no
+  extraction call, and 7 `*-dry.jsonl` probe logs under `bench-data/`, which DO carry extraction
+  calls — 12 page-agent calls and 12 checks on 3 pages — and which any walker descending every
+  top-level directory folds in silently. Page-agent calls, not draws: they are `agent_call`s, which
+  is the word the paragraph above cannot narrow. It could not be narrowed here either, since those 7
+  files log **0** page `model_call`s at all, so none of them is among the 60 that carry `step` —
+  which is why 60 / 954 / 604 / 1,558 are the only figures this exclusion leaves alone. An earlier
+  version of this got 4,159 calls and 1,916 pages, and it moves the headline: 20/1,913 is 1.0455%
+  where 20/1,916 was 1.0438% and rounded to 1.04%. Four digits, because three would be 1.045, the
+  half that cannot decide its own rounding. The 0.255% first shipped was wrong twice over: 20/7,843
+  off a corpus missing the round directory named `runs`, where the phase-wide figure on the whole
+  corpus is 20/8,049 = **0.248%**.
+
+- **What the declaration test does not cover, in two spellings.** A blank page whose declaration
+  `blankDeclaration` cannot see. One is **markup-only** — `<!-- blank page -->` is #219's own
+  spelling, and with no envelope there is no `blank` field or `log` to read. The other is an envelope
+  whose `html` is **not a string**, so `{"html": null, "log": "This page is blank.", "blank": true}`
+  answers the question and is redrawn anyway. Each costs one call and changes no outcome: the second
+  draw declares the page blank the same way, and the page is refused exactly as it is today. Nothing
+  on disk has produced either shape — every one of the 17 honoured declarations sent `html` as a
+  string. Believing a declaration whose `html` is null would change the **blank routing** (it would
+  deliver such a page rather than refuse it), which is a separate question from this branch.
+
+- **A truncated first draw is redrawn where a truncated correction is not**, because a correction's
+  page survives its failure and a first render's does not. The choice is one more call or a hole in
+  the document, and the one instance on disk is not a ceiling at all but an envelope one `}` short of
+  a 3,437-character table of contents. A page that genuinely exceeds the ceiling loses the second
+  draw as well, and its remedy is still `providers.*.max_tokens`.
+
+
 ## Reading a blank-page declaration
 
 The run log entries [`page_blank`](API.md#page_blank) and [`page_no_output`](API.md#page_no_output)
