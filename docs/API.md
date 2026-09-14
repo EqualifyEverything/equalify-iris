@@ -4373,21 +4373,23 @@ curl -s -H "$AUTH" "$BASE/sessions/$SID/diagnostics" | jq
 }
 ```
 
-The key field for **"is it hung?"** is `in_flight`: a non-null value with a large `waiting_ms`
-means a model call started and hasn't returned (the likely culprit). Because pages are
-extracted in parallel, several calls can be open at once — `in_flight` reports the
-**longest-waiting** one and `in_flight_count` how many are open in total. `concurrency_factor`
-is total model-call time ÷ wall-clock elapsed: ~1 means calls ran serially, and roughly
-`extraction_concurrency` during a parallel extraction phase — a value near 1 on a multi-page run
-means parallelism isn't happening. `slowest_calls` and `phase_durations_ms` show where time goes;
-`errors` lists failed calls, plus the two failures that are not calls — a feedback round's
-agent training (`feedback_training_failed`) and its agent-suggestion filing
-(`contribution_failed`). Both run after the document is delivered and report rather than raise,
-since neither may revoke a document the user already has, so this is where they surface. **Failures
-only**, which it was not: a `page_correction_recheck` carries an `ok` of its own meaning "the
-verifier named no problem", so every second verdict that named one landed here too — 31 of 31 on
-disk across 22 rounds, all of them the measurement-only sample, which runs *after* the correction is
-kept and changes nothing about what ships. On a four-document round that made two clean documents
+The key field for **"is it hung?"** is `in_flight`: a non-null value with a large `waiting_ms` means
+a model call started and hasn't returned (the likely culprit). Because pages are extracted in
+parallel, several calls can be open at once — `in_flight` reports the **longest-waiting** one and
+`in_flight_count` how many are open in total. `concurrency_factor` is total model-call time ÷
+wall-clock elapsed: ~1 means calls ran serially, and roughly `extraction_concurrency` during a
+parallel extraction phase — a value near 1 on a multi-page run means parallelism isn't happening.
+
+`slowest_calls` and `phase_durations_ms` show where time goes; `errors` lists failed calls, plus the
+two failures that are not calls — a feedback round's agent training (`feedback_training_failed`) and
+its agent-suggestion filing (`contribution_failed`). Both run after the document is delivered and
+report rather than raise, since neither may revoke a document the user already has, so this is where
+they surface.
+
+**Failures only**, which it was not: a `page_correction_recheck` carries an `ok` of its own meaning
+"the verifier named no problem", so every second verdict that named one landed here too — 31 of 31
+on disk across 22 rounds, all of them the measurement-only sample, which runs *after* the correction
+is kept and changes nothing about what ships. On a four-document round that made two clean documents
 read as having errors, and the only thing distinguishing a working measurement from a truncated call
 was that the measurement's `message` said `"unknown"` — this entry read `error`, and that event
 carries its diagnosis under `problems` (issue #296). A failing verdict is now reported where its
@@ -4403,46 +4405,51 @@ answered separately, because they are often different agents. `by_step` is the *
 the same seven numbers, keyed by the job the call was bought for** instead of by the agent that
 answered it, so summing either gives the same totals and the same `tokens`.
 
-Each row also carries `models`: **which model ids answered those calls**, sorted and
-deduplicated. The seven numbers say what a bucket cost, and this says what the cost is a price
-*of* — the pair matters on the one knob a deployment turns, since `providers.per_agent` picks a
-model per agent and until this field nothing in a finished run said whether a swap had taken
-effect. A key naming no dispatched agent is ignored rather than refused (**Configuration**), so
-the call falls through to the provider's own model and the run succeeds at the price it would
-have cost anyway: a cheaper model that saved nothing and a swap that never happened produced
-identical diagnostics. Read `by_agent.<agent>.models` after changing an override — that is the
-split the override is keyed by, on a session that has only run since the change: this field folds
-the whole session log exactly as the seven numbers do, and a session's log spans its feedback
-rounds, so a session extracted before a restart and given feedback after one reports both ids
-truthfully. Usually one id; **more than one is not a defect**, because
-resolution keys on capability as well as agent, so a provider's `per_capability` block can put
-one agent on two models on purpose (`page` extracts with `vision` and merges a specialist
-fragment with `text`; `feedback` judges with `vision` and classifies with `text`; the copy editor
-picks by whether the section it is editing has images). An **empty** list on a row with calls in
-it means a log old enough to predate the field — every `model_call` the router writes carries
-`model`, on the failure branch as well as the success one, which is deliberate: a model id that
-is valid for one provider and named to another resolves happily and then fails on every call, and
-that row's model is the whole diagnosis. Both are reported
-because they answer different questions and neither substitutes for the other: an agent name is a
-*contract*, and one contract serves several jobs. The Feedback Agent judges a freshly extracted
-page, re-judges a corrected one, routes a user's feedback and classifies a lesson from it; the
-Copy Editor runs a review round **and** merges a table split across a page break. So the cost of a
-*step* is not a row in `by_agent` — extraction read as 41% of a document's spend against a
-`by_agent` split that books its per-page fidelity check to `feedback`, where its jobs together are
-57.2% — while `providers.per_agent` overrides are keyed by agent, so "which model should this be
-on?" is not a question `by_step` can answer. The step names are a closed set, split finely on
-purpose because buckets add: **extraction** is `extract`, `verify`, `correct`, `recheck_binding`,
-`recheck_sampled`, `specialist`, `specialist_merge`; **review** is `read`, `edit`, `edit_section`,
-`table_join`; **a feedback round** adds `feedback_scope`, `feedback_learn`, `agent_update`,
-`agent_regression`; and `agent_calibrate` and `contribute` are maintenance paths a delivered
-document does not pay for. Every call carries one, so a `"?"` key means the log predates the field
-rather than that a call went unattributed. `in_flight` and `slowest_calls` name the step too, since
-"what is this run stuck on?" is a question about the job and not about the contract.
-Deliberately no dollar figure: the rate depends on the provider,
-region and model, all of which are deployment config, so the token counts are reported and
-whoever holds the price sheet does the multiplication. The four counts bill at four different
-rates and are never summed here; note that `input` **excludes** tokens read from the cache, so the
-whole prompt is `input + cache_read + cache_write`.
+Each row also carries `models`: **which model ids answered those calls**, sorted and deduplicated.
+The seven numbers say what a bucket cost, and this says what the cost is a price *of* — the pair
+matters on the one knob a deployment turns, since `providers.per_agent` picks a model per agent and
+until this field nothing in a finished run said whether a swap had taken effect. A key naming no
+dispatched agent is ignored rather than refused (**Configuration**), so the call falls through to
+the provider's own model and the run succeeds at the price it would have cost anyway: a cheaper
+model that saved nothing and a swap that never happened produced identical diagnostics.
+
+Read `by_agent.<agent>.models` after changing an override — that is the split the override is keyed
+by, on a session that has only run since the change: this field folds the whole session log exactly
+as the seven numbers do, and a session's log spans its feedback rounds, so a session extracted
+before a restart and given feedback after one reports both ids truthfully.
+
+Usually one id; **more than one is not a defect**, because resolution keys on capability as well as
+agent, so a provider's `per_capability` block can put one agent on two models on purpose (`page`
+extracts with `vision` and merges a specialist fragment with `text`; `feedback` judges with `vision`
+and classifies with `text`; the copy editor picks by whether the section it is editing has images).
+An **empty** list on a row with calls in it means a log old enough to predate the field — every
+`model_call` the router writes carries `model`, on the failure branch as well as the success one,
+which is deliberate: a model id that is valid for one provider and named to another resolves happily
+and then fails on every call, and that row's model is the whole diagnosis.
+
+Both are reported because they answer different questions and neither substitutes for the other: an
+agent name is a *contract*, and one contract serves several jobs. The Feedback Agent judges a
+freshly extracted page, re-judges a corrected one, routes a user's feedback and classifies a lesson
+from it; the Copy Editor runs a review round **and** merges a table split across a page break. So
+the cost of a *step* is not a row in `by_agent` — extraction read as 41% of a document's spend
+against a `by_agent` split that books its per-page fidelity check to `feedback`, where its jobs
+together are 57.2% — while `providers.per_agent` overrides are keyed by agent, so "which model
+should this be on?" is not a question `by_step` can answer.
+
+The step names are a closed set, split finely on purpose because buckets add: **extraction** is
+`extract`, `verify`, `correct`, `recheck_binding`, `recheck_sampled`, `specialist`,
+`specialist_merge`; **review** is `read`, `edit`, `edit_section`, `table_join`; **a feedback round**
+adds `feedback_scope`, `feedback_learn`, `agent_update`, `agent_regression`; and `agent_calibrate`
+and `contribute` are maintenance paths a delivered document does not pay for. Every call carries
+one, so a `"?"` key means the log predates the field rather than that a call went unattributed.
+`in_flight` and `slowest_calls` name the step too, since "what is this run stuck on?" is a question
+about the job and not about the contract.
+
+Deliberately no dollar figure: the rate depends on the provider, region and model, all of which are
+deployment config, so the token counts are reported and whoever holds the price sheet does the
+multiplication. The four counts bill at four different rates and are never summed here; note that
+`input` **excludes** tokens read from the cache, so the whole prompt is `input + cache_read +
+cache_write`.
 
 The last two are non-zero because Iris asks the model to cache the part of each prompt that does
 not change. Three things qualify: the agent's own system prompt, which is identical on every page
@@ -4504,68 +4511,82 @@ learns its output size. Failed calls **are** counted, because a truncation has a
 a full ceiling of output and a stall for its prompt.
 
 `verification` is what the verify-then-correct loop did. Every page is checked against its source
-image and a page that fails is re-rendered once, so a run's `page` call count is
-`pages + corrections` — on three real 25-page runs the Feedback Agent rejected 58 of 75 pages,
-which makes the "correct if needed" pass mandatory in practice and put verification alone at 24% of
-one document's bill. `corrections` and **not** `verify_failed`: a page that passed its check is
-re-rendered too when the code finds a link the model dropped, and that costs the same page call, so
-`triggers` is the split — `verify` is a page the Feedback Agent rejected, `links` a page that passed
-and lost a link, `alt` a page that passed and described an image with a placeholder (#290), `ids` a page
-that passed and used one `id` on two elements (#373), `words` a page that passed and wrote one word two
-ways (#334), `both` one with more than one of those. `alt` and
-`ids` are both expected to be 0 on most runs, and that is the point of counting them: the alt rule
-flags nothing this pipeline writes, and the id rule flags 2 of 1,501 measured page replies — about one
-page in 750. One of those two is `fnref-1` written twice by `gpt-5.6-luna`, the page model deployed
-since 2026-09-10 (#344), so one non-zero `ids` is the measured rate rather than a finding. Several is
-the finding: a page agent that has started writing placeholders or reusing ids, or a regression in one
-of the rules. `words` is the one of the four
-expected to be **non-zero**, and so the one with a cost line: on #334's 100-page census `kimi-k2.5`
-wrote one word two ways on 4 of the 92 pages it delivered, `claude-sonnet-4-6` on 3 of 91 and
-`gpt-5.6-luna` on 2 of 91 — no arm was clean. So this trigger buys a page call for a page that had
-already passed, at a rate near 4% on the highest arm measured and near 2% on `gpt-5.6-luna`, which is
-the page model deployed since 2026-09-10 (#344). It is the first field to read
-when `corrections` grows and `verify_failed` does not. `verify_failed / (pages_verified - pages_unjudged)` is the
-rejection rate; the raw counts are reported rather than the percentage, because a rate over three
-pages is not a measurement.
+image and a page that fails is re-rendered once, so a run's `page` call count is `pages +
+corrections` — on three real 25-page runs the Feedback Agent rejected 58 of 75 pages, which makes
+the "correct if needed" pass mandatory in practice and put verification alone at 24% of one
+document's bill.
 
-`declined` is what the corrector said it would **not** do. Since #373 a correction may answer a problem
-by refusing it — where the problem asserts something about the HTML it was shown and that HTML shows
-otherwise, it says which problem and why and changes nothing — and before that its only legal move was
-compliance, so a false claim about a page was answered by editing a page that was right. These counts
-are the only trace the licence leaves, because it **gates nothing**: no verdict, no `results`, no
-recheck and not the `uncorrected` set are touched by a decline, so a page whose problem was declined
-wrongly ships in exactly the state a correction that failed to fix it ships in — named in
-`uncorrected`, with `@page-uncorrected` on the document. What a decline removes is the edit, not the
-record. Two rates, and both denominators are here because neither count reads alone: `pages` against
+`corrections` and **not** `verify_failed`: a page that passed its check is re-rendered too when the
+code finds a link the model dropped, and that costs the same page call, so `triggers` is the split —
+`verify` is a page the Feedback Agent rejected, `links` a page that passed and lost a link, `alt` a
+page that passed and described an image with a placeholder (#290), `ids` a page that passed and used
+one `id` on two elements (#373), `words` a page that passed and wrote one word two ways (#334),
+`both` one with more than one of those.
+
+`alt` and `ids` are both expected to be 0 on most runs, and that is the point of counting them: the
+alt rule flags nothing this pipeline writes, and the id rule flags 2 of 1,501 measured page replies
+— about one page in 750. One of those two is `fnref-1` written twice by `gpt-5.6-luna`, the page
+model deployed since 2026-09-10 (#344), so one non-zero `ids` is the measured rate rather than a
+finding. Several is the finding: a page agent that has started writing placeholders or reusing ids,
+or a regression in one of the rules.
+
+`words` is the one of the four expected to be **non-zero**, and so the one with a cost line: on
+#334's 100-page census `kimi-k2.5` wrote one word two ways on 4 of the 92 pages it delivered,
+`claude-sonnet-4-6` on 3 of 91 and `gpt-5.6-luna` on 2 of 91 — no arm was clean. So this trigger
+buys a page call for a page that had already passed, at a rate near 4% on the highest arm measured
+and near 2% on `gpt-5.6-luna`, which is the page model deployed since 2026-09-10 (#344).
+
+It is the first field to read when `corrections` grows and `verify_failed` does not. `verify_failed
+/ (pages_verified - pages_unjudged)` is the rejection rate; the raw counts are reported rather than
+the percentage, because a rate over three pages is not a measurement.
+
+`declined` is what the corrector said it would **not** do. Since #373 a correction may answer a
+problem by refusing it — where the problem asserts something about the HTML it was shown and that
+HTML shows otherwise, it says which problem and why and changes nothing — and before that its only
+legal move was compliance, so a false claim about a page was answered by editing a page that was
+right.
+
+These counts are the only trace the licence leaves, because it **gates nothing**: no verdict, no
+`results`, no recheck and not the `uncorrected` set are touched by a decline, so a page whose
+problem was declined wrongly ships in exactly the state a correction that failed to fix it ships in
+— named in `uncorrected`, with `@page-uncorrected` on the document. What a decline removes is the
+edit, not the record.
+
+Two rates, and both denominators are here because neither count reads alone: `pages` against
 `corrections`, and `problems` against `problems_offered`, the whole bill every correction in the run
-was given (summed from the `page_corrected` lines, not from the declining pages' own bills — dividing
-by the numerator's own subject would report a rate the run cannot be wrong about). 2 declined of 2 is a
-correction refused outright; 2 of 40 is the pass doing what it was built for. `code_checked` is the
-field to watch rather than the total, and it is the misuse: a declined `links`, `alt` or `ids` problem
-is a refusal of something Iris checked against the source file's own annotations, a closed word list or
-the parsed fragment, so it is wrong by construction, where a declined `verify` problem is a
-disagreement with a *reading* and may well be right. A non-zero there is a corrector reading the
-licence wider than it is written — the risk #373 states against its own proposal, countable now rather
-than arguable later. What makes that reading of the number sound is that the corrector can tell the
-two apart: the `links`, `alt` and `ids` problems Iris raised itself are marked
-`(Iris checked this one in code.)` in the list it is shown, and the licence excludes a marked problem
-by name. Without the mark a corrector following the licence exactly would decline into those bands —
-their wordings are the licence's own examples almost verbatim — and this field would be counting
-compliance. `words` is the fifth code-checked band, it carries a **different** mark
-(`(Iris checked in code that both spellings are on this page, not which one is right.)`) and it is
-counted **apart** from `code_checked`, all three for one reason: on a word written two ways, Iris
-verified that both spellings are present and cannot know which the printing shows, so the entry is
-settled in one part and open in the other. The request says that in its own sentence, since the
-sentence excluding a marked problem ends "so fix it" and that would order the corrector to join
-`non-farm` into a `nonfarm` the page never prints. A decline there is therefore the licence working
-rather than being stretched. Reading it as misuse would put compliance in the one field whose
-job is to count abuse. A non-zero `words` is a rate to compare against the
-[`page_split_words`](#page_split_words) lines — how often a page really did print both — and not a
-number to act on by itself. `unattributed` is a decline that cited no problem number, or cited one
-the request never listed: not evidence about a code-checked fact and not nothing either, but a disagreement whose
-subject cannot be recovered, which is the first thing to read if `problems` is large and the lines are
-not making sense. Zero on every log written before the field existed, and the block prints at zero on a
-run where nothing declined — `pages: 0` against a non-zero `problems_offered` is the measurement this
+was given (summed from the `page_corrected` lines, not from the declining pages' own bills —
+dividing by the numerator's own subject would report a rate the run cannot be wrong about). 2
+declined of 2 is a correction refused outright; 2 of 40 is the pass doing what it was built for.
+
+`code_checked` is the field to watch rather than the total, and it is the misuse: a declined
+`links`, `alt` or `ids` problem is a refusal of something Iris checked against the source file's own
+annotations, a closed word list or the parsed fragment, so it is wrong by construction, where a
+declined `verify` problem is a disagreement with a *reading* and may well be right. A non-zero there
+is a corrector reading the licence wider than it is written — the risk #373 states against its own
+proposal, countable now rather than arguable later.
+
+What makes that reading of the number sound is that the corrector can tell the two apart: the
+`links`, `alt` and `ids` problems Iris raised itself are marked `(Iris checked this one in code.)`
+in the list it is shown, and the licence excludes a marked problem by name. Without the mark a
+corrector following the licence exactly would decline into those bands — their wordings are the
+licence's own examples almost verbatim — and this field would be counting compliance.
+
+`words` is the fifth code-checked band, it carries a **different** mark (`(Iris checked in code that
+both spellings are on this page, not which one is right.)`) and it is counted **apart** from
+`code_checked`, all three for one reason: on a word written two ways, Iris verified that both
+spellings are present and cannot know which the printing shows, so the entry is settled in one part
+and open in the other. The request says that in its own sentence, since the sentence excluding a
+marked problem ends "so fix it" and that would order the corrector to join `non-farm` into a
+`nonfarm` the page never prints. A decline there is therefore the licence working rather than being
+stretched. Reading it as misuse would put compliance in the one field whose job is to count abuse. A
+non-zero `words` is a rate to compare against the [`page_split_words`](#page_split_words) lines —
+how often a page really did print both — and not a number to act on by itself.
+
+`unattributed` is a decline that cited no problem number, or cited one the request never listed: not
+evidence about a code-checked fact and not nothing either, but a disagreement whose subject cannot
+be recovered, which is the first thing to read if `problems` is large and the lines are not making
+sense. Zero on every log written before the field existed, and the block prints at zero on a run
+where nothing declined — `pages: 0` against a non-zero `problems_offered` is the measurement this
 feature is judged on.
 
 `pages_unjudged` is a **subset** of `pages_verified`, not a deduction from it: the pages that reached
@@ -4577,30 +4598,37 @@ with an unusually good pass rate. Zero on every log written before the flag exis
 case it cannot distinguish rather than one it claims to.
 
 `pages_skipped_blank` is a subset of *that*: the pages nothing looked at because nothing was bought.
-A page the page agent declared blank has an empty fragment, and an empty fragment has no content to be
-unfaithful with — the verifier used to be shown the source image and an empty code block, and in 36
-such judgements on a 100-page corpus (9 blank pages, two page-model arms, two commits) it passed every
-one, for $0.0859 per arm: 0.77% of that lineup's bill and a growing share as the models get cheaper,
-because a per-image cost does not shrink with them (issue #294). Read it as the saving — this count
-times $0.0095, the measured cost of a verify call carrying no HTML, against $0.0212 for an average
-page — with one caveat: it counts calls **not bought**, which is money not spent only where there was a
-verifier to spend it on. A run with no Feedback Agent loaded skips the blank page's call too and saves
-nothing by it. `pages_unjudged == pages_verified` is *consistent* with such a run but does not
-identify it: a run whose Feedback Agent loaded and whose every verify reply failed to parse gives the
-same equality, and there the calls were bought and the money spent. What settles it is the calls
-themselves — `by_step.verify.count` in this same object is 0 on a run that bought no verdict at all,
-whatever `pages_unjudged` says. It is a subset of `pages_unjudged` and therefore still inside `pages_verified`, so no rate
-published before it moves; what it adds is that a skip and a broken Feedback Agent stop being the same
-two numbers. The blank page keeps every check that costs nothing: a page carrying link annotations
-that came back empty still fails the link comparison, still buys a correction against the image, and
-that correction is still verified — so the wrong-blank case a **file** can prove is caught for free.
-What is given up is a confident wrong declaration on a page with no annotations, which this call has
+A page the page agent declared blank has an empty fragment, and an empty fragment has no content to
+be unfaithful with — the verifier used to be shown the source image and an empty code block, and in
+36 such judgements on a 100-page corpus (9 blank pages, two page-model arms, two commits) it passed
+every one, for $0.0859 per arm: 0.77% of that lineup's bill and a growing share as the models get
+cheaper, because a per-image cost does not shrink with them (issue #294).
+
+Read it as the saving — this count times $0.0095, the measured cost of a verify call carrying no
+HTML, against $0.0212 for an average page — with one caveat: it counts calls **not bought**, which
+is money not spent only where there was a verifier to spend it on. A run with no Feedback Agent
+loaded skips the blank page's call too and saves nothing by it. `pages_unjudged == pages_verified`
+is *consistent* with such a run but does not identify it: a run whose Feedback Agent loaded and
+whose every verify reply failed to parse gives the same equality, and there the calls were bought
+and the money spent.
+
+What settles it is the calls themselves — `by_step.verify.count` in this same object is 0 on a run
+that bought no verdict at all, whatever `pages_unjudged` says. It is a subset of `pages_unjudged`
+and therefore still inside `pages_verified`, so no rate published before it moves; what it adds is
+that a skip and a broken Feedback Agent stop being the same two numbers.
+
+The blank page keeps every check that costs nothing: a page carrying link annotations that came back
+empty still fails the link comparison, still buys a correction against the image, and that
+correction is still verified — so the wrong-blank case a **file** can prove is caught for free. What
+is given up is a confident wrong declaration on a page with no annotations, which this call has
 never caught (0 of 36) and whose observed cause — a hedged declaration — is refused before it gets
-here by the doubt-word veto (`blank_vetoed`), which a stated declaration does not override either. Its
-evidence is the `page_blank` line and `pages_blank`. One blank page is outside this count and is
-supposed to be: where the reply stated blankness in its `blank` field and its own log names something on
-the page, the verdict IS bought — `blank_contradicted` on `page_blank`, no `skipped` on the page's line —
-so `pages_blank - pages_skipped_blank` is the number of declarations that cost a call (issue #371).
+here by the doubt-word veto (`blank_vetoed`), which a stated declaration does not override either.
+Its evidence is the `page_blank` line and `pages_blank`.
+
+One blank page is outside this count and is supposed to be: where the reply stated blankness in its
+`blank` field and its own log names something on the page, the verdict IS bought —
+`blank_contradicted` on `page_blank`, no `skipped` on the page's line — so `pages_blank -
+pages_skipped_blank` is the number of declarations that cost a call (issue #371).
 
 `pages_verify_error` is the other subset of `pages_unjudged`, and it is the counterweight to the one
 above: the pages whose verify call **was** bought and threw — a throttle, a stall, or a reply that
@@ -4662,78 +4690,85 @@ addressed what was reported: a page flagged `content_missing` whose correction c
 
 The fields answer different questions about the same loop. `results` is what the corrections
 **cost**: `identical`, `empty` and `failed` are page calls paid for that produced no change at all,
-and `failed` is the most expensive of the three — a correction that hit the output ceiling paid for a
-full ceiling of tokens before failing, so summing only the first two undercounts the waste by the
-worst of it. `effects`
-is what they **did**, read off the two fragments rather than taken from the verdict — the other end
-of the same question `verify_kinds` answers, and the one that can be checked against it: what the
-verifier said was wrong, and what the correction actually changed. It is also the only one of the two
-available for a page whose verdict named nothing, since a page that passed its check is re-rendered
-too when a link is missing.
+and `failed` is the most expensive of the three — a correction that hit the output ceiling paid for
+a full ceiling of tokens before failing, so summing only the first two undercounts the waste by the
+worst of it.
+
+`effects` is what they **did**, read off the two fragments rather than taken from the verdict — the
+other end of the same question `verify_kinds` answers, and the one that can be checked against it:
+what the verifier said was wrong, and what the correction actually changed. It is also the only one
+of the two available for a page whose verdict named nothing, since a page that passed its check is
+re-rendered too when a link is missing.
+
 `text` and `structure` are not exclusive (a re-render is usually both); `alt_only` is the count that
 stands alone, and a run where it dominates is spending a page call per page on image descriptions.
 `attrs` is every attribute but `alt`, which is where the cheapest real fixes live — an `href` the
 model re-typed, a missing `<th scope>`, an `aria-describedby` — a correction that moves no word and
 still matters.
+
 `text_grew` and `text_shrank` split `text` by direction, measured on the prose a reader receives:
 how many corrections added words, how many removed them, and — on a log where every line carries the
 sizes — by subtraction how many rewrote the same quantity in place. That subtraction is only safe on
 a log written entirely since the sizes existed: an older `page_corrected` line still counts under
-`text` and lands in neither direction, and a session's log is append-only across rounds, so a session
-that takes a feedback round across the upgrade has a mixed one. Compare `text_grew + text_shrank`
-against `text` first.
-This is what makes a high `verify_failed` rate readable in either direction.
-Two bench rounds put it at 71% and 74% of pages, with `attrs` and `structure` touched on nearly
-every correction — which reads either as most pages arriving with content missing, or as most pages
-arriving fine and being polished, and no count could tell the two apart. A round clustered in
-`text_grew` is recovering content the vision pass dropped; one that barely leaves `attrs` and
-`structure` is buying markup on pages that were already readable, and the cheaper fix for that is
-the page prompt rather than a call per page. There is no threshold — a correction that adds one
-character counts as `text_grew`, because any band calling that "cosmetic" would be picked rather
-than measured, and the magnitudes are on each `page_corrected` line for anyone with a corpus to
-calibrate one on.
+`text` and lands in neither direction, and a session's log is append-only across rounds, so a
+session that takes a feedback round across the upgrade has a mixed one. Compare `text_grew +
+text_shrank` against `text` first.
+
+This is what makes a high `verify_failed` rate readable in either direction. Two bench rounds put it
+at 71% and 74% of pages, with `attrs` and `structure` touched on nearly every correction — which
+reads either as most pages arriving with content missing, or as most pages arriving fine and being
+polished, and no count could tell the two apart. A round clustered in `text_grew` is recovering
+content the vision pass dropped; one that barely leaves `attrs` and `structure` is buying markup on
+pages that were already readable, and the cheaper fix for that is the page prompt rather than a call
+per page. There is no threshold — a correction that adds one character counts as `text_grew`,
+because any band calling that "cosmetic" would be picked rather than measured, and the magnitudes
+are on each `page_corrected` line for anyone with a corpus to calibrate one on.
+
 `rechecks` is whether correction **converges**: `sampled_ok / sampled` is a corrected page that had
 FAILED its check, verified a second time to see whether the re-render fixed it. How many pages a run
 samples is `defaults.recheck_sample_size` (default 1, `0` off, at or above the page count a census),
 and how many it actually took is `sampled` — a slot is spent only if a corrected page reached its
-threshold. Read the default as a **count**: `sampled: 1` supports "1 of 1 cleared" and no percentage,
-which is the mistake this number was built to invite — 8 runs over 111 corrections bought 8 verdicts,
-and two four-draw samples off one corpus read 50% and 25% (issue #288). Accruing draws over a fleet
-does not fix that on its own, because the pages are chosen by a rule and not at random. The rate over
-corrected pages is what a **census** buys, at one Feedback Agent call per correction — roughly half
-again on top of verify's 14.2% of a document's bill — and it is worth buying once rather than
-standing in production: replayed over 57 corrected bench pages it says **26%** of corrected pages
-clear their recheck, against a 2% floor for re-asking about the page as it was (19 better, 2 worse,
-p = 0.000). So a correction usually leaves a named problem behind, and `sampled_ok` near zero on a
-small sample is the expected reading rather than a regression.
-`sampled_problems_before / sampled_problems_after` is how far the kept corrections got:
-`sampled_ok` alone read as pass/fail on a single-shot pass that was never expected to reach zero, so
-11 problems in and 3 out looked exactly like 11 and 11. Fidelity problems on both sides, deliberately
-— a correction is also handed the links the code found missing, and this verdict judges the fragment
+threshold. Read the default as a **count**: `sampled: 1` supports "1 of 1 cleared" and no
+percentage, which is the mistake this number was built to invite — 8 runs over 111 corrections
+bought 8 verdicts, and two four-draw samples off one corpus read 50% and 25% (issue #288). Accruing
+draws over a fleet does not fix that on its own, because the pages are chosen by a rule and not at
+random. The rate over corrected pages is what a **census** buys, at one Feedback Agent call per
+correction — roughly half again on top of verify's 14.2% of a document's bill — and it is worth
+buying once rather than standing in production: replayed over 57 corrected bench pages it says
+**26%** of corrected pages clear their recheck, against a 2% floor for re-asking about the page as
+it was (19 better, 2 worse, p = 0.000). So a correction usually leaves a named problem behind, and
+`sampled_ok` near zero on a small sample is the expected reading rather than a regression.
+
+`sampled_problems_before / sampled_problems_after` is how far the kept corrections got: `sampled_ok`
+alone read as pass/fail on a single-shot pass that was never expected to reach zero, so 11 problems
+in and 3 out looked exactly like 11 and 11. Fidelity problems on both sides, deliberately — a
+correction is also handed the links the code found missing, and this verdict judges the fragment
 against the *image*, where a link target does not appear, so counting a link going in and never
 being able to count it coming out would bias the ratio toward "the loop converges" on exactly the
 pages that have the most to fix. Both are sums over the sampled pages that were actually judged —
-`sampled` less `sampled_unjudged`, and less any line too old to carry both counts — so
-read them as a ratio rather than a per-page average, and note that `sampled_problems_after: 0` does
-not mean the sample passed — a verdict's `ok` is its `faithful` / `accessible` flags, which an agent
-can set false while naming nothing. `binding` is counted apart from the sample and not added to it:
-those are the links path's own re-verifications of pages that had already **passed**, kept or
-discarded on the verdict, so their ok-rate answers "did a rewrite of a good page stay good" — a
-different question, and on a link-heavy PDF there is one per page, enough to swamp the sample if the
-two were summed. The tally has no binding `problems_*` pair for the same reason — the event lines do
-carry the counts, but nothing sums them here: those pages had passed, so their `problems_before` is 0
-by construction, and their verdict decides whether the rewrite ships at all rather than measuring how
-far a kept one got. `sampled_unjudged` and `binding_unjudged` are `pages_unjudged`'s caveat one level
-down, and subsets in the same way: a recheck's `ok` is also what an unavailable Feedback Agent looks
-like, and with none loaded every page passes its first check, so every corrected page's recheck is the
-binding one and every one of them reads as a rewrite checked and found good. Subtract from BOTH sides
-— `(binding_ok - binding_unjudged) / (binding - binding_unjudged)`, same shape for sampled — because
-an unjudged recheck logs `ok: true` and so is already inside `binding_ok`. That is where these differ
-from `pages_unjudged`, which comes off the denominator alone: `verify_failed` can only come from a
-`page_verify_failed` line, which an unjudged verdict never writes. The `sampled_problems_*` pair needs
-no such correction, because an unjudged sample is left out of it: its `problems_after` is 0 for want
-of a verdict rather than for want of remaining problems, and summed in it would report a page nobody
-judged as a correction that fixed everything it was given.
+`sampled` less `sampled_unjudged`, and less any line too old to carry both counts — so read them as
+a ratio rather than a per-page average, and note that `sampled_problems_after: 0` does not mean the
+sample passed — a verdict's `ok` is its `faithful` / `accessible` flags, which an agent can set
+false while naming nothing.
+
+`binding` is counted apart from the sample and not added to it: those are the links path's own
+re-verifications of pages that had already **passed**, kept or discarded on the verdict, so their
+ok-rate answers "did a rewrite of a good page stay good" — a different question, and on a link-heavy
+PDF there is one per page, enough to swamp the sample if the two were summed. The tally has no
+binding `problems_*` pair for the same reason — the event lines do carry the counts, but nothing
+sums them here: those pages had passed, so their `problems_before` is 0 by construction, and their
+verdict decides whether the rewrite ships at all rather than measuring how far a kept one got.
+`sampled_unjudged` and `binding_unjudged` are `pages_unjudged`'s caveat one level down, and subsets
+in the same way: a recheck's `ok` is also what an unavailable Feedback Agent looks like, and with
+none loaded every page passes its first check, so every corrected page's recheck is the binding one
+and every one of them reads as a rewrite checked and found good. Subtract from BOTH sides —
+`(binding_ok - binding_unjudged) / (binding - binding_unjudged)`, same shape for sampled — because
+an unjudged recheck logs `ok: true` and so is already inside `binding_ok`. That is where these
+differ from `pages_unjudged`, which comes off the denominator alone: `verify_failed` can only come
+from a `page_verify_failed` line, which an unjudged verdict never writes. The `sampled_problems_*`
+pair needs no such correction, because an unjudged sample is left out of it: its `problems_after` is
+0 for want of a verdict rather than for want of remaining problems, and summed in it would report a
+page nobody judged as a correction that fixed everything it was given.
 
 `binding_error` is the binding recheck that was **bought and threw**, so it produced no verdict at all
 (`page_verify_error` with `step: "recheck_binding"`, issue #364). It is **not** a subset of `binding`
@@ -4763,27 +4798,31 @@ and `binding - binding_ok`. One entry per recheck that named a problem, in the v
 Nothing else in `diagnostics.json` holds that prose, and it is the whole answer to "what is still
 wrong with the page that shipped" — the counts say a correction did not converge and never say what
 it failed to fix. Both populations, told apart by `binding`, because the two failures read
-differently: `false` is a page that shipped **still wrong**, and `true` is a rewrite that was refused
-so the page shipped as it was (`page_links_correction_rejected`). `null` is a line that did not say,
-which the counts above put in neither bucket — kept here anyway, since what that line failed to say
-is which rate it belongs in and not what is wrong with the page. `page` is on the entry because a run
-can fail several rechecks and each message is about one page. The `message` is the problems in full,
-counted when there is more than one (`"2 problems: … | …"`), since no order is claimed among them and
-the dropped one is as likely as any to be why the page is wrong. Failing verdicts only, so an
-unjudged recheck never appears — it logs `ok: true` and names nothing. This is where these were meant
-to be read all along: they were in `errors` under the word `"unknown"` (issue #296).
-Bounded, which nothing else in this payload needs to be: every other field here is a count, and these
-entries are model prose, so they are the one part that grows with what the documents needed. At most
-**20** verdicts, each `message` cut at **600** characters with a `…` marking the cut (so a cut message
-is 601 characters, the mark being extra), and `verdicts_omitted` says how many the cap left out — a
-capped list is never a short one read as whole. The two populations reach that cap at very different
-rates, and the sampled one effectively never does: `recheck_sample_size` is 1 by default, so a run
-supplies at most one sampled failure. The binding recheck is **not** sampled — it runs on every page
-that passed its check and had a link or alt rewritten — so a link-heavy document can refuse more than
-twenty rewrites inside one round on default config, and the cap engages there. That is the run worth
-capping: twenty refusals plus a count of the rest says the rewrite path is losing content
-systematically as well as fifty verbatim would. `GET /v1/sessions/{id}/logs` holds every verdict in
-full, uncut and uncapped.
+differently: `false` is a page that shipped **still wrong**, and `true` is a rewrite that was
+refused so the page shipped as it was (`page_links_correction_rejected`). `null` is a line that did
+not say, which the counts above put in neither bucket — kept here anyway, since what that line
+failed to say is which rate it belongs in and not what is wrong with the page.
+
+`page` is on the entry because a run can fail several rechecks and each message is about one page.
+The `message` is the problems in full, counted when there is more than one (`"2 problems: … | …"`),
+since no order is claimed among them and the dropped one is as likely as any to be why the page is
+wrong. Failing verdicts only, so an unjudged recheck never appears — it logs `ok: true` and names
+nothing. This is where these were meant to be read all along: they were in `errors` under the word
+`"unknown"` (issue #296).
+
+Bounded, which nothing else in this payload needs to be: every other field here is a count, and
+these entries are model prose, so they are the one part that grows with what the documents needed.
+At most **20** verdicts, each `message` cut at **600** characters with a `…` marking the cut (so a
+cut message is 601 characters, the mark being extra), and `verdicts_omitted` says how many the cap
+left out — a capped list is never a short one read as whole.
+
+The two populations reach that cap at very different rates, and the sampled one effectively never
+does: `recheck_sample_size` is 1 by default, so a run supplies at most one sampled failure. The
+binding recheck is **not** sampled — it runs on every page that passed its check and had a link or
+alt rewritten — so a link-heavy document can refuse more than twenty rewrites inside one round on
+default config, and the cap engages there. That is the run worth capping: twenty refusals plus a
+count of the rest says the rewrite path is losing content systematically as well as fifty verbatim
+would. `GET /v1/sessions/{id}/logs` holds every verdict in full, uncut and uncapped.
 
 `rejected: 0` over a whole round is the expected reading of a healthy one, not a gate that accepts
 everything. The only rejection that applies on every trigger is the shrink floor — a correction that
@@ -4922,33 +4961,38 @@ and `by_step.edit_section` the fallback calls it bought.
 
 `fidelity_observed` sits outside `verification` because it is not part of that loop and does not
 gate anything: it is what the **Copy Editor** noticed about a page it happened to be looking at,
-folded from [`editor_fidelity_observed`](#editor_fidelity_observed). Everything under
-`verification` is the one fidelity check each page gets, and that check's weakness is structural
-rather than a matter of rate — the verifier is the same model family looking at the same image as
-the transcriber, so a page whose text it misread once it can misread twice, and a page it declared
-blank it will declare blank again. Nothing else in the run had standing to disagree. The Reader
-never sees a source image; the editor does, for the pages the Reader's issues name, and now has a
-field to say so in (issue #183). So read this as **evidence, not a rate**: the denominator is
-"pages an unrelated issue happened to attach an image for", which is not a sample of anything, and
-`observed: 0` on a run means nobody noticed something in passing, not that the document is
-faithful. What it is good for is the direction of a disagreement between the two — `kinds` uses
-the same five as `verify_kinds` on purpose, so a run whose editor reports `content_missing` on
-pages whose VERIFY passed is saying the check missed content, which is the failure mode no count
-in `verification` can see. `pages` is the distinct pages observations were filed about, so one
-page reported in three rounds is one page and three observations; `observed` is the observations.
-`unattached` and `unplaced` are the ones to discount first — an observation about a page whose
-image was not attached is a guess about a page the model could not see, and one that named no page
-cannot be checked at all. `pages` includes the guessed pages, because it is where a person should
-look and a guess that turns out to be right is worth the look; `unattached_pages` is the subset
-the editor could **not** see, so the difference between the two is the set that was backed by an
-image in front of the model. Attachment is judged per round, so a page attached in round 1 and
-reported in round 2 without its image counts as a guess — and a log line that does not say what
-was attached puts its pages in `pages` and none in `unattached_pages`, leaving its own
-`unattached` count as the only statement that some were guesses. `untagged` in `kinds` is the
-usual companion: an observation whose kind this version does not recognize is counted there and in
-no other bucket, and the kinds are not a partition, so read each against `observed`. None of this
-changes the delivered document — an observation is addressed to a person, and acting on one would
-mean re-extracting that page.
+folded from [`editor_fidelity_observed`](#editor_fidelity_observed). Everything under `verification`
+is the one fidelity check each page gets, and that check's weakness is structural rather than a
+matter of rate — the verifier is the same model family looking at the same image as the transcriber,
+so a page whose text it misread once it can misread twice, and a page it declared blank it will
+declare blank again. Nothing else in the run had standing to disagree. The Reader never sees a
+source image; the editor does, for the pages the Reader's issues name, and now has a field to say so
+in (issue #183).
+
+So read this as **evidence, not a rate**: the denominator is "pages an unrelated issue happened to
+attach an image for", which is not a sample of anything, and `observed: 0` on a run means nobody
+noticed something in passing, not that the document is faithful. What it is good for is the
+direction of a disagreement between the two — `kinds` uses the same five as `verify_kinds` on
+purpose, so a run whose editor reports `content_missing` on pages whose VERIFY passed is saying the
+check missed content, which is the failure mode no count in `verification` can see.
+
+`pages` is the distinct pages observations were filed about, so one page reported in three rounds is
+one page and three observations; `observed` is the observations. `unattached` and `unplaced` are the
+ones to discount first — an observation about a page whose image was not attached is a guess about a
+page the model could not see, and one that named no page cannot be checked at all. `pages` includes
+the guessed pages, because it is where a person should look and a guess that turns out to be right
+is worth the look; `unattached_pages` is the subset the editor could **not** see, so the difference
+between the two is the set that was backed by an image in front of the model.
+
+Attachment is judged per round, so a page attached in round 1 and reported in round 2 without its
+image counts as a guess — and a log line that does not say what was attached puts its pages in
+`pages` and none in `unattached_pages`, leaving its own `unattached` count as the only statement
+that some were guesses.
+
+`untagged` in `kinds` is the usual companion: an observation whose kind this version does not
+recognize is counted there and in no other bucket, and the kinds are not a partition, so read each
+against `observed`. None of this changes the delivered document — an observation is addressed to a
+person, and acting on one would mean re-extracting that page.
 
 `pages_failed` is the set of source pages the delivered document has no content for, because their
 own extraction threw ([Partial documents](#partial-documents)). It has its own field

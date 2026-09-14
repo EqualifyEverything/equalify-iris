@@ -1,6 +1,6 @@
 # What Iris costs
 
-**From $0 to about 11¢ a page. Which one you get is a config choice, not a property of Iris.**
+**From $0 to about 10.7¢ a page. Which one you get is a config choice, not a property of Iris.**
 
 Iris ships no model. `resolveAgentModel` ([src/providers/index.ts](../src/providers/index.ts)) reads
 your config and nothing else — every branch ends in a value you wrote, and an unconfigured provider
