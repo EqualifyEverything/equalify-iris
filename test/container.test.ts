@@ -196,8 +196,17 @@ test("an unwritable data_dir names its remedy instead of throwing a stack trace"
     /failStaleSessions\(\)/,
     "the first database WRITE is outside the guard, so an unwritable iris.sqlite dies with a bare ERR_SQLITE_ERROR and the chown below never prints",
   );
+  // Counted over CODE, with whole-line comments dropped, because the count is a claim about calls
+  // and `split` cannot tell one from a mention. The comments in the guard paraphrase the call today
+  // ("clearing the sessions a previous shutdown orphaned"); one that names it instead would fail
+  // this and send the reader after a second call that does not exist. The slice assertion above is
+  // the one carrying the real invariant — this only stops a copy being added outside it.
+  const code = index
+    .split("\n")
+    .filter((l) => !l.trim().startsWith("//"))
+    .join("\n");
   assert.equal(
-    index.split("failStaleSessions()").length - 1,
+    code.split("failStaleSessions()").length - 1,
     1,
     "src/index.ts calls failStaleSessions() more than once, so one of them may sit outside the storage guard",
   );
@@ -218,6 +227,17 @@ test("an unwritable data_dir names its remedy instead of throwing a stack trace"
     /cfg\.storage\.database/,
     "the writability probe does not include storage.database, so an unwritable iris.sqlite under writable directories reports the wrong cause",
   );
+  // And the two WAL sidecars, which are separate files with their own owners: this deployment runs
+  // in WAL, so a refused write can come from `-wal` or `-shm` while iris.sqlite itself is fine.
+  // Without them the one-file chown printed above is a remedy that does not work and then reports
+  // itself as not an ownership problem — the same wrong positive claim, one step later.
+  for (const sidecar of ["-wal", "-shm"]) {
+    assert.match(
+      guarded,
+      new RegExp(`\\$\\{cfg\\.storage\\.database\\}${sidecar}`),
+      `the writability probe does not include the ${sidecar} sidecar, so a root-owned one survives the chown this guard prints and the next boot claims the cause is not ownership`,
+    );
+  }
   assert.doesNotMatch(
     guarded,
     /is not an ownership problem/,
@@ -239,16 +259,24 @@ test("an unwritable data_dir names its remedy instead of throwing a stack trace"
     "the candidates are not probed at their nearest existing ancestor, so a data_dir that cannot be created answers ENOENT instead of naming the parent",
   );
 
-  // The database file is the one candidate right to drop while absent, since creating it writes
-  // into its directory. Stated as: every `existsSync` in the guard is that one call. A regex
-  // forbidding one spelling of the group filter (`.filter((p) => existsSync(p))`) would pass
-  // against `.filter(existsSync)`, against `existsSync(p) === true`, and against the same
+  // The three FILES are the candidates right to drop while absent, since creating any of them
+  // writes into their directory. Stated as: every `existsSync` in the guard is one of those three.
+  // A regex forbidding one spelling of the group filter (`.filter((p) => existsSync(p))`) would
+  // pass against `.filter(existsSync)`, against `existsSync(p) === true`, and against the same
   // predicate rewrapped across two lines — all of them the defect it was written for.
+  //
+  // Which is also why src/index.ts spells the three checks out instead of filtering a list: a
+  // filter reads as `existsSync(p)` here, and `p` cannot say whether a directory was among what it
+  // ranged over. The repetition there buys this enumeration.
   const existsUses = guarded.match(/existsSync\b[^)]*\)?/g) ?? [];
   assert.deepEqual(
     existsUses,
-    ["existsSync(cfg.storage.database)"],
-    `existsSync is used in the guard for something other than the database file (${JSON.stringify(existsUses)}); applied to the directories it drops the ones that cannot be created`,
+    [
+      "existsSync(cfg.storage.database)",
+      "existsSync(`${cfg.storage.database}-wal`)",
+      "existsSync(`${cfg.storage.database}-shm`)",
+    ],
+    `existsSync is used in the guard for something other than the three database files (${JSON.stringify(existsUses)}); applied to the directories it drops the ones that cannot be created`,
   );
 
   // The remedy has to name the path that was just diagnosed. A hardcoded `chown -R … ./data` was

@@ -149,11 +149,36 @@ const openStorage = (): { store: Store; stale: number } => {
     // beside a claim that the failure could not be explained.
     //
     // The database FILE is the one candidate that is right to drop while absent: creating it is a
-    // write into its directory, which is already above.
+    // write into its directory, which is already above. Same for the two WAL sidecars.
+    //
+    // The sidecars are here because this deployment runs in WAL (`PRAGMA journal_mode = WAL`,
+    // store/db.ts), where a refused write can come from `iris.sqlite-wal` or `-shm` rather than
+    // from the database, and each is a separate file with its own owner. The sequel this exists to
+    // stop: a group-writable ./data holding a root-owned set, the operator runs the one-file
+    // `chown` printed below, and the next boot fails again — but with all three of the paths above
+    // now writable, so it lands in the `else` and claims this is not an ownership failure at all.
+    // A positive claim, and the wrong one, of exactly the kind that branch's comment warns about.
+    //
+    // Latent until this round, and no longer: the write that raises on a root-owned set is the
+    // first one, and only now does it reach this guard rather than dying past the end of it.
+    //
+    // Three near-identical lines rather than a filter over a list of the three paths, because the
+    // property that matters here is which candidates are dropped when absent — files yes,
+    // directories never — and a group filter states that over a bound variable, which says nothing
+    // about what it ranged over. Spelled out, each check names its own path, and the test that
+    // enumerates every existence check in this guard can still read which ones they are. (That test
+    // reads this file as TEXT, so it counts the ones named in a comment too, which is the other
+    // reason the name is not written here.)
     const candidates = [
       { want: cfg.storage.data_dir, kind: "dir" as const },
       { want: dirname(cfg.storage.database), kind: "dir" as const },
       ...(existsSync(cfg.storage.database) ? [{ want: cfg.storage.database, kind: "file" as const }] : []),
+      ...(existsSync(`${cfg.storage.database}-wal`)
+        ? [{ want: `${cfg.storage.database}-wal`, kind: "file" as const }]
+        : []),
+      ...(existsSync(`${cfg.storage.database}-shm`)
+        ? [{ want: `${cfg.storage.database}-shm`, kind: "file" as const }]
+        : []),
     ]
       .map((c) => ({ ...c, probe: nearestExisting(c.want), key: canonical(c.want) }))
       .filter((c, i, all) => all.findIndex((o) => o.key === c.key) === i);
