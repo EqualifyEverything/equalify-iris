@@ -1382,7 +1382,8 @@ make run in one direction on purpose.
   part holds in all three rounds.
 
   Since the Reader's model is a config key and not a code change (`providers.per_agent.reader`, plus
-  block-wide `providers.bedrock.api: converse` for a non-Claude id — docs/models.md §3), **swapping
+  block-wide `providers.bedrock.api: converse` for a non-Claude id — [docs/models.md § How a swap
+  fails quietly](models.md#how-a-swap-fails-quietly)), **swapping
   it means re-measuring this**, and prose share is not a model trait to look up in either form.
 
   **What to re-measure**, then: the **share of replies containing any prose**, not the share of

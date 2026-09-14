@@ -8,7 +8,8 @@ was measured at.
 **Every model here is a suggestion, not a default.** Iris names no model in its own code —
 `resolveAgentModel` (`src/providers/index.ts`) reads your config and nothing else, and an
 unconfigured provider throws rather than falling back to something. An agent with no `per_agent`
-model gets its provider block's `default_model`.
+model gets its provider block's `per_capability` entry for the capability the call needs, or that
+block's `default_model` if there is none.
 
 **The suggested setup is the paid end of a range that starts at zero.** Point
 `providers.openrouter.base_url` at a self-hosted open-weight model and Iris costs nothing per token.
@@ -57,13 +58,14 @@ ARNs, and an inference-profile model needs **both** its `inference-profile/us.<i
 `foundation-model/<id>` ARNs. Missing that, the refusal arrives as a runtime error on a user's
 upload rather than at boot — which is how #312 shipped broken for a day.
 
-## Four ways a swap fails
+## How a swap fails quietly
 
 1. **A `per_agent` key that names no agent is warned about, not refused.** The call falls through to
-   the provider's `default_model` and the document costs what it would have anyway, so **a typo reads
-   as "the cheaper model saved nothing."** Boot logs the unroutable key (`perAgentKeyWarning`,
-   `src/config.ts`); it warns rather than fails because a specialist's name is just a file in
-   `agents_dir`.
+   the provider's `per_capability` entry, or to its `default_model` if there is none, and the document
+   costs what it would have anyway — so **a typo reads as "the cheaper model saved nothing."** Boot
+   logs the unroutable key (`perAgentKeyWarning`, `src/config.ts`); it warns rather than fails because
+   a specialist's name is just a file in `agents_dir`. Check both keys when diagnosing it: on a
+   deployment that sets `per_capability`, the typo lands on the capability model, not the default.
 2. **A model id belongs to a provider, and nothing checks it belongs to yours.** An override with
    only `model:` keeps `providers.default`. A Bedrock id under an OpenRouter default fails on every
    call of the run. Name `provider:` as well as `model:`, always.
@@ -71,8 +73,18 @@ upload rather than at boot — which is how #312 shipped broken for a day.
    be put on different models.
 4. **`api: converse` is block-wide.** Setting it for one non-Claude model moves every agent on that
    provider onto a transport no round may have measured.
+5. **Moving an agent off Claude turns its prompt cache off.** `cacheableSystemPrompt`
+   (`src/providers/promptCache.ts`) returns false for any id it cannot read as a caching-generation
+   Claude model, so that agent gets no breakpoint however `providers.prompt_cache` is set. The
+   measured size of it, on the largest such swap: across the incumbent arm's 21 `page` calls,
+   **283,290 of 333,958 prompt tokens (84.8%) were billed as cache reads** at a tenth of the input
+   rate, while the challenger's 21 carried 351,841 input tokens and none. The swap still won by 56%,
+   so **the lost cache is inside the saving, not a cost on top of it** — but a swap measured on a
+   cold cache would report a smaller win than it earns.
 
-**How to tell whether the swap took.** Diagnostics reports the model ids that answered each agent's
+### How to tell whether the swap took
+
+Diagnostics reports the model ids that answered each agent's
 calls: `by_agent.<agent>.models` from `GET /v1/sessions/{id}/diagnostics`
 ([API.md](API.md#diagnostics-timing--hang-detection)). Read it on a session that has only run since
 the edit — a session's log spans its feedback rounds too, so one extracted before a restart and given
@@ -87,17 +99,20 @@ tables, pure scan, no ground truth ([cost.md § Scope](cost.md#scope)).
 
 **`page` — applied twice, and the second one is what runs.** `us.openai.gpt-5.6-luna` replaced
 `moonshotai.kimi-k2.5` on 2026-09-10 (#344), which had replaced Sonnet on 2026-09-02 (#312). luna's
-case is cost and robustness: **15% cheaper on the page step, and 0 lost pages against 2**, over the
-same 100 pages with the checker pinned. The quality edge #344 was filed on **did not reproduce and
-was withdrawn there** — a second round put the same paired comparison at McNemar p=0.6636.
+case is cost and robustness: **cheaper, and 0 lost pages against 2**, over the same 100 pages with the
+checker pinned. Cheaper by two figures with two denominators, both from the one 2026-09-03 round:
+**39% off the page agent's own two steps** ($1.5835 against $2.5968 for `extract` + `correct`) and
+**15% off the three steps a page costs** ($5.1496 against $6.0617, the difference being `verify`,
+which the swap made no cheaper). The quality edge #344 was filed on **did not reproduce and was
+withdrawn there** — a second round put the same paired comparison at McNemar p=0.6636.
 
-What the swap costs is accessibility polish, and the axe count is the weakest way to say it: 4
-violations to Kimi's 3, but Kimi's 3 are all `critical` to luna's 1, and 2 of luna's 4 are a
-mis-formed `<dl>` on pages that ask for one — a rule you score 0 on by emitting no `<dl>` at all. The
-part not in doubt: on the nine map-and-key pages luna passes clean by saying less about the legend
-(#347). On the region subtotal rows of a statistical table it drops 23.3% of a 146-row ceiling against
-Kimi's 34.9% — better, not fixed, since unswapped Sonnet drops 9.6% and **on that axis the three arms
-rank the reverse of their price** (#324).
+**luna is worse on accessibility, and one comparison holds.** On the region subtotal rows of a
+statistical table it drops 23.3% of the 146 such rows the corpus holds, against Kimi's 34.9% —
+better, not fixed, since unswapped Sonnet drops 9.6%, so **on that axis the three arms rank the
+reverse of their price** (#324). The axe count is the weaker way to say it: 4 violations to Kimi's 3,
+but Kimi's 3 are all `critical` to luna's 1. Two of luna's 4 are a mis-formed `<dl>` on pages that ask
+for one, which is a rule you score 0 on by emitting no `<dl>` at all. One thing not in doubt: on the
+nine map-and-key pages luna passes clean by saying less about the legend (#347).
 
 **`feedback` — keep, and price is not why.** Five dispositions were published for this one agent in
 one sprint. Total cost per page favours the swap by 44.9% under the corrector now deployed, because a
@@ -111,6 +126,11 @@ document and is ahead on both quality halves: 21 of 23 provable defect instances
 6 documents obeying the issue list against 3 of 10. Worth about **−26% of the bill** (#329). That
 result only appeared once the round attached the page images the agent receives in production; the
 round that withheld them ranked the two the other way.
+
+**`builder` — nothing measured, and its cost is not separable from the specialists'.** A run whose
+pages named no specialist spends nothing here, and the same gate leaves the specialist at zero one
+step downstream, so a report that prices the two separately is pricing one cause twice. Two calls in
+the whole sprint, about $0.04 each.
 
 **`reader` — declined.** The cheap arm was 77% cheaper at 78% of the incumbent's own agreement floor,
 and the decision turned on what the missing 22% was, not on the ratio (#313). Note that 78% is a
@@ -179,7 +199,7 @@ reproduces the figures but not the timestamps.
 computed at aggregation time from a rate table, and that table has changed: two of three arms in
 `runs-extract100-95ca64c` reprice by $0.06 and $0.79 while the third is identical to four decimals —
 consistent with a cache-write premium that stopped applying to non-Anthropic models. Orderings, lost
-pages and the ~15% and ~39% gaps all hold. Quote two decimals across rounds.
+pages and both gaps above hold. Quote two decimals across rounds.
 
 The sprint that produced all of this, including what it got wrong:
 [#370](https://github.com/EqualifyEverything/equalify-iris/issues/370).

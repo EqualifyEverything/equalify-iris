@@ -313,7 +313,7 @@ Commands: `npm test` is `node --test` over `test/*.test.ts` (not vitest), `npm r
 |---|---|
 | [docs/API.md](docs/API.md) | Every endpoint, with copy-pasteable `curl`. The run log's fields. |
 | [docs/design-notes.md](docs/design-notes.md) | Why the code is the way it is. Read this before changing it. |
-| [docs/models.md](docs/models.md) | Which model to run on which agent, what each was measured at, and the four ways a swap fails. |
+| [docs/models.md](docs/models.md) | Which model to run on which agent, what each was measured at, and how a swap fails quietly. |
 | [docs/github-auth.md](docs/github-auth.md) | The GitHub token: making it, what one identity costs, gating the API, an older database. |
 | [docs/cost.md](docs/cost.md) | What a page costs, measured, and why that number hides more than it says. |
 | [docs/ci.md](docs/ci.md) | The five workflows that run this repo, including the bot that will review your PR. |

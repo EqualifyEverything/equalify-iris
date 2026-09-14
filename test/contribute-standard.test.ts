@@ -30,7 +30,8 @@ interface Rec {
   drafted: number;
   // Which agent the draft was dispatched as, recorded because `providers.per_agent` is keyed by
   // exactly this string: a rename here silently un-routes a deployment's override for the
-  // builder, and there is no other call site to notice it (docs/models.md §1).
+  // builder, and there is no other call site to notice it (docs/models.md "How a swap fails
+  // quietly", first item).
   agents: string[];
 }
 
@@ -140,7 +141,7 @@ test("no suggestion means no builder call, which is why its cost and the special
   // builder: it is the same gate that leaves the specialist at zero, one step downstream
   // (`runContribution` is called with the page pass's suggestions — orchestrator.ts). A cost
   // report that lists the two separately is reporting one cause twice, which is what
-  // docs/models.md §4 says and what this pins.
+  // docs/models.md's `builder` paragraph says and what this pins.
   const rec = await contribute([]);
   assert.equal(rec.drafted, 0, "a run with no suggestions still called a model");
   assert.deepEqual(rec.agents, []);

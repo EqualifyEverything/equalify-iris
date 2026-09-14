@@ -625,10 +625,14 @@ test("no prose paragraph is swallowed into the table above it", () => {
 // right by coincidence. The document now states each decomposition in its own sentence and this reads
 // the one it means.
 //
-// The cost column is found by its HEADER, not by position. #466 added an `agent` column between the
-// step and its cost, and the old index-based filter read every row as having no money in it and passed
-// by finding zero rows — the assertion on row count is what caught that, and reading the header is what
-// stops it recurring.
+// The cost column is found by its HEADER, not by position, and the rows are the ones ADJACENT to that
+// header rather than every table line in the file. #466 added an `agent` column between the step and
+// its cost, and the old index-based filter read every row as having no money in it and passed by
+// finding zero rows — the row-count assertion is what caught that, and reading the header is what stops
+// it recurring. Review round 1 of PR #469 then pointed out that the membership was still positional:
+// cost.md's second table has a dollar figure in a cell, and any table whose third column carried one
+// would have been swept into the step rows with the `>= 7` floor none the wiser. A table is a
+// contiguous run of `|` lines, so that is what this reads.
 //
 // Rounding is asserted rather than tolerated away. The per-step cells are published to four decimals,
 // so the share column sums to 100.1% rather than 100%; the document says so out loud, and this reads
@@ -640,27 +644,36 @@ test("docs/cost.md's price sheet decomposes to the headline it opens with", () =
     return m ? Number(m[1]!.replace(/,/g, "")) : undefined;
   };
 
-  const tableLines = doc
-    .split("\n")
-    .filter((l) => /^\| /.test(l))
-    .map((l) =>
-      l
-        .split("|")
-        .slice(1, -1)
-        .map((c) => c.trim()),
-    );
-  const header = tableLines.find((cells) => cells.includes("step") && cells.includes("cost"));
+  const cellsOf = (line: string) =>
+    line
+      .split("|")
+      .slice(1, -1)
+      .map((c) => c.trim());
+  const lines = doc.split("\n");
+  const headerAt = lines.findIndex((l) => {
+    if (!/^\| /.test(l)) return false;
+    const cells = cellsOf(l);
+    return cells.includes("step") && cells.includes("cost");
+  });
   assert.ok(
-    header,
+    headerAt >= 0,
     "docs/cost.md has no table with `step` and `cost` columns, so nothing below can be located by " +
       "header. The price sheet's whole job is that a reader can take a figure off one table.",
   );
+  const header = cellsOf(lines[headerAt]!);
   const iStep = header.indexOf("step");
   const iCost = header.indexOf("cost");
   const iShare = header.indexOf("share");
   assert.ok(iShare >= 0, "docs/cost.md's price table has no `share` column any more");
 
-  const rows = tableLines.filter((cells) => money(cells[iCost]) !== undefined);
+  // That header's OWN table: the contiguous run of pipe lines below it, stopping at the first line
+  // that is not one. A second table elsewhere in the file cannot join these rows, whatever it holds in
+  // the column this one prices.
+  const rows: string[][] = [];
+  for (let i = headerAt + 1; i < lines.length && lines[i]!.startsWith("|"); i += 1) {
+    const cells = cellsOf(lines[i]!);
+    if (money(cells[iCost]) !== undefined) rows.push(cells);
+  }
   assert.ok(rows.length >= 7, `docs/cost.md's table has ${rows.length} step rows; expected one per step`);
 
   const total = money(doc.match(/total\s+\*\*(\$[\d,]+\.\d+)\*\*/)?.[1]);

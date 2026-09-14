@@ -191,18 +191,18 @@ providers:
   #       page: { provider: bedrock, model: us.openai.gpt-5.6-luna }
   #
   # This is the one configuration with whole-run numbers behind it: 100 scanned pages end to
-  # end, priced per step, in docs/cost.md — about **10.7¢ a page** (that round ran the previous
-  # page model, so today's is slightly cheaper and has not been re-priced end to end). It is
-  # what the reference deployment runs. Three things about it:
+  # end, priced per step, in docs/cost.md — about **10.7¢ a page**, on these models. It is what
+  # the reference deployment runs. Three things about it:
   #
   # - **`api: converse` is not optional here.** Left out, this block defaults to `invoke` and
   #   sends an Anthropic-native body, which a non-Claude id rejects — every `page` call fails.
   #   The key is block-wide: it moves every agent on this provider, not the one named.
   # - **The `us.` prefix is part of the id.** That model is inference-profile-only on Bedrock
   #   and cannot be invoked under its bare id.
-  # - **It is cheaper and slightly worse on accessibility.** luna cost 15.9% less than the Kimi
-  #   K2.5 it replaced on the same 100 pages and lost 0 pages where Kimi lost 2, but it is one
-  #   axe violation worse over that corpus. docs/models.md §2 says what that costs.
+  # - **It is cheaper and slightly worse on accessibility.** luna cost about 15% less than the
+  #   Kimi K2.5 it replaced over the three steps a page costs, on the same 100 pages, and lost 0
+  #   pages where Kimi lost 2 — but it is one axe violation worse over that corpus.
+  #   docs/models.md "What each suggestion was measured on" says what that costs.
   #
   # Both provider blocks below name Sonnet 4.6 because every whole-run figure was measured on
   # it, and because `max_tokens` below is OUR setting and not the model's: how often a dense
@@ -283,9 +283,9 @@ providers:
     # (src/providers/promptCache.ts): an id it cannot read as a Claude model of a caching
     # generation gets no breakpoint, so a `per_agent` swap to another vendor's model turns
     # caching off for that agent whatever this setting says. Priced rather than guessed —
-    # docs/models.md §2 measures it on the largest such swap, where the incumbent had 84.8%
-    # of its prompt served from cache and the swap still won: the loss is inside the saving,
-    # not on top of it.
+    # docs/models.md "How a swap fails quietly" measures it on the largest such swap, where
+    # the incumbent had 84.8% of its prompt served from cache and the swap still won: the loss
+    # is inside the saving, not on top of it.
     #
     # It is not free in every case, which is why the numbers are worth reading rather
     # than assuming: a WRITE bills at 1.25x, so an agent called only once in a run pays

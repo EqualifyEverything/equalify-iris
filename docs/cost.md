@@ -47,11 +47,16 @@ Three things worth more than the total:
 
 ### The last model swap did not change the price
 
-Moving the `page` agent to luna cut what that agent does itself by **39%** — $1.58 against $2.60
-over the same 100 pages (measured 2026-09-03, applied to the reference deployment 2026-09-10).
-Between the two rounds a day apart, verifier and page-prompt fixes made `verify` **36% more
-expensive** on identical input. The two are within a penny of each other, so the end-to-end price
-sat still at about 10.7¢.
+Moving the `page` agent to luna cut what that agent does itself by **39%** — $1.5835 against
+$2.5968 for `extract` + `correct`. Both arms are in the one round run 2026-09-03, on the same 100
+pages at the same commit, so no prompt change is inside that figure. It was applied to the reference
+deployment 2026-09-10.
+
+Then something that is not a model gave it back. Between the 2026-09-02 round and the 2026-09-03 one,
+verifier and page-prompt fixes made `verify` **36% more expensive** on identical input — $2.5499 to
+$3.4649 checking the same page model's output. (Those are the Kimi arm both times; the table above
+prices luna's `verify`.) So about a penny a page came off the page agent and
+about a penny a page went onto the checker, and the end-to-end price sat still at about 10.7¢.
 
 **Model choice is not the main lever any more. The prompt is.**
 
@@ -68,8 +73,9 @@ It is the number everyone asks for, so it is above — but it hides more than it
    page.
 2. **93% of the bill is arguing about the page, not reading it.** Price follows how often the
    checker objects, which follows how hard your scans are — not how many pages you sent.
-3. **A prompt change moved it as much as a model change did.** One week: −39% on the page agent,
-   +36% on the checker, net zero. A price quoted without a commit is not a price.
+3. **A prompt change moved it as much as a model change did.** One day apart: −39% on the page agent
+   from a model swap, +36% on the checker from a prompt fix, net zero. A price quoted without a
+   commit is not a price.
 4. **Pages submitted and pages delivered are different denominators.** The previous page model lost
    2 of 100: 6.1¢ per page submitted, 6.2¢ per page delivered. A model that is cheap because it
    drops pages looks cheap on the wrong denominator.

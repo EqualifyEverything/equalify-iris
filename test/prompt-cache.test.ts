@@ -108,9 +108,10 @@ test("the real agent prompts clear the bar on the model this repo runs", () => {
 });
 
 test("the model docs/models.md recommends for `page` gets no breakpoint, which is what makes its arithmetic honest", () => {
-  // docs/models.md §2 recommends swapping the page agent to a cheaper model and states that the
-  // −56% is measured against an incumbent whose prompt was 84.8% cache reads — so the breakpoint
-  // this agent loses is INSIDE the published saving rather than a cost on top of it. That
+  // docs/models.md recommends swapping the page agent to a cheaper model, and its "How a swap
+  // fails quietly" section states that the −56% is measured against an incumbent whose prompt was
+  // 84.8% cache reads — so the breakpoint this agent loses is INSIDE the published saving rather
+  // than a cost on top of it. That
   // sentence holds only while the recommended id is one this function declines. Teach
   // `cacheableSystemPrompt` another vendor and the swap keeps its cache, the comparison changes
   // shape, and the paragraph has to be re-read instead of left standing — which is what this
@@ -124,11 +125,11 @@ test("the model docs/models.md recommends for `page` gets no breakpoint, which i
   assert.equal(
     claudeFamily(recommended),
     null,
-    `${recommended} now reads as a Claude family, so §2's cache paragraph is describing a different swap`,
+    `${recommended} now reads as a Claude family, so docs/models.md's cache item is describing a different swap`,
   );
   assert.equal(cacheableSystemPrompt(recommended, page), false);
   // And the incumbent it is priced against does get one, or the round was not the comparison
-  // §2 says it was.
+  // that item says it was.
   assert.equal(cacheableSystemPrompt("us.anthropic.claude-sonnet-4-6", page), true);
 });
 
