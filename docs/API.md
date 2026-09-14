@@ -1245,86 +1245,27 @@ the ones with no answer to attribute them by.
 One agent call that returned, carrying the whole reply in `output` and the prompt version that
 produced it. This is the only place a model's raw text is kept — every other line about a call
 reports what was *read out of* it — so a question about what an agent actually said is answered here
-and nowhere else, and a reply that this pipeline then rejected is still on record in full.
+and nowhere else, and a reply this pipeline then rejected is still on record in full.
 
-`phase` is `extraction`, `assembly` or `review`, matching the [`phase`](#phase) markers.
-`capabilities` is what the agent **declared** it needs (`text`, `vision`, `structured_output`), read
-off its `## Required capability` section — the one capability that actually routed this call is
-`capability` on the [`model_call`](#model_call_start--model_call) beside it, and an agent declaring
-two does not use both at once. `image` is the source image on a per-page call and `null` otherwise —
-written rather than omitted, unlike the count fields elsewhere in this log.
+| Field | Reads |
+| --- | --- |
+| `phase` | `extraction`, `assembly` or `review`, matching the [`phase`](#phase) markers |
+| `agent` | The agent's **file** name, not its logical name: a table join and a correction round are both the Copy Editor, and they are `copy_editor_table_join.md` and `copy_editor.md`. Read it as a label rather than as a path |
+| `agent_sha` | The git blob SHA of the prompt text that was **sent**. `null` at eight call sites |
+| `agent_content` | The prompt inline, for a **session-built** agent — one loaded from `tmp/<id>/agents` in preference to the agent library. On **every** line and `null` on all but that one case, so read it as present-and-null rather than omitted |
+| `capabilities` | What the agent **declared** it needs (`text`, `vision`, `structured_output`), read off its `## Required capability` section. The one capability that routed this call is `capability` on the [`model_call`](#model_call_start--model_call) beside it, and an agent declaring two does not use both at once |
+| `image` | The source image on a per-page call and `null` otherwise — written rather than omitted, like `agent_content` and unlike the count fields elsewhere in this log |
 
-`agent` is the agent's **file** name, not its logical name, which is what tells two contracts served
-by one agent apart: a table join and a correction round are both the Copy Editor, and they are
-`copy_editor_table_join.md` and `copy_editor.md`. Read it as a label rather than as a path, though.
-`agent_sha` is the git blob SHA of the prompt text that was **sent**, so a round's prompt is
-recoverable from a checkout however the file has moved since. It is `null` at **eight** call sites, of
-two kinds. **Six** send a prompt that is a literal in this codebase rather than a file: the Reader,
-the two editor contracts, the table join, the specialist merge, and the page agent's own
-`DEFAULT_PAGE_PROMPT` fallback, taken when `agents/page.md` does not load. Those six are versioned by
-the application's commit. The other **two** are a training round's fixture replays, and only one of
-them loses anything. The regression gate sends the *candidate* prompt the round proposed: in no
-commit, in no file, and not on this line either, so that reply is to a prompt nothing keeps. The eval
-gate sends the **current** library prompt, for comparison against it — recoverable at the deployed
-commit, its real SHA just discarded on the way here.
+**A call that threw has no line here.** The provider's failure is on `model_call` with `ok: false`, and
+this line is written after the call returned — so these lines count answers, not attempts, and a phase's
+spend cannot be read off them.
 
-Those two lines are the ones worth telling apart, and nothing on them does it: same `agent`, both
-`agent_sha: null`, both `agent_content: null`, and both replays hardcode `step: "agent_regression"` on
-their `model_call`, so the tiebreak this section offers elsewhere fails here. The `eval_gate` line
-that follows them delimits the pair, but it sits after **both** halves, so it does not split them by
-itself. Order and count do that. The regression gate is awaited to completion before the eval gate
-starts, so every one of the regression gate's lines precedes every one of the eval gate's. And the two
-halves are the same length, subject to the two caveats below. Both gates read the same fixture
-directory, sorted and capped the same way at three cases, and skip a fixture for the same two reasons:
-a case file that will not parse, an image file that is not there. Each then issues exactly one of these
-calls per surviving fixture — so the first half is the candidate prompt's, and the second half the
-current prompt's. The regression gate also emits a verifier `agent_call`, for each fixture that
-survived its own checks, and that one names the Feedback Agent's file, carries a real `agent_sha`, and
-reads `phase: "extraction"` rather than `review`, so it stays out of this population. Fixtures it
-never reaches — the replay produced nothing, or the content check failed — have a replay line and no
-verifier line, which is a gap in *that* set rather than in this one.
-
-Both caveats are themselves visible in the log, so the rule can be checked before it is applied. **A
-gate that threw leaves a short half.** A provider error or timeout on any one replay rejects the whole
-gate, and neither gate call is wrapped, so the round logs `feedback_training_failed` and the run
-finishes — with whichever replay lines were already written still in place. That is the case to watch
-for, because a truncated eval half read under the count rule is attributed to the candidate prompt,
-which is the exact confusion this paragraph exists to prevent. **And the fixture set can change
-between the two reads.** The directory is keyed by the agent rather than by the session, and the two
-reads are a whole gate apart, so another session accepting a fixture in that window can leave a
-two-line half followed by a three-line one. The paired scoring absorbs that for the *scores*; only the
-count rule here depends on it.
-
-An `eval_gate` line missing altogether is the other half of the rule, and it does not mean the log was
-cut short. A regression gate that *failed* logs `agent_update_blocked` and returns before the eval gate
-is reached — so a round with no `eval_gate` **and** no `feedback_training_failed` ran no eval gate, and
-every `agent_sha: null` replay in it was the regression gate's. A round carrying
-`feedback_training_failed` instead is the throwing case, and there the replays could belong to either
-gate.
-
-One `agent` value spans two cases: the merge sends `MERGE_SYSTEM` under the name `page.md` with
-`agent_sha: null`, beside ordinary page calls that carry `page.md`'s real SHA. So `agent_sha`, and the
-`step` on the `model_call` next to it, are what identify the text that went out; `agent` alone groups
-the two together. On a deployment that fell back to `DEFAULT_PAGE_PROMPT` even that breaks down —
-every `page.md` line reads `agent_sha: null`, and `step` is the only field left that tells a page call
-from a merge.
-
-`agent_content` is on **every** line and `null` on all but one case, so read it as
-present-and-null rather than omitted — the convention `image` follows above. It carries the prompt
-inline for a **session-built** agent, meaning one loaded from `tmp/<id>/agents` in preference to the
-agent library. Nothing in this pipeline puts a file there: the one write into that directory is the
-feedback-training step overwriting an agent that is *already* session-built, so today every line
-reads `agent_content: null` unless an operator dropped a file in by hand.
-
-A session-built agent does still carry an `agent_sha`, computed over the text it was built from. It
-just names no blob a checkout holds, which is what `agent_content` is there to cover. The eight
-`agent_sha: null` sites above are the case where **neither** field recovers the text. Seven of the
-eight are recoverable anyway — six from the application's commit, the eval gate's from the deployed
-agent library. Exactly one is recoverable nowhere: the candidate prompt the regression gate replays.
-
-A call that **threw** has no line here. The provider's failure is on `model_call` with `ok: false`,
-and this line is written after the call returned — so these lines count answers, not attempts, and a
-phase's spend cannot be read off them.
+**Two `agent_call` lines cannot be told apart by any field on them**: a training round's two fixture
+replays, one per prompt being compared. The rule that separates them, and its two caveats, are in
+[design notes — telling a training round's two replays
+apart](design-notes.md#telling-a-training-rounds-two-replays-apart). What recovers a prompt at each of
+the eight null-SHA sites, and which single one is recoverable nowhere, is [what recovers the text a
+prompt actually sent](design-notes.md#what-recovers-the-text-a-prompt-actually-sent).
 
 ### `extraction_start`
 
@@ -3815,76 +3756,30 @@ it** — written only when something was rewritten, so an ordinary run adds no l
 `Govern-ment -> Government (document writes government)`: the spelling that stood, what replaced it,
 and the unhyphenated occurrence elsewhere in the document that licensed the change.
 
-**This line is the only trace, and it reports a change to delivered TEXT** rather than to markup,
-which no other assembly line does. Read the third field first: it is the evidence, and a reader
-checking this line is asking whether the document really writes the whole spelling somewhere. If it
-does not, the join is wrong and the log is where that is visible.
+**This line is the only trace, and it reports a change to delivered TEXT** rather than to markup, which
+no other assembly line does. The third field is the evidence: a reader checking this line is asking
+whether the document really writes the whole spelling somewhere, and if it does not, the join is wrong
+and the log is where that is visible.
 
-Three conditions have to hold together, and each stops a different mistake.
+**Three conditions have to hold together**, and each stops a different mistake:
 
-1. **The joined spelling appears somewhere in the document.** Without it, `ad-valorem` would be closed
-   into an `advalorem` no page prints.
-2. **The fragment after the hyphen is not a word the document uses on its own.** Without it, every
-   compound whose document also prints the closed form gets closed, which is why `inter-state`,
-   `non-tax`, `non-farm`, `Mid-east` and `Non-property` are never touched here. A compound joins words,
-   so a hyphen whose right-hand side is not a word cannot be a compound joint — and that is the whole of
-   what makes this one decidable without the image.
-3. **The joined spelling is not on the page carrying the hyphen.** That page is
-   [`page_split_words`](#page_split_words)'s ground: it raises exactly this shape, the page agent answers
-   it holding the image, and it is explicitly allowed to answer "the page really does print both
-   spellings" and change nothing. Joining it here would revoke that answer from a pass that never saw
-   the page. Not theoretical — without this condition, 7 of the 36 joins measured over #334's corpus are
-   words the page step had already raised.
-
-**Conditions 1 and 2 read the document at different widths, on purpose.** Condition 1 *licenses* a join,
-so it is the narrow one — the text a reader is shown, with `script` and `style` content dropped, because a
-`.crosshatch` selector is author metadata and the third field of this line has to name a spelling somebody
-can find on the page. Condition 2 *refuses* one, so it is the wide one — prose plus every attribute
-value, quoted or bare and with entities decoded, plus any **quote pair** or `name=value` run **anywhere in
-the markup, comments included**, because a bare `state` that lives only in an `alt` is still the document
-using the word, and a guard that cannot see it closes up `inter-state`. A pair rather than a quoted span,
-because two apostrophes in ordinary prose are a pair: only comment prose with neither a pair nor an `=` is
-outside the width. A comment can suppress a join and never license one, which is the direction to fail in,
-and two classes of comment reach this pass — a model-written one inside a page fragment, and Iris's own
-`@page-failed` comment (see [`page_extraction_failed`](#page_extraction_failed)), which is the whole body of
-its fragment and carries up to 300 characters of provider error text. The `@` markers of a delivered
-document are not among them: `wrapDocument` appends those after this pass has run. A word missing
-from the first index leaves a hyphen; a word missing from the second closes a compound the printing owns.
-Widening the second costs zero joins across #334's 1,221 page files, measured.
-
-Condition 3 reads a **third** width, and it is neither of those: `script` and `style` content in, attribute
-values out, which is `page_split_words`' own width exactly. That is what makes the condition decline
-precisely the words that step raises. A closed spelling living only in an `alt` on the hyphen's page
-therefore does not trip it — `page_split_words` cannot see that `alt` either, so nothing was asked about
-the word and nothing is being reversed.
-
-The words this pass declines stay with `page_split_words` and its correction call. Nothing is asked
-twice, and nothing is answered twice.
-
-It runs after the page-break prose join, which is the only place it can: before that seam closes,
-`Simi-` and `larly` are two whole words in two paragraphs. So a word broken across a **page** and a
-word broken across a **line** are settled by the same pass, and the hyphen
-[`prose_joined`](#prose_joined)'s `word_splits` records as kept is the input to it.
-
-**Written into prose only**, on the same reasoning `page_split_words` gives for not reading attributes: a
-repair that writes into attribute values is a repair that can reach an `href`. Reading one is a different
-act from writing one, which is the asymmetry above: an attribute value is enough to refuse a join and never
-enough to license one. `script`, `style`, `pre` and `code`
-are skipped for the neighbouring reason — a hyphen in a code listing is a flag, not a line break, and a
-reader has to be able to copy it. One line can therefore stand for a word closed in the body while the
-same word keeps its hyphen inside a long `alt` on the same page: measured, not hypothetical, on a
-map-heavy arm where `Cross-hatch` occurs eight times and only the three in body text move. Nothing
-downstream reads that leftover as a defect, because `page_split_words` does not examine attributes
-either — but one attribute makes it a WCAG failure rather than an inconsistency. A visible label joined
-beside an `aria-label` or `title` that keeps its hyphen no longer has its visible text contained in its
-accessible name (2.5.3), and no gate here catches it: axe's `label-content-name-mismatch` is
-experimental and outside the `runOnly` list. It is latent rather than live, because `agents/page.md`
-tells the page agent not to put printed text in an `aria-label` at all.
+1. The joined spelling appears somewhere in the document — without it, `ad-valorem` closes into an
+   `advalorem` no page prints.
+2. The fragment after the hyphen is not a word the document uses on its own, which is why
+   `inter-state`, `non-tax`, `non-farm`, `Mid-east` and `Non-property` are never touched here.
+3. The joined spelling is not on the page carrying the hyphen. That page is
+   [`page_split_words`](#page_split_words)'s ground, and the words this pass declines stay with it and
+   its correction call.
 
 **`words` is capped at 20 spellings; `count` is not.** Bounded on the same reasoning as
 [`prose_joined`](#prose_joined)'s examples — the count is the figure, the list is what a reader
-spot-checks, and an OCR-garbled submission is what a cap is for — so a truncated list never understates
-how much text changed.
+spot-checks, and an OCR-garbled submission is what a cap is for — so a truncated list never
+understates how much text changed.
+
+Why the three conditions read the document at three different widths, why the repair is written into
+prose only, and the one leftover that is a WCAG failure rather than an inconsistency, are in [design
+notes — closing a word the printing broke at a line
+end](design-notes.md#closing-a-word-the-printing-broke-at-a-line-end).
 
 ### `deprecated_roles_stripped`
 
@@ -3997,94 +3892,39 @@ all and goes straight to the gate, for the reason the role strip stays narrow.
 ### `page_markers`
 
 Page-break markers were checked against the document's own numbering, and any label naming the
-**position of the image in the file** instead of the number the page prints was removed (issue
-#333).
+**position of the image in the file** instead of the number the page prints was removed (issue #333).
 
-`markers` found, `readable` (labels that parse as a numeral), `unreadable` (a sectioned folio —
-`A-3`, `M-16` — plus markers carrying no label at all), `systems` (one entry per numbering system
-that produced at least three markers, `arabic: offset -11 on 22 of 23` where an offset was acted
-on, or one of the two ways nothing was: `arabic: no offset holds 8 markers (best: 3)` where no
-offset held both a run of three and a majority, and
-`arabic: offset 0 on 8 of 10, 8 of them repeating their own filename` where the check refused this
-document), `stripped` (one entry per label removed, `page 52: "Page 52" → 38`, cut at 40
-characters, with the derived folio omitted where the derivation computes below 1), `departures`
-(the shape those removals form, one entry per offset they sat at —
-`arabic: 1 removed at offset -50, page 2` against
-`arabic: 6 removed at offset 0, pages 1-6 (every marker in that span)`), `off_mode`, `undecided`,
-`unchecked`, and `stage: "assembly"`.
+A label is touched only when it repeats the last integer of its own filename, AND its numbering
+system's own modal offset says the folio is something else, AND the markers holding that offset do not
+repeat their own filenames. **The label is removed, not corrected, and the `id` stays.**
 
-**The number is checkable because Iris supplied it**: the page agent is handed
-`filename: acir-p052.png, page 2 of 25`, so a leak can only be one of two numbers, and the one
-tested is the FILENAME's — its **last integer**, which is the part Iris writes. A label is touched
-only when it repeats that number, AND its numbering system's own modal offset says the folio is
-something else, AND the markers holding that offset do not repeat their own filenames. The last
-integer and not every integer, because `<base>-p<N>.png` takes `<base>` from the uploaded file's
-own name: a check reading all of them finds the label `Page 1` written in `volume-1-p13.png` and
-takes a true page number off a document whose only distinction was being called `volume-1.pdf`.
+| Field | Reads |
+| --- | --- |
+| `markers` | How many page-break markers were found |
+| `readable` | Labels that parse as a numeral |
+| `unreadable` | A sectioned folio — `A-3`, `M-16` — plus markers carrying no label at all |
+| `systems` | One entry per numbering system that produced at least three markers. `arabic: offset -11 on 22 of 23` where an offset was acted on, or one of the two ways nothing was: `arabic: no offset holds 8 markers (best: 3)` where no offset held both a run of three and a majority, and `arabic: offset 0 on 8 of 10, 8 of them repeating their own filename` where the check refused this document |
+| `stripped` | One entry per label removed, `page 52: "Page 52" → 38`, cut at 40 characters, with the derived folio omitted where the derivation computes below 1 |
+| `departures` | The shape those removals form, one entry per offset they sat at: `arabic: 1 removed at offset -50, page 2` against `arabic: 6 removed at offset 0, pages 1-6 (every marker in that span)` |
+| `off_mode` | Readable labels that disagree with their system's offset and were left alone because they repeat no positional number — a page printing `ix` labelled `Page 9` |
+| `undecided` | Labels that DO repeat one where nothing could be concluded: too few markers, no offset holding a run of them, or a document the check refused. This check's blind spot, with a size on it |
+| `unchecked` | Readable labels on a page whose filename carries no number at all, so `readable: 25, stripped: []` cannot read as agreement when nothing could be checked |
+| `stage` | Only ever `"assembly"` |
 
-The third condition is what a document is refused on — where the honest majority repeats its own
-filenames, a label repeating its filename is the shape of a CORRECT label there and the test
-carries no information, which covers both a caller who names images after the printed folios and a
-plain report whose sheets really do print their own submitted positions. Three markers to ask and
-three agreeing to act are also different gates: a strict majority of three markers is two, so
-without the second `Page 1` and `Page 2` would hold an offset and delete `Page 9`'s number, and
-the smallest document that can lose a label carries four markers.
+**This line prints on clean documents too**, unlike [`assembly_anchors`](#assembly_anchors):
+`stripped: []` beside `arabic: offset 14 on 23 of 25` is a document this checked and agreed with, while
+no line at all is one it could not decide — and a round measuring whether the defect is fixed cannot
+tell those apart from silence.
 
-The other half, `page N of M`, is deliberately not tested: replayed over 61 chunks of paid rounds
-this removed 29 labels, all 29 repeating the filename, and the only label that ever matched the
-position alone was CORRECT — a round re-submitting a non-contiguous subset of a rendered document,
-where the sheet printing `iv` happened to arrive 4th. Where Iris rasterizes a whole PDF itself the
-two numbers are the same one anyway (`<base>-p<N>.png`), so what is uncovered is a caller
-uploading images whose names carry no position — counted as `unchecked`, since a marker with no
-number to check against is not one this agreed with.
+The labels are text out of the caller's own document, so like [`prose_joined`](#prose_joined)'s
+`word_split_examples` this line stays in the run log on the deployment and never reaches
+`GET /v1/quality`.
 
-Roman and arabic are counted apart, because a document with both has two offsets and a pooled
-reading would both exempt a `Page xv` leak and read correct front matter as a departure. **The
-label is removed, not corrected, and the `id` stays.** The derived folio is right where it can be
-checked — the four it named on the reference corpus are the four read off the scans — but
-delivering it would have Iris assert a number nobody saw printed, on a page whose own model just
-proved it was guessing, so it is logged and not shipped; and taking out `id="page-52"` would turn
-a `#page-52` reference that lands on the wrong sheet today into one that lands nowhere.
-
-Every copy of the attribute goes, not the one a parser keeps, since deleting the first would
-promote a repeated `aria-label` into its place and leave the line claiming a removal the page did
-not get. What is left is a break saying only that something ended, which is what the page contract
-prescribes for a page whose number is not known. **This line prints on clean documents too**,
-unlike `assembly_anchors` above: `stripped: []` beside `arabic: offset 14 on 23 of 25` is a
-document this checked and agreed with, while no line at all is one it could not decide, and a
-round measuring whether the defect is fixed cannot tell those apart from silence.
-
-`off_mode` counts readable labels that disagree with their system's offset and were left alone
-because they repeat no positional number — a page printing `ix` labelled `Page 9` — and
-`undecided` counts labels that do repeat one where nothing could be concluded — too few markers,
-no offset holding a run of them, or a document refused above — which is this check's blind spot
-with a size on it, and `unchecked` counts readable labels on a page whose filename carries no
-number at all, so that `readable: 25, stripped: []` cannot read as agreement when nothing could be
-checked.
-
-Three more blind spots, each of which reads as a clean document: a model that leaks on EVERY page
-(which is the same input as a report printing its own positions, so the document is refused and
-the log says so); a document whose arabic numbering restarts partway through, where the minority
-run's folios coincide with the numbers in their filenames while the majority's do not — an active
-removal of true labels rather than a missed leak, which is why `departures` is logged: a restart
-takes out a block of consecutive positions with no surviving label among them, a leak is
-interleaved with the labels that contradict it, and the check cannot act on that difference but a
-round can count it; and a positional number announced through `aria-labelledby` instead, which is
-not read — #333's shape is `aria-label` on both failing arms, and resolving an ID reference into
-another element's text is a different pass on a different input.
-
-`stage` is only ever `"assembly"` — unlike the role strips above, this cannot run on a corrected
-body, because deriving an offset needs every page's filename and position and by then there is one
-string with the pages' provenance spent, so a marker the Copy Editor introduces later is not
-reached. Measured cause, and why this is code and not more prose:
-
-`agents/page.md` forbids exactly this by name
-(`never the position of the image you were given in the file`) at every prompt blob there is a
-round for, and two of three vendors did it anyway on the same document and the same blob — 6 of
-`kimi-k2.5`'s 88 markers, 5 of `claude-sonnet-4-6`'s 90, on the same two pages, against 0 of 88 for
-`gpt-5.6-luna`, which is the page model deployed since 2026-09-10 (#344). The labels are text
-out of the user's own document, so like `prose_joined`'s `word_split_examples` this line stays in
-the run log on the deployment and never reaches `GET /v1/quality`.
+Why the filename's last integer is the only number tested, what the third condition refuses a whole
+document on, why `page N of M` is left alone, the three blind spots that read as a clean document, and
+why this runs at assembly only, are in [design notes — a page label naming the image's position rather
+than the page's
+number](design-notes.md#a-page-label-naming-the-images-position-rather-than-the-pages-number).
 
 ### `reader_page_reports_deduped`
 
