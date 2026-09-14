@@ -1439,68 +1439,10 @@ discarded.
 **Once, and never twice.** The failure this is for is a draw the model can lose, and a page that
 loses two in a row is not that page.
 
-The gate is that the reply asserted nothing, not that it was short (issue #365, directive 5, which
-asked for a floor of HTML characters). A floor reads what the parse produced, and a reply Iris
-refused whole is 0 characters of HTML however much page it was carrying. Over every bench run log on
-disk — 2,639 files in the 80 round directories — 20 replies reach this branch, landing on **20 distinct
-round-and-page pairs**: **1.05% of the 1,913 pages drawn at least once**, and at least 0.48% of
-individual draws. The distinctness is counted rather than assumed, because those pairs average 2.2
-page-agent calls each. The 20 are `page_no_output` events, and can only be: nothing on disk logs
-[`page_redrawn`](#page_redrawn), because every round predates this branch.
-
-A repo-wide `find` counts 2,657 `*.jsonl`, and the 18 not counted here are two different things: 11
-corpus manifests in the bench root, holding no extraction call, and 7 `*-dry.jsonl` probe logs under
-`bench-data/`, which *do* carry extraction calls — 12 **page-agent calls** and 12 checks on 3 pages — and
-which any walker descending every top-level directory folds in silently. Page-agent calls, not draws:
-they are `agent_call`s, and the paragraph below is about why that word cannot be narrowed. It could not
-be narrowed here either — those 7 files log **0** page `model_call`s at all, so none of them is among the
-60 that carry `step`, which is why 60 / 954 / 604 / 1,558 are the only figures this exclusion leaves
-alone. That is where an earlier version of this
-section got 4,159 calls and 1,916 pages. Every count below is the round directories alone, and it moves
-the headline: 20/1,913 is 1.0455%, where 20/1,916 was 1.0438% and rounded to 1.04% — four digits,
-because three would be 1.045, the half that cannot decide its own rounding. The 0.48% and the 0.248%
-below are unchanged.
-
-The per-draw rate is a lower bound rather than a figure, and the reason is worth stating because two
-shipped versions of this paragraph got it wrong. `phase: "extraction"` carries 8,049 `agent_call`s, of
-which 4,147 name the page agent and 3,902 the fidelity check on the same pages — but `agent_call`
-records no `step` (`src/store/runlog.ts`), and **three** call sites log under that agent and that
-phase: the draw, the correction pass, and the specialist merge. So 4,147 bounds the draws from above
-and does not count them. **In this corpus the third site contributes nothing and the inflation is
-corrections alone:** `4,147 + 3,902` is the whole phase, so no specialist agent ever logged a row here,
-and `mergeSpecialist` runs only after one returns a fragment. That sum carries the claim by itself —
-0 `specialist_merge` `model_call`s is a fact about the 60 files that emit `step`, and says nothing about
-the other 2,579. `model_call` does carry `step`, and only recent rounds emit it: in those 60
-log files, 954 of 1,558 page-agent calls are draws and 604 are corrections, which puts the
-rate nearer 0.8% if that mix holds. A correction always follows a draw of the same page in the same run
-(`correctPage`'s only caller is inside `extractPage`), which is what makes *pages drawn at least once* a
-sound reading of a population that counts corrections. The **1,913 is exact** — distinct round-and-page pairs counted off
-page-agent calls alone, where a mixed count gives 2,042, because 129 pairs carry a checker call and no
-draw. The 0.255% this section first shipped was wrong twice over: 20/7,843 off a corpus missing the
-round directory named `runs`, where the phase-wide figure on the whole corpus is 20/8,049 = 0.248%.
-Replaying all 20 through today's parser
-leaves **three**: the other 17 are blank pages whose
-declaration [`page_blank`](#page_blank) honours, and a floor would have redrawn every one of
-them. Two of those 17 were refusals until issue #429 — one on the doubt word
-`noise`, for a log reading *"blank apart from minor scanning artifacts (specks and compression
-noise)"*, one as self-contradicting for a log naming the **image filename**. Both pages are blank on
-more than one log's word: every page-agent reply on disk for those two images declares the page blank
-— 14 replies on one, 8 on the other from three different models — and none of the 22 carries content,
-so the redraw they used to get bought a second copy of the same sentence at a full page's price. The
-three that still arrive carry no declaration to read at all: no envelope survives the parse, so there
-is no `log`, and each of the three wanted the redraw. That makes the declaration test right about all
-20 where a character floor redraws all 20 and is right about 3 — the same three replies, counted
-against a different denominator than the 3 of 5 that held before #429.
-
-What it does not cover, in two spellings: a blank page whose declaration `blankDeclaration` cannot
-see. One is **markup-only** — `<!-- blank page -->` is #219's own spelling, and with no envelope there
-is no `blank` field or `log` to read. The other is an envelope whose `html` is **not a string**, so
-`{"html": null, "log": "This page is blank.", "blank": true}` answers the question and is redrawn
-anyway. Each costs one call and changes no outcome: the second draw declares the page blank the same
-way, and the page is refused exactly as it is today. Nothing on disk has produced either shape —
-every one of the 17 honoured declarations sent `html` as a string. Believing a declaration whose
-`html` is null would change the **blank routing** (it would deliver such a page rather than refuse
-it), which is a separate question from this branch.
+**The gate is that the reply asserted nothing, not that it was short.** A reply Iris refused whole is
+0 characters of HTML however much page it was carrying, so a character floor would redraw every page
+that correctly declared itself blank. Reaching this branch at all is rare: about **1%** of pages
+drawn at least once, over every bench round on disk.
 
 A redrawn page's second draw re-runs the four repair seams, so `page_soft_hyphens`,
 `page_style_attributes`, `page_digit_groups` and `page_links` can fire twice for one page. The second
@@ -1508,17 +1450,18 @@ draw's lines carry **`redrawn: true`**, because `where` attributes a count to th
 under and a redraw makes two calls at the same seam: an offline per-occurrence census discounts the
 flagged lines rather than counting a discarded draw's markup as page content.
 
-A provider failure never reaches this line: a throttle, a stall and a refusal all throw before a
+**A provider failure never reaches this line:** a throttle, a stall and a refusal all throw before a
 reply exists to read, and that boundary is deliberate.
 
-A reply the model itself cut short does reach it, as `truncated_envelope`, and is redrawn. The
-argument against retrying a truncated **correction** — it will truncate again, and the retry buys a
-second full ceiling to prove it (`correctPage`'s error containment in `src/pipeline/extraction.ts`) —
-turns the other way here, because a correction's page survives its failure and a first render's does
-not. The choice is one more call or a hole in the document, and the one instance on disk is not a
-ceiling at all but an envelope one `}` short of a 3,437-character table of contents. A page that
-genuinely exceeds the ceiling loses the second draw as well, and its remedy is still
-`providers.*.max_tokens`.
+**A reply the model itself cut short does reach it**, as `truncated_envelope`, and is redrawn — where
+a truncated *correction* is not, because a correction's page survives its failure and a first
+render's does not. A page that genuinely exceeds the ceiling loses the second draw as well, and its
+remedy is `providers.*.max_tokens`.
+
+Two shapes of blank-page declaration this gate cannot read are redrawn anyway, each costing one call
+and changing no outcome. Why the gate reads a declaration rather than a size, what the corpus behind
+the rule is, and what those two shapes are, is in [design notes — a draw that claimed
+nothing](design-notes.md#a-draw-that-claimed-nothing-and-the-corpus-behind-redrawing-once).
 
 ### `page_no_output`
 
@@ -2448,153 +2391,114 @@ as `page_verify_failed`'s, and empty on the `links`, `alt`, `ids` and `words` tr
 defect was found by code against the file's own annotations, a closed word list, the fragment's own
 parsed tree or the page's own two spellings of one word rather than named by the verifier).
 
-`both` means **more than one** source, which is what it has always counted: until #290 there were
-two, until #373 three and until #334 four, so no reading of an older log changes, and it no longer
-names which combination — `page_links_missing`, `page_generic_alt`, `page_duplicate_ids` and
-`page_split_words`, keyed by the same `image`, are where the per-source detail is exact.
+`both` means **more than one** source, which is what it has always counted, so no reading of an older
+log changes as sources are added. It does not name which combination — `page_links_missing`,
+`page_generic_alt`, `page_duplicate_ids` and `page_split_words`, keyed by the same `image`, are where
+the per-source detail is exact.
 
-`result` is `kept` (it changed the delivered document), `rejected` (thrown away in favour of the
-page it was meant to improve — for **three** reasons, and only two of them have a rejection event:
-`page_correction_rejected` where the reply came back a fraction of the page's size,
-`page_links_correction_rejected` where a second verdict named something the rewrite had lost, and
-— with neither of those beside it — a binding recheck that could not be obtained at all, which
-logs `page_verify_error` with `correction_discarded: true` and is counted as
-`rechecks.binding_error`. Anyone triaging a `rejected` by looking only for the first two will find
-no event for the third, which is why it is named here: the first two are a correction judged and
-found wanting, and the third was never judged), `identical` (it changed nothing about the page),
-`empty` (nothing usable came back) or `failed` (the model call threw, so nothing came back at all
-— see `page_correction_failed`); the last three are calls paid for that bought nothing, and
-`failed` is the expensive one, since a truncation has already paid for a full ceiling of output.
+`result` is one of five:
 
-`identical` is decided on the **effect**, not on string identity, so a model that returns its own
-page re-indented or with `&` for `&amp;` is counted here rather than as `kept`. Note that such a
-fragment is still **adopted** — what ships is decided on string identity, deliberately, so that a
-change no signal here observes cannot be silently reverted; `identical` means the page call bought
-nothing, not that its output was discarded (that is `rejected`). Two shapes of `identical` are
-worth telling apart, and field presence is what tells them apart: with `chars_before` /
-`chars_after` and all four flags `false`, the model re-typed the page to no effect; with no sizes
-and no flags at all, it handed back the exact string it was given.
+| `result` | What it says |
+| --- | --- |
+| `kept` | It changed the delivered document |
+| `rejected` | Thrown away in favour of the page it was meant to improve |
+| `identical` | It changed nothing about the page |
+| `empty` | Nothing usable came back |
+| `failed` | The model call threw, so nothing came back at all — see [`page_correction_failed`](#page_correction_failed) |
 
-Same bill, different behaviour. When it changed something, `text_changed` / `alt_changed` /
-`attrs_changed` / `structure_changed` and `chars_before` / `chars_after` say **what** changed —
-observed on the two fragments, not claimed by the verdict, so an alt-text refinement, a re-typed
-`href` and a restored table row are distinguishable.
+The last three are calls paid for that bought nothing, and `failed` is the expensive one, since a
+truncation has already paid for a full ceiling of output.
 
-`alt_relocated` is on the line only where the correction moved one or more NAMED members from one
-enumeration in a description into a disjoint one — a state that left `darkest` and entered
-`cross-hatched` (#355) — and it names them rather than counting them, because a boolean saying
-something moved somewhere is not a claim anyone can check afterwards. It is not a fifth flag: a
-relocation is always an `alt_changed` too, and what this adds is what KIND of alt change it was,
-which the four booleans and the sizes cannot say — that page's line read as an alt refinement, the
-same bucket as "orange kayak" becoming "orange-yellow kayak", and its two sizes were equal.
+**A `rejected` has three causes and only two of them have a rejection event.**
+[`page_correction_rejected`](#page_correction_rejected) is a reply that came back a fraction of the
+page's size; `page_links_correction_rejected` is a second verdict naming something the rewrite had
+lost; and — with neither of those beside it — a binding recheck that could not be obtained at all,
+which logs `page_verify_error` with `correction_discarded: true` and counts as
+`rechecks.binding_error`. Triaging a `rejected` by looking only for the first two finds no event for
+the third, which is why it is named here: the first two are a correction judged and found wanting,
+and the third was never judged.
 
-It takes no view on which of the two replies is right, and it is not a gate: nothing about what
-ships is decided here. Absent where nothing moved, which is the ordinary case, and absent rather
-than empty. Its limits are worth knowing before a corpus is counted off it: two lists written as
-two sentences with no semicolon between them read as one list, a member added or dropped is not a
-relocation — an added one is `alt_added` below, and a dropped one is reported only by the sizes —
-a correction that changes how many images a fragment has is skipped, since descriptions are paired
-by position, and a name whose own words include "and" or "or" is read as one member wherever the
-list it sits in also uses commas, except as the first half of that list's last item ("Ohio, Health
-and Human Services and Education"), where nothing in the string says which conjunction is the
-list's and a member is silently not seen.
+**`identical` is decided on the effect, not on string identity**, so a model that returns its own
+page re-indented or with `&` for `&amp;` is counted here rather than as `kept`. Such a fragment is
+still **adopted** — what ships is decided on string identity, deliberately, so that a change no
+signal here observes cannot be silently reverted. `identical` means the page call bought nothing, not
+that its output was discarded (that is `rejected`). Two shapes of it are worth telling apart, and
+field presence is what tells them apart: with `chars_before` / `chars_after` and all four flags
+`false`, the model re-typed the page to no effect; with no sizes and no flags at all, it handed back
+the exact string it was given. Same bill, different behaviour.
 
-In a run written with no commas at all the conjunction is the only separator there is, so such a
-name is split there — which costs the name itself and not its neighbours, since its two halves
-always travel together. Reading a run-on at all is also what lets a word that is not a name onto
-the line — "the legend runs pale and light and medium and dark" separates into band words — so an
-entry here is a **token that changed bucket** and not necessarily a place, and a corpus counted
-off this field will contain some adjectives.
+When it changed something, `text_changed` / `alt_changed` / `attrs_changed` / `structure_changed` and
+`chars_before` / `chars_after` say **what** changed — observed on the two fragments, not claimed by
+the verdict, so an alt-text refinement, a re-typed `href` and a restored table row are
+distinguishable. `text_chars_before` / `text_chars_after` are the same two sizes with the markup
+taken out — how much prose a *reader* receives — which is what separates a correction that added
+markup to a page that was already complete from one that brought back content the vision pass had
+dropped.
 
-`alt_added` is the same shape of claim for a member that ARRIVED: a name the corrected description
-lists in one of its categories, named nowhere in the words of the description it corrected — **in
-a list or out of one**, since a band of a single member and a mention in running prose are both
-the earlier reply naming the place — joining a list at least two of whose members that earlier
-description had already listed together — #373's `p084`, whose `below` band went from four members
-to six by gaining Colorado and Illinois.
+**Three more fields are about the image description and the completeness markers.**
+`alt_relocated` names one or more NAMED members the correction moved from one enumeration in a
+description into a disjoint one — a state that left `darkest` and entered `cross-hatched` (#355).
+`alt_added` names a member that ARRIVED: a name the corrected description lists in one of its
+categories, named nowhere in the words of the description it corrected — **in a list or out of one**,
+since a band of a single member and a mention in running prose are both the earlier reply naming the
+place — joining a list at least two of whose members that earlier description had already listed
+together (#373's `p084`, whose `below` band went from four members to six by gaining Colorado and
+Illinois). `markers_added` names which of the two body markers — `[not legible]`, `[page not fully
+transcribed]` — the corrected page has MORE of, which is the completeness claim a correction
+appended.
 
-Everything said above about `alt_relocated` holds of it: it names them rather than counting them,
-it is not a fifth flag, it takes no view on which of the two replies is right, nothing about what
-ships is decided here, and it is absent rather than empty where nothing arrived. The two fields
-are disjoint **by construction** rather than by a rule — a member `alt_added` names the earlier
-description did not name at all, and a member `alt_relocated` names it listed — so a reader can
-add them. That the first test is on the earlier description's **text** rather than on its parsed
-lists is what makes the partition hold: a band of one leaves no list behind, so a member read off
-the lists alone read as new, and the one move `alt_relocated` declines on purpose — out of a
-category of one, which has no first company to compare a second against — landed here instead.
+The three share a contract. Each **names** its members rather than counting them, because a boolean
+saying something moved somewhere is not a claim anyone can check afterwards. None is a fifth flag: a
+relocation is always an `alt_changed` too, and what these add is what KIND of change it was, which
+the four booleans and the sizes cannot say. None takes a view on which of the two replies is right,
+none decides anything about what ships, and each is **absent rather than empty** where nothing
+happened, which is the ordinary case. `alt_relocated` and `alt_added` are **disjoint by
+construction** rather than by a rule — a member `alt_added` names the earlier description did not
+name at all, and one `alt_relocated` names it listed — so a reader can add them. Each is capped at
+**six** names independently, so one line carries at most twelve.
 
-Each field is capped at **six** names independently, so one line carries at most twelve;
-separately rather than between them, because a shared budget would let a description that moved
-six members hide every one it added behind a cap spent on the other field. The destination
-requirement is the whole of the discipline here: every correction re-emits the description entire,
-so new WORDS are ordinary and a rewritten clause is full of them; what is not ordinary is a new
-name inside a list the earlier reply already wrote.
+Limits to know before a corpus is counted off them:
 
-A wholly new list of wholly new names is a category the correction invented — a different claim,
-and `structure_changed` and the sizes are what report a description rebuilt. Its limits are
-`alt_relocated`'s, plus two of its own. A description that lost **any** member it no longer names
-anywhere reports no arrivals at all, because a state written out in full ("N.D." becoming "North
-Dakota") drops one key and adds another, and nothing in the two strings says the two are one place
-— the descriptions this reads abbreviate constantly.
+- Two lists written as two sentences with no semicolon between them read as **one** list.
+- A member merely **dropped** is on neither line. Only `text_chars_before` / `text_chars_after` say a
+  description lost prose.
+- A correction that changes how many images a fragment has is **skipped**, since descriptions are
+  paired by position.
+- A name whose own words include "and" or "or" reads as one member wherever the list it sits in also
+  uses commas — except as the first half of that list's last item ("Ohio, Health and Human Services
+  and Education"), where nothing in the string says which conjunction is the list's and a member is
+  silently not seen. In a run written with **no commas at all** the conjunction is the only separator
+  there is, so such a name is split there, which costs the name itself and not its neighbours, since
+  its two halves always travel together.
+- Reading a run-on at all is what lets a word that is not a name onto the line — "the legend runs
+  pale and light and medium and dark" separates into band words — so an entry is a **token that
+  changed bucket** and not necessarily a place, and a corpus counted off these fields will contain
+  some adjectives.
+- A description that lost **any** member it no longer names anywhere reports no arrivals at all,
+  because a state written out in full ("N.D." becoming "North Dakota") drops one key and adds
+  another, and nothing in the two strings says the two are one place — the descriptions this reads
+  abbreviate constantly. A member the earlier description listed **twice** has no single written form
+  to match, so it too reads as lost. That costs the case where a description genuinely gained one
+  state and dropped another in the same pass.
+- A member that merely moved between two of the description's own bands is **not** such a loss, since
+  the correction still names it — and "still names it", like "named nowhere", is read off the
+  **words**, so a state re-banded into a band of one or left in running prose has not been lost
+  either.
+- A wholly new list of wholly new names is a category the correction **invented**, which is a
+  different claim: `structure_changed` and the sizes are what report a description rebuilt.
+- `markers_added` counts over the whole fragment, so a marker that arrives in an **attribute** is on
+  this line too: inside an `alt`, with `text_changed` **false**, `alt_changed` true and the two text
+  sizes **equal**, since nothing a reader reads as prose moved; and inside any other attribute (a
+  `title`, an `aria-label`), with `text_changed` and `alt_changed` both false and only
+  `attrs_changed` true. The page agent describing an unreadable region inside an image description
+  reaches the first, and it is much the commoner of the two. A corpus expecting `text_changed: true`
+  beside every `markers_added` line, or sizing the marker off the two text numbers, would read either
+  wrong.
 
-Read across the whole description rather than per band, because a re-spelling can re-band in the
-same stroke, and a check scoped to the band the new name landed in would report a place newly
-asserted into a band whose predecessor had already classified it. A member that merely moved
-between two of the description's own bands is not such a loss, since the correction still names it
-— and "still names it", like "named nowhere" above, is read off the **words**, so a state
-re-banded into a band of one or left in running prose has not been lost either.
-
-The two readings are not the same match, and the asymmetry is deliberate: "named nowhere" folds
-case and reads the normalised member, since a generous reading there only makes the field quieter,
-while "still names it" matches the member **exactly as the earlier reply wrote it**, capital and
-abbreviating dot included. A generous reading on that side puts a wrong name on the line, which is
-the one thing this field must not do — a member whose abbreviation is also an ordinary English
-word ("Or.", "Miss.") is otherwise found in the corrected description's prose, and its expansion
-reported as an arrival.
-
-What that exact test costs is worth stating in its own terms, since it is wider than the
-re-spelling it was written for: it is reached only for a member in **no** category of the
-corrected description, so it bites where a member was re-banded out of every list **and** re-typed
-— and then for **any** re-typing, an abbreviation losing its dot ("Wis." written "Wis") or a name
-losing its capitals ("MISSOURI" written "Missouri") as much as an expansion — and every arrival in
-that description goes unreported. Either condition on its own still reports, for a re-typing that
-leaves the **key** intact — case and trailing dots are normalised out of it.
-
-A re-typing that changes the key needs no re-banding at all: "N.D." written "North Dakota" inside
-the list it was already in is caught by the sentence above, which is that guard working rather
-than this cost. A member the earlier description listed **twice** has no single written form to
-match, so it too reads as lost. That costs the case where a description genuinely gained one state
-and dropped another in the same pass, and it is the direction every bound in this module errs in:
-a name here sends a reader to look for a member that arrived, and a wrong one sends them looking
-for a member that never did.
-
-A member merely dropped from a category is not on this line at all, because #373's evidence is
-about assertions the corrector makes rather than ones it withdraws, and `text_chars_before` /
-`text_chars_after` already say a description lost prose.
-
-`markers_added` names which of the two body markers — `[not legible]`,
-`[page not fully transcribed]` — the corrected page has MORE of, which is the completeness claim a
-correction appended and the third of #373's reviewable shapes. **Additions only, deliberately**:
-this corrector is handed the page image and resolving an illegible passage is its job, so a marker
-LEAVING is as often the repair as the harm; and where prose arrived the two text sizes say so,
-whereas for a marker no such number exists, because the marker is itself the prose.
-
-The count is over the whole fragment, so a marker that arrives in an **attribute** is on this line
-too — inside an `alt`, with `text_changed` **false**, `alt_changed` true and the two text sizes
-**equal**, since nothing a reader reads as prose moved; and inside any other attribute (a `title`,
-an `aria-label`), with `text_changed` and `alt_changed` both false and only `attrs_changed` true.
-The page agent describing an unreadable region inside an image description is what reaches the
-first, and it is much the commoner of the two.
-
-A corpus expecting `text_changed: true` beside every `markers_added` line, or sizing the marker
-off the two text numbers, would read either wrong. The copy editor's `editor_markers_changed`
-counts the same way and records both directions off the same shared constants, for the opposite
-reason — that stage is handed no image, so a marker leaving its body is a claim dropped rather
-than answered.
-
-`text_chars_before` / `text_chars_after` are the same two sizes with the markup taken out — how
-much prose a *reader* receives — which is what separates a correction that added markup to a page
-that was already complete from one that brought back content the vision pass had dropped.
+Why the two alt fields match the way they do, what their exact test costs, why the six-name budgets
+are separate, and why `markers_added` reports additions only, is in [design notes — what a
+correction's alt fields can and cannot
+see](design-notes.md#what-a-corrections-alt-fields-can-and-cannot-see).
 
 ### `page_correction_rejected`
 
@@ -2615,119 +2519,100 @@ that judgement.
 
 A self-correction's model call threw (`page`, `image`, `trigger`, `problems`, `kinds`, `error`,
 `truncated`, `ceiling`, `ceiling_bound`, `chars_kept`, and on a truncation `reply_chars` /
-`reply_head` / `reply_tail` / `shape`), so the page keeps the version it already had — the
-extraction that succeeded, verified minutes earlier. It costs the **correction**, not the page:
-before this, the error propagated out of the page's own task and the run logged
-`page_extraction_failed` and shipped a `@page-failed` marker for a page it still had, which also
-named a stage that had worked (issue #171).
+`reply_head` / `reply_tail` / `shape`), so the page keeps the version it already had — the extraction
+that succeeded, verified minutes earlier. **It costs the correction, not the page.**
 
 Paired with `page_corrected` `result: "failed"`. Every error class is survivable here, not only a
-ceiling — a throttle, a stall and a truncation all leave behind a page good enough to have been
-worth correcting — and nothing is retried, because a correction truncating because the *page* is
-large will truncate again for a second full ceiling of output.
+ceiling — a throttle, a stall and a truncation all leave behind a page good enough to have been worth
+correcting — and **nothing is retried**, because a correction truncating because the *page* is large
+will truncate again for a second full ceiling of output.
 
 `truncated: true` says the model wrote an essay where a page was asked for, which is worth reading
 beside `page_verify_failed`'s problem list.
 
-`problems` is how much work the call was given and `kinds` is what kind of work, spelled exactly
-as `page_corrected` spells it so a failed correction and a kept one can be grouped together (issue
-#182): without it, the failures were the one part of the correction path that could not be grouped
-by what was asked — 205 successful corrections in a bench round were split by whether the verdict
-named `content_missing`, the kind that asks a model for content its first pass never produced, and
-not one failed correction could be put in either half.
+`problems` is how much work the call was given and `kinds` is what kind of work, spelled exactly as
+`page_corrected` spells it so a failed correction and a kept one can be grouped together. `kinds` is
+empty on the `links` and `alt` triggers, where the defect was found by code against the source file's
+own annotations and no verdict named anything; a kind there would be a count the verifier never made.
 
-It is empty on the `links` and `alt` triggers, where the defect was found by code against the
-source file's own annotations and no verdict named anything; a kind there would be a count the
-verifier never made.
+`ceiling` is the output ceiling this call **asked for**, which is usually **this call's own** and not
+the deployment's: a correction is capped at twice what the first pass of that page spent — scaled up
+if a specialist handed it a document longer than that pass produced — with a 4,000-token floor
+(`correctionCeiling` in `src/pipeline/extraction.ts`). **So the remedy on a truncated correction is
+that multiple, not `providers.*.max_tokens`.**
 
-`ceiling` is the output ceiling this call **asked for**, which since #285 is usually **this call's
-own** and not the deployment's: a correction is capped at twice what the first pass of that page
-spent — scaled up if a specialist handed it a document longer than that pass produced — with a
-4,000-token floor (`correctionCeiling` in `src/pipeline/extraction.ts`). So the remedy on a
-truncated correction is that multiple, not `providers.*.max_tokens` — one uncapped correction ran
-to 32,000 tokens on a page whose render cost 6,233 and was discarded for being truncated, and the
-error it raised advised raising the ceiling, which would only have bought a larger discarded
-reply.
+It is the number asked for and not the number reached, so it is on **every** failure this line reports
+and not only a truncation: read it with `truncated`, which says whether the ceiling is what the call
+died of. A throttle or a stall carries a `ceiling` it never got near.
 
-It is the number asked for and not the number reached, so it is on **every** failure this line
-reports and not only a truncation: read it with `truncated`, which says whether the ceiling is
-what the call died of. A throttle or a stall carries a `ceiling` it never got near. A `ceiling`
-**larger** than `providers.<provider>.max_tokens` is not a contradiction and is the one case where
-this field is not what the call asked the provider for: a caller may lower a call's ceiling and
-never raise it, so the adapter sent the smaller of the two, and a truncation on such a line is the
+A `ceiling` **larger** than `providers.<provider>.max_tokens` is not a contradiction, and is the one
+case where this field is not what the call asked the provider for: a caller may lower a call's ceiling
+and never raise it, so the adapter sent the smaller of the two, and a truncation on such a line is the
 deployment's ceiling — which is what its error message will name.
 
-`ceiling` is absent where the call ran uncapped, and the configuration is the remedy again on such
-a line — but it is two causes, not one, and the *page* tells them apart. Either the first pass
-reported no token usage, so there was no measurement to take a cap from; or the page rendered
-**nothing** and was delivered as blank (`page_blank`), whose correction is a re-render of the page
-from its image rather than an edit of a page, so nothing its first pass spent bounds it (issue
-#294 — this line is reachable there only on the `links` trigger, and it is the repair that catches
-a page the source file says was wrongly declared blank, which is why it is not capped at the
-floor).
+`ceiling` is **absent** where the call ran uncapped, and the configuration is the remedy again on such
+a line — but it is two causes, not one, and the *page* tells them apart. Either the first pass reported
+no token usage, so there was no measurement to take a cap from; or the page rendered **nothing** and
+was delivered as blank ([`page_blank`](#page_blank)), whose correction is a re-render of the page from
+its image rather than an edit of a page, so nothing its first pass spent bounds it (issue #294 — this
+line is reachable there only on the `links` trigger, and it is the repair that catches a page the
+source file says was wrongly declared blank, which is why it is not capped at the floor).
 
-`ceiling_bound` says which of `correctionCeiling`'s two terms produced that number, because
-`ceiling` alone cannot and the answer decides which constant a truncated correction is evidence
-about:
+`ceiling_bound` says which of `correctionCeiling`'s two terms produced that number, because `ceiling`
+alone cannot: `multiple` is twice this page's own first pass, scaled by a specialist's growth where
+there was one, and `floor` is the 4,000-token floor binding on a small page whose doubling falls under
+it. **Read the term off this field and not off the number** — a page whose doubling lands on 4,000 was
+bound by the multiple and `ceiling === 4000` says otherwise. Absent wherever `ceiling` is, and for the
+same reason: no cap means no term that produced one.
 
-`multiple` is twice this page's own first pass, scaled by a specialist's growth where there was
-one, and `floor` is the 4,000-token floor binding on a small page whose doubling falls under it.
-Of the three corrections that truncated in one bench round, one is a `floor` line — a 1,618-token
-first pass capped at 4,000 rather than 3,236 — so triaging all three as evidence about the
-multiple counts a line the multiple never bound, and raising the multiple would move that page's
-cap not at all (issue #365). Reading the term off the number instead is wrong on exactly one page:
-the one whose doubling lands on 4,000, where the multiple is what bound it and `ceiling === 4000`
-says otherwise.
+`chars_kept` is the size of the fragment that ships. On a truncation, four more fields say what the
+reply was, which is the evidence `ceiling` only poses a question about:
 
-Absent wherever `ceiling` is, and for the same reason — no cap means no term that produced one.
-`chars_kept` is the size of the fragment that ships. On a truncation, four fields say what the
-reply itself was, which is the evidence `ceiling` only poses a question about (#293): the same cap
-is either too tight for a page that genuinely needs more room than its first pass took, or exactly
-right for a model that went on rewriting the page it was given, and nothing else on the line can
-tell those apart — two truncations at 34,573 and 41,959 characters against pages of 11,908 and
-11,456 were argued both ways off the same log, and the round cannot be asked again, because a
-truncation has already been billed for a full ceiling of output.
+`reply_chars` is how far the reply reached (the number `editor_truncated` calls `chars`, renamed here
+because `chars_kept` is on the same line and a bare `chars` would read as the page's own length — read
+it as a ratio against that), `reply_head` its first 240 characters and `reply_tail` its last 240, on
+`editor_truncated`'s terms exactly: whitespace folded, a fragment shorter than both excerpts together
+quoted **entire** under `reply_head` with no `reply_tail`, and deployment-only — never on
+`GET /v1/quality`.
 
-`reply_chars` is how far the reply reached (the number `editor_truncated` calls `chars`, renamed
-here because `chars_kept` is on the same line and a bare `chars` would read as the page's own
-length — read as a ratio against it, those two pages are 2.9x and 3.7x), `reply_head` its first
-240 characters and `reply_tail` its last 240, on `editor_truncated`'s terms exactly: whitespace
-folded, a fragment shorter than both excerpts together quoted **entire** under `reply_head` with
-no `reply_tail`, and deployment-only — never on `GET /v1/quality`.
+**A tail mid-sentence in content the head has not reached is a page that needed the room; a tail
+repeating rows already in the head is a model looping.** The excerpts are absent on every other
+failure, which has no reply to quote, and absent on a truncation that returned nothing at all —
+`reply_chars: 0` is the zero-character shape [Errors](#errors) describes, where raising anything buys
+a larger burn.
 
-A tail mid-sentence in content the head has not reached is a page that needed the room; a tail
-repeating rows already in the head is a model looping. Absent on every other failure, which has no
-reply to quote, and absent on a truncation that returned nothing at all — `reply_chars: 0` is the
-zero-character shape [Errors](#errors) describes, where raising anything buys a larger burn. On this line
-uniquely it is `reply_chars` and not the missing `reply_head` that says so:
-
-`truncated` here is a predicate over the error's *message*, so it is also true of a truncation
-whose class was lost crossing a boundary, and such a line carries no `reply_chars` at all. So a
-bare `truncated: true` is two shapes — a reply of zero characters, or a truncation that arrived
-without its evidence — and only `reply_chars` separates them.
+On this line uniquely it is `reply_chars` and not the missing `reply_head` that says so, because
+`truncated` here is a predicate over the error's *message*: it is also true of a truncation whose class
+was lost crossing a boundary, and such a line carries no `reply_chars` at all. **So a bare
+`truncated: true` is two shapes** — a reply of zero characters, or a truncation that arrived without
+its evidence — and only `reply_chars` separates them.
 
 `shape` is that head-and-tail reading turned into something countable, in `page_no_output`'s
-vocabulary above: `truncated_envelope` is the reply the prompt asked for, cut; `bare_html` is a
-reply that IS the page's markup, which is how 24 of the 180 corrections in that round answered and
-the shape both of its page-shaped truncations had; `prose` is a reply that never began the page.
-Two more are reachable and worth expecting if the field is being counted:
+vocabulary:
 
-`envelope`, where the ceiling landed after the closing brace of a reply the model was still adding
-to, and `empty`, where the reply is whitespace only — that one is not the zero-character shape
-below, which carries no `shape` at all, and `reply_chars` tells them apart. Only `prose` settles
-the question by itself — a cap spent on something other than the page buys more of the same if it
-is raised ([Errors](#errors)).
+| `shape` | The reply |
+| --- | --- |
+| `truncated_envelope` | The reply the prompt asked for, cut |
+| `bare_html` | A reply that IS the page's markup |
+| `prose` | A reply that never began the page |
+| `envelope` | The ceiling landed after the closing brace of a reply the model was still adding to |
+| `empty` | Whitespace only — not the zero-character shape, which carries no `shape` at all; `reply_chars` tells them apart |
 
-`bare_html` says where the reply **began** and not where the output went: a correction that starts
-the page and then narrates at it carries the same value as one that transcribed to its last
-character, both happened in that round on the same model, and `reply_tail` is still what tells
-them apart — nothing counts narration off this field. Absent on a truncation that returned
-nothing, where `reply_chars: 0` is already the whole of what is known, and absent on every failure
-with no reply at all, exactly as the excerpts are (issue #365).
+Only `prose` settles the question by itself — a cap spent on something other than the page buys more
+of the same if it is raised ([Errors](#errors)). And `bare_html` says where the reply **began** and not
+where the output went: a correction that starts the page and then narrates at it carries the same value
+as one that transcribed to its last character, and `reply_tail` is still what tells them apart. Nothing
+counts narration off this field. Absent on a truncation that returned nothing, where `reply_chars: 0`
+is already the whole of what is known, and absent on every failure with no reply at all, exactly as the
+excerpts are.
 
-`blocks_named` has no counterpart here: this call is asked for the page's HTML and not for an
-edits list. The fidelity problems the correction was asked to fix are still unfixed and still on
-record — keeping the page is not a claim that it was right.
+`blocks_named` has no counterpart here: this call is asked for the page's HTML and not for an edits
+list. The fidelity problems the correction was asked to fix are still unfixed and still on record —
+keeping the page is not a claim that it was right.
+
+Where the multiple and the floor came from, what one round's truncations could and could not settle,
+and why a failed correction is not retried, is in [design notes — the output ceiling a correction asks
+for](design-notes.md#the-output-ceiling-a-correction-asks-for).
 
 ### `page_correction_no_output`
 
@@ -2805,72 +2690,61 @@ counts it as `verification.declined`.
 
 ### `page_correction_recheck`
 
-A second verdict on a corrected page (`ok`, `problems`), with `problems_before` / `problems_after`
-— how many **fidelity** problems the page was sent to be corrected with, and how many this verdict
-names — `kinds_before` / `kinds_after`, the same two sides as kinds, and `links_before` /
-`alt_before` / `ids_before` / `words_before`, the missing links, placeholder alts, duplicated ids and
-words written two ways it was also given. The four are kept out of `problems_before` so that a page
-with one fidelity problem and two code-found defects does not read as three-in-one-out; on the first
-three the reason is also that a verdict judged against the **image** cannot see them at all, and
-`words_before` is the exception — a visible hyphen is on the page, and #334 found both candidate
-verifiers raising that family unprompted, so `problems_after` may name a split word `words_before`
-also counts. The exact answer to whether any of the four came back is the matching `_unrecovered`
-line, not the difference between these two numbers. The kinds are what turn "the recheck did not
-pass" into an answer about the correction:
+A second verdict on a corrected page (`ok`, `problems`), with `problems_before` / `problems_after` —
+how many **fidelity** problems the page was sent to be corrected with, and how many this verdict names
+— `kinds_before` / `kinds_after`, the same two sides as kinds, and `links_before` / `alt_before` /
+`ids_before` / `words_before`, the missing links, placeholder alts, duplicated ids and words written
+two ways it was also given.
 
-`content_missing` in and `alt_quality` out is a page whose content came back and whose description
-is now the complaint, while `content_missing` on both sides is a correction that did not do the
-one thing it was asked to. Both are `ok: false` with the same counts.
+**The four code-found counts are kept out of `problems_before`**, so that a page with one fidelity
+problem and two code-found defects does not read as three-in-one-out. `words_before` is the one whose
+family this verdict can also raise, since a visible hyphen is on the page, so `problems_after` may name
+a split word `words_before` also counts. **The exact answer to whether any of the four came back is the
+matching `_unrecovered` line, not the difference between these two numbers:**
+`page_links_unrecovered` says whether the links came back, and `page_generic_alt_unrecovered` /
+`page_duplicate_ids_unrecovered` answer the alts and the ids exactly and for free.
+`page_corrected`'s `problems` is the correction's whole bill.
 
-`binding: true` is the links path re-verifying a rewrite it may discard; `binding: false` is a
-measurement-only sample, `defaults.recheck_sample_size` pages of the batch (default 1, `0` for
-none), which changes nothing about what is delivered. The two are counted apart in
-`verification.rechecks`, and a line with `ok: false` has its `problems` reported there as
-`rechecks.failures` — **not** in `diagnostics.errors`, which is failures of the run and rendered
-every one of these `"unknown"` while the diagnosis sat on this line (issue #296).
-
-At the default the sample is a **count and not a rate**: one draw per run, so `1 of 1 cleared` is
-everything it says. Reading a proportion off it is what this field invited and got — four draws
-split 2/2 quoted as "half", and the same instrument reading 50% on one model's four draws and 25%
-on another's over one 100-page corpus (issue #288).
-
-`sampled_ok / sampled` is a rate over corrected pages only at a size at or above the page count,
-which is a census and costs one Feedback Agent call per correction; the answer at that setting,
-replayed off 57 corrected bench pages, is that **26%** of corrected pages clear their recheck
-against a 2% floor for re-asking about the page as it was — 19 pages better and 2 worse, p =
-0.000. Between the two, which pages answer is a deterministic threshold spread across the batch
-rather than a random draw, and is not evidence that any position is representative: it replaced a
-rule that handed the slot to whichever corrected page finished **first**, which under concurrency
-is the front of the batch, and on one 8-run corpus put all 8 slots on six pages of 100.
-
-`extraction_start` / `reextract_start` carry `recheck_sample_size` and `recheck_thresholds`, so a
-log with none of these lines in it says which of three things happened: the measurement is off, no
-page was corrected, or every correction landed below the first threshold. On a `binding: false`
-line, read the two counts beside it: a correction pass is single-shot and was never expected to
-reach zero problems, so five-in-one-out and five-in-five-out are both `ok: false` and only these
-say which happened. On a `binding: true` line the page had **passed**, so `problems_before` is 0
-by construction and a problem named here is a rewrite of a good page that lost something — not a
-correction that failed to converge.
-
-The link, alt and id shares are carried apart because this verdict judges the fragment against the
-*image* and names the Feedback Agent's own problems: a link target does not appear in the image at
-all, and a placeholder alt or a duplicated id was found by code rather than by this verdict, so
-none of them could be counted coming out. Folding them in would make a page with one fidelity
-problem and two gutted alts read as three-in-one-out — a correction that fixed nothing, logged as
-converging.
-
-`page_corrected`'s `problems` is the correction's whole bill, `page_links_unrecovered` says
-whether the links came back, and `page_generic_alt_unrecovered` / `page_duplicate_ids_unrecovered`
-answer the alts and the ids exactly and for free. Counts, not a diff — deciding whether two of the
-Feedback Agent's prose descriptions are the same problem is fuzzy matching on model output, so
+The kinds are what turn "the recheck did not pass" into an answer about the correction:
+`content_missing` in and `alt_quality` out is a page whose content came back and whose description is
+now the complaint, while `content_missing` on both sides is a correction that did not do the one thing
+it was asked to. Both are `ok: false` with the same counts. Counts, not a diff — deciding whether two
+of the Feedback Agent's prose descriptions are the same problem is fuzzy matching on model output, so
 both lists are on the line in full instead.
 
-`unjudged: true` marks a recheck nothing judged, on the same terms as `page_verify_ok`: `ok` is
-also what an unavailable Feedback Agent looks like, and with none loaded every page passes its
-first check, so every corrected page's recheck is the binding one and every one of them would
-otherwise read as a rewrite checked and found good.
+**`binding: true` is the links path re-verifying a rewrite it may discard; `binding: false` is a
+measurement-only sample**, `defaults.recheck_sample_size` pages of the batch (default 1, `0` for none),
+which changes nothing about what is delivered. The two are counted apart in `verification.rechecks`,
+and a line with `ok: false` has its `problems` reported there as `rechecks.failures` — **not** in
+`diagnostics.errors`, which is failures of the run.
 
-`verification.rechecks.binding_unjudged` and `sampled_unjudged` are those, per population.
+**At the default the sample is a count and not a rate.** One draw per run, so `1 of 1 cleared` is
+everything it says, and a proportion read off it is not a measurement.
+`sampled_ok / sampled` becomes a rate only at a size at or above the page count, which is a census and
+costs one Feedback Agent call per correction.
+
+Read the two counts beside the flag:
+
+- On a **`binding: false`** line, a correction pass is single-shot and was never expected to reach zero
+  problems, so five-in-one-out and five-in-five-out are both `ok: false` and only these say which
+  happened.
+- On a **`binding: true`** line the page had **passed**, so `problems_before` is 0 by construction and
+  a problem named here is a rewrite of a good page that lost something — not a correction that failed
+  to converge.
+
+`extraction_start` / `reextract_start` carry `recheck_sample_size` and `recheck_thresholds`, so a log
+with none of these lines in it says which of three things happened: the measurement is off, no page was
+corrected, or every correction landed below the first threshold.
+
+`unjudged: true` marks a recheck nothing judged, on the same terms as `page_verify_ok`: `ok` is also
+what an unavailable Feedback Agent looks like, and with none loaded every page passes its first check,
+so every corrected page's recheck is the binding one and every one of them would otherwise read as a
+rewrite checked and found good. `verification.rechecks.binding_unjudged` and `sampled_unjudged` are
+those, per population.
+
+What a census of the sample answered, why the four code-found counts are carried apart, and which pages
+the sample lands on, is in [design notes — the recheck, and what a sample of one can
+say](design-notes.md#the-recheck-and-what-a-sample-of-one-can-say).
 
 ### `page_correction_recheck_failed`
 
