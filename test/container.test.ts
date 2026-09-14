@@ -263,11 +263,21 @@ test("an unwritable data_dir names its remedy instead of throwing a stack trace"
     .split("\n")
     .filter((l) => !/^\s*(\/\/|\*)/.test(l))
     .join("\n");
+  // Read from `chown` onward, not the whole line: the directory remedy is one template holding a
+  // `mkdir -p` and a `chown` together, so a line-wide check is satisfied by the mkdir alone — and
+  // that admits `mkdir -p c.want && chown -R c.probe`, which is the one shape the comment above the
+  // template singles out as worse than the failure being diagnosed.
   for (const line of commands.split("\n").filter((l) => l.includes("sudo chown"))) {
+    const args = line.slice(line.indexOf("sudo chown"));
     assert.match(
-      line,
+      args,
       /c\.want/,
       `a printed chown names a path the guard did not diagnose (${line.trim()}); the operator is told to fix a path this run never checked`,
+    );
+    assert.doesNotMatch(
+      args,
+      /c\.probe/,
+      `a printed chown targets the ancestor that was probed instead of the path configured (${line.trim()}); \`chown -R\` on /var/lib to fix /var/lib/iris/data is a far worse day than the one being diagnosed`,
     );
   }
   assert.match(
