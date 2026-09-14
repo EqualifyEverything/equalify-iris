@@ -22,12 +22,14 @@ A **round** in this document is one captured run of a fixed corpus, named like
 
 ## The suggested config
 
-| agent | what it does | suggested model | status |
+The ids below are **Bedrock ids**, spelled as the reference deployment writes them.
+
+| agent | what it does | suggested Bedrock id | status |
 |---|---|---|---|
 | `page` | reads the page image, writes its HTML, fixes what `verify` rejects | `us.openai.gpt-5.6-luna` | **applied 2026-09-10** (#344) |
-| `feedback` | verifies each page: pass, or a list of problems | `claude-sonnet-4-6` | **keep** (#330) |
-| `copy_editor` | applies the review; joins a table split across a page break | `claude-sonnet-4-6`, or `openai.gpt-5.6-luna` | **recommended, not applied** (#329) |
-| `reader` | reads the assembled document and proposes edits | `claude-sonnet-4-6` | **declined** (#313) |
+| `feedback` | verifies each page: pass, or a list of problems | `us.anthropic.claude-sonnet-4-6` | **keep** (#330) |
+| `copy_editor` | applies the review; joins a table split across a page break | `us.anthropic.claude-sonnet-4-6`, or `us.openai.gpt-5.6-luna` | **recommended, not applied** (#329) |
+| `reader` | reads the assembled document and proposes edits | `us.anthropic.claude-sonnet-4-6` | **declined** (#313) |
 | `builder`, specialists | drafts a specialist agent for a content type a page asked for | anything | ~$0.04 a call, 2 calls in the whole sprint |
 
 ```yaml
@@ -42,7 +44,8 @@ providers:
 
 That block is the reference deployment's. `config.example.yaml` ships `openrouter` as the default
 provider instead, where the same models carry different ids (`anthropic/claude-sonnet-4.6`) — so copy
-the shape, not the strings.
+the shape, not the strings. **An id belongs to a provider**, which is why the table names which one:
+a Bedrock id under an OpenRouter block fails on every call of the run.
 
 **The `us.` prefix is part of the id.** `openai.gpt-5.6-luna` is offered only as a cross-region
 inference profile, so the bare id cannot be called at all. `moonshotai.kimi-k2.5` was the opposite —
@@ -121,7 +124,7 @@ verify verdict is not a deliverable: it triggers one correction pass billed to w
 against 39) but **rejects 44 of 45 undamaged pages** at least once, reproducibly on 32 of those 44,
 against the incumbent's 22 of 25. And its rate of invented defects is not bounded by 45 pages (#330).
 
-**`copy_editor` — recommended, not applied.** `openai.gpt-5.6-luna` costs 9.5% of the incumbent per
+**`copy_editor` — recommended, not applied.** `us.openai.gpt-5.6-luna` costs 9.5% of the incumbent per
 document and is ahead on both quality halves: 21 of 23 provable defect instances against 12, and 5 of
 6 documents obeying the issue list against 3 of 10. Worth about **−26% of the bill** (#329). That
 result only appeared once the round attached the page images the agent receives in production; the
