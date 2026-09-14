@@ -32,10 +32,12 @@ RUN cp -n config.example.yaml config.yaml || true
 # `data/` is created here, owned by that user, because it is where every session and the
 # SQLite database are written and the process cannot chown it once privileges are dropped.
 # THE CATCH, stated again beside the bind mounts in docker-compose.yml: a bind-mounted host
-# directory keeps its HOST ownership, so on Linux `./data` must be writable by uid 1000 or
-# the first upload fails with EACCES. On macOS and Windows, Docker runs in a VM whose file
-# sharing remaps ownership and nothing is needed (checked: compose up on colima/Docker
-# 27.4 writes `./data` as the host user while the process runs as uid 1000).
+# directory keeps its HOST ownership, so on Linux `./data` must be writable by uid 1000 —
+# and it fails at STARTUP, not on the first upload: src/index.ts creates sessions/ and tmp/
+# at import, before the port is bound, so the container exits and never answers /v1/health.
+# It prints the chown to run. On macOS and Windows, Docker runs in a VM whose file sharing
+# remaps ownership and nothing is needed (checked: compose up on colima/Docker 27.4 writes
+# `./data` as the host user while the process runs as uid 1000).
 RUN mkdir -p data && chown -R node:node data
 USER node
 

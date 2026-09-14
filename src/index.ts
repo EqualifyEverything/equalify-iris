@@ -57,8 +57,30 @@ const visionWarning = visionModelWarning(cfg);
 if (visionWarning) console.warn(`WARNING: ${visionWarning}`);
 
 // Ensure the on-disk layout exists.
-mkdirSync(join(cfg.storage.data_dir, "sessions"), { recursive: true });
-mkdirSync(join(cfg.storage.data_dir, "tmp"), { recursive: true });
+//
+// This is the first thing that can fail on a correctly configured deployment, and the way it
+// fails is worth catching: the container runs as uid 1000 and compose bind-mounts `./data`,
+// which keeps its HOST ownership, so on Linux a `./data` owned by anyone else is an EACCES
+// here — at import, before the port is bound. With `restart: unless-stopped` that is a loop,
+// so the message is the whole diagnostic an operator gets, and it repeats. An uncaught
+// mkdirSync gives them a Node stack trace naming a path inside a container they cannot see
+// the ownership of; this names the remedy instead.
+try {
+  mkdirSync(join(cfg.storage.data_dir, "sessions"), { recursive: true });
+  mkdirSync(join(cfg.storage.data_dir, "tmp"), { recursive: true });
+} catch (err) {
+  const e = err as NodeJS.ErrnoException;
+  console.error(`FATAL: cannot create the session layout under ${cfg.storage.data_dir} (${e.code ?? e.message}).`);
+  if (e.code === "EACCES" || e.code === "EPERM") {
+    console.error(
+      `This process runs as uid ${process.getuid?.() ?? "?"}, and storage.data_dir must be writable by it.\n` +
+        `In Docker, ./data is bind-mounted from the host and keeps the host's ownership:\n` +
+        `  sudo chown -R ${process.getuid?.() ?? 1000}:${process.getgid?.() ?? 1000} ./data\n` +
+        `or add \`user: "$(id -u):$(id -g)"\` to the iris service in docker-compose.yml.`,
+    );
+  }
+  process.exit(1);
+}
 
 const store = new Store(cfg.storage.database);
 // Clear sessions orphaned by a previous shutdown (their in-process run is gone).

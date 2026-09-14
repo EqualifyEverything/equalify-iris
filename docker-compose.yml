@@ -30,7 +30,14 @@ services:
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
       # For Bedrock instead, supply the standard AWS credential env vars.
     # Come back up after a crash or a host reboot, but not after `docker compose stop` —
-    # a deliberate stop should stay stopped.
+    # a deliberate stop should stay stopped. `on-failure:N` would give up after N tries;
+    # surviving a reboot is worth more here, and it is what `on-failure` does not do (a
+    # reboot stops the container cleanly, so there is no failure to retry).
+    #
+    # The cost, worth knowing before you read the log: a startup error that will never
+    # come right on its own — a missing IRIS_GITHUB_TOKEN, an unwritable ./data — becomes
+    # a loop rather than one exit. `docker compose logs` shows the same message repeating,
+    # and each of those messages says what to change.
     restart: unless-stopped
     # Report the container unhealthy when the service stops answering, so `docker ps` and any
     # supervisor above it can tell "running" from "working". The command is the Dockerfile's
@@ -54,9 +61,16 @@ services:
       #
       # The container runs as uid 1000 (the image's `node` user, see Dockerfile), and a
       # bind-mounted host directory keeps its HOST ownership. On Linux, `./data` must
-      # therefore be writable by uid 1000 or the first upload fails with EACCES —
-      # `sudo chown -R 1000:1000 ./data` fixes it, or add
+      # therefore be writable by uid 1000, and it fails at STARTUP rather than on the first
+      # upload: src/index.ts creates sessions/ and tmp/ at import, so the container exits
+      # before binding the port and `restart:` below turns that into a loop. The log says
+      # which chown to run. Two remedies: `sudo chown -R 1000:1000 ./data`, or add
       # `user: "1234:1234"` to this service to run as whichever uid owns the directory.
+      #
+      # A fresh clone already contains `./data` (data/.gitkeep is tracked for exactly this
+      # reason), so the daemon never has to create the mount source itself — which it would
+      # make root-owned, failing for every host user rather than only for uid != 1000.
+      #
       # On macOS and Windows nothing is needed: Docker runs in a VM whose file sharing
       # remaps ownership, so `./data` fills up owned by you.
       - ./data:/app/data

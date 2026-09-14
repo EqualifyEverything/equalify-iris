@@ -109,6 +109,17 @@ cp .env.example .env          # fill in values
 docker compose up
 ```
 
+The container runs as uid 1000 and writes sessions to `./data`, which keeps its ownership from the
+host. **On Linux, if your user is not uid 1000, give it the directory first** — otherwise the service
+exits at startup and compose restarts it in a loop:
+
+```bash
+sudo chown -R 1000:1000 ./data
+```
+
+macOS and Windows need nothing: Docker runs in a VM that remaps ownership. Either way the startup log
+says which command to run, so you do not have to know this in advance.
+
 Check it's alive, and which build it is:
 
 ```bash

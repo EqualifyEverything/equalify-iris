@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 
 const ROOT = join(import.meta.dirname, "..");
@@ -117,6 +118,50 @@ test("dropping privileges is stated where the bind mounts are declared", () => {
   );
 });
 
+test("a fresh clone contains ./data, so the daemon never creates the mount source", () => {
+  // The reason this is a test and not just a file: compose bind-mounts `./data`, and when the
+  // source does not exist the Docker daemon creates it ROOT-OWNED. The container runs as uid 1000,
+  // `src/index.ts` makes sessions/ and tmp/ at import, and the result is EACCES before the port is
+  // bound — on Linux, from the exact sequence README's Docker quickstart gives. A tracked file
+  // inside `data/` means the clone creates the directory instead, owned by whoever cloned.
+  //
+  // Reproduced before this was written: a root-owned /app/data with the image's `node` user gives
+  // `EACCES: permission denied, mkdir '/app/data/sessions'` and exit 1, with no port ever bound.
+  const tracked = execFileSync("git", ["ls-files", "data"], { cwd: ROOT }).toString().trim().split("\n");
+  assert.ok(
+    tracked.includes("data/.gitkeep"),
+    `data/.gitkeep is not tracked (git ls-files data => ${JSON.stringify(tracked)}), so a fresh clone has no ./data and the Docker daemon will create it root-owned`,
+  );
+
+  // And the rule that keeps it that way. `data/` alone would exclude the directory, and git does not
+  // look inside an excluded directory, so the negation would never be read.
+  const ignore = read(".gitignore");
+  assert.match(ignore, /^data\/\*$/m, ".gitignore does not use `data/*`, so the `!data/.gitkeep` line below it is unreachable");
+  assert.match(ignore, /^!data\/\.gitkeep$/m, ".gitignore does not re-include data/.gitkeep");
+
+  // The point of the mount is that real session data stays out of git. Checked against git itself
+  // rather than by re-reading the patterns, because the patterns are what could be wrong.
+  const wouldCommit = execFileSync("git", ["check-ignore", "data/iris.sqlite", "data/sessions/x.json", "data/tmp/y"], {
+    cwd: ROOT,
+  })
+    .toString()
+    .trim()
+    .split("\n");
+  assert.equal(wouldCommit.length, 3, `the ./data exception is too wide: ${JSON.stringify(wouldCommit)} of 3 paths are ignored`);
+});
+
+test("an unwritable data_dir names its remedy instead of throwing a stack trace", () => {
+  // The failure this catches is a loop, not an exit: `restart: unless-stopped` restarts a container
+  // that died at import, so this message is the entire diagnostic an operator gets, repeating. An
+  // uncaught mkdirSync names a path inside a container whose ownership they cannot see from outside.
+  const index = read("src/index.ts");
+  const guarded = index.slice(index.indexOf("// Ensure the on-disk layout exists"), index.indexOf("const store = new Store"));
+  assert.match(guarded, /try\s*\{/, "the startup mkdirSync pair is unguarded, so an unwritable ./data exits with a Node stack trace");
+  assert.match(guarded, /EACCES/, "the startup guard does not distinguish the permission case, which is the one with a remedy");
+  assert.match(guarded, /chown/, "the startup guard does not print the chown that fixes it");
+  assert.match(guarded, /process\.exit\(1\)/, "the startup guard does not exit non-zero, so a broken deployment would carry on to bind a port it cannot serve from");
+});
+
 test("GET /v1/health reports the running build, and package.json is the one place it is written", () => {
   const index = read("src/index.ts");
   const route = index.slice(index.indexOf('app.get("/v1/health"'));
@@ -147,16 +192,22 @@ test("a version printed in the docs is the version this repo is at", () => {
   // reader comparing their own curl output needs something to compare it to. That makes the docs a
   // second copy of the version — the kind that goes stale at the next release with nothing
   // complaining. This is the complaint: bump package.json and these two lines have to move too.
+  //
+  // Anchored on the probe's own reply rather than on any `"version"` in the file. Some other
+  // component's version in some future JSON example — axe-core's, a provider's, a schema's — is not
+  // this fact, and a check that read it would fail naming the wrong defect.
   const pkg = JSON.parse(read("package.json")) as { version: string };
+  let found = 0;
   for (const rel of ["README.md", "docs/API.md"] as const) {
-    for (const shown of read(rel).matchAll(/"version"\s*:\s*"([^"]+)"/g)) {
-      assert.equal(
-        shown[1],
-        pkg.version,
-        `${rel} prints version "${shown[1]}" and package.json is at "${pkg.version}"`,
-      );
+    for (const shown of read(rel).matchAll(/"service"\s*:\s*"equalify-iris"\s*,\s*"version"\s*:\s*"([^"]+)"/g)) {
+      found++;
+      assert.equal(shown[1], pkg.version, `${rel} prints version "${shown[1]}" and package.json is at "${pkg.version}"`);
     }
   }
+  // Anchoring narrows what matches, so it can also match nothing — at which point the test passes
+  // by reading no version at all. Both files show the reply today; if one stops, say so here rather
+  // than going quiet.
+  assert.equal(found, 2, `expected the health reply in README.md and docs/API.md, found ${found}`);
 });
 
 test("the qs override is still the only way to reach a patched qs", () => {
