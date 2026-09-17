@@ -1,5 +1,11 @@
 import { DEFAULT_MAX_TOKENS, type Capability, type ProviderBlock } from "../config.ts";
-import { StalledStreamError, TruncatedResponseError, type StallKind } from "./types.ts";
+import {
+  EmptyStreamError,
+  StalledStreamError,
+  TruncatedResponseError,
+  addUsage,
+  type StallKind,
+} from "./types.ts";
 import type { CompletionRequest, CompletionResult, ModelProvider, Usage } from "./types.ts";
 import {
   cacheableSystemPrompt,
@@ -86,26 +92,6 @@ export function normalizeUsage(u?: OpenAIUsage): Usage | undefined {
   if (cacheRead != null) usage.cache_read_input_tokens = cacheRead;
   if (cacheWrite != null) usage.cache_creation_input_tokens = cacheWrite;
   return Object.keys(usage).length ? usage : undefined;
-}
-
-// Add two usage snapshots. Used across retry attempts, where the counts ADD rather
-// than replace: an attempt that reported tokens and was then abandoned was still
-// billed for them, so reporting only the surviving attempt understates the call — and
-// understates it invisibly, since `tokens.calls_reported` would still say the call was
-// fully accounted for.
-//
-// Absent stays absent when neither side reported: a 0 nobody sent reads as a free
-// half of the call rather than an unreported one.
-function addUsage(a?: Usage, b?: Usage): Usage | undefined {
-  if (!a) return b;
-  if (!b) return a;
-  const sum: Usage = { ...a };
-  for (const key of Object.keys(b) as (keyof Usage)[]) {
-    const v = b[key];
-    if (v == null) continue;
-    sum[key] = (sum[key] ?? 0) + v;
-  }
-  return sum;
 }
 
 // OpenRouter adapter. Speaks the OpenAI-compatible chat
@@ -370,6 +356,18 @@ export class OpenRouterProvider implements ModelProvider {
         // TruncatedResponseError exists to prevent, by a different road.
         if (expired) throw stalled(expired);
         if (!sawDone && !finishReason) {
+          // Nothing arrived at all: a transient failure this loop can answer, rather than a
+          // document cut short, which it cannot. Raised as the shared type so the retry
+          // below recognizes it and so both adapters describe the same event the same way —
+          // see `EmptyStreamError` and providers/bedrock.ts.
+          if (!text) {
+            throw new EmptyStreamError({
+              provider: this.name,
+              model: req.model,
+              attempts: attempt,
+              detail: "no [DONE] and no finish_reason",
+            });
+          }
           throw new Error(
             `openrouter: the response stream ended without completing (${text.length} chars ` +
               `received, no [DONE] and no finish_reason). Treating a partial document as a whole ` +
@@ -410,7 +408,19 @@ export class OpenRouterProvider implements ModelProvider {
         // is the case the retry was added for (a proxy resetting a large request
         // body, which happens before any output), and it keeps the loop from
         // re-billing a long generation that died three quarters of the way through.
-        if (attempt < MAX_ATTEMPTS && !text && isTransientNetworkError(e)) {
+        //
+        // `EmptyStreamError` joins the set for issue #480, which was reported on Bedrock:
+        // a stream that opened and closed having sent nothing is the same transient
+        // upstream event as a reset, arriving as a clean 200 instead of a socket error, so
+        // nothing about `isTransientNetworkError` was ever going to recognize it. The `!text`
+        // guard is already exactly its condition — that error is raised only when no
+        // character arrived — and is left in the condition rather than leaned on, because
+        // what makes this retry safe should be readable on the line that decides it.
+        if (
+          attempt < MAX_ATTEMPTS &&
+          !text &&
+          (isTransientNetworkError(e) || e instanceof EmptyStreamError)
+        ) {
           await sleep(400 * 2 ** (attempt - 1));
           continue;
         }
