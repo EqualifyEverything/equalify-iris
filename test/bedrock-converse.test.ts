@@ -134,8 +134,19 @@ test("the default deployment still sends the Anthropic body, unchanged", async (
   const bedrock = new BedrockProvider({ default_model: MODEL });
   const captured = stubConverse(bedrock, script([]));
   // Deliberately an empty script: what is asserted is the command, and an empty stream
-  // fails the completeness check afterwards, which is the existing path's behaviour.
-  await assert.rejects(() => bedrock.complete(req()), /ended without completing/);
+  // fails the completeness check afterwards. Since #480 that means it is sent twice and
+  // then fails, so `captured` holds the second send's command — the same command, built
+  // the same way, which is the whole point of this assertion.
+  //
+  // The warning the retry prints is swallowed here rather than asserted: this test is about
+  // the request body, and empty-stream-retry.test.ts is where that warning is pinned.
+  const warn = console.warn;
+  console.warn = () => {};
+  try {
+    await assert.rejects(() => bedrock.complete(req()), /ended without completing/);
+  } finally {
+    console.warn = warn;
+  }
   assert.ok(captured.command instanceof InvokeModelWithResponseStreamCommand);
   const body = JSON.parse(String(captured.input.body));
   assert.equal(body.anthropic_version, "bedrock-2023-05-31");

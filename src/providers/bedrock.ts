@@ -10,8 +10,10 @@ import {
 } from "@aws-sdk/client-bedrock-runtime";
 import { DEFAULT_MAX_TOKENS, type Capability, type ProviderBlock } from "../config.ts";
 import {
+  EmptyStreamError,
   StalledStreamError,
   TruncatedResponseError,
+  addUsage,
   isRequestTooLargeError,
   type StallKind,
 } from "./types.ts";
@@ -62,6 +64,19 @@ const TRAILING_TIMEOUT_MS = 10_000;
 // concurrency slot and leaving the session "running". Deliberately generous: it is
 // here to bound the pathological case, not to bound normal slow work.
 const MAX_TOTAL_MS = 15 * 60_000;
+
+// How long to wait before sending an empty-stream call again (issue #480). OpenRouter's
+// first backoff, so the two adapters pause for the same reason: an upstream that just
+// closed a response having said nothing is one whose next second is more likely to work
+// than its next millisecond. Short enough that a document's total time is unchanged in
+// any way a caller would notice.
+const EMPTY_STREAM_RETRY_MS = 400;
+
+// What this adapter can say about the stream having ended early, in the Anthropic stream's
+// own vocabulary. One constant because the failure is raised at one place and re-raised at
+// another, and a reader comparing the two messages should not have to check whether the
+// wording drifted.
+const EMPTY_STREAM_DETAIL = "no message_stop and no stop_reason";
 
 // What the upstream actually sends in a usage block, which is a superset of what
 // `Usage` declares: today `service_tier` and a nested `cache_creation` breakdown ride
@@ -358,10 +373,19 @@ function converseUsage(raw?: {
 // `maxTokens` against `this.maxTokens` at the throw site cannot tell the last two apart — both
 // are below the deployment's — so it would tell an operator a call the CALLER bounded was
 // bounded by the model, which is advice as wrong as the advice #285 was filed about.
+//
+// `billed` is what EARLIER attempts at this same ceiling were charged for, and it is why
+// `spent` being true no longer has to mean "do not send this again". A stream that closed
+// having delivered nothing is re-sent (issue #480) even though the Anthropic stream's
+// `message_start` has usually already reported the prompt's counts by then — so the counts
+// of the abandoned attempt have to survive into the surviving one's report, or a call that
+// paid for two prompts would be logged as having paid for one. Added, not replaced: see
+// `addUsage`.
 interface Attempt {
   maxTokens: number;
   ceilingFrom: "deployment" | "model" | "call";
   spent: boolean;
+  billed?: Usage;
 }
 
 // What to do about a response that hit its ceiling, appended to `TruncatedResponseError`'s
@@ -503,9 +527,15 @@ function outputCeilingRefused(model: string, asked: number, cause: unknown, capp
 // Known gap, inherent to streaming: that strategy covers establishing the request.
 // A failure delivered as an event mid-stream (see streamException) rides a 200, so
 // the SDK never classifies it and cannot retry it. Such a call now fails where the
-// non-streaming version would have retried it. Left alone deliberately — a retry
-// here would have to either discard streamed output or resume mid-document, and
-// neither is worth building before the logs show it happening.
+// non-streaming version would have retried it. A retry there would have to either
+// discard streamed output or resume mid-document, and neither is worth building
+// before the logs show it happening.
+//
+// ONE case out of that gap is retried here, and it is the one where neither of those
+// objections applies: a stream that closes having delivered nothing at all
+// (`EmptyStreamError`, issue #480 — a user lost a whole document to it). There is no
+// streamed output to discard and no document to resume from, so the request is simply
+// sent again, once. See `sendRetryingEmptyStream`.
 export class BedrockProvider implements ModelProvider {
   name = "bedrock";
   capabilities: Capability[] = ["text", "vision", "structured_output"];
@@ -646,11 +676,16 @@ export class BedrockProvider implements ModelProvider {
       spent: false,
     };
     try {
-      return await this.send(req, system, first);
+      return await this.sendRetryingEmptyStream(req, system, first);
     } catch (e) {
       // `first.spent` is the guarantee that sending it again costs nothing: a refusal
       // arrives before generation, so a failure that had already been billed for is not
       // this one however its message reads, and re-sending would pay for the prompt twice.
+      //
+      // It is also what lets `second` below start with nothing billed against it. An
+      // empty-stream retry inside `first` can have paid for a prompt, and `first.billed`
+      // would hold it — but only where `first.spent` is true, which is a refusal this
+      // rethrows rather than answering, so the two cannot both be true of one call.
       if (!refusedForOutputCeiling(e) || first.spent) throw e;
       const stated = statedOutputCeiling(e);
       // Refused over the ceiling with nothing to retry at: either the message did not state
@@ -716,7 +751,7 @@ export class BedrockProvider implements ModelProvider {
       // deployment's ceiling and below any cap this call carried.
       const second: Attempt = { maxTokens: stated, ceilingFrom: "model", spent: false };
       try {
-        return await this.send(req, system, second);
+        return await this.sendRetryingEmptyStream(req, system, second);
       } catch (again) {
         if (!refusedForOutputCeiling(again) || second.spent) throw again;
         // This page is lost either way — a third attempt is not on offer, since a model that
@@ -760,6 +795,77 @@ export class BedrockProvider implements ModelProvider {
           }
         }
         throw outputCeilingRefused(req.model, stated, again);
+      }
+    }
+  }
+
+  // One attempt at one ceiling, sent a second time if the stream closed having delivered
+  // nothing (issue #480: a user's document failed with "0 chars received, no message_stop
+  // and no stop_reason", and the conversion was lost for a failure that had produced no
+  // content to protect).
+  //
+  // Safe in the two ways the note above `BedrockProvider` says a mid-stream retry usually
+  // is not. Nothing is discarded: `EmptyStreamError` is raised only when not one character
+  // arrived, so there is no partial document to throw away and no risk of a passage
+  // shipping twice. And a stalled attempt is never retried: a stall is a `StalledStreamError`,
+  // checked before the completeness check that raises this, so the attempt this follows is
+  // one the upstream closed itself.
+  //
+  // "Closed itself" does not mean "closed quickly". On the UIC deployment every empty stream
+  // came from one model, us.openai.gpt-5.6-luna on Converse, after 42, 82 and 83 seconds of
+  // silence (3 of its 308 page calls from 2026-09-01 to 09-24; the same model also hit the
+  // 120 s first-output stall 10 times, and no other model did either). So the retry can add up
+  // to one more first-output window, 120 s, to a page. That is the price of not losing the
+  // document. MAX_TOTAL_MS does not cap it: each send arms its own total timer, so the
+  // retry gets a fresh one. A worst-case call holds its slot for the empty send, then
+  // EMPTY_STREAM_RETRY_MS, then a full MAX_TOTAL_MS. The output-ceiling retry already
+  // works the same way.
+  //
+  // Not free, though, and the cost is worth stating: the Anthropic stream reports the
+  // prompt's counts in `message_start`, so an attempt that got that far and then closed was
+  // billed for reading the prompt, and this pays for it again. That is one prompt against
+  // the alternative of losing a document every other page of which has already been paid
+  // for — and `attempt.billed` keeps the abandoned attempt's counts in the call's reported
+  // usage, so the run log shows what the retry cost rather than hiding it.
+  //
+  // Once, not until it works. An upstream that answers an identical request with two empty
+  // streams is not having a blip, and a third attempt would only spend a third prompt to
+  // say so; the error names the attempt count so a run log can show that this is where it
+  // ended up.
+  private async sendRetryingEmptyStream(
+    req: CompletionRequest,
+    system: string,
+    attempt: Attempt,
+  ): Promise<CompletionResult> {
+    try {
+      return await this.send(req, system, attempt);
+    } catch (e) {
+      if (!(e instanceof EmptyStreamError)) throw e;
+      // Said on every occurrence rather than once per process, unlike the ceiling warnings
+      // above: those report a standing config error that is the same news however many
+      // pages meet it, while this is a transient upstream event whose FREQUENCY is the
+      // whole question. A deployment seeing it on one page a week and one seeing it on
+      // every page have different problems, and only the count tells them apart.
+      console.warn(
+        `bedrock: ${req.model} closed a response stream having sent nothing at all, so the ` +
+          `request is being sent again once after ${EMPTY_STREAM_RETRY_MS}ms. Nothing was ` +
+          `generated, so nothing is being discarded — but the prompt is read, and paid for, ` +
+          `a second time.`,
+      );
+      await new Promise((resolve) => setTimeout(resolve, EMPTY_STREAM_RETRY_MS));
+      try {
+        return await this.send(req, system, attempt);
+      } catch (again) {
+        if (!(again instanceof EmptyStreamError)) throw again;
+        // The surviving message says it happened twice. Re-raised rather than rethrown
+        // because the second attempt's own error says "sent once", which would tell an
+        // operator the retry had not been reached.
+        throw new EmptyStreamError({
+          provider: this.name,
+          model: req.model,
+          attempts: 2,
+          detail: EMPTY_STREAM_DETAIL,
+        });
       }
     }
   }
@@ -957,7 +1063,11 @@ export class BedrockProvider implements ModelProvider {
       // arrived yet — see Attempt.spent.
       attempt.spent = true;
       usage = { ...usage, ...u };
-      req.onUsage?.(usage);
+      // `attempt.billed` and not `usage` alone: on a call that is being sent a second time
+      // after an empty stream, the first attempt's prompt was billed and must stay in the
+      // total. Absent on every other call, where `addUsage` returns `usage` untouched.
+      const total = addUsage(attempt.billed, usage);
+      if (total) req.onUsage?.(total);
     };
     // Which window an event re-arms is decided by whether any text has arrived, not
     // by the event's own type. Protocol events (message_start, content_block_start)
@@ -1065,9 +1175,23 @@ export class BedrockProvider implements ModelProvider {
     // of a message that had already stopped took nothing from the document.
     if (expired && !sawStop) throw stalled(expired);
     if (!sawStop && !stopReason) {
+      // Nothing arrived at all, which is a different failure from a document cut short and
+      // is the one that can be sent again (see `sendRetryingEmptyStream` and
+      // `EmptyStreamError`). Folded into `attempt.billed` here rather than in the caller,
+      // because this is the only place that knows what this attempt was charged for and the
+      // only failure the caller answers by re-sending.
+      if (!text) {
+        attempt.billed = addUsage(attempt.billed, usage);
+        throw new EmptyStreamError({
+          provider: this.name,
+          model: req.model,
+          attempts: 1,
+          detail: EMPTY_STREAM_DETAIL,
+        });
+      }
       throw new Error(
         `bedrock: the response stream ended without completing (${text.length} chars received, ` +
-          `no message_stop and no stop_reason). Treating a partial document as a whole one would ` +
+          `${EMPTY_STREAM_DETAIL}). Treating a partial document as a whole one would ` +
           `deliver content the source never had.`,
       );
     }
@@ -1105,6 +1229,10 @@ export class BedrockProvider implements ModelProvider {
           `whole one.`,
       );
     }
-    return { text, model: req.model, provider: this.name, usage };
+    // `attempt.billed` for the same reason `mergeUsage` reports it: a call that was sent
+    // again after an empty stream paid for both prompts, and the router reads usage off the
+    // result on the surviving path and off the callback on the failing one — the two have to
+    // agree that the abandoned attempt was paid for.
+    return { text, model: req.model, provider: this.name, usage: addUsage(attempt.billed, usage) };
   }
 }

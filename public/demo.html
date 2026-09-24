@@ -302,6 +302,26 @@
       live((lead || 'Converting your document.') +
         ' This can take a few minutes — you can leave this page and come back; the conversion keeps running in the background.');
     }
+    // What a user is told when their conversion failed: what went wrong, then that trying
+    // again is allowed. A named function rather than a concatenation at the call site so it
+    // can be lifted out and tested (test/demo-error-sentence.test.ts, the same way
+    // `qualityClause` is).
+    //
+    // The period is added only when the message does not already end a sentence. Every
+    // failure Iris raises is prose ending in a full stop, so adding one unconditionally
+    // produced the "…content the source never had.. You can try again." quoted in issue
+    // #480. Worth fixing rather than tolerating: this string is announced, and a screen
+    // reader reads a stray double stop as a pause and a new sentence rather than skipping
+    // it — so the one place a failed document explains itself stumbles on the way out.
+    function failureMessage(error) {
+      const why = String(error || '').trim() || 'unknown error';
+      // A closing quote or bracket may follow the stop — a message that ends by quoting
+      // what an upstream said ("…decrease input length or `max_tokens` and try again.")
+      // is still a finished sentence. `…` is its own character, not three dots, so it is
+      // listed: an upstream message forwarded verbatim can end in one.
+      const ended = /[.!?…]["'`)\]]?$/.test(why);
+      return 'Conversion failed: ' + why + (ended ? '' : '.') + ' You can try again.';
+    }
     async function pollStatus() {
       let d = null;
       try {
@@ -325,7 +345,7 @@
       }
       if (d && d.status === 'failed') {
         converting = false; releaseAwake();
-        setError('Conversion failed: ' + (d.error || 'unknown error') + '. You can try again.');
+        setError(failureMessage(d.error));
         hide('status-section'); show('upload-section'); focusHeading('upload-h');
         return; // terminal — stop polling
       }

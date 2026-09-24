@@ -98,6 +98,33 @@ export interface Usage {
   cache_creation_input_tokens?: number;
 }
 
+// Add two usage snapshots. Used across retry attempts, where the counts ADD rather
+// than replace: an attempt that reported tokens and was then abandoned was still
+// billed for them, so reporting only the surviving attempt understates the call — and
+// understates it invisibly, since `tokens.calls_reported` would still say the call was
+// fully accounted for.
+//
+// Absent stays absent when neither side reported: a 0 nobody sent reads as a free
+// half of the call rather than an unreported one.
+//
+// Here rather than in one adapter because both retry now, and the two must not disagree
+// about what a re-sent call cost. Within ONE attempt the counts replace rather than add —
+// the Anthropic stream reports the prompt's half in `message_start` and the output's half
+// at the end, and adding those would double whichever field arrived twice. Across attempts
+// they add. That is the whole distinction, and it is why this is not the only merge in
+// either adapter.
+export function addUsage(a?: Usage, b?: Usage): Usage | undefined {
+  if (!a) return b;
+  if (!b) return a;
+  const sum: Usage = { ...a };
+  for (const key of Object.keys(b) as (keyof Usage)[]) {
+    const v = b[key];
+    if (v == null) continue;
+    sum[key] = (sum[key] ?? 0) + v;
+  }
+  return sum;
+}
+
 // A fact an adapter learned while serving one call that only the CALLER can record. Same
 // shape of problem as `onUsage`, and unreportable for the same reason a return value cannot
 // carry it: it is learned mid-call, it is worth having whether the call then succeeds or
@@ -439,5 +466,54 @@ export class StalledStreamError extends Error {
     this.kind = args.kind;
     this.limitMs = args.limitMs;
     this.chars = args.chars;
+  }
+}
+
+// A streamed call whose stream opened, delivered NOTHING, and closed without ever saying
+// the message was over. Reported to a user as "Conversion failed" on a whole document,
+// which is what issue #480 was filed about.
+//
+// Its own type, apart from the partial-response failure it used to share a message with,
+// because the two are opposite diagnoses:
+//
+//   - A stream that ends after 30,000 characters has a document in hand that is missing
+//     its end. Returning it delivers content the source never had, and re-sending it
+//     means either discarding what was generated or resuming mid-document. Neither is on
+//     offer, so it fails.
+//   - A stream that ends after nothing has no document in hand at all. There is nothing to
+//     discard, nothing to resume, and nothing that can ship short — so the call can simply
+//     be sent again, which is what both adapters now do. It is the upstream ending a 200
+//     response before saying anything, and no part of the request is what it objected to.
+//
+// The old message told the second story as the first: an operator reading "treating a
+// partial document as a whole one" about a response of zero characters is being pointed at
+// a truncation that did not happen.
+//
+// `attempts` is what makes the surviving message honest about cost — a re-sent call was
+// billed for its prompt more than once — and is the one line in a run log that says the
+// retry was reached and did not help.
+//
+// Short on purpose. This message is what the demo reads out in a live region, followed by
+// its own "You can try again." (public/demo.html, `failureMessage`), so it says what
+// happened and stops. Advice to send it again would be said twice, and the reasoning above
+// is for whoever reads this file, not for someone whose document just failed.
+export class EmptyStreamError extends Error {
+  readonly provider: string;
+  readonly model: string;
+  readonly attempts: number;
+
+  constructor(args: { provider: string; model: string; attempts: number; detail: string }) {
+    // "ended without completing" is kept from the old message on purpose: it is what anyone
+    // searching run logs for this failure already searches for.
+    super(
+      `${args.provider}: the response stream ended without completing on ${args.model}, ` +
+        `having sent nothing (${args.detail}).` +
+        (args.attempts > 1 ? ` Sent ${args.attempts} times, and each ended the same way.` : ``) +
+        ` Nothing partial was kept.`,
+    );
+    this.name = "EmptyStreamError";
+    this.provider = args.provider;
+    this.model = args.model;
+    this.attempts = args.attempts;
   }
 }
