@@ -816,7 +816,10 @@ export class BedrockProvider implements ModelProvider {
   // silence (3 of its 308 page calls from 2026-09-01 to 09-24; the same model also hit the
   // 120 s first-output stall 10 times, and no other model did either). So the retry can add up
   // to one more first-output window, 120 s, to a page. That is the price of not losing the
-  // document, and it stays inside MAX_TOTAL_MS.
+  // document. MAX_TOTAL_MS does not cap it: each send arms its own total timer, so the
+  // retry gets a fresh one. A worst-case call holds its slot for the empty send, then
+  // EMPTY_STREAM_RETRY_MS, then a full MAX_TOTAL_MS. The output-ceiling retry already
+  // works the same way.
   //
   // Not free, though, and the cost is worth stating: the Anthropic stream reports the
   // prompt's counts in `message_start`, so an attempt that got that far and then closed was
