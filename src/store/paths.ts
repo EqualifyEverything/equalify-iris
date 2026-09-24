@@ -15,6 +15,8 @@ import type { IrisConfig } from "../config.ts";
 //   fixtures/<agent>/  and  memory/<agent>.json  — keyed by agent, shared by every session
 //   tmp/<id>/       one run's scratch. `tmp/<id>/agents/` holds agents that session BUILT,
 //                   which `loadAgent` prefers over the library for the rest of it.
+//   tmp/pdf-*/      one tagged-PDF request's scratch, removed when it answers. Outside
+//                   tmp/<id>/ so closing the session cannot delete it mid-request.
 //
 // Stated here rather than pointed at README's "Layout": that section is the SOURCE tree, and
 // its one line about this one is `data/  # sessions/, tmp/, and the SQLite DB`.
@@ -112,6 +114,9 @@ export class Paths {
     return join(this.memoryDir(), `${agentName.replace(/\.md$/, "")}.json`);
   }
 
+  pdfScratchRoot(): string {
+    return join(this.cfg.storage.data_dir, "tmp");
+  }
   tmpDir(id: string): string {
     return join(this.cfg.storage.data_dir, "tmp", id);
   }

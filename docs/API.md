@@ -978,7 +978,8 @@ curl -s -H "$AUTH" "$BASE/sessions/$SID/fields" | jq '.fields[0]'
 ```
 
 `type` is one of `text`, `checkbox`, `radio`, `combobox`, `listbox`, `button` or `signature`. A PDF with
-no form gives `{"fields": []}`.
+no form gives `{"fields": []}`. It can answer `404`, `409 no_source_pdf`, `422` for a PDF the tagger
+refuses, or `503 busy`, the same as below.
 
 **Get the tagged PDF:**
 
@@ -999,10 +1000,11 @@ tagger's report. `report.warnings` lists what the tagger could not do cleanly, s
 it could not find in the HTML. The demo page turns each warning into a plain sentence.
 
 The session must have finished (`ready_for_review` or `closed`), or you get `409 invalid_state`. The
-PDF is tagged from the first pass's HTML for each page, before review. Errors from the tagger keep
+PDF is tagged from the first pass's HTML for each page, before review. A page that failed extraction is
+left out, and the report lists it as `page_not_in_html`. Errors from the tagger keep
 its code: `400` for a bad value, `422` for a PDF it refuses (for example `encrypted`), and `504
-timeout` after `tagged_pdf.timeout_seconds` (300 by default). Two tagging requests at once is the
-limit, so a third gets `503 busy` with `Retry-After`. A deployment without the feature answers
+timeout` after `tagged_pdf.timeout_seconds` (300 by default). Two tagger runs at once, counting
+both `/fields` and `/pdf`, is the limit, so a third gets `503 busy` with `Retry-After`. A deployment without the feature answers
 `404 tagged_pdf_unavailable`.
 
 ## Submit feedback (re-run)

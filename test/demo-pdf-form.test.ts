@@ -67,12 +67,21 @@ test("an untouched form sends nothing, so the PDF keeps what it had", () => {
   assert.deepEqual(fieldValues(form().list), {});
 });
 
+test("a checkbox can be left alone, ticked or unticked", () => {
+  const { list } = form();
+  const box = (v: string) => list.querySelector(`[data-field="agree"] input[value="${v}"]`) as HTMLInputElement;
+  box("Not checked").checked = true;
+  assert.deepEqual(fieldValues(list), { agree: false });
+  box("Checked").checked = true;
+  assert.deepEqual(fieldValues(list), { agree: true });
+});
+
 test("what was entered is sent under each field's name", () => {
   const { list } = form();
   const q = (s: string) => list.querySelector(s) as HTMLInputElement & HTMLSelectElement;
   q('[data-field="name"] input').value = "Ada";
   q('[data-field="city"] input').value = "Peoria";
-  q('[data-field="agree"] input').checked = true;
+  q('[data-field="agree"] input[value="Checked"]').checked = true;
   q('[data-field="size"] input[value="M"]').checked = true;
   q('[data-field="state"] select').value = "IN";
   (q('[data-field="days"] select').options[1] as HTMLOptionElement).selected = true;

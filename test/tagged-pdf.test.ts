@@ -44,7 +44,9 @@ async function serve(opts: { command?: string; source?: string | null; status?: 
   if (opts.source !== null) writeFileSync(paths.sessionSourcePdf(id), opts.source ?? "%PDF-1.7 source");
   const frag = (order: number, innerHtml: string) => ({ image: `p${order}.png`, order, agent: "page.md", region: "page", innerHtml, edges: [], log: "" });
   // Stored out of order on purpose: the pages must reach the tagger by page order.
-  writeFileSync(paths.sessionFinalFragments(id), JSON.stringify({ fragments: [frag(2, "<p>two</p>"), frag(1, "<h1>one</h1>")], body: "" }));
+  // Page 3 failed extraction, so it holds only its note.
+  const pages = [frag(2, "<p>two</p>"), frag(3, "<!-- @page-failed 3: timeout -->"), frag(1, "<h1>one</h1>")];
+  writeFileSync(paths.sessionFinalFragments(id), JSON.stringify({ fragments: pages, body: "" }));
   writeFileSync(paths.sessionOutput(id), '<!DOCTYPE html><html lang="fr"><head><title>x</title></head><body></body></html>');
 
   const app = express();
@@ -158,7 +160,7 @@ test("a deployment without the command, or a session without a PDF, says so", as
   }
 });
 
-test("POST /pdf tags the pages in page order, fills the values, and keeps nothing", async () => {
+test("POST /pdf tags the pages in page order, leaves out a failed page, fills the values, and keeps nothing", async () => {
   const s = await serve();
   try {
     const res = await s.tag({ values: { "applicant.name": "Ada Lovelace", "applicant.consent": true } });
@@ -177,8 +179,8 @@ test("POST /pdf tags the pages in page order, fills the values, and keeps nothin
     assert.equal(made.mode, "600", "only this process can read the values file");
     // The values, and the filled PDF, are gone once the answer is sent.
     assert.equal(existsSync(made.scratch), false);
-    const tmp = s.paths.tmpDir(s.id);
-    assert.deepEqual(readdirSync(tmp).filter((f) => f.startsWith("pdf-")), []);
+    assert.equal(dirname(made.scratch).startsWith(s.paths.pdfScratchRoot()), true);
+    assert.deepEqual(readdirSync(s.paths.pdfScratchRoot()).filter((f) => f.startsWith("pdf-")), []);
     const log = readFileSync(s.paths.sessionLog(s.id), "utf8");
     assert.match(log, /"tagged_pdf"/);
     assert.match(log, /applicant\.name/, "the field names are logged");
@@ -229,8 +231,29 @@ test("POST /pdf waits for the finished document and stops a run that takes too l
     const res = await slow.tag({ values: { slow: true } });
     assert.equal(res.status, 504);
     assert.equal((await res.json()).error.code, "timeout");
-    assert.deepEqual(readdirSync(slow.paths.tmpDir(slow.id)).filter((f) => f.startsWith("pdf-")), []);
+    assert.deepEqual(readdirSync(slow.paths.pdfScratchRoot()).filter((f) => f.startsWith("pdf-")), []);
   } finally {
     slow.close();
+  }
+});
+
+test("two tagger runs at once, across both routes, and a third is told to wait", async () => {
+  const s = await serve();
+  const slow = [s.tag({ values: { slow: true } }), s.tag({ values: { slow: true } })];
+  try {
+    await new Promise((r) => setTimeout(r, 300));
+    for (const res of [await s.tag({}), await s.fields()]) {
+      const body = await res.json();
+      assert.equal(res.status, 503);
+      assert.equal(res.headers.get("retry-after"), "10");
+      assert.equal(body.error.code, "busy");
+    }
+    for (const res of await Promise.all(slow)) assert.equal(res.status, 200);
+    const after = await s.fields();
+    await after.body?.cancel();
+    assert.equal(after.status, 200, "the count goes back down");
+  } finally {
+    await Promise.allSettled(slow.map(async (p) => (await p).body?.cancel()));
+    s.close();
   }
 });

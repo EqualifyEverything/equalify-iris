@@ -171,7 +171,7 @@
            form is built when the result is shown. -->
       <div id="pdf-part" hidden>
         <h3 id="pdf-h">Get your PDF back, tagged</h3>
-        <p>The same PDF you uploaded, tagged so a screen reader can read it in order. The pages look the same.</p>
+        <p>The same PDF you uploaded, tagged so a screen reader can read it in order. The pages look the same. The tags come from Iris's first reading of each page, before review, so the HTML above is the more accurate version.</p>
         <form id="pdf-form">
           <fieldset id="pdf-fields" hidden>
             <legend>Fill in the PDF's form (optional)</legend>
@@ -456,14 +456,14 @@
             input.setAttribute('list', dl.id);
           }
           box.append(input);
-        } else if (f.type === 'checkbox') {
-          box = el('div', { className: 'choice' });
-          box.append(el('input', { id, type: 'checkbox' }), el('label', { htmlFor: id, textContent: f.name + req(f) }));
-        } else if (f.type === 'radio') {
+        } else if (f.type === 'radio' || f.type === 'checkbox') {
           box = el('fieldset');
           box.append(el('legend', { textContent: f.name + req(f) }));
-          // A chosen radio cannot be unchosen, so "leave it" is a choice of its own.
-          ['', ...f.options].forEach((o, i) => {
+          // A chosen radio cannot be unchosen, so "leave it" is a choice of its own. A
+          // checkbox is asked the same way: the page cannot show whether the PDF has it
+          // checked, so an unticked box would not say "leave it" or "untick it".
+          const choices = f.type === 'checkbox' ? ['', 'Checked', 'Not checked'] : ['', ...f.options];
+          choices.forEach((o, i) => {
             const row = el('div', { className: 'choice' });
             row.append(
               el('input', { id: id + '-' + i, type: 'radio', name: id, value: o, checked: i === 0 }),
@@ -496,7 +496,8 @@
       for (const box of list.querySelectorAll('[data-field]')) {
         const name = box.dataset.field;
         if (box.dataset.type === 'checkbox') {
-          if (box.querySelector('input').checked) values[name] = true;
+          const picked = box.querySelector('input:checked');
+          if (picked && picked.value) values[name] = picked.value === 'Checked';
         } else if (box.dataset.type === 'radio') {
           const picked = box.querySelector('input:checked');
           if (picked && picked.value) values[name] = picked.value;
