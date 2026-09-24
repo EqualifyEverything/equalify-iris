@@ -160,7 +160,7 @@ test("two empty Bedrock streams fail, saying so, and do not describe a document 
         // second attempt's own, which says nothing about the first.
         assert.match(e.message, /Sent 2 times/);
         assert.match(e.message, /ended without completing/);
-        assert.match(e.message, /nothing at all/);
+        assert.match(e.message, /having sent nothing/);
         // The old message's wording, which was the actual defect in #480: an operator
         // reading "a partial document" about a response of zero characters is being
         // pointed at a truncation that did not happen.

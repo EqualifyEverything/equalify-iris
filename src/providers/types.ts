@@ -492,23 +492,24 @@ export class StalledStreamError extends Error {
 // `attempts` is what makes the surviving message honest about cost — a re-sent call was
 // billed for its prompt more than once — and is the one line in a run log that says the
 // retry was reached and did not help.
+//
+// Short on purpose. This message is what the demo reads out in a live region, followed by
+// its own "You can try again." (public/demo.html, `failureMessage`), so it says what
+// happened and stops. Advice to send it again would be said twice, and the reasoning above
+// is for whoever reads this file, not for someone whose document just failed.
 export class EmptyStreamError extends Error {
   readonly provider: string;
   readonly model: string;
   readonly attempts: number;
 
   constructor(args: { provider: string; model: string; attempts: number; detail: string }) {
+    // "ended without completing" is kept from the old message on purpose: it is what anyone
+    // searching run logs for this failure already searches for.
     super(
       `${args.provider}: the response stream ended without completing on ${args.model}, ` +
-        `having delivered nothing at all — no content, ${args.detail}. ` +
-        (args.attempts > 1
-          ? `Sent ${args.attempts} times in all, since a stream that produced nothing cannot ` +
-            `deliver a document twice over, and every attempt ended the same way. `
-          : ``) +
-        `Nothing partial arrived, so no part of a document is at risk of shipping short: ` +
-        `what failed is the upstream closing a 200 response before saying anything, which ` +
-        `is not something the request can be at fault for. Sending the document again is ` +
-        `the remedy.`,
+        `having sent nothing (${args.detail}).` +
+        (args.attempts > 1 ? ` Sent ${args.attempts} times, and each ended the same way.` : ``) +
+        ` Nothing partial was kept.`,
     );
     this.name = "EmptyStreamError";
     this.provider = args.provider;

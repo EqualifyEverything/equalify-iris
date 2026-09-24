@@ -317,8 +317,9 @@
       const why = String(error || '').trim() || 'unknown error';
       // A closing quote or bracket may follow the stop — a message that ends by quoting
       // what an upstream said ("…decrease input length or `max_tokens` and try again.")
-      // is still a finished sentence.
-      const ended = /[.!?]["'`)\]]?$/.test(why);
+      // is still a finished sentence. `…` is its own character, not three dots, so it is
+      // listed: an upstream message forwarded verbatim can end in one.
+      const ended = /[.!?…]["'`)\]]?$/.test(why);
       return 'Conversion failed: ' + why + (ended ? '' : '.') + ' You can try again.';
     }
     async function pollStatus() {

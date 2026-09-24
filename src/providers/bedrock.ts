@@ -807,9 +807,16 @@ export class BedrockProvider implements ModelProvider {
   // Safe in the two ways the note above `BedrockProvider` says a mid-stream retry usually
   // is not. Nothing is discarded: `EmptyStreamError` is raised only when not one character
   // arrived, so there is no partial document to throw away and no risk of a passage
-  // shipping twice. And it cannot lengthen a stall, because a stalled attempt is a
-  // `StalledStreamError` — checked before the completeness check that raises this — so the
-  // attempt this follows is always one that closed cleanly and, being empty, quickly.
+  // shipping twice. And a stalled attempt is never retried: a stall is a `StalledStreamError`,
+  // checked before the completeness check that raises this, so the attempt this follows is
+  // one the upstream closed itself.
+  //
+  // "Closed itself" does not mean "closed quickly". On the UIC deployment every empty stream
+  // came from one model, us.openai.gpt-5.6-luna on Converse, after 42, 82 and 83 seconds of
+  // silence (3 of its 308 page calls from 2026-09-01 to 09-24; the same model also hit the
+  // 120 s first-output stall 10 times, and no other model did either). So the retry can add up
+  // to one more first-output window, 120 s, to a page. That is the price of not losing the
+  // document, and it stays inside MAX_TOTAL_MS.
   //
   // Not free, though, and the cost is worth stating: the Anthropic stream reports the
   // prompt's counts in `message_start`, so an attempt that got that far and then closed was

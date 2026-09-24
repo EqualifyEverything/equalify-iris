@@ -62,9 +62,25 @@ test("an ellipsis, a question and a quoted ending are all already finished", () 
     "bedrock: decrease input length or `max_tokens` and try again.",
     "openrouter: is the model name right?",
   ]) {
-    assert.ok(!failureMessage(why).includes(".."), why);
-    assert.match(failureMessage(why), /You can try again\.$/);
+    // The exact string, not "contains no `..`": `…` is one character, so `….` never contains
+    // `..` and that check passed on the very input it names.
+    assert.equal(failureMessage(why), `Conversion failed: ${why} You can try again.`, why);
   }
+});
+
+test("the #480 failure is read out once, briefly, and says to try again only once", () => {
+  // This is what a screen-reader user hears in a live region. A retry that fails twice used to
+  // announce 97 words ending in two ways of saying "try again".
+  const e = new EmptyStreamError({
+    provider: "bedrock",
+    model: "us.openai.gpt-5.6-luna",
+    attempts: 2,
+    detail: "no message_stop and no stop_reason",
+  });
+  const said = failureMessage(e.message);
+  assert.equal(said.match(/again/gi)?.length, 1, said);
+  const words = said.split(/\s+/).length;
+  assert.ok(words <= 40, `${words} words: ${said}`);
 });
 
 test("no error, an empty one, or a blank one still says something", () => {
