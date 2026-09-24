@@ -544,8 +544,15 @@
     async function showPdfPart() {
       hide('pdf-part');
       if (!taggedPdfOn) return;
-      const res = await api('/sessions/' + sessionId + '/fields');
-      if (!res.ok) return; // not one uploaded PDF, or the PDF cannot be read: no offer
+      const id = sessionId;
+      let res = await api('/sessions/' + id + '/fields');
+      // 503 means other PDFs are being tagged. Wait and ask again, a few times.
+      for (let tries = 0; res.status === 503 && tries < 5; tries++) {
+        await new Promise((r) => setTimeout(r, (Number(res.headers.get('retry-after')) || 10) * 1000));
+        if (sessionId !== id) return; // the reader has moved on to another document
+        res = await api('/sessions/' + id + '/fields');
+      }
+      if (!res.ok || sessionId !== id) return; // not one uploaded PDF, or the PDF cannot be read: no offer
       const { fields } = await res.json();
       $('pdf-field-list').replaceChildren();
       $('pdf-notes').replaceChildren();

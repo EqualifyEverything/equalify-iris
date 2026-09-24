@@ -4,7 +4,7 @@
 // its own. It runs the command the way it runs poppler, and a deployment without the
 // command works exactly as before.
 import { execFile, spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import type { IrisConfig } from "../config.ts";
@@ -97,6 +97,20 @@ export async function readFields(command: string, pdfPath: string): Promise<PdfF
   } catch {
     throw new TaggedPdfError("tagger_failed", "iris-pdf printed fields that are not JSON.", 0);
   }
+}
+
+// Remove the scratch a killed process left behind. `tagPdf` deletes its own in a `finally`,
+// but a SIGKILL or a container restart mid-tag skips that, and the scratch holds the form
+// values. Run at startup, before any request can make a new one. Returns how many it removed.
+export function clearPdfScratch(scratchRoot: string): number {
+  let names: string[];
+  try {
+    names = readdirSync(scratchRoot).filter((n) => n.startsWith("pdf-"));
+  } catch {
+    return 0;
+  }
+  for (const n of names) rmSync(join(scratchRoot, n), { recursive: true, force: true });
+  return names.length;
 }
 
 export type TagInput = { lang?: string; title?: string; pages: { sourcePage: number; html: string }[] };

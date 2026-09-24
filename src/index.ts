@@ -18,7 +18,7 @@ import { meRouter } from "./routes/me.ts";
 import { sessionsRouter } from "./routes/sessions.ts";
 import { statsRouter } from "./routes/stats.ts";
 import { limitsRouter } from "./routes/limits.ts";
-import { taggedPdfStatus } from "./util/taggedPdf.ts";
+import { clearPdfScratch, taggedPdfStatus } from "./util/taggedPdf.ts";
 import { qualityRouter } from "./routes/quality.ts";
 import { visionModelWarning } from "./providers/imageLimits.ts";
 import { generalRateLimit } from "./util/requestLimits.ts";
@@ -248,6 +248,8 @@ const { store, stale } = openStorage();
 if (stale > 0) console.log(`Marked ${stale} interrupted session(s) as failed on startup.`);
 // Optional. Silent when tagged_pdf.command is blank; says so when it is set and does not run.
 const pdfStatus = taggedPdfStatus(cfg);
+const leftover = clearPdfScratch(join(cfg.storage.data_dir, "tmp"));
+if (leftover > 0) console.log(`Removed ${leftover} tagged-PDF scratch dir(s) left by a previous process.`);
 if (pdfStatus) (pdfStatus.startsWith("WARNING") ? console.warn : console.log)(pdfStatus);
 const app = express();
 // Whose address `req.ip` is. Off unless a deployment says how many proxies are in front

@@ -4,7 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import express from "express";
 import type { AddressInfo } from "node:net";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -14,7 +14,7 @@ import { keepSourcePdf, sessionsRouter } from "../src/routes/sessions.ts";
 import { limitsRouter } from "../src/routes/limits.ts";
 import { Store } from "../src/store/db.ts";
 import { Paths } from "../src/store/paths.ts";
-import { taggedPdfCommand, taggedPdfStatus } from "../src/util/taggedPdf.ts";
+import { clearPdfScratch, taggedPdfCommand, taggedPdfStatus } from "../src/util/taggedPdf.ts";
 
 const FAKE = join(dirname(fileURLToPath(import.meta.url)), "fixtures", "fake-iris-pdf.mjs");
 const USER = 7;
@@ -256,4 +256,22 @@ test("two tagger runs at once, across both routes, and a third is told to wait",
     await Promise.allSettled(slow.map(async (p) => (await p).body?.cancel()));
     s.close();
   }
+});
+
+test("startup removes the scratch a killed process left, and nothing else", () => {
+  const root = mkdtempSync(join(tmpdir(), "iris-scratch-"));
+  try {
+    mkdirSync(join(root, "pdf-abc123"));
+    writeFileSync(join(root, "pdf-abc123", "values.json"), "{}");
+    mkdirSync(join(root, "ses_keep"));
+    assert.equal(clearPdfScratch(root), 1);
+    assert.deepEqual(readdirSync(root), ["ses_keep"]);
+    assert.equal(clearPdfScratch(join(root, "missing")), 0);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+  // And startup runs it on the root the routes use, before it listens.
+  const index = readFileSync(join(dirname(FAKE), "..", "..", "src", "index.ts"), "utf8");
+  const call = index.indexOf('clearPdfScratch(join(cfg.storage.data_dir, "tmp"))');
+  assert.ok(call > 0 && call < index.indexOf("app.listen("));
 });
