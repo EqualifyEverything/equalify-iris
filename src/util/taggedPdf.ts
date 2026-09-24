@@ -101,7 +101,8 @@ export async function readFields(command: string, pdfPath: string): Promise<PdfF
 
 // Remove the scratch a killed process left behind. `tagPdf` deletes its own in a `finally`,
 // but a SIGKILL or a container restart mid-tag skips that, and the scratch holds the form
-// values. Run at startup, before any request can make a new one. Returns how many it removed.
+// values. Run at startup, before any request can make a new one. Like failStaleSessions, this
+// assumes one Iris per data_dir. Returns how many it removed.
 export function clearPdfScratch(scratchRoot: string): number {
   let names: string[];
   try {

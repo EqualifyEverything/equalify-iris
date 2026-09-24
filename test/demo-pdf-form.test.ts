@@ -106,3 +106,10 @@ test("the report's warnings come back as one sentence per kind", () => {
   assert.deepEqual(pdfNotes({ warnings: [] }), []);
   assert.deepEqual(pdfNotes(null), []);
 });
+
+test("the finished document is shown before the PDF offer, which is not awaited", () => {
+  const reveal = demoHtml.indexOf("show('result-section'); focusHeading('result-h');");
+  const offer = demoHtml.indexOf("showPdfPart()");
+  assert.ok(reveal > 0 && offer > reveal, "the offer comes after the reveal");
+  assert.doesNotMatch(demoHtml, /await\s+showPdfPart\(/, "a busy tagger must not hold the result back");
+});

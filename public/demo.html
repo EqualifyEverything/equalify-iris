@@ -426,9 +426,10 @@
       // is built into the session and used, so there is no "taught itself" to
       // report to the person converting a document. The run log's `agent_issue`
       // events are where that information actually lives if it is wanted back.
-      // Best-effort: the HTML is the result, and the PDF offer is extra.
-      try { await showPdfPart(); } catch { hide('pdf-part'); }
       hide('status-section'); show('result-section'); focusHeading('result-h');
+      // Best-effort, and not awaited: the HTML is the result, and the PDF offer is extra.
+      // A busy tagger makes showPdfPart wait, and the result must not wait with it.
+      showPdfPart().catch(() => hide('pdf-part'));
     }
 
     // ----- Tagged PDF (optional) -----
