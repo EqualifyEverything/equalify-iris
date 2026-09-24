@@ -171,6 +171,10 @@ key inline** — this section is the decisions an operator has to make, not the 
   for a single Caddy/nginx). Without it every caller presents as the proxy's address and shares one
   bucket; the log warns when it sees an `X-Forwarded-For` while this is unset. Anything Iris cannot
   interpret warns and trusts nothing rather than failing startup.
+- **Tagged PDFs — optional, off by default.** Set `tagged_pdf.command` to the `iris-pdf` command from
+  [equalify-iris-pdf](https://github.com/EqualifyEverything/equalify-iris-pdf), and a session made from
+  one PDF can return that PDF tagged, with its form filled in. The demo page shows this only when it is
+  on. Iris runs without it.
 
 ### One GitHub identity, and no sign-in
 
@@ -222,6 +226,8 @@ in the other direction: it has its own shared secret and 404s unless you set it.
 | `POST /v1/sessions` | Create a session, upload images and/or PDFs (`multipart/form-data`) |
 | `GET  /v1/sessions/{id}` | Poll status |
 | `GET  /v1/sessions/{id}/output` | Fetch the HTML when ready |
+| `GET  /v1/sessions/{id}/fields` | The uploaded PDF's form fields (only with tagged PDFs on) |
+| `POST /v1/sessions/{id}/pdf` | The uploaded PDF back, tagged, with its form filled in (only with tagged PDFs on) |
 | `POST /v1/sessions/{id}/feedback` | Submit feedback, trigger a re-run |
 | `POST /v1/sessions/{id}/close` | Finalize the session and clean tmp |
 | `GET  /v1/sessions/{id}/logs` | Fetch the run log (ndjson) |

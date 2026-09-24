@@ -49,6 +49,15 @@
       border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--fg);
     }
     textarea { min-height: 5rem; }
+    select {
+      font: inherit; max-width: 32rem; padding: .5rem .65rem;
+      border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--fg);
+    }
+    h3 { font-size: 1.1rem; margin: 1.5rem 0 .5rem; }
+    fieldset { border: 1px solid var(--border); border-radius: 8px; margin: 1rem 0; padding: .25rem 1rem 1rem; }
+    legend { font-weight: 600; padding: 0 .35rem; }
+    .choice { display: flex; gap: .5rem; align-items: center; margin: .5rem 0; }
+    .choice label { display: inline; margin: 0; font-weight: 400; }
     button {
       font: inherit; font-weight: 600; cursor: pointer; border: 1px solid transparent;
       border-radius: 8px; padding: .6rem 1.1rem; background: var(--accent); color: var(--accent-fg);
@@ -157,6 +166,25 @@
         <button id="restart-btn" type="button" class="secondary">Convert another document</button>
       </div>
 
+      <!-- Only where this deployment makes tagged PDFs (GET /v1/limits `tagged_pdf`) and
+           the upload was one PDF. The fields come from that PDF (GET .../fields), so the
+           form is built when the result is shown. -->
+      <div id="pdf-part" hidden>
+        <h3 id="pdf-h">Get your PDF back, tagged</h3>
+        <p>The same PDF you uploaded, tagged so a screen reader can read it in order. The pages look the same.</p>
+        <form id="pdf-form">
+          <fieldset id="pdf-fields" hidden>
+            <legend>Fill in the PDF's form (optional)</legend>
+            <p class="hint">Leave a field blank to keep it as it is. Iris does not keep what you type.</p>
+            <div id="pdf-field-list"></div>
+          </fieldset>
+          <div class="row">
+            <button id="pdf-btn" type="submit" class="secondary">Download tagged PDF</button>
+          </div>
+        </form>
+        <div id="pdf-notes"></div>
+      </div>
+
       <form id="feedback-form">
         <label for="feedback-text">Not quite right? Tell Iris what to fix</label>
         <p class="hint" id="fb-hint">Iris will re-run the conversion with your feedback applied (for example: “Keep footnotes separate from body text”).</p>
@@ -195,6 +223,8 @@
     // that enforces, and a page that guessed would either reject a fine file or
     // promise one that fails.
     let uploadLimits = null;
+    // Whether this deployment makes tagged PDFs (GET /v1/limits). False until it says so.
+    let taggedPdfOn = false;
 
     const $ = (id) => document.getElementById(id);
     const show = (id) => { $(id).hidden = false; };
@@ -396,8 +426,164 @@
       // is built into the session and used, so there is no "taught itself" to
       // report to the person converting a document. The run log's `agent_issue`
       // events are where that information actually lives if it is wanted back.
+      // Best-effort: the HTML is the result, and the PDF offer is extra.
+      try { await showPdfPart(); } catch { hide('pdf-part'); }
       hide('status-section'); show('result-section'); focusHeading('result-h');
     }
+
+    // ----- Tagged PDF (optional) -----
+    // One control per settable field of the source PDF, labelled with the field's name.
+    // `doc` is passed in so the tests can build the form in their own document.
+    // Returns how many fields got a control. Read-only fields, buttons and signatures
+    // cannot be set, so they get none.
+    function renderFields(doc, list, fields) {
+      const el = (tag, props = {}) => Object.assign(doc.createElement(tag), props);
+      const req = (f) => (f.required ? ' (required on the form)' : '');
+      let n = 0;
+      for (const f of fields) {
+        if (f.readonly) continue;
+        const id = 'pdf-f' + n;
+        let box;
+        if (f.type === 'text' || (f.type === 'combobox' && f.editable)) {
+          box = el('div');
+          box.append(el('label', { htmlFor: id, textContent: f.name + req(f) }));
+          const input = el('input', { id, type: 'text' });
+          if (f.maxlen) input.maxLength = f.maxlen;
+          if (f.options.length) {
+            const dl = el('datalist', { id: id + '-list' });
+            for (const o of f.options) dl.append(el('option', { value: o }));
+            box.append(dl);
+            input.setAttribute('list', dl.id);
+          }
+          box.append(input);
+        } else if (f.type === 'checkbox') {
+          box = el('div', { className: 'choice' });
+          box.append(el('input', { id, type: 'checkbox' }), el('label', { htmlFor: id, textContent: f.name + req(f) }));
+        } else if (f.type === 'radio') {
+          box = el('fieldset');
+          box.append(el('legend', { textContent: f.name + req(f) }));
+          // A chosen radio cannot be unchosen, so "leave it" is a choice of its own.
+          ['', ...f.options].forEach((o, i) => {
+            const row = el('div', { className: 'choice' });
+            row.append(
+              el('input', { id: id + '-' + i, type: 'radio', name: id, value: o, checked: i === 0 }),
+              el('label', { htmlFor: id + '-' + i, textContent: o || 'Leave as it is' }),
+            );
+            box.append(row);
+          });
+        } else if (f.type === 'combobox' || f.type === 'listbox') {
+          box = el('div');
+          box.append(el('label', { htmlFor: id, textContent: f.name + req(f) }));
+          const select = el('select', { id, multiple: f.multiSelect });
+          if (!f.multiSelect) select.append(el('option', { value: '', textContent: 'Leave as it is' }));
+          for (const o of f.options) select.append(el('option', { value: o, textContent: o }));
+          box.append(select);
+        } else {
+          continue;
+        }
+        box.dataset.field = f.name;
+        box.dataset.type = f.type;
+        list.append(box);
+        n++;
+      }
+      return n;
+    }
+
+    // What was entered, as the API takes it. A blank field is left out, so the PDF keeps
+    // what it had.
+    function fieldValues(list) {
+      const values = {};
+      for (const box of list.querySelectorAll('[data-field]')) {
+        const name = box.dataset.field;
+        if (box.dataset.type === 'checkbox') {
+          if (box.querySelector('input').checked) values[name] = true;
+        } else if (box.dataset.type === 'radio') {
+          const picked = box.querySelector('input:checked');
+          if (picked && picked.value) values[name] = picked.value;
+        } else if (box.querySelector('select[multiple]')) {
+          const picked = [...box.querySelector('select').selectedOptions].map((o) => o.value);
+          if (picked.length) values[name] = picked;
+        } else {
+          const v = box.querySelector('input, select').value;
+          if (v) values[name] = v;
+        }
+      }
+      return values;
+    }
+
+    // The tagger's report, as sentences a person can act on. One per kind of warning.
+    function pdfNotes(report) {
+      const count = {};
+      for (const w of (report && report.warnings) || []) count[w.code] = (count[w.code] || 0) + 1;
+      const s = (n, one, many) => (n === 1 ? one : many.replace('#', n));
+      const say = {
+        duplicate_text_layer: (n) => s(n, 'One page now has its text twice: screen readers read it once, but copied text may come out doubled.', '# pages now have their text twice: screen readers read it once, but copied text may come out doubled.'),
+        unmatched_text: () => 'Some text on the page was not in the HTML. It was kept, as plain paragraphs.',
+        missing_alt: (n) => s(n, 'One image has no description.', '# images have no description.'),
+        field_not_in_html: (n) => s(n, 'One form field was not found in the HTML, so a screen reader reaches it at the end of its page.', '# form fields were not found in the HTML, so a screen reader reaches them at the end of their page.'),
+        unmatched_link: (n) => s(n, 'One link was not found in the HTML, so a screen reader reaches it at the end of its page.', '# links were not found in the HTML, so a screen reader reaches them at the end of their page.'),
+        page_not_tagged: (n) => s(n, 'One page was left untagged.', '# pages were left untagged.'),
+        page_not_in_html: (n) => s(n, 'One page had no HTML and was left untagged.', '# pages had no HTML and were left untagged.'),
+        alignment_incomplete: () => 'On some pages the HTML and the page differed too much to match every word. The rest was kept as plain paragraphs.',
+        font_not_embedded: () => 'The PDF uses fonts it does not include, so it cannot claim to meet PDF/UA, the PDF accessibility standard.',
+        source_marked_content: () => 'The PDF has tags left over from another tool, so it cannot claim to meet PDF/UA, the PDF accessibility standard.',
+        repaired: () => 'The PDF was damaged. The tagged file is a repaired copy.',
+        link_not_on_page: (n) => s(n, 'One link in the HTML is not on the page, so it was left out.', '# links in the HTML are not on the page, so they were left out.'),
+        missing_glyph: () => 'Some characters could not be written in the PDF\'s fonts, so they may read wrongly.',
+        unmapped_element: () => 'Some HTML had no PDF tag to match, so it was tagged as a paragraph.',
+        field_without_name: () => 'A form control in the HTML had no name, so it was not matched to the PDF\'s form.',
+        no_text_positions: (n) => s(n, 'One page has no text the tagger could find, so it was left untagged.', '# pages have no text the tagger could find, so they were left untagged.'),
+        xfa_removed: () => 'The PDF had two versions of its form. The one most readers cannot use was removed.',
+        signature_invalidated: () => 'The PDF was signed. The signature no longer holds, because the file changed.',
+        signature_field_skipped: () => 'Signature fields cannot be filled in here, so they were left empty.',
+      };
+      return Object.keys(count).filter((c) => c !== 'no_title').map((c) => (say[c] ? say[c](count[c]) : 'Note from the tagger: ' + c + '.'));
+    }
+
+    async function showPdfPart() {
+      hide('pdf-part');
+      if (!taggedPdfOn) return;
+      const res = await api('/sessions/' + sessionId + '/fields');
+      if (!res.ok) return; // not one uploaded PDF, or the PDF cannot be read: no offer
+      const { fields } = await res.json();
+      $('pdf-field-list').replaceChildren();
+      $('pdf-notes').replaceChildren();
+      $('pdf-fields').hidden = renderFields(document, $('pdf-field-list'), fields || []) === 0;
+      show('pdf-part');
+    }
+
+    $('pdf-form').addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      setError('');
+      $('pdf-btn').disabled = true;
+      live('Tagging your PDF. This can take a minute.');
+      try {
+        const res = await api('/sessions/' + sessionId + '/pdf', {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ values: fieldValues($('pdf-field-list')) }),
+        });
+        if (!res.ok) throw new Error(await errMessage(res));
+        const out = await res.json();
+        const bytes = Uint8Array.from(atob(out.pdf), (c) => c.charCodeAt(0));
+        const url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
+        const a = document.createElement('a');
+        a.href = url; a.download = out.filename;
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 60000);
+        const notes = pdfNotes(out.report);
+        const list = document.createElement('ul');
+        for (const n of notes) list.append(Object.assign(document.createElement('li'), { textContent: n }));
+        const head = Object.assign(document.createElement('p'), {
+          textContent: 'Downloaded ' + out.filename + '.' + (notes.length ? ' Notes on it:' : ''),
+        });
+        $('pdf-notes').replaceChildren(head, ...(notes.length ? [list] : []));
+        live('Downloaded ' + out.filename + '.' + (notes.length === 1 ? ' One note is below the button.' : notes.length ? ' ' + notes.length + ' notes are below the button.' : ''));
+      } catch (e) {
+        setError('Could not tag the PDF: ' + e.message);
+      } finally {
+        $('pdf-btn').disabled = false;
+      }
+    });
 
     $('restart-btn').addEventListener('click', () => {
       sessionId = null; setError('');
@@ -548,6 +734,7 @@
         const res = await fetch(API + '/limits');
         if (!res.ok) return;
         const l = await res.json();
+        taggedPdfOn = Boolean(l && l.tagged_pdf === true);
         const bytes = Number(l && l.image && l.image.max_bytes);
         if (!Number.isFinite(bytes) || bytes < 1) return;
         uploadLimits = { maxBytes: bytes, hint: String(l.image.hint || '') };

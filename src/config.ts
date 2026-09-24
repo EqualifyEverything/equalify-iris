@@ -140,6 +140,9 @@ export interface IrisConfig {
     rate_limits?: Partial<RateLimitConfig>;
   };
   storage: { data_dir: string; agents_dir: string; database: string };
+  // Optional. The `iris-pdf` command that tags an uploaded PDF (util/taggedPdf.ts).
+  // Blank or absent means the feature is off.
+  tagged_pdf?: { command?: string; timeout_seconds?: number };
   github: {
     upstream_repo: string;
     // Overridable for GitHub Enterprise (and for testing). Defaults below.

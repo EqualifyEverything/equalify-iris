@@ -712,7 +712,8 @@ curl -s "$BASE/limits" | jq
     "upload_per_minute": 12,
     "max_upload_memory_mb": 256,
     "window_seconds": 60
-  }
+  },
+  "tagged_pdf": false
 }
 ```
 
@@ -740,7 +741,8 @@ are streaming: the byte total is checked before the body is read (or counted as 
 request declares no length), while the part count is refused during parsing, once a part past
 `max_files` appears. `rate_limits` is how often you may ask
 ([Rate limits](#rate-limits-how-often-you-may-ask)), and is `null` on a deployment that does not
-limit requests in the app — which means "not limiting", not "unknown".
+limit requests in the app — which means "not limiting", not "unknown". `tagged_pdf` says whether
+this deployment can [return a tagged PDF](#get-a-tagged-pdf-optional).
 
 A PDF's **links survive**, which rasterizing alone would not manage: a link is an annotation
 over the page rather than something drawn on it, so the page image carries the link text and
@@ -956,6 +958,53 @@ those references 404 until a consumer supplies the files. What a screen-reader u
 browser will show broken images, and one that rewrites the `src`s has the log and the fragment to
 match them against.
 
+## Get a tagged PDF (optional)
+
+A deployment that runs [equalify-iris-pdf](https://github.com/EqualifyEverything/equalify-iris-pdf)
+can give you the original PDF back with tags, built from the HTML. The feature is off unless
+`tagged_pdf.command` is set in the config. `GET /v1/limits` says whether it is on.
+
+It works only for a session made from **one PDF**. Iris keeps that PDF so it can tag it. Sessions made
+from images, or from several files, get `409 no_source_pdf`.
+
+**Read the PDF's form fields:**
+
+```bash
+curl -s -H "$AUTH" "$BASE/sessions/$SID/fields" | jq '.fields[0]'
+```
+```json
+{ "name": "applicant.name", "type": "text", "page": 1, "options": [], "required": true,
+  "readonly": false, "maxlen": 40, "editable": false, "multiSelect": false }
+```
+
+`type` is one of `text`, `checkbox`, `radio`, `combobox`, `listbox`, `button` or `signature`. A PDF with
+no form gives `{"fields": []}`.
+
+**Get the tagged PDF:**
+
+```bash
+curl -s -X POST -H "$AUTH" "$BASE/sessions/$SID/pdf" \
+  -H 'content-type: application/json' \
+  -d '{"values":{"applicant.name":"Jane Doe","applicant.consent":true}}' > tagged.json
+jq -r .pdf tagged.json | base64 --decode > tagged.pdf
+```
+
+`values` is optional. Its keys are field names. A text field takes a string, a checkbox takes `true`
+or `false`, and a multi-select list takes an array. Fields you leave out keep what the PDF had.
+**The values are used for this one request and are never stored or logged.** The run log records
+only which field names were given.
+
+The answer is `{"filename", "pdf", "report"}`: the file name to save as, the PDF in base64, and the
+tagger's report. `report.warnings` lists what the tagger could not do cleanly, such as a form field
+it could not find in the HTML. The demo page turns each warning into a plain sentence.
+
+The session must have finished (`ready_for_review` or `closed`), or you get `409 invalid_state`. The
+PDF is tagged from the first pass's HTML for each page, before review. Errors from the tagger keep
+its code: `400` for a bad value, `422` for a PDF it refuses (for example `encrypted`), and `504
+timeout` after `tagged_pdf.timeout_seconds` (300 by default). Two tagging requests at once is the
+limit, so a third gets `503 busy` with `Retry-After`. A deployment without the feature answers
+`404 tagged_pdf_unavailable`.
+
 ## Submit feedback (re-run)
 
 Triggers a new run within the same session, with the feedback injected as a top-level
@@ -1000,8 +1049,8 @@ The events worth grepping for have a section each below, and the index is a link
 the index when you have a `type` off a log line and want to know what it means; read a section when
 you want to know what the field it names is for and what it costs.
 
-**The index is the whole log.** `src/` emits **118** event types and every one of them has a section
-below — **113** sections, because a few cover a pair of events that are only read together. So a
+**The index is the whole log.** `src/` emits **120** event types and every one of them has a section
+below — **114** sections, because a few cover a pair of events that are only read together. So a
 `type` you cannot find here is not one the index skipped: it is a misread line, or a name `src/` no
 longer emits.
 
@@ -1125,6 +1174,7 @@ emits fails it too.
 | [`agent_issue_failed`](#agent_issue_failed) | A suggestion did not get filed, and which of the two calls failed |
 | [`contribution_failed`](#contribution_failed) | The filing step threw, **after** `run_complete` |
 | [`run_failed`](#run_failed) | The run threw, so there is **no document** |
+| [`tagged_pdf` / `tagged_pdf_failed`](#tagged_pdf--tagged_pdf_failed) | A tagged PDF was made, or could not be |
 | [`calibrate_call_failed`](#calibrate_call_failed) | One calibration verifier call threw — a tool's line, never a run's |
 
 ### `run_queued` / `run_dequeued`
@@ -4277,6 +4327,13 @@ Where a run does end in extraction, [`extraction_failed`](#extraction_failed) is
 which failure it was, and this `error` is written to match: with `blank: 0` it is the first page's own
 provider error, standing for all of them because that is the diagnosis; otherwise it counts the source
 pages reported blank, which an empty document could not.
+
+### `tagged_pdf` / `tagged_pdf_failed`
+
+A [tagged PDF](#get-a-tagged-pdf-optional) was made, or the tagger refused. `ms` is how long it took.
+`tagged_pdf` lists `fields_given`, the names of the fields that were filled in. The values are
+never logged. `tagged_pdf_failed` has the tagger's `code` and `error`. An `internal_error`'s
+message is left out, because it may quote a value.
 
 ### `calibrate_call_failed`
 

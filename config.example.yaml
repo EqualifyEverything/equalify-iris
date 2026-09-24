@@ -93,6 +93,20 @@ storage:
   # alternative for multi-instance deployments (not implemented in v1).
   database: ./data/iris.sqlite
 
+# Optional: give back the uploaded PDF, tagged for accessibility, with form fields filled
+# in. Needs the `iris-pdf` command from
+# https://github.com/EqualifyEverything/equalify-iris-pdf, which is not part of Iris.
+# Blank (the default) turns it off, and Iris works as it does without it.
+#
+# With it on, a session made from one PDF keeps that PDF, and the demo page offers
+# a form for the PDF's fields and "Download tagged PDF". Form values are personal data:
+# they are used for one request, and Iris stores neither them nor the filled PDF.
+tagged_pdf:
+  # The command to run, e.g. `iris-pdf` if it is on PATH.
+  command: ${IRIS_PDF_COMMAND}
+  # How long one PDF may take before the command is stopped.
+  timeout_seconds: 300
+
 # Iris has ONE GitHub identity: the token below. The server holds it, callers never
 # see it, and nobody signs in. Every session is owned by that account and every issue
 # Iris files is filed under it.
