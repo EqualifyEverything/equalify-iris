@@ -548,7 +548,8 @@
       const id = sessionId;
       let res = await api('/sessions/' + id + '/fields');
       // 503 means other PDFs are being tagged. Wait and ask again, a few times.
-      for (let tries = 0; res.status === 503 && tries < 5; tries++) {
+      let tries = 0;
+      for (; res.status === 503 && tries < 5; tries++) {
         await new Promise((r) => setTimeout(r, (Number(res.headers.get('retry-after')) || 10) * 1000));
         if (sessionId !== id) return; // the reader has moved on to another document
         res = await api('/sessions/' + id + '/fields');
@@ -559,6 +560,9 @@
       $('pdf-notes').replaceChildren();
       $('pdf-fields').hidden = renderFields(document, $('pdf-field-list'), fields || []) === 0;
       show('pdf-part');
+      // After a wait the reader is already on the result, so say the offer has appeared.
+      // Without a wait it is there before they reach it, and "ready" was just announced.
+      if (tries > 0) live('You can now get your PDF back, tagged. It is in a new section below the buttons.');
     }
 
     $('pdf-form').addEventListener('submit', async (ev) => {

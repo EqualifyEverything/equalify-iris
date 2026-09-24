@@ -113,3 +113,8 @@ test("the finished document is shown before the PDF offer, which is not awaited"
   assert.ok(reveal > 0 && offer > reveal, "the offer comes after the reveal");
   assert.doesNotMatch(demoHtml, /await\s+showPdfPart\(/, "a busy tagger must not hold the result back");
 });
+
+test("an offer that arrives after a wait is announced, and one that arrives at once is not", () => {
+  const body = demoHtml.slice(demoHtml.indexOf("async function showPdfPart"), demoHtml.indexOf("$('pdf-form').addEventListener"));
+  assert.match(body, /show\('pdf-part'\);\s*(\/\/.*\s*)*if \(tries > 0\) live\(/);
+});
