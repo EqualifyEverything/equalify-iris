@@ -10,10 +10,13 @@ import type { IrisConfig } from "../config.ts";
 //                   final.json), history/ (the PRIOR output.html, snapshotted only when a
 //                   feedback re-run is about to overwrite it — not the review loop's rounds),
 //                   output.html, log.jsonl (the run log), lint.json, unresolved.md,
-//                   agent-updates.md, links.json, source-name.txt
+//                   agent-updates.md, links.json, source-name.txt, source.pdf (only with
+//                   tagged PDFs on)
 //   fixtures/<agent>/  and  memory/<agent>.json  — keyed by agent, shared by every session
 //   tmp/<id>/       one run's scratch. `tmp/<id>/agents/` holds agents that session BUILT,
 //                   which `loadAgent` prefers over the library for the rest of it.
+//   tmp/pdf-*/      one tagged-PDF request's scratch, removed when it answers. Outside
+//                   tmp/<id>/ so closing the session cannot delete it mid-request.
 //
 // Stated here rather than pointed at README's "Layout": that section is the SOURCE tree, and
 // its one line about this one is `data/  # sessions/, tmp/, and the SQLite DB`.
@@ -65,6 +68,11 @@ export class Paths {
   sessionLinks(id: string): string {
     return join(this.sessionDir(id), "links.json");
   }
+  // The uploaded PDF, kept only when tagged PDFs are on and the upload was one PDF.
+  // It is what `iris-pdf` tags (util/taggedPdf.ts).
+  sessionSourcePdf(id: string): string {
+    return join(this.sessionDir(id), "source.pdf");
+  }
   // `sessionNewAgents()` and `sessionPrs()` used to sit here with zero callers,
   // left over from an earlier fork-and-PR design. That flow has been dropped
   // (contributions are issues, filed under the deployment's own GitHub account), so
@@ -106,6 +114,9 @@ export class Paths {
     return join(this.memoryDir(), `${agentName.replace(/\.md$/, "")}.json`);
   }
 
+  pdfScratchRoot(): string {
+    return join(this.cfg.storage.data_dir, "tmp");
+  }
   tmpDir(id: string): string {
     return join(this.cfg.storage.data_dir, "tmp", id);
   }

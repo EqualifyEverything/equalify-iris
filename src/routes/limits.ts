@@ -2,6 +2,7 @@ import { Router } from "express";
 import type { IrisConfig } from "../config.ts";
 import { imageLimitsHint, resolveImageLimits } from "../providers/imageLimits.ts";
 import { MAX_PDF_PAGES } from "../util/pdf.ts";
+import { taggedPdfCommand } from "../util/taggedPdf.ts";
 import { MAX_UPLOAD_FILES, publishedRateLimits, uploadCeilingBytes } from "../util/requestLimits.ts";
 
 /**
@@ -23,7 +24,8 @@ import { MAX_UPLOAD_FILES, publishedRateLimits, uploadCeilingBytes } from "../ut
  *   "pdf": { "max_pages": 25 },
  *   "upload": { "max_files": 25, "max_request_bytes": 134217728 },
  *   "rate_limits": { "general_per_minute": 240, "upload_per_minute": 12,
- *                    "max_upload_memory_mb": 256, "window_seconds": 60 } }
+ *                    "max_upload_memory_mb": 256, "window_seconds": 60 },
+ *   "tagged_pdf": false }
  * ```
  *
  * Not handed the auth middleware, like `GET /v1/stats`, so it answers even where the
@@ -64,6 +66,9 @@ export function limitsRouter(cfg: IrisConfig): Router {
     // volume in the app. Same rationale as the upload limits: a budget a client can read
     // is one it can pace itself against, instead of discovering it by being refused.
     rate_limits: publishedRateLimits(cfg),
+    // Whether POST /v1/sessions/{id}/pdf can answer here (util/taggedPdf.ts), so a client
+    // offers it only where it works.
+    tagged_pdf: taggedPdfCommand(cfg) !== null,
   };
 
   r.get("/", (_req, res) => {

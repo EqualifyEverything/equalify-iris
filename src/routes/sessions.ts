@@ -32,6 +32,7 @@ import {
   resolveImageLimits,
 } from "../providers/imageLimits.ts";
 import { imageDimensions } from "../util/imageSize.ts";
+import { readFields, tagPdf, taggedPdfCommand, tagTimeoutSeconds, TaggedPdfError } from "../util/taggedPdf.ts";
 
 // 50 MB is a memory bound, not the image limit. It stays well above what an image may
 // be (see imageLimits.ts) because a PDF legitimately is: 25 pages of scans is a large
@@ -132,6 +133,19 @@ function ownedSession(store: Store, id: string, userId: number): SessionRecord |
   const s = store.getSession(id);
   if (!s || s.github_user_id !== userId) return undefined;
   return s;
+}
+
+// Keep the upload for a tagged PDF later, when this deployment makes them and the upload
+// was one PDF on its own. Then the PDF's page N is the session's page N.
+export function keepSourcePdf(
+  cfg: IrisConfig,
+  paths: Paths,
+  sessionId: string,
+  files: { originalname: string; buffer: Buffer }[],
+): boolean {
+  if (!taggedPdfCommand(cfg) || files.length !== 1 || !PDF_EXT.test(files[0].originalname)) return false;
+  writeFileSync(paths.sessionSourcePdf(sessionId), files[0].buffer);
+  return true;
 }
 
 export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
@@ -383,6 +397,7 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
     if (Object.keys(linksByOrder).length) {
       writeFileSync(paths.sessionLinks(sessionId), JSON.stringify(linksByOrder, null, 2));
     }
+    keepSourcePdf(cfg, paths, sessionId, files);
 
     const record = store.createSession({
       session_id: sessionId,
@@ -454,6 +469,126 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
     const html = titledAs(readFileSync(outPath, "utf8"), base);
     res.setHeader("Content-Disposition", `inline; filename="${convertedHtmlFilename(base)}"`);
     res.type("text/html").send(html);
+  });
+
+  // ----- Tagged PDF (optional; util/taggedPdf.ts) -----
+  // The session's source PDF, or the reason it has none. Sends that error itself.
+  function sourcePdf(req: AuthedRequest, res: Response): { s: SessionRecord; command: string; pdf: string } | null {
+    const s = ownedSession(store, req.params.id, req.user!.github_user_id);
+    if (!s) {
+      sendError(res, 404, "session_not_found", "No such session");
+      return null;
+    }
+    const command = taggedPdfCommand(cfg);
+    if (!command) {
+      sendError(res, 404, "tagged_pdf_unavailable", "This deployment does not make tagged PDFs.");
+      return null;
+    }
+    const pdf = paths.sessionSourcePdf(s.session_id);
+    if (!existsSync(pdf)) {
+      sendError(res, 409, "no_source_pdf", "Only a session made from one uploaded PDF can be tagged.");
+      return null;
+    }
+    return { s, command, pdf };
+  }
+  // Express 4 does not catch a rejected async handler, so every error is answered here.
+  function taggerError(res: Response, e: unknown): void {
+    if (!(e instanceof TaggedPdfError)) {
+      sendError(res, 500, "tagger_failed", "Could not tag the PDF.");
+      return;
+    }
+    const status = e.code === "timeout" ? 504 : e.exit === 3 ? 400 : 422;
+    sendError(res, status, e.code, e.message);
+  }
+
+  // Each tagger run is a child process with seconds of CPU. Two at once, across both
+  // routes, is enough.
+  let tagging = 0;
+  function tooBusy(res: Response): boolean {
+    if (tagging < 2) return false;
+    res.setHeader("Retry-After", "10");
+    sendError(res, 503, "busy", "Other PDFs are being tagged. Try again in a few seconds.");
+    return true;
+  }
+
+  // GET /v1/sessions/{id}/fields — the source PDF's form fields, for a fill-in form.
+  r.get("/:id/fields", async (req: AuthedRequest, res) => {
+    const src = sourcePdf(req, res);
+    if (!src) return;
+    if (tooBusy(res)) return;
+    tagging++;
+    try {
+      res.json({ fields: await readFields(src.command, src.pdf) });
+    } catch (e) {
+      taggerError(res, e);
+    } finally {
+      tagging--;
+    }
+  });
+
+  // POST /v1/sessions/{id}/pdf — the source PDF, tagged from the extracted pages, with
+  // `values` filled in. The PDF is the answer and nothing is kept, so neither the values
+  // nor the filled PDF is ever stored.
+  r.post("/:id/pdf", async (req: AuthedRequest, res) => {
+    const src = sourcePdf(req, res);
+    if (!src) return;
+    const { s } = src;
+    const finalPath = paths.sessionFinalFragments(s.session_id);
+    if ((s.status !== "ready_for_review" && s.status !== "closed") || !existsSync(finalPath)) {
+      sendError(res, 409, "invalid_state", "The PDF can be tagged once the session is ready_for_review.");
+      return;
+    }
+    const values: unknown = (req.body ?? {}).values ?? {};
+    if (typeof values !== "object" || values === null || Array.isArray(values)) {
+      sendError(res, 400, "invalid_request", "`values` must be an object of field name to value.");
+      return;
+    }
+    if (tooBusy(res)) return;
+    const log = new RunLog(paths.sessionLog(s.session_id));
+    const started = Date.now();
+    tagging++;
+    try {
+      const base = existsSync(paths.sessionSourceName(s.session_id))
+        ? readFileSync(paths.sessionSourceName(s.session_id), "utf8").trim() || "document"
+        : "document";
+      // The pages as extracted, by page order. Order is the PDF's page number, because
+      // the session is one PDF. A page that failed extraction holds only its
+      // `@page-failed` note, so it is left out and the tagger reports it untagged.
+      const { fragments = [] } = JSON.parse(readFileSync(finalPath, "utf8")) as { fragments?: Fragment[] };
+      const outPath = paths.sessionOutput(s.session_id);
+      const output = existsSync(outPath) ? readFileSync(outPath, "utf8") : "";
+      const input = {
+        lang: output.match(/<html\b[^>]*\blang="([^"]+)"/i)?.[1],
+        title: base,
+        pages: [...fragments]
+          .filter((f) => !f.innerHtml.trimStart().startsWith("<!-- @page-failed"))
+          .sort((a, b) => a.order - b.order)
+          .map((f) => ({ sourcePage: f.order, html: f.innerHtml })),
+      };
+      const { pdf, report } = await tagPdf(src.command, {
+        pdfPath: src.pdf,
+        input,
+        values: values as Record<string, unknown>,
+        scratchRoot: paths.pdfScratchRoot(),
+        timeoutSeconds: tagTimeoutSeconds(cfg),
+      });
+      // Field names only. A value is never logged.
+      log.event("tagged_pdf", { ms: Date.now() - started, fields_given: Object.keys(values) });
+      res.json({ filename: `${base}_tagged.pdf`, pdf: pdf.toString("base64"), report });
+    } catch (e) {
+      // iris-pdf's own messages name fields and options, never values. Its
+      // `internal_error` passes on any exception's text, which could hold one, so that
+      // message is not logged.
+      const code = e instanceof TaggedPdfError ? e.code : "tagger_failed";
+      log.event("tagged_pdf_failed", {
+        ms: Date.now() - started,
+        code,
+        error: code === "internal_error" ? "(not logged: it may quote a value)" : (e as Error).message,
+      });
+      taggerError(res, e);
+    } finally {
+      tagging--;
+    }
   });
 
   // GET /v1/sessions/{id}/logs — the run log as ndjson.
@@ -598,8 +733,8 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
     // an unwritable subdirectory still gives ENOTEMPTY. Previously the status write
     // came last, so a throw left the session at ready_for_review and the client's
     // retry re-ran the cleanup; now the retry would get a 409 while
-    // `data_dir/tmp/<id>` is orphaned anyway (nothing else touches tmpDir, and
-    // failStaleSessions only rewrites statuses). Swallowing keeps the leak a leak
+    // `data_dir/tmp/<id>` is orphaned anyway (nothing else touches tmpDir after close:
+    // tagged PDFs use tmp/pdf-*, and failStaleSessions only rewrites statuses). Swallowing keeps the leak a leak
     // instead of also stranding the session.
     try {
       const tmp = paths.tmpDir(s.session_id);
