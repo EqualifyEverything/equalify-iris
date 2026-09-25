@@ -560,6 +560,7 @@
       }
       if (!res.ok || stale()) return; // not one uploaded PDF, or the PDF cannot be read: no offer
       const { fields } = await res.json();
+      if (stale()) return; // checked again after the last await, right before the page changes
       $('pdf-field-list').replaceChildren();
       $('pdf-notes').replaceChildren();
       $('pdf-fields').hidden = renderFields(document, $('pdf-field-list'), fields || []) === 0;

@@ -122,6 +122,9 @@ test("an offer that arrives after a wait is announced, and one that arrives at o
 test("a late /fields reply is dropped after a new document, a re-run, or a newer offer", () => {
   const body = demoHtml.slice(demoHtml.indexOf("async function showPdfPart"), demoHtml.indexOf("$('pdf-form').addEventListener"));
   assert.match(body, /const stale = \(\) => turn !== pdfTurn \|\| sessionId !== id \|\| converting;/);
-  // Checked after every wait and before anything is shown.
-  assert.equal(body.match(/if \(stale\(\)\) return;|if \(!res\.ok \|\| stale\(\)\) return;/g)?.length, 2);
+  // Checked after every wait, and after the last await, right before anything is shown.
+  assert.equal(body.match(/if \(stale\(\)\) return;|if \(!res\.ok \|\| stale\(\)\) return;/g)?.length, 3);
+  const last = body.lastIndexOf("await ");
+  const check = body.indexOf("if (stale()) return;", last);
+  assert.ok(check > last && check < body.indexOf("show('pdf-part')"), "no await between the last check and the change");
 });
