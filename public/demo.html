@@ -542,19 +542,23 @@
       return Object.keys(count).filter((c) => c !== 'no_title').map((c) => (say[c] ? say[c](count[c]) : 'Note from the tagger: ' + c + '.'));
     }
 
+    // Each call supersedes the last. A feedback re-run keeps the session id, so the id
+    // alone cannot tell a reply meant for a result the reader has since left.
+    let pdfTurn = 0;
     async function showPdfPart() {
       hide('pdf-part');
       if (!taggedPdfOn) return;
-      const id = sessionId;
+      const id = sessionId, turn = ++pdfTurn;
+      const stale = () => turn !== pdfTurn || sessionId !== id || converting;
       let res = await api('/sessions/' + id + '/fields');
       // 503 means other PDFs are being tagged. Wait and ask again, a few times.
       let tries = 0;
       for (; res.status === 503 && tries < 5; tries++) {
         await new Promise((r) => setTimeout(r, (Number(res.headers.get('retry-after')) || 10) * 1000));
-        if (sessionId !== id) return; // the reader has moved on to another document
+        if (stale()) return; // the reader has moved on: another document, or a re-run
         res = await api('/sessions/' + id + '/fields');
       }
-      if (!res.ok || sessionId !== id) return; // not one uploaded PDF, or the PDF cannot be read: no offer
+      if (!res.ok || stale()) return; // not one uploaded PDF, or the PDF cannot be read: no offer
       const { fields } = await res.json();
       $('pdf-field-list').replaceChildren();
       $('pdf-notes').replaceChildren();

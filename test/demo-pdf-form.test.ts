@@ -118,3 +118,10 @@ test("an offer that arrives after a wait is announced, and one that arrives at o
   const body = demoHtml.slice(demoHtml.indexOf("async function showPdfPart"), demoHtml.indexOf("$('pdf-form').addEventListener"));
   assert.match(body, /show\('pdf-part'\);\s*(\/\/.*\s*)*if \(tries > 0\) live\(/);
 });
+
+test("a late /fields reply is dropped after a new document, a re-run, or a newer offer", () => {
+  const body = demoHtml.slice(demoHtml.indexOf("async function showPdfPart"), demoHtml.indexOf("$('pdf-form').addEventListener"));
+  assert.match(body, /const stale = \(\) => turn !== pdfTurn \|\| sessionId !== id \|\| converting;/);
+  // Checked after every wait and before anything is shown.
+  assert.equal(body.match(/if \(stale\(\)\) return;|if \(!res\.ok \|\| stale\(\)\) return;/g)?.length, 2);
+});
