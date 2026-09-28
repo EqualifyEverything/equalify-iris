@@ -648,6 +648,74 @@ export function rasterizedPageRejection(
   return null;
 }
 
+// How small to render a rasterized page that does not fit, or null when rendering it
+// again cannot help. Read only after `rasterizedPageRejection` has said there is a
+// problem; what it answers is whether Iris can fix that problem itself.
+//
+// It can, because it chose the pixels. A page over either limit at util/pdf.ts's DPI is
+// a page whose ink Iris rendered too big — the caller uploaded a PDF, and the remedy the
+// rejection offers them (re-export at a smaller page size, re-save the pages as JPEGs)
+// asks them to do by hand what the renderer can do exactly. Refusing the document was
+// the honest thing to do while the only alternative was failing inside a model call four
+// minutes later; it is not the honest thing to do when a second render fits.
+//
+// WHICH pixels may be given up is the only real question, and the answer differs by
+// basis, which is why it is decided here rather than at the renderer:
+//
+//   documented — the long edge is a fact about the configured model: it downscales to
+//     that size before reading, so rendering to it discards exactly the pixels the model
+//     was going to discard anyway. This is the same trade `imageLimitsHint` already
+//     recommends to a caller with an oversized IMAGE, applied by Iris to a page the
+//     caller never sized.
+//   assumed — the long edge is a guess, so rendering to it would be throwing away
+//     detail the model may well have read, which is the quiet damage this module exists
+//     to avoid. Only the hard ceiling is given up to, and only the pixels above it: they
+//     cannot be sent to the model at all under Iris's own rule (`dimensionReason`), so
+//     nothing that could have been read is lost. A page over the BYTE cap alone is
+//     therefore left to its rejection on an assumed basis — it is already inside the
+//     ceiling, so this returns null and the caller reports the refusal.
+//
+// Null for a page whose dimensions could not be read, too: the target is a comparison
+// against the long edge this page HAS, and a page whose header would not parse has not
+// told us. (pdftoppm writes a well-formed PNG, so this is a guard rather than a case.)
+export function refitLongEdge(page: { width?: number; height?: number }, limits: ImageLimits): number | null {
+  if (page.width === undefined || page.height === undefined) return null;
+  const target = limits.basis === "documented" ? limits.max_long_edge_px : limits.max_dimension_px;
+  // A target at or above what the page already is would re-render the same picture and
+  // reject it twice.
+  return target < Math.max(page.width, page.height) ? target : null;
+}
+
+// Why a page is refused after Iris has already rendered it smaller, or null if the
+// smaller render is fine.
+//
+// The same two limits and the same advice — the remedies in `rasterizedPageRejection`
+// are still the caller's, and a page that is over at `longEdgePx` is over because of
+// what is ON it. What this adds is the one thing that message would otherwise be wrong
+// about: the dimensions it prints are the SECOND render's, not the one the DPI would
+// have produced, and a caller comparing them against their own page would be measuring
+// a picture they never asked for. Saying the retry happened also stops the obvious
+// reply, which is to ask Iris to try a smaller size.
+export function shrunkPageRejection(
+  pdfName: string,
+  pageNumber: number,
+  longEdgePx: number,
+  page: { bytes: number; width?: number; height?: number },
+  limits: ImageLimits,
+): string | null {
+  const why = rasterizedPageRejection(pdfName, pageNumber, page, limits);
+  if (!why) return null;
+  // Whose number `longEdgePx` is, on the same terms as `dimensionReason`: on a
+  // documented basis `refitLongEdge` renders to what the model reads, and on an assumed
+  // one to the largest side Iris will send at all. Claiming the first where only the
+  // second is known would be putting a promise about the model in this sentence.
+  const size =
+    limits.basis === "documented"
+      ? `${longEdgePx} px on the long edge, the size the vision model reads`
+      : `${longEdgePx} px on the long edge, the largest it will send`;
+  return `${why} Iris rendered this page again at ${size}, and it is still over.`;
+}
+
 // The long edge, in pixels, past which a rasterized page is bigger than the paper a
 // document normally comes on. Letter at util/pdf.ts's 150 DPI is 1650 px and A4 is
 // 1755; tabloid is 2550, and a drawing or a fold-out is larger still. Used only to

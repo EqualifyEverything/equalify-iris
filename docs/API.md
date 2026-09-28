@@ -663,10 +663,18 @@ base64**, which is **3.75 MB on disk**, on Amazon Bedrock. Ask the deployment in
 assuming, since it moves with the configured model and provider:
 [`GET /v1/limits`](#upload-limits-unauthenticated). A **PDF** is not measured against that
 limit — the file you send is not what reaches the model, since Iris rasterizes its pages at its
-own resolution — but each *rendered page* is, and a page over it fails with a `400` naming the
-page and the PDF. That happens with large-format pages: rasterizing at a fixed DPI means the
-page image scales with the physical page, so a letter page renders well inside the limit and an
-ARCH-D drawing does not.
+own resolution — but each *rendered page* is. That matters for large-format pages: rasterizing
+at a fixed DPI means the page image scales with the physical page, so a letter page renders well
+inside the limit and an ARCH-D drawing does not.
+
+A page that renders too large is **rendered again, smaller**, rather than failing the upload —
+those pixels are Iris's choice and not yours. The second render fits the long edge the model
+reads where that is documented (so nothing it would have looked at is given up), and the
+`max_dimension_px` ceiling where Iris has no published limits for the configured model (so only
+pixels that could not have been sent at all are given up). The page appears in the session's run
+log as [`page_refit`](#page_refit). A page that is *still* over after that — a dense photographic
+or halftoned scan is over on bytes, not on size — fails with a `400` naming the page, the PDF,
+and the size it was retried at.
 
 Pixel dimensions are mostly **not** a limit worth planning around, and this is the common
 misdiagnosis: a large-but-light image converts fine, while a small-but-heavy photo is what
@@ -1051,8 +1059,8 @@ The events worth grepping for have a section each below, and the index is a link
 the index when you have a `type` off a log line and want to know what it means; read a section when
 you want to know what the field it names is for and what it costs.
 
-**The index is the whole log.** `src/` emits **120** event types and every one of them has a section
-below — **114** sections, because a few cover a pair of events that are only read together. So a
+**The index is the whole log.** `src/` emits **121** event types and every one of them has a section
+below — **115** sections, because a few cover a pair of events that are only read together. So a
 `type` you cannot find here is not one the index skipped: it is a misread line, or a name `src/` no
 longer emits.
 
@@ -1064,6 +1072,7 @@ emits fails it too.
 
 | `type` | What it records |
 | --- | --- |
+| [`page_refit`](#page_refit) | A page too large to send was rendered again, smaller, instead of refusing the document |
 | [`run_queued` / `run_dequeued`](#run_queued--run_dequeued) | The run's wait for a concurrency slot |
 | [`run_start`](#run_start) | The run's opening line: how many source pages, and which of the three paths it took |
 | [`phase`](#phase) | The pipeline entered a phase |
@@ -1178,6 +1187,28 @@ emits fails it too.
 | [`run_failed`](#run_failed) | The run threw, so there is **no document** |
 | [`tagged_pdf` / `tagged_pdf_failed`](#tagged_pdf--tagged_pdf_failed) | A tagged PDF was made, or could not be |
 | [`calibrate_call_failed`](#calibrate_call_failed) | One calibration verifier call threw — a tool's line, never a run's |
+
+### `page_refit`
+
+One page of an uploaded PDF was rendered a second time, smaller, because the first render came out too
+large to send: `pdf` and `page` name it (the PDF's own page number, 1-based), `from` is the size the
+first render produced (`8334x8334`), and `long_edge_px` is what the second one was fitted to. One line
+per page refitted, so a document of fold-outs writes several.
+
+This is the only event the upload route writes, and it is written before the run is queued —
+rasterizing is what measures a page, so the pages have to be too big before there is a session to
+record it against. A log that opens with `page_refit` rather than
+[`run_queued`](#run_queued--run_dequeued) is therefore reading correctly.
+
+The line exists because the page it names is read at a lower resolution than the rest of the document,
+and nothing else in the log would say so. Rasterizing runs at a fixed DPI, so pixel count follows the
+physical page: a letter page lands near 1275x1650 and a 55-inch drawing past 8000 px, above which the
+vision model errors instead of downscaling. Those pixels are Iris's choice, not the caller's, so Iris
+renders the page again instead of refusing the upload — nothing is cropped, only resolution is given
+up. When a fold-out's findings read thinner than the letter pages around it, this is the line that
+explains why, and re-exporting that page at a smaller trim size is the fix that gets it back. A page
+still over the limit after the second render fails the upload instead, with a `400` that names the size
+it was retried at.
 
 ### `run_queued` / `run_dequeued`
 

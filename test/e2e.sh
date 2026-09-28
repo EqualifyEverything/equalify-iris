@@ -1120,6 +1120,39 @@ umarkers=$(echo "$uout" | grep -o '\[page not fully transcribed\]' | wc -l | tr 
   && pass "the marker is delivered as content, once, rather than tidied away" \
   || fail "unfinished page" "expected 1 marker in the delivered document, found $umarkers"
 
+echo "==> 9j. a page too big to send is rendered smaller, not refused (issue #485)"
+# A one-page PDF whose MediaBox is 4000x4000 pt — a 55-inch square fold-out, which is a
+# size a drawing or a poster really comes in. Rasterizing happens at a fixed 150 DPI, so
+# that page renders to 8334x8334: past the 8000 px ceiling above which the vision model
+# errors instead of downscaling, and so the whole upload used to be refused with advice to
+# re-export the page at a smaller page size. Those pixels were Iris's choice and not the
+# caller's, so Iris makes the smaller render itself and the document converts.
+#
+# Written from base64 for the same reason as the PNG in step 5 — the bytes have to be
+# exact, since a PDF carries the offsets of its own objects. The readable builder for the
+# same file is in test/pdf-large-pages.test.ts.
+bigpdf=/tmp/iris-e2e-foldout.pdf
+printf 'JVBERi0xLjcKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4KZW5kb2JqCjIgMCBvYmoKPDwgL1R5cGUgL1BhZ2VzIC9LaWRzIFszIDAgUl0gL0NvdW50IDEgPj4KZW5kb2JqCjMgMCBvYmoKPDwgL1R5cGUgL1BhZ2UgL1BhcmVudCAyIDAgUiAvTWVkaWFCb3ggWzAgMCA0MDAwIDQwMDBdIC9SZXNvdXJjZXMgPDwgL0ZvbnQgPDwgL0YxIDUgMCBSID4+ID4+IC9Db250ZW50cyA0IDAgUiA+PgplbmRvYmoKNCAwIG9iago8PCAvTGVuZ3RoIDU2ID4+CnN0cmVhbQpCVCAvRjEgMTIwIFRmIDIwMCAzNzAwIFRkIChJcmlzIGxhcmdlLWZvcm1hdCBwYWdlKSBUaiBFVAplbmRzdHJlYW0KZW5kb2JqCjUgMCBvYmoKPDwgL1R5cGUgL0ZvbnQgL1N1YnR5cGUgL1R5cGUxIC9CYXNlRm9udCAvSGVsdmV0aWNhID4+CmVuZG9iagp4cmVmCjAgNgowMDAwMDAwMDAwIDY1NTM1IGYgCjAwMDAwMDAwMDkgMDAwMDAgbiAKMDAwMDAwMDA1OCAwMDAwMCBuIAowMDAwMDAwMTE1IDAwMDAwIG4gCjAwMDAwMDAyNDMgMDAwMDAgbiAKMDAwMDAwMDM0OSAwMDAwMCBuIAp0cmFpbGVyCjw8IC9TaXplIDYgL1Jvb3QgMSAwIFIgPj4Kc3RhcnR4cmVmCjQxOQolJUVPRgo=' \
+  | base64 -d > "$bigpdf"
+big=$(curl -s -X POST "${AUTH[@]}" "$BASE/sessions" -F "images=@$bigpdf;filename=foldout.pdf")
+BIG=$(echo "$big" | jq -r '.session_id')
+echo "$big" | jq -e '.image_count==1' >/dev/null \
+  && pass "the large-format PDF is accepted rather than 400'd" \
+  || fail "large-format upload" "expected a session with image_count=1, got $big"
+# And it converts: the retry is only worth anything if the page it produces is one the
+# pipeline can actually send.
+await_session_ready "$BIG" "large-format page"
+# The session says so, too. A page the model reads at lower resolution than the rest of a
+# document is a fact about that document's output, and its owner should not have to guess
+# why the fold-out reads worse than the letter pages. `long_edge_px` is deliberately not
+# asserted as a number: it is the model's long edge where that is documented and the 8000 px
+# ceiling where it is Iris's own guess, and this deployment runs `mock-model`, which Iris has
+# no published limits for. `from` is matched loosely because the exact rounding is poppler's.
+refit=$(curl -s "${AUTH[@]}" "$BASE/sessions/$BIG/logs" | jq -c 'select(.type=="page_refit")' | head -1)
+echo "$refit" | jq -e '.page==1 and .long_edge_px>0 and (.from|test("^8[0-9]{3}x8[0-9]{3}$"))' >/dev/null \
+  && pass "the smaller render is recorded in the session's own log ($refit)" \
+  || fail "page_refit" "expected a page_refit line naming the page and the size it was rendered at, got '$refit'"
+
 echo "==> 10. ownership isolation (other endpoints reject unknown id)"
 code=$(curl -s -o /dev/null -w '%{http_code}' "${AUTH[@]}" "$BASE/sessions/ses_doesnotexist")
 [ "$code" = "404" ] && pass "unknown session => 404" || fail "isolation" "got $code"
