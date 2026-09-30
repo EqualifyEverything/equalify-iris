@@ -61,7 +61,8 @@ jobs:
         run: docker build -t iris-ci:${{ github.sha }} .
       # The base image's own npm is skipped: Iris never runs it, and on 2026-09-30 it
       # held 7 fixed-upstream advisories that even npm 12.2.0 still bundled 3 of.
-      # Dependabot's docker updates bring in the base image's next npm.
+      # Nothing retires this skip on its own (`24-slim` floats, so Dependabot never
+      # proposes a rebuild); to check, drop `skip-dirs` and see whether `scan` passes.
       - name: Scan the image (OS packages and runtime node_modules)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
