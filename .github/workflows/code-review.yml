@@ -1136,11 +1136,12 @@ jobs:
             - **Docs prose that is not concise plain language**, on the files CONTRIBUTING.md's
               Documentation section binds: `README.md`, anything under `docs/`, the comments in
               `config.example.yaml`, and the prompts in `agents/`. Quote the sentence and name the
-              rule it breaks — one idea per sentence, the claim before the caveat, a number instead
-              of an adjective, a gloss on the first use of jargon, no paragraph restating the one
-              above it, shorter over completer. Apply the last one to what the PR adds: a new file
-              or section where a sentence in an existing document would do, or added text that takes
-              a paragraph to say what a sentence could. For that one, quote the addition and write
+              rule it breaks: one idea per sentence; the claim first, the caveat after; a number
+              instead of an adjective; no jargon without a gloss on first use; no repetition; one job
+              per document, and no restating another one; shorter over completer. Apply the last
+              one to what the PR adds: a new file or section where a sentence in an existing
+              document would do, or added text that takes a paragraph to say what a sentence could.
+              For that one, quote the addition and write
               the shorter version. If you cannot quote the text and name the rule, or cannot write
               the shorter version, you do not have a finding — "reads long" is not one. Three
               instances at most, the worst ones; a list of every long sentence in a long document is
