@@ -34,7 +34,7 @@ What it does, in order:
 4. Checks docs prose against CONTRIBUTING.md's plain-language requirement
    ([its rules](../CONTRIBUTING.md#documentation)). It quotes the sentence and names the rule,
    three instances at most, never blocking. The scope is the file set that section binds:
-   `README.md`, `docs/`, `config.example.yaml` and `agents/`. All of them apply. The last,
+   `README.md`, `docs/`, `config.example.yaml` and `agents/`. All the rules apply. The last,
    shorter over completer, is checked on what the PR adds, and the reviewer writes the shorter
    version. This is the only style-shaped thing the reviewer flags. Formatting, heading style
    and line length stay unreviewed in those files too.

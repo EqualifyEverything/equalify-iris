@@ -419,6 +419,7 @@ test("PATH_RE's bare-word list still matches how these four documents use those 
 test("the docs-prose bullet names every rule in CONTRIBUTING.md's Documentation section", () => {
   const text = readFileSync(CONTRIBUTING, "utf8");
   const start = text.indexOf("\n## Documentation\n");
+  assert.notEqual(start, -1, "CONTRIBUTING.md still has a `## Documentation` section");
   const body = text.slice(start + 1, text.indexOf("\n## ", start + 1));
   const rules = [...body.matchAll(/^- \*\*(.+?)\.?\*\*/gm)].map((m) => m[1]!.toLowerCase());
   assert.ok(rules.length >= 7, `CONTRIBUTING.md's Documentation section still lists its rules: ${rules}`);

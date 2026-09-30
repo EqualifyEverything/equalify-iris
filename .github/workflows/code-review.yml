@@ -1141,12 +1141,10 @@ jobs:
               per document, and no restating another one; shorter over completer. Apply the last
               one to what the PR adds: a new file or section where a sentence in an existing
               document would do, or added text that takes a paragraph to say what a sentence could.
-              For that one, quote the addition and write
-              the shorter version. If you cannot quote the text and name the rule, or cannot write
-              the shorter version, you do not have a finding — "reads long" is not one. Three
-              instances at most, the worst ones; a list of every long sentence in a long document is
-              noise. Detail is not the target: an exact
-              number, a file path, or a caveat that saves a reader an hour all belong in. Prose in
+              For that one, quote the addition and write the shorter version. For any rule, if you
+              cannot quote the text and name the rule, you do not have a finding — "reads long" is
+              not one. Three instances at most, the worst ones; a list of every long sentence in a
+              long document is noise. Detail is not the target: an exact number, a file path, or a caveat that saves a reader an hour all belong in. Prose in
               files outside that set is not reviewed, and CONTRIBUTING.md is the authority if it and
               this list ever disagree.
 
