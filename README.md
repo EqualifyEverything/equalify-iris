@@ -9,8 +9,9 @@ Three constraints shape the whole design, and the code is written to hold them:
 
 - **Content only.** No CSS, no visual fidelity, no pixel-perfect layout. A two-column source
   becomes linear semantic HTML. WCAG 2.2 AA is the fixed target and is not a per-run option.
-  Styling is added by the tools that use Iris, such as the WordPress plugin:
-  [where styling comes from](docs/styling.md).
+  Styling is left to the tools that use Iris, such as the
+  [WordPress plugin](https://github.com/EqualifyEverything/equalify-iris-wp), so each site's theme
+  and each reader's settings apply.
 - **One machine, no vendor lock-in.** A laptop, a Mac Mini or a self-hosted box are all
   first-class targets, with no AWS/GCP/Azure account required. Every external dependency —
   model provider, database, object store — is replaceable by configuration, and the defaults
@@ -21,12 +22,9 @@ Three constraints shape the whole design, and the code is written to hold them:
   gate the deployment. Simple, and it costs per-user attribution and session isolation:
   [what that means](#one-github-identity-and-no-sign-in).
 
-**Iris is an engineering tool, not a product.** It solves one problem: turning a PDF into accessible
-HTML and, with the optional [equalify-iris-pdf](https://github.com/EqualifyEverything/equalify-iris-pdf),
-turning that HTML back into a tagged PDF. This repo's roadmap is work on that engine. Product needs
-are recorded here and will add up to a product later. Products, such as the
-[WordPress plugin](https://github.com/EqualifyEverything/equalify-iris-wp), are built on top of Iris
-in their own repos. (Decided at the 2026-09-29 roadmap meeting.)
+**Iris is an engineering tool, not a product.** It turns a PDF into accessible HTML and, with the
+optional [equalify-iris-pdf](https://github.com/EqualifyEverything/equalify-iris-pdf), back into a
+tagged PDF. Products built on it live in their own repos.
 
 ---
 
@@ -341,7 +339,6 @@ credentials.
 | Document | What is in it |
 |---|---|
 | [docs/API.md](docs/API.md) | Every endpoint, with copy-pasteable `curl`. The run log's fields. |
-| [docs/styling.md](docs/styling.md) | Why Iris's HTML has no styling, and which tools add it. |
 | [docs/design-notes.md](docs/design-notes.md) | Why the code is the way it is. Read this before changing it. |
 | [docs/models.md](docs/models.md) | Which model to run on which agent, what each was measured at, and how a swap fails quietly. |
 | [docs/github-auth.md](docs/github-auth.md) | The GitHub token: making it, what one identity costs, gating the API, an older database. |
