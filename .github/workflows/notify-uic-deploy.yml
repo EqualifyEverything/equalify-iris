@@ -9,8 +9,13 @@ name: Notify UIC deploy
 # a revoked one — or an unreachable API — warns; neither fails the job, so anyone
 # forking this repo gets a harmless no-op. Other deployments should ignore this
 # file, or copy it with their own target.
+#
+# It waits for ci.yml to pass on the pushed commit, so a failing test or a blocking
+# advisory stops the deploy as well as the merge.
 on:
-  push:
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
     branches: [main]
   workflow_dispatch:
 
@@ -40,10 +45,19 @@ jobs:
         # It takes repo write access to do, so it is a maintainer capability rather than
         # a hole — but "only what has actually landed on main gets deployed" should be
         # enforced here, not left to the far end to reject.
-        if: ${{ github.repository == 'EqualifyEverything/equalify-iris' && github.ref == 'refs/heads/main' }}
+        #
+        # On `workflow_run`, `github.sha` is main's tip, not the commit ci checked, so
+        # the SHA comes from the run itself.
+        if: >-
+          github.repository == 'EqualifyEverything/equalify-iris' && (
+            (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+            (github.event_name == 'workflow_run' &&
+             github.event.workflow_run.event == 'push' &&
+             github.event.workflow_run.head_branch == 'main' &&
+             github.event.workflow_run.conclusion == 'success'))
         env:
           TOKEN: ${{ secrets.UIC_DEPLOY_DISPATCH_TOKEN }}
-          SHA: ${{ github.sha }}
+          SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
         run: |
           set -euo pipefail
           if [ -z "${TOKEN:-}" ]; then
