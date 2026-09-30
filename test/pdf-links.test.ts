@@ -993,3 +993,11 @@ test(
     }
   },
 );
+
+test("a page name keeps its last 100 filename characters, and drops a number the cut splits", async () => {
+  const { safeStem } = await import("../src/util/outputNames.ts");
+  assert.equal(safeStem(`${"a".repeat(150)}-page-12.png`, "page"), `${"a".repeat(92)}-page-12`);
+  assert.equal(safeStem(`12${"b".repeat(99)}.png`, "page"), "b".repeat(99));
+  assert.equal(safeStem(`Say "hi".png`, "page"), "Say__hi_");
+  assert.equal(safeStem(`"".png`, "page"), "__");
+});

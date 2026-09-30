@@ -2945,8 +2945,8 @@ These are the rules both adapters enforce on a model call. The README states the
   no PDF metadata is read. Page names are cut to `[A-Za-z0-9._-]` and their last 100 characters
   (`safeStem`), and link text is JSON-quoted (`links.ts`). The image can't be filtered: the text
   in it is what the model is meant to read. Instructions printed on a page reach the model; the
-  output lint and the review check what it writes. `test/pdf-links.test.ts` fails if a page
-  gains a field.
+  output lint and the review check what it writes. A new page field needs a change to `PageImage`
+  (`src/util/pdf.ts`), and `test/pdf-links.test.ts` pins a rasterized page's fields.
 
 ## Designed for, and not built
 

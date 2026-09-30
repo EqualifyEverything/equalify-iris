@@ -14,7 +14,11 @@ const MAX_STEM = 100;
 
 /** An upload's name as a page name: no extension, filename characters, the last 100. */
 export function safeStem(name: string, fallback: string): string {
-  return filenameChars(name).slice(-MAX_STEM) || fallback;
+  const all = filenameChars(name);
+  const tail = all.slice(-MAX_STEM);
+  // A number split by the cut is dropped, not read as a smaller one.
+  const split = all.length > MAX_STEM && /\d/.test(all[all.length - MAX_STEM - 1]!);
+  return (split ? tail.replace(/^\d+/, "") : tail) || fallback;
 }
 
 /** Strip the extension and sanitize a name for safe use as a filename. */
