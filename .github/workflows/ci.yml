@@ -15,7 +15,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  # By event too, so the nightly and a push to `main` cannot cancel each other's queued run.
+  group: ci-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -36,12 +37,13 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: ./test/e2e.sh
-      # Same pinned version and checksum as code-review.yml.
+      # Same pinned version and checksum as code-review.yml; bump both together.
+      # Unlike there, a failed download fails the check: a gate that skips is no gate.
       - name: actionlint
         run: |
           set -euo pipefail
           V=1.7.12
-          curl -fsSL -o /tmp/actionlint.tgz \
+          curl -fsSL --retry 3 -o /tmp/actionlint.tgz \
             "https://github.com/rhysd/actionlint/releases/download/v${V}/actionlint_${V}_linux_amd64.tar.gz"
           echo "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  /tmp/actionlint.tgz" | sha256sum -c -
           tar -xzf /tmp/actionlint.tgz -C /tmp actionlint
