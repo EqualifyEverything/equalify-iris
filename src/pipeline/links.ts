@@ -96,7 +96,8 @@ export function pageLinkContext(links: PdfLink[] = []): {
   const shown = links.slice(0, MAX_LINKS_PER_PAGE);
   const dropped = links.length - shown.length;
   const list = shown
-    .map((l, i) => `${i + 1}. ${l.text ? `"${l.text}"` : "(no text found under the link)"} -> ${l.href}`)
+    // JSON-quoted: the text is the PDF's, and a quote or newline in it must not end the quote.
+    .map((l, i) => `${i + 1}. ${l.text ? JSON.stringify(l.text) : "(no text found under the link)"} -> ${l.href}`)
     .join("\n");
   const section =
     `\n\n## Links on this page (from the source file's own link annotations)\n` +

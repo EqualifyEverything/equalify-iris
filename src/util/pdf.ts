@@ -1,9 +1,10 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { mkdtempSync, readdirSync, readFileSync, writeFileSync, rmSync } from "node:fs";
-import { join, basename } from "node:path";
+import { join } from "node:path";
 import { tmpdir, availableParallelism } from "node:os";
 import { decodeEntities } from "./html.ts";
+import { safeStem } from "./outputNames.ts";
 
 const execFileP = promisify(execFile);
 
@@ -328,7 +329,7 @@ export async function rasterizePdf(pdf: Buffer, originalName: string): Promise<P
     // the render below how many pages there are to divide between processes.
     const pages = await pdfPageCount(pdfPath);
 
-    const base = basename(originalName, ".pdf").replace(/[^A-Za-z0-9._-]/g, "_") || "page";
+    const base = safeStem(originalName, "page");
     await rasterizePages(pdfPath, dir, pages);
     const pngs = readdirSync(dir).filter((f) => f.endsWith(".png")).sort((a, b) => pageNum(a) - pageNum(b));
     if (pngs.length === 0) throw new Error("no pages produced — is this a valid PDF?");

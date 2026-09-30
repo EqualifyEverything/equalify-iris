@@ -2,7 +2,7 @@ import { Router } from "express";
 import type { Request, Response, NextFunction } from "express";
 import multer from "multer";
 import { writeFileSync, readFileSync, existsSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { extname, join } from "node:path";
 import { ulid } from "ulid";
 import type { IrisConfig } from "../config.ts";
 import type { Store, SessionRecord } from "../store/db.ts";
@@ -13,7 +13,7 @@ import type { AuthedRequest } from "../auth/middleware.ts";
 import { sendError } from "./errors.ts";
 import { summarizeRun } from "../diagnostics.ts";
 import { rasterizePdf, PdfTooLargeError, MAX_PDF_PAGES, type PageImage, type PdfLink } from "../util/pdf.ts";
-import { outputBasenameFromUploads, convertedHtmlFilename, titledAs } from "../util/outputNames.ts";
+import { outputBasenameFromUploads, convertedHtmlFilename, safeStem, titledAs } from "../util/outputNames.ts";
 import { captureFixtures } from "../pipeline/regression.ts";
 import type { Fragment } from "../pipeline/fragment.ts";
 import { RunQueue } from "../util/queue.ts";
@@ -357,7 +357,8 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
           }
           pages.push(...rendered);
         } else {
-          pages.push({ name: f.originalname, buffer: f.buffer, links: [] });
+          // Filtered like a PDF's page names (safeStem); the extension already passed IMAGE_EXT.
+          pages.push({ name: safeStem(f.originalname, "page") + extname(f.originalname).toLowerCase(), buffer: f.buffer, links: [] });
         }
       }
     } catch (e) {
