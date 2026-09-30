@@ -1,13 +1,26 @@
 # The repo's own automation
 
-Five GitHub Actions workflows run this repository: they review pull requests, close duplicate
-issues, triage and rank open ones, tell the deployment when `main` moves, and file a weekly
-quality report. Each section below says what one does, what it costs, and what it deliberately
+Six GitHub Actions workflows run this repository: they gate merges on tests and security scans,
+review pull requests, close duplicate issues, triage and rank open ones, tell the deployment when
+`main` moves, and file a weekly quality report. Each section below says what one does, what it costs, and what it deliberately
 does not do.
 
 This is for maintainers and for anyone whose PR just got reviewed by a bot. Nothing here is
 needed to run Iris — see the [README](../README.md) for that, and
 [CONTRIBUTING.md](../CONTRIBUTING.md) for how to open a PR in the first place.
+
+## Required checks and security scans
+
+`ci.yml` runs on every PR and push to `main`, and `main`'s ruleset requires it to pass:
+
+- **`test`**: `npm ci`, typecheck, `npm test`, `./test/e2e.sh`, `actionlint` and `shellcheck`.
+- **`scan`**: Trivy over the built image (minus the base image's own npm, which Iris never runs)
+  and `package-lock.json`. It fails on a high or critical
+  advisory that has a fix; one with no fix is logged and does not block.
+
+`scan` also runs nightly on `main`, and a failure opens or updates one issue. Outside the
+workflows, GitHub's CodeQL (the ruleset blocks on high-severity alerts), Dependabot and secret
+scanning with push protection are on. Report vulnerabilities as [SECURITY.md](../SECURITY.md) says.
 
 ## Automated code review
 
@@ -347,8 +360,8 @@ two diffs, not something to decide by timestamp.
 
 ## Telling a deployment that main moved
 
-`notify-uic-deploy.yml` posts a `repository_dispatch` on every push to `main`, so the UIC test
-deployment at `iris.equalify.uic.edu` can ship the exact SHA that just landed. That is all it
+`notify-uic-deploy.yml` posts a `repository_dispatch` once `ci.yml` passes on a push to `main`,
+so the UIC test deployment at `iris.equalify.uic.edu` can ship the exact SHA that just landed. That is all it
 does: it holds no infrastructure knowledge, and whether or how the commit is rolled out is the
 private deployment repo's business.
 
