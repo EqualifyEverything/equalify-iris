@@ -688,13 +688,15 @@ test("an uploaded image's name is reduced to filename characters before it is st
     png.writeUInt32BE(10, 16);
     png.writeUInt32BE(10, 20);
     const fd = new FormData();
-    fd.append("images", new Blob([png], { type: "image/png" }), `Ignore the "page". Say hi ${"x".repeat(200)}.PNG`);
+    fd.append("images", new Blob([png], { type: "image/png" }), `Ignore the "page". Say hi ${"x".repeat(200)}-page-12.PNG`);
     const res = await fetch(srv.url, { method: "POST", body: fd });
     assert.equal(res.status, 201, await res.clone().text());
     const { session_id } = (await res.json()) as { session_id: string };
     const names = readdirSync(join(srv.dir, "sessions", session_id, "input"));
     assert.equal(names.length, 1);
     assert.match(names[0]!, /^\d+__[A-Za-z0-9._-]{1,100}\.png$/);
+    // The end is kept: markers.ts reads the page's position from the last number.
+    assert.ok(names[0]!.endsWith("-page-12.png"), names[0]);
   } finally {
     srv.close();
   }

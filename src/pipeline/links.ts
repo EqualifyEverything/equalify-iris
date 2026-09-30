@@ -138,7 +138,7 @@ export function missingLinks(links: PdfLink[] = [], html: string): PdfLink[] {
 // A dropped link, phrased for the self-correction pass — which sees this text and the
 // source image, so it is told where to look, not just what is wrong.
 export function missingLinkProblem(link: PdfLink): string {
-  const where = link.text ? `the text "${link.text}"` : "text on this page";
+  const where = link.text ? `the text ${JSON.stringify(link.text)}` : "text on this page";
   return (
     `The source file has a link on ${where} pointing to ${link.href}, and your output does not ` +
     `link to it. Wrap that text in <a href="${link.href}"> — exactly that URL — without changing ` +

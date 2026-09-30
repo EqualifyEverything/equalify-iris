@@ -3,19 +3,23 @@ import { basename, extname } from "node:path";
 // Output filename helpers. Adapted from PR #10 (filename preservation, by
 // @Alcray); the fillable-PDF portion of that PR is intentionally not included.
 
-// An uploaded file's name reaches the page agent's prompt ("filename: …"), so every upload's
-// name passes through here first: filename characters only, so it cannot end the sentence it
-// sits in, and at most MAX_STEM of them.
+function filenameChars(name: string): string {
+  return basename(name, extname(name)).replace(/[^A-Za-z0-9._-]/g, "_");
+}
+
+// A page's name reaches the page agent's prompt ("filename: …"), so every upload's name passes
+// through here first: filename characters only, so it cannot end the sentence it sits in, and
+// the LAST MAX_STEM of them, since markers.ts reads a page's position from the final number.
 const MAX_STEM = 100;
 
-/** An upload's name without its extension, reduced to filename characters. */
+/** An upload's name as a page name: no extension, filename characters, the last 100. */
 export function safeStem(name: string, fallback: string): string {
-  return basename(name, extname(name)).replace(/[^A-Za-z0-9._-]/g, "_").slice(0, MAX_STEM) || fallback;
+  return filenameChars(name).slice(-MAX_STEM) || fallback;
 }
 
 /** Strip the extension and sanitize a name for safe use as a filename. */
 export function sanitizeBasename(name: string): string {
-  return safeStem(name, "document");
+  return filenameChars(name) || "document";
 }
 
 /** Derive the output basename from uploaded files (first file wins). */

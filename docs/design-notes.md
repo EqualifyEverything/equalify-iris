@@ -2942,10 +2942,10 @@ These are the rules both adapters enforce on a model call. The README states the
   it is the same decision as the global run cap: the resource being protected is the machine's, not the
   caller's.
 - **What of a document reaches a prompt.** A page's image, its filename and its link annotations;
-  no PDF metadata is read. Filenames are cut to `[A-Za-z0-9._-]`, at most 100 characters
-  (`safeStem`), and link text is JSON-quoted (`pageLinkContext`). The image can't be filtered: the
-  text in it is what the model is meant to read, so instructions printed on a page reach it
-  unfiltered, and what it writes still goes through the output lint and the review. `test/pdf-links.test.ts` fails if a page
+  no PDF metadata is read. Page names are cut to `[A-Za-z0-9._-]` and their last 100 characters
+  (`safeStem`), and link text is JSON-quoted (`links.ts`). The image can't be filtered: the text
+  in it is what the model is meant to read. Instructions printed on a page reach the model; the
+  output lint and the review check what it writes. `test/pdf-links.test.ts` fails if a page
   gains a field.
 
 ## Designed for, and not built
