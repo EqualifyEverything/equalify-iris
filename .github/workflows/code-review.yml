@@ -1138,11 +1138,13 @@ jobs:
               `config.example.yaml`, and the prompts in `agents/`. Quote the sentence and name the
               rule it breaks — one idea per sentence, the claim before the caveat, a number instead
               of an adjective, a gloss on the first use of jargon, no paragraph restating the one
-              above it. Those are five of that section's six rules, and the sixth is left out on
-              purpose: whether a document earns its length is the maintainer's call, not a judgement
-              a diff supports. If you cannot quote the text and name the rule, you do not have a
-              finding — "reads long" is not one. Three instances at most, the worst ones; a list of
-              every long sentence in a long document is noise. Detail is not the target: an exact
+              above it, shorter over completer. Apply the last one to what the PR adds: a new file
+              or section where a sentence in an existing document would do, or added text that takes
+              a paragraph to say what a sentence could. For that one, quote the addition and write
+              the shorter version. If you cannot quote the text and name the rule, or cannot write
+              the shorter version, you do not have a finding — "reads long" is not one. Three
+              instances at most, the worst ones; a list of every long sentence in a long document is
+              noise. Detail is not the target: an exact
               number, a file path, or a caveat that saves a reader an hour all belong in. Prose in
               files outside that set is not reviewed, and CONTRIBUTING.md is the authority if it and
               this list ever disagree.
@@ -1172,7 +1174,8 @@ jobs:
             - Reference concrete `path:line` locations. Quote the code you are objecting to.
             - For each blocking finding, state in one line what input reaches it. If you cannot
               name one, it belongs in the non-blocking notes.
-            - Be concise. No praise sections, no restating the diff.
+            - Be concise. No praise sections, no restating the diff. A finding is the quote, what is
+              wrong, and the input that reaches it: a few sentences, not a paragraph each.
             - End the body with a single line: `Accessibility impact: <one sentence>` — what this
               change does to the accessibility of Iris's output, or "none" if it cannot affect it.
 

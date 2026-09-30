@@ -111,8 +111,9 @@ nothing checks heading style, line length or word choice.
 **Who checks it:** the automated review, then a maintainer. On a PR touching those files the
 reviewer quotes a sentence that breaks one of the rules above and names the rule, as a
 [non-blocking note](#what-the-automated-review-will-say) — at most three, the worst ones. It is the
-only prose it comments on, and a note is not a merge gate. It does not judge whether a document
-earns its length: that is the last rule above, and it stays with the maintainer.
+only prose it comments on, and a note is not a merge gate. It checks the last rule on what a PR
+adds: a new file or section where a line in an existing doc would do, or a paragraph that could be a
+sentence. It quotes the addition and writes the shorter version.
 
 A PR that only makes an existing doc plainer is welcome, with no code change attached.
 

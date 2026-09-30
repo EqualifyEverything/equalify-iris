@@ -34,9 +34,9 @@ What it does, in order:
 4. Checks docs prose against CONTRIBUTING.md's plain-language requirement
    ([the six rules](../CONTRIBUTING.md#documentation)). It quotes the sentence and names the rule,
    three instances at most, never blocking. The scope is the file set that section binds:
-   `README.md`, `docs/`, `config.example.yaml` and `agents/`. Five of the six rules apply. The sixth
-   is whether a document earns its length. That one stays a maintainer's call, because a diff does
-   not show it. This is the only style-shaped thing the reviewer flags. Formatting, heading style
+   `README.md`, `docs/`, `config.example.yaml` and `agents/`. All six rules apply. The sixth,
+   shorter over completer, is checked on what the PR adds, and the reviewer writes the shorter
+   version. This is the only style-shaped thing the reviewer flags. Formatting, heading style
    and line length stay unreviewed in those files too.
 5. Posts exactly one review ending with a one-line `Accessibility impact:`.
 
