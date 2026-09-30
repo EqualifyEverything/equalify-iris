@@ -23,10 +23,9 @@ on:
 # capability comes from the PAT below, which is scoped to the deployment repo.
 permissions: {}
 
-# Newest wins, explicitly. Two merges seconds apart would otherwise race with no
-# ordering guarantee, and if the older SHA's dispatch arrives last the far end
-# deploys the older commit until something else is pushed — the exact drift this
-# workflow exists to remove.
+# Newest wins. Push order is kept by ci.yml's concurrency group, which runs `main`'s
+# pushes one at a time, so they finish, and dispatch, in push order. One exception:
+# re-running an older `ci` run on `main` redeploys that older SHA.
 concurrency:
   group: notify-uic-deploy
   cancel-in-progress: true
@@ -47,7 +46,9 @@ jobs:
         # enforced here, not left to the far end to reject.
         #
         # On `workflow_run`, `github.sha` is main's tip, not the commit ci checked, so
-        # the SHA comes from the run itself.
+        # the SHA comes from the run itself. `event == 'push'` is the clause that keeps a
+        # fork out: a fork PR's branch can be named `main`, and `branches:` above only
+        # filters on that name. Never drop it.
         if: >-
           github.repository == 'EqualifyEverything/equalify-iris' && (
             (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||

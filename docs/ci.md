@@ -13,12 +13,12 @@ needed to run Iris — see the [README](../README.md) for that, and
 
 `ci.yml` runs on every PR and push to `main`, and `main`'s ruleset requires it to pass:
 
-- **`test`**: `npm ci`, typecheck, `npm test` and `./test/e2e.sh`.
+- **`test`**: `npm ci`, typecheck, `npm test`, `./test/e2e.sh`, `actionlint` and `shellcheck`.
 - **`scan`**: Trivy over the built image (minus the base image's own npm, which Iris never runs)
   and `package-lock.json`. It fails on a high or critical
   advisory that has a fix; one with no fix is logged and does not block.
 
-It also runs nightly on `main`, and a failed scan opens or updates one issue. Outside the
+`scan` also runs nightly on `main`, and a failure opens or updates one issue. Outside the
 workflows, GitHub's CodeQL (the ruleset blocks on high-severity alerts), Dependabot and secret
 scanning with push protection are on. Report vulnerabilities as [SECURITY.md](../SECURITY.md) says.
 

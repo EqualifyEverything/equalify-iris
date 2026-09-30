@@ -25,6 +25,9 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
+      # No error tolerance here, unlike code-review.yml: without poppler the PDF tests
+      # skip themselves and report as passes.
+      - run: sudo apt-get update && sudo apt-get install -y poppler-utils
       - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
@@ -33,6 +36,17 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: ./test/e2e.sh
+      # Same pinned version and checksum as code-review.yml.
+      - name: actionlint
+        run: |
+          set -euo pipefail
+          V=1.7.12
+          curl -fsSL -o /tmp/actionlint.tgz \
+            "https://github.com/rhysd/actionlint/releases/download/v${V}/actionlint_${V}_linux_amd64.tar.gz"
+          echo "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  /tmp/actionlint.tgz" | sha256sum -c -
+          tar -xzf /tmp/actionlint.tgz -C /tmp actionlint
+          /tmp/actionlint -shellcheck= -pyflakes= .github/workflows/*.yml
+      - run: shellcheck -s bash -S warning .github/scripts/*.sh
 
   # High or critical, with a fix available. An advisory nobody can fix yet is
   # reported in the log and does not block.
@@ -82,7 +96,8 @@ jobs:
       - run: |
           set -euo pipefail
           TITLE="Nightly security scan failed on main"
-          NUM=$(gh issue list --state open --search "in:title \"$TITLE\"" --json number --jq '.[0].number // empty')
+          # A failed search files a new issue rather than none.
+          NUM=$(gh issue list --state open --search "in:title \"$TITLE\"" --json number --jq '.[0].number // empty' || true)
           if [ -n "$NUM" ]; then
             gh issue comment "$NUM" --body "Still failing: $RUN_URL"
           else
