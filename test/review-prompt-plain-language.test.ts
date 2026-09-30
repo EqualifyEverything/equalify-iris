@@ -413,3 +413,18 @@ test("PATH_RE's bare-word list still matches how these four documents use those 
     );
   }
 });
+
+// The prompt restates CONTRIBUTING.md's rules by name. A rule added there and not here goes
+// unchecked: #489 found the prompt listing five of seven while docs/ci.md said "all six".
+test("the docs-prose bullet names every rule in CONTRIBUTING.md's Documentation section", () => {
+  const text = readFileSync(CONTRIBUTING, "utf8");
+  const start = text.indexOf("\n## Documentation\n");
+  assert.notEqual(start, -1, "CONTRIBUTING.md still has a `## Documentation` section");
+  const body = text.slice(start + 1, text.indexOf("\n## ", start + 1));
+  const rules = [...body.matchAll(/^- \*\*(.+?)\.?\*\*/gm)].map((m) => m[1]!.toLowerCase());
+  assert.ok(rules.length >= 7, `CONTRIBUTING.md's Documentation section still lists its rules: ${rules}`);
+  const prose = promptProseBullet().toLowerCase();
+  for (const rule of rules) {
+    assert.ok(prose.includes(rule), `the docs-prose bullet names ${JSON.stringify(rule)}:\n${prose}`);
+  }
+});
