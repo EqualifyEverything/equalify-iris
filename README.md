@@ -1,22 +1,24 @@
 # Equalify Iris
 
-**Image-to-Accessible-HTML parsing service.** Iris converts a sequential set of image files
-(e.g. the rendered pages of a PDF) into a single content-only, WCAG 2.2 AA accessible HTML
-document: one vision call per page against a prompt anyone can improve, then an iterative
-reader/copy-editor review loop over the assembled document.
+Iris turns the pages of a PDF into one accessible HTML document that meets WCAG 2.2 AA. A vision
+model reads each page, using prompts anyone can improve. Then a reader and a copy editor review the
+whole document and fix what they find.
 
-Three constraints shape the whole design, and the code is written to hold them:
+**Where we are.** We're focused on one thing: the most accessible HTML conversion we can deliver.
+With the optional [equalify-iris-pdf](https://github.com/EqualifyEverything/equalify-iris-pdf), that
+HTML can also go back into a tagged PDF. Once we're confident in the conversion, we may move on to
+product development. Success rate, speed and cost are measured in
+[equalify-iris-bench](https://github.com/EqualifyEverything/equalify-iris-bench).
 
-- **Content only.** No CSS, no visual fidelity, no pixel-perfect layout. A two-column source
-  becomes linear semantic HTML. WCAG 2.2 AA is the fixed target and is not a per-run option.
-- **One machine, no vendor lock-in.** A laptop, a Mac Mini or a self-hosted box are all
-  first-class targets, with no AWS/GCP/Azure account required. Every external dependency —
-  model provider, database, object store — is replaceable by configuration, and the defaults
-  (SQLite + local filesystem) need nothing hosted. That is also why in-process work is
-  budgeted rather than assumed: see the concurrency and request-limit knobs below.
-- **One GitHub identity, held by the server.** There is no sign-in. You set one GitHub token; Iris
-  uses it to file every session's contributions. Callers send nothing — or a shared secret, if you
-  gate the deployment. Simple, and it costs per-user attribution and session isolation:
+Design constraints:
+
+- **Content only.** No CSS and no visual layout: a two-column page becomes linear, semantic HTML.
+  Styling is left to the tools that use Iris, such as the
+  [WordPress plugin](https://github.com/EqualifyEverything/equalify-iris-wp).
+- **Runs on one machine.** A laptop or a self-hosted box is enough, with no cloud account. The model
+  provider, database and file store can each be swapped in the config.
+- **One GitHub identity, and no sign-in.** Iris files every session's contributions with one token
+  you set. That's simple, but it means no per-user credit or session isolation:
   [what that means](#one-github-identity-and-no-sign-in).
 
 ---
