@@ -29,7 +29,7 @@
     "express-rate-limit": "^8.6.2",
     "jsdom": "25.0.1",
     "multer": "^2.1.1",
-    "ulid": "^2.3.0",
+    "ulid": "^3.0.2",
     "yaml": "^2.6.0"
   },
   "overrides": {
