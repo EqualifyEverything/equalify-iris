@@ -128,6 +128,18 @@ test("a missing, malformed or wrong token is rejected without touching the store
   }
 });
 
+// The padding after "Bearer" is what `\s+(\S` must allow (fetch drops the trailing padding).
+test("a whitespace-padded token opens the endpoint", async () => {
+  const { store } = fakeStore();
+  const srv = await serve(qualityRouter(store, { quality_token: TOKEN }));
+  try {
+    const res = await srv.get("", { headers: { authorization: `Bearer   ${TOKEN}  ` } });
+    assert.equal(res.status, 200);
+  } finally {
+    srv.close();
+  }
+});
+
 test("a valid token gets the tally, and the response is never shared-cached", async () => {
   const { store } = fakeStore();
   const srv = await serve(qualityRouter(store, { quality_token: TOKEN }));

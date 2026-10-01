@@ -29,7 +29,7 @@ function tokenMatches(presented: string, configured: string): boolean {
 // The bearer token on the request, if it presented one in the form the rest of the
 // API uses.
 function bearer(header: string | undefined): string | null {
-  const m = /^Bearer\s+(.+)$/i.exec(header ?? "");
+  const m = /^Bearer\s+(\S.*)$/i.exec(header ?? "");
   return m ? m[1].trim() : null;
 }
 
