@@ -41,6 +41,7 @@ import { altTexts, genericAlts } from "./alt.ts";
 import { markupReport } from "./markup.ts";
 import type { Fragment } from "./fragment.ts";
 import type { PdfLink } from "../util/pdf.ts";
+import type { PdfField } from "../util/taggedPdf.ts";
 
 // The link annotations the upload extracted from its PDFs, keyed by page order
 // (see Paths.sessionLinks). Absent for a session of plain images, for a PDF with no
@@ -48,11 +49,11 @@ import type { PdfLink } from "../util/pdf.ts";
 // which mean the same thing here, so a missing or unreadable file is no links rather
 // than an error. Links are additive: without them a run produces the document it
 // always produced.
-function readLinks(paths: Paths, sessionId: string): Record<string, PdfLink[]> {
-  const path = paths.sessionLinks(sessionId);
+// The same holds for form fields (fields.json, #483).
+function readByOrder<T>(path: string): Record<string, T[]> {
   if (!existsSync(path)) return {};
   try {
-    const parsed = JSON.parse(readFileSync(path, "utf8")) as Record<string, PdfLink[]>;
+    const parsed = JSON.parse(readFileSync(path, "utf8")) as Record<string, T[]>;
     return parsed && typeof parsed === "object" ? parsed : {};
   } catch {
     return {};
@@ -63,13 +64,20 @@ function readLinks(paths: Paths, sessionId: string): Record<string, PdfLink[]> {
 // (which is significant — see docs/API.md) survives, independent of filename.
 export function enumerateInputs(paths: Paths, sessionId: string): InputImage[] {
   const dir = paths.sessionInput(sessionId);
-  const links = readLinks(paths, sessionId);
+  const links = readByOrder<PdfLink>(paths.sessionLinks(sessionId));
+  const fields = readByOrder<PdfField>(paths.sessionFields(sessionId));
   return readdirSync(dir)
     .filter((f) => f.includes("__"))
     .map((f) => {
       const [prefix, ...rest] = f.split("__");
       const order = parseInt(prefix, 10);
-      return { order, name: rest.join("__"), path: join(dir, f), links: links[String(order)] ?? [] };
+      return {
+        order,
+        name: rest.join("__"),
+        path: join(dir, f),
+        links: links[String(order)] ?? [],
+        fields: fields[String(order)] ?? [],
+      };
     })
     .sort((a, b) => a.order - b.order);
 }

@@ -41,7 +41,7 @@ import {
   shrunkPageRejection,
 } from "../providers/imageLimits.ts";
 import { imageDimensions } from "../util/imageSize.ts";
-import { readFields, tagPdf, taggedPdfCommand, tagTimeoutSeconds, TaggedPdfError } from "../util/taggedPdf.ts";
+import { readFields, tagPdf, taggedPdfCommand, tagTimeoutSeconds, TaggedPdfError, type PdfField } from "../util/taggedPdf.ts";
 
 // 50 MB is a memory bound, not the image limit. It stays well above what an image may
 // be (see imageLimits.ts) because a PDF legitimately is: 25 pages of scans is a large
@@ -155,6 +155,30 @@ export function keepSourcePdf(
   if (!taggedPdfCommand(cfg) || files.length !== 1 || !PDF_EXT.test(files[0].originalname)) return false;
   writeFileSync(paths.sessionSourcePdf(sessionId), files[0].buffer);
   return true;
+}
+
+// The kept PDF's form fields, by page, so the page agent can name each control after its
+// field (#483, pipeline/fields.ts). Written only when there are some. A failure is returned
+// for the run log rather than raised: the run converts the same without them.
+export async function keepPdfFields(
+  command: string,
+  paths: Paths,
+  sessionId: string,
+): Promise<{ fields: number } | { error: string }> {
+  let fields: PdfField[];
+  try {
+    fields = await readFields(command, paths.sessionSourcePdf(sessionId));
+  } catch (e) {
+    return { error: e instanceof TaggedPdfError ? e.code : "tagger_failed" };
+  }
+  if (!Array.isArray(fields)) return { error: "tagger_failed" };
+  const byPage: Record<string, PdfField[]> = {};
+  for (const f of fields) {
+    if (typeof f?.name !== "string" || !Number.isInteger(f.page)) continue;
+    (byPage[String(f.page)] ??= []).push(f);
+  }
+  if (Object.keys(byPage).length) writeFileSync(paths.sessionFields(sessionId), JSON.stringify(byPage, null, 2));
+  return { fields: fields.length };
 }
 
 export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
@@ -442,16 +466,19 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
     if (Object.keys(linksByOrder).length) {
       writeFileSync(paths.sessionLinks(sessionId), JSON.stringify(linksByOrder, null, 2));
     }
-    keepSourcePdf(cfg, paths, sessionId, files);
+    const formFields = keepSourcePdf(cfg, paths, sessionId, files)
+      ? await keepPdfFields(taggedPdfCommand(cfg)!, paths, sessionId)
+      : null;
     // A page the model reads at lower resolution than the rest is a fact about this
     // document's output, so the session says so rather than the deployment's stdout: the
     // owner of a document whose fold-out reads worse than its letter pages can find out
     // why from the log they already have (`GET /v1/sessions/{id}/logs`). Best-effort for
     // the same reason `run_queued` is — a run must not fail to start over its own log.
-    if (refits.length) {
+    if (refits.length || formFields) {
       try {
         const log = new RunLog(paths.sessionLog(sessionId));
         for (const r of refits) log.event("page_refit", r);
+        if (formFields) log.event("form_fields", formFields);
       } catch {
         // ignore — observability must not block the run
       }

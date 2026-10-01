@@ -20,6 +20,7 @@ import {
 import { examplesForPrompt } from "./memory.ts";
 import { altTexts, genericAltProblem, genericAlts } from "./alt.ts";
 import { missingLinkProblem, missingLinks, pageLinkContext, unexpectedHrefs } from "./links.ts";
+import { missingFields, pageFieldContext } from "./fields.ts";
 import { duplicateIdProblem, duplicateIds, idAudit } from "./anchors.ts";
 import { splitWordAudit, splitWordContradictions, splitWordProblem } from "./hyphens.ts";
 import { STANDARD as STANDARD_AGENTS, isStandardType, logicalType } from "./contribute.ts";
@@ -3747,9 +3748,19 @@ async function renderPage(
       ...(redrawn ? { redrawn: true } : {}),
     });
   }
+  // And its form fields' names, which the image cannot show either (pipeline/fields.ts).
+  const fields = pageFieldContext(img.fields);
+  if (fields.shown.length) {
+    ctx.log.event("page_fields", {
+      image: img.name,
+      fields: fields.shown.length,
+      dropped: fields.dropped,
+      ...(redrawn ? { redrawn: true } : {}),
+    });
+  }
   const user =
     `Convert this document page image (filename: ${img.name}, page ${img.order} of ${ctx.images.length}) ` +
-    `to accessible HTML.${links.section}${feedbackPreamble(ctx)}${priorSection}`;
+    `to accessible HTML.${links.section}${fields.section}${feedbackPreamble(ctx)}${priorSection}`;
   const res = await ctx.router.complete(
     PAGE_AGENT,
     "vision",
@@ -4326,7 +4337,7 @@ async function correctPage(
     `Omit it where you are acting on every problem. Return the page in "html" either way — ` +
     `unchanged where you declined everything — because a reply with no "html" is a reply this run ` +
     `cannot use, and every problem you did not decline is still to be fixed in the same reply.` +
-    `${pageLinkContext(img.links).section}`;
+    `${pageLinkContext(img.links).section}${pageFieldContext(img.fields).section}`;
   const res = await ctx.router.complete(
     PAGE_AGENT,
     "vision",
@@ -5020,6 +5031,12 @@ async function extractPage(
   const missing = missingLinks(img.links, innerHtml);
   if (missing.length) {
     ctx.log.event("page_links_missing", { image: img.name, links: missing.map((l) => l.href) });
+  }
+  // Fields with no control named after them are only logged, not corrected: the first
+  // measurement is whether the names match at all (#483).
+  const unnamed = missingFields(img.fields, innerHtml);
+  if (unnamed.length) {
+    ctx.log.event("page_fields_missing", { image: img.name, fields: unnamed.map((f) => f.name) });
   }
 
   // And whether any image on the page was described with a placeholder instead of a
