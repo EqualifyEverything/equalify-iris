@@ -2771,9 +2771,10 @@ These are the rules both adapters enforce on a model call. The README states the
 
   There is one narrow exception: a call that produced no output is sent once more. That is a stream
   that closed empty (#480), or no output within the 120 s first-output window (#484, Bedrock only;
-  OpenRouter does not retry a stall). The SDK can't retry either. A stall then stall takes 240 s to fail. Both of those sends get the SDK's own 3 wire
-  attempts, so the worst case is 6 wire attempts instead of 3 (12 across the output-ceiling retry).
-  That only happens when an empty stream or stall is followed by a throttle or a 5xx.
+  OpenRouter does not retry a stall). The SDK retries neither, because both arrive as a 200. Both
+  sends get the SDK's own 3 wire attempts, so the worst case is 6 instead of 3 (12 across the
+  output-ceiling retry), and only when an empty stream or stall is followed by a throttle or a 5xx.
+  A stall followed by a stall takes 240 s to fail.
 - **The Bedrock adapter speaks two dialects**, chosen by `providers.bedrock.api`. `invoke` (the
   default) is `InvokeModelWithResponseStream` carrying an Anthropic-native body, and it is what every
   published number in this repo was measured through. `converse` is `ConverseStream`, whose request

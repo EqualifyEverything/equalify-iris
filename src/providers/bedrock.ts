@@ -1182,7 +1182,7 @@ export class BedrockProvider implements ModelProvider {
     if (expired && !sawStop) throw stalled(expired);
     if (!sawStop && !stopReason) {
       // Nothing arrived at all, which is a different failure from a document cut short and
-      // is the one that can be sent again (see `sendRetryingEmptyStream` and
+      // is the one that can be sent again (see `sendRetryingNoOutput` and
       // `EmptyStreamError`). Folded into `attempt.billed` here rather than in the caller,
       // because this is the only place that knows what this attempt was charged for and the
       // only failure the caller answers by re-sending.
