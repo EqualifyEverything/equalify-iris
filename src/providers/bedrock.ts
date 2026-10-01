@@ -80,7 +80,7 @@ const EMPTY_STREAM_DETAIL = "no message_stop and no stop_reason";
 
 // A failed attempt that produced no output, which is the one kind sent again.
 function producedNothing(e: unknown): boolean {
-  return e instanceof EmptyStreamError || (e instanceof StalledStreamError && e.kind === "first_output");
+  return e instanceof EmptyStreamError || (e instanceof StalledStreamError && e.kind === "first_output" && e.chars === 0);
 }
 
 // What the upstream actually sends in a usage block, which is a superset of what
@@ -811,9 +811,9 @@ export class BedrockProvider implements ModelProvider {
   // luna's 308 UIC page calls, each a lost page).
   //
   // Safe in the way the note above `BedrockProvider` says a mid-stream retry usually is
-  // not: both are raised only when not one character arrived, so there is no partial
-  // document to throw away and no risk of a passage shipping twice. An `idle` or `total`
-  // stall had output and is not retried.
+  // not: either is retried only when not one character arrived (`producedNothing`), so
+  // there is no partial document to throw away and no risk of a passage shipping twice. An
+  // `idle` or `total` stall had output and is not retried.
   //
   // "Closed itself" does not mean "closed quickly". On the UIC deployment every empty stream
   // came from one model, us.openai.gpt-5.6-luna on Converse, after 42, 82 and 83 seconds of

@@ -190,8 +190,8 @@ test("a Bedrock stream that ends SHORT is not retried, and still reports what it
 });
 
 // A client whose sends follow `script(send)`: "silent" waits for the abort and ends, "text"
-// sends one delta then goes silent, "ok" completes.
-function stubStalls(bedrock: BedrockProvider, script: (send: number) => "silent" | "text" | "ok") {
+// sends one delta then goes silent, "late" sends one delta just after the abort, "ok" completes.
+function stubStalls(bedrock: BedrockProvider, script: (send: number) => "silent" | "text" | "late" | "ok") {
   let sends = 0;
   (bedrock as unknown as { client: unknown }).client = {
     send: async (_cmd: unknown, opts: { abortSignal: AbortSignal }) => {
@@ -207,6 +207,7 @@ function stubStalls(bedrock: BedrockProvider, script: (send: number) => "silent"
           }
           if (kind === "text") yield textDelta("<p>partial");
           await aborted();
+          if (kind === "late") yield textDelta("<p>late");
         })(),
       };
     },
@@ -259,6 +260,18 @@ test("two first-output stalls fail as a stall, after two sends", async () => {
     }),
   );
   assert.equal(sends.count(), 2);
+});
+
+test("a first-output stall whose first text lands after the abort is not sent again", async () => {
+  const bedrock = new BedrockProvider({ default_model: "m" }, { firstOutputTimeoutMs: 50 });
+  const sends = stubStalls(bedrock, () => "late");
+  await assert.rejects(() => bedrock.complete(bedrockReq), (e: Error) => {
+    assert.ok(e instanceof StalledStreamError);
+    assert.equal(e.kind, "first_output");
+    assert.ok(e.chars > 0);
+    return true;
+  });
+  assert.equal(sends.count(), 1);
 });
 
 test("a Bedrock call that stalls after output started is not sent again", async () => {
