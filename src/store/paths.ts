@@ -10,8 +10,8 @@ import type { IrisConfig } from "../config.ts";
 //                   final.json), history/ (the PRIOR output.html, snapshotted only when a
 //                   feedback re-run is about to overwrite it — not the review loop's rounds),
 //                   output.html, log.jsonl (the run log), lint.json, unresolved.md,
-//                   agent-updates.md, links.json, source-name.txt, source.pdf (only with
-//                   tagged PDFs on)
+//                   agent-updates.md, links.json, source-name.txt, source.pdf and
+//                   fields.json (only with tagged PDFs on)
 //   fixtures/<agent>/  and  memory/<agent>.json  — keyed by agent, shared by every session
 //   tmp/<id>/       one run's scratch. `tmp/<id>/agents/` holds agents that session BUILT,
 //                   which `loadAgent` prefers over the library for the rest of it.
@@ -67,6 +67,11 @@ export class Paths {
   // when a document actually has links, so its absence and `{}` mean the same thing.
   sessionLinks(id: string): string {
     return join(this.sessionDir(id), "links.json");
+  }
+  // The source PDF's form fields by page order, like links.json (#483). Written only when
+  // there are some.
+  sessionFields(id: string): string {
+    return join(this.sessionDir(id), "fields.json");
   }
   // The uploaded PDF, kept only when tagged PDFs are on and the upload was one PDF.
   // It is what `iris-pdf` tags (util/taggedPdf.ts).

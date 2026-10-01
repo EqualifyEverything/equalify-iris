@@ -1059,8 +1059,8 @@ The events worth grepping for have a section each below, and the index is a link
 the index when you have a `type` off a log line and want to know what it means; read a section when
 you want to know what the field it names is for and what it costs.
 
-**The index is the whole log.** `src/` emits **121** event types and every one of them has a section
-below — **115** sections, because a few cover a pair of events that are only read together. So a
+**The index is the whole log.** `src/` emits **124** event types and every one of them has a section
+below — **116** sections, because a few cover two or three events that are only read together. So a
 `type` you cannot find here is not one the index skipped: it is a misread line, or a name `src/` no
 longer emits.
 
@@ -1186,6 +1186,7 @@ emits fails it too.
 | [`contribution_failed`](#contribution_failed) | The filing step threw, **after** `run_complete` |
 | [`run_failed`](#run_failed) | The run threw, so there is **no document** |
 | [`tagged_pdf` / `tagged_pdf_failed`](#tagged_pdf--tagged_pdf_failed) | A tagged PDF was made, or could not be |
+| [`form_fields` / `page_fields` / `page_fields_missing`](#form_fields--page_fields--page_fields_missing) | The PDF's form field names were read, shown to a page, or not used |
 | [`calibrate_call_failed`](#calibrate_call_failed) | One calibration verifier call threw — a tool's line, never a run's |
 
 ### `page_refit`
@@ -1955,7 +1956,7 @@ carried one. `where` is what makes the count attributable: the same character fr
 from the correction pass and from a specialist are three facts about three different calls — and
 `redrawn: true` is present when the reply was a page's [second draw](#page_redrawn), whose markup Iris
 discarded, because a redraw makes two `extract` calls for one page. The same flag appears for the same
-reason on `page_style_attributes`, `page_digit_groups` and `page_links`. It is
+reason on `page_style_attributes`, `page_digit_groups`, `page_links` and `page_fields`. It is
 written AFTER `agent_call`, so the reply on record in the round logs is still the model's own —
 the census behind this row was a $0 regrade of logs already on disk, and a strip applied before
 the log would have left no way to take that measurement or any future one.
@@ -4367,6 +4368,20 @@ A [tagged PDF](#get-a-tagged-pdf-optional) was made, or the tagger refused. `ms`
 `tagged_pdf` lists `fields_given`, the names of the fields that were filled in. The values are
 never logged. `tagged_pdf_failed` has the tagger's `code` and `error`. An `internal_error`'s
 message is left out, because it may quote a value.
+
+### `form_fields` / `page_fields` / `page_fields_missing`
+
+With tagged PDFs on, the upload reads the PDF's form fields, and the page agent is asked to name
+each control after its field, so the tagger can tag the field where it sits.
+
+- `form_fields`: at upload, `fields` (how many were kept) and `unusable` (fields dropped: a name with
+  a quote, `'`, `<`, `>`, a backtick or a control character, a name over 100 characters, or no page
+  number), or the tagger's `error` code. Without them the run converts the same.
+- `page_fields`: `image`, `fields` (how many were in the prompt), `dropped` (past the cap of 40) and,
+  on a second draw, `redrawn: true`.
+- `page_fields_missing`: `image`, and `fields`, the names no control in the first pass's HTML has.
+  Only logged; no correction is made. A control a later correction removes is not reported here, but
+  the tagged PDF's report lists it as `field_not_in_html`.
 
 ### `calibrate_call_failed`
 

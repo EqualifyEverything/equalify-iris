@@ -26,6 +26,9 @@ if (command === "fields") {
   console.log(JSON.stringify([
     { name: "applicant.name", type: "text", page: 1, options: [], required: true, readonly: false, maxlen: 40, editable: false, multiSelect: false },
     { name: "applicant.consent", type: "checkbox", page: 1, options: ["Yes"], required: false, readonly: false, maxlen: null, editable: false, multiSelect: false },
+    ...(pdf.includes("UNSAFE")
+      ? [`x" onfocus="alert(1)`, "y".repeat(101)].map((name) => ({ name, type: "text", page: 1, options: [], required: false, readonly: false, maxlen: null, editable: false, multiSelect: false }))
+      : []),
   ]));
 } else if (command === "tag") {
   const values = JSON.parse(readFileSync(a.values, "utf8"));

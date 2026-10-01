@@ -6,6 +6,7 @@ import type { Paths } from "../store/paths.ts";
 import type { RunLog } from "../store/runlog.ts";
 import type { IrisConfig } from "../config.ts";
 import type { PdfLink } from "../util/pdf.ts";
+import type { PdfField } from "../util/taggedPdf.ts";
 
 export interface InputImage {
   name: string; // filename, e.g. page-001.png
@@ -17,6 +18,8 @@ export interface InputImage {
   // something other than an upload (the regression gate's fixture images) have no
   // links to give it.
   links?: PdfLink[];
+  // The source PDF's form fields on this page, when tagged PDFs are on (pipeline/fields.ts).
+  fields?: PdfField[];
 }
 
 // Everything a pipeline phase needs. Created once per run.

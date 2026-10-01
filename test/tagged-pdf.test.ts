@@ -10,7 +10,8 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { IrisConfig } from "../src/config.ts";
 import type { AuthedRequest } from "../src/auth/middleware.ts";
-import { keepSourcePdf, sessionsRouter } from "../src/routes/sessions.ts";
+import { keepPdfFields, keepSourcePdf, sessionsRouter } from "../src/routes/sessions.ts";
+import { enumerateInputs } from "../src/pipeline/orchestrator.ts";
 import { limitsRouter } from "../src/routes/limits.ts";
 import { Store } from "../src/store/db.ts";
 import { Paths } from "../src/store/paths.ts";
@@ -125,7 +126,35 @@ test("the upload is kept only when tagged PDFs are on and it is one PDF", () => 
   // And the upload route is what calls it, after the session directory exists.
   const route = readFileSync(join(dirname(FAKE), "..", "..", "src", "routes", "sessions.ts"), "utf8");
   const handler = route.slice(route.indexOf('r.post("/", '), route.indexOf("store.createSession("));
-  assert.match(handler, /paths\.initSession\(sessionId\);[\s\S]*keepSourcePdf\(cfg, paths, sessionId, files\);/);
+  assert.match(handler, /paths\.initSession\(sessionId\);[\s\S]*keepSourcePdf\(cfg, paths, sessionId, files\)\s*\?\s*await keepPdfFields\(/);
+});
+
+test("the kept PDF's form fields reach its pages, and a failure writes nothing", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "iris-fields-"));
+  try {
+    const paths = new Paths(cfg(dir, FAKE));
+    paths.initSession("ses_f");
+    writeFileSync(paths.sessionSourcePdf("ses_f"), "%PDF");
+    writeFileSync(join(paths.sessionInput("ses_f"), "0001__a-p1.png"), "png");
+    writeFileSync(join(paths.sessionInput("ses_f"), "0002__a-p2.png"), "png");
+    assert.deepEqual(await keepPdfFields(FAKE, paths, "ses_f"), { fields: 2, unusable: 0 });
+    const [one, two] = enumerateInputs(paths, "ses_f");
+    assert.deepEqual(one.fields?.map((f) => f.name), ["applicant.name", "applicant.consent"]);
+    assert.deepEqual(two.fields, []);
+
+    // A name that could end the attribute it is copied into, or too long to list, is dropped.
+    paths.initSession("ses_u");
+    writeFileSync(paths.sessionSourcePdf("ses_u"), "UNSAFE");
+    assert.deepEqual(await keepPdfFields(FAKE, paths, "ses_u"), { fields: 2, unusable: 2 });
+    assert.ok(!readFileSync(paths.sessionFields("ses_u"), "utf8").includes("onfocus"));
+
+    paths.initSession("ses_e");
+    writeFileSync(paths.sessionSourcePdf("ses_e"), "ENCRYPTED");
+    assert.deepEqual(await keepPdfFields(FAKE, paths, "ses_e"), { error: "encrypted" });
+    assert.equal(existsSync(paths.sessionFields("ses_e")), false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("GET /fields passes the PDF's fields through", async () => {
