@@ -41,6 +41,7 @@ import {
   shrunkPageRejection,
 } from "../providers/imageLimits.ts";
 import { imageDimensions } from "../util/imageSize.ts";
+import { usableFieldName } from "../pipeline/fields.ts";
 import { readFields, tagPdf, taggedPdfCommand, tagTimeoutSeconds, TaggedPdfError, type PdfField } from "../util/taggedPdf.ts";
 
 // 50 MB is a memory bound, not the image limit. It stays well above what an image may
@@ -159,12 +160,13 @@ export function keepSourcePdf(
 
 // The kept PDF's form fields, by page, so the page agent can name each control after its
 // field (#483, pipeline/fields.ts). Written only when there are some. A failure is returned
-// for the run log rather than raised: the run converts the same without them.
+// for the run log rather than raised: the run converts the same without them. A name that
+// could end the attribute it is copied into is dropped and counted (`usableFieldName`).
 export async function keepPdfFields(
   command: string,
   paths: Paths,
   sessionId: string,
-): Promise<{ fields: number } | { error: string }> {
+): Promise<{ fields: number; unusable: number } | { error: string }> {
   let fields: PdfField[];
   try {
     fields = await readFields(command, paths.sessionSourcePdf(sessionId));
@@ -173,12 +175,16 @@ export async function keepPdfFields(
   }
   if (!Array.isArray(fields)) return { error: "tagger_failed" };
   const byPage: Record<string, PdfField[]> = {};
+  let unusable = 0;
   for (const f of fields) {
-    if (typeof f?.name !== "string" || !Number.isInteger(f.page)) continue;
+    if (!usableFieldName(f?.name) || !Number.isInteger(f.page)) {
+      unusable++;
+      continue;
+    }
     (byPage[String(f.page)] ??= []).push(f);
   }
   if (Object.keys(byPage).length) writeFileSync(paths.sessionFields(sessionId), JSON.stringify(byPage, null, 2));
-  return { fields: fields.length };
+  return { fields: fields.length - unusable, unusable };
 }
 
 export function sessionsRouter(cfg: IrisConfig, store: Store): Router {

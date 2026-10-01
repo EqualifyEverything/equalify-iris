@@ -10,6 +10,17 @@ import { decodeEntities } from "../util/html.ts";
 // A field with no control is logged, not yet corrected.
 
 export const MAX_FIELDS_PER_PAGE = 40;
+export const MAX_NAME_CHARS = 100;
+
+// Characters that would end the `name="…"` attribute the agent copies a name into, as for
+// link hrefs (`UNSAFE_CHARS` in util/pdf.ts). A space is allowed: field names have them, and
+// a space cannot leave a quoted value. A field refused here is tagged at the end of its
+// page, as every field was before #483.
+const UNSAFE_NAME = /["'<>`\u0000-\u001f\u007f]/;
+
+export function usableFieldName(name: unknown): name is string {
+  return typeof name === "string" && name.length > 0 && name.length <= MAX_NAME_CHARS && !UNSAFE_NAME.test(name);
+}
 
 // Choice lists longer than this, or with longer entries, are left out of the prompt.
 const MAX_OPTIONS = 10;
@@ -54,8 +65,9 @@ export function pageFieldContext(fields: PdfField[] = []): {
     `inside the quotes). The names are not labels: keep the label the page prints.\n\n` +
     `${list}\n\n` +
     (dropped > 0 ? `(…and ${dropped} more field${dropped === 1 ? "" : "s"} on this page.)\n\n` : "") +
-    `Do not invent names for controls that are not listed. If you cannot tell which control a ` +
-    `field belongs to, say so in the "log" field.\n`;
+    `Do not add a control the image does not show, and do not invent names for controls that ` +
+    `are not listed. If you cannot tell which control a field belongs to, say so in the "log" ` +
+    `field.\n`;
   return { section, shown, dropped };
 }
 

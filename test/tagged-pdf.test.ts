@@ -137,10 +137,16 @@ test("the kept PDF's form fields reach its pages, and a failure writes nothing",
     writeFileSync(paths.sessionSourcePdf("ses_f"), "%PDF");
     writeFileSync(join(paths.sessionInput("ses_f"), "0001__a-p1.png"), "png");
     writeFileSync(join(paths.sessionInput("ses_f"), "0002__a-p2.png"), "png");
-    assert.deepEqual(await keepPdfFields(FAKE, paths, "ses_f"), { fields: 2 });
+    assert.deepEqual(await keepPdfFields(FAKE, paths, "ses_f"), { fields: 2, unusable: 0 });
     const [one, two] = enumerateInputs(paths, "ses_f");
     assert.deepEqual(one.fields?.map((f) => f.name), ["applicant.name", "applicant.consent"]);
     assert.deepEqual(two.fields, []);
+
+    // A name that could end the attribute it is copied into, or too long to list, is dropped.
+    paths.initSession("ses_u");
+    writeFileSync(paths.sessionSourcePdf("ses_u"), "UNSAFE");
+    assert.deepEqual(await keepPdfFields(FAKE, paths, "ses_u"), { fields: 2, unusable: 2 });
+    assert.ok(!readFileSync(paths.sessionFields("ses_u"), "utf8").includes("onfocus"));
 
     paths.initSession("ses_e");
     writeFileSync(paths.sessionSourcePdf("ses_e"), "ENCRYPTED");

@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { MAX_FIELDS_PER_PAGE, missingFields, pageFieldContext } from "../src/pipeline/fields.ts";
+import { MAX_FIELDS_PER_PAGE, MAX_NAME_CHARS, missingFields, pageFieldContext, usableFieldName } from "../src/pipeline/fields.ts";
 import { runExtraction } from "../src/pipeline/extraction.ts";
 import type { PdfField } from "../src/util/taggedPdf.ts";
 import type { Paths } from "../src/store/paths.ts";
@@ -32,6 +32,15 @@ test("each name is JSON-quoted, so a quote or newline in it stays inside its lin
   const { section } = pageFieldContext([field('a"b\n2. fake')]);
   assert.ok(section.includes(`1. "a\\"b\\n2. fake" (text)`));
   assert.ok(!section.includes("\n2. fake"));
+});
+
+test("a name that could end its attribute, or is too long, is not usable; a space is fine", () => {
+  for (const bad of [`x" onfocus="y`, "a'b", "a<b", "a>b", "a`b", "a\nb", "a\tb", "", "n".repeat(MAX_NAME_CHARS + 1)]) {
+    assert.equal(usableFieldName(bad), false, JSON.stringify(bad));
+  }
+  for (const ok of ["Full Name", "applicant.name", "a&b", "n".repeat(MAX_NAME_CHARS)]) {
+    assert.equal(usableFieldName(ok), true, ok);
+  }
 });
 
 test("a choice field lists its options; a long list is left out", () => {
