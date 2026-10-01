@@ -1956,7 +1956,7 @@ carried one. `where` is what makes the count attributable: the same character fr
 from the correction pass and from a specialist are three facts about three different calls — and
 `redrawn: true` is present when the reply was a page's [second draw](#page_redrawn), whose markup Iris
 discarded, because a redraw makes two `extract` calls for one page. The same flag appears for the same
-reason on `page_style_attributes`, `page_digit_groups` and `page_links`. It is
+reason on `page_style_attributes`, `page_digit_groups`, `page_links` and `page_fields`. It is
 written AFTER `agent_call`, so the reply on record in the round logs is still the model's own —
 the census behind this row was a $0 regrade of logs already on disk, and a strip applied before
 the log would have left no way to take that measurement or any future one.
@@ -4377,7 +4377,8 @@ each control after its field, so the tagger can tag the field where it sits.
 - `form_fields`: at upload, `fields` (how many were kept) and `unusable` (fields dropped: a name with
   a quote, `'`, `<`, `>`, a backtick or a control character, a name over 100 characters, or no page
   number), or the tagger's `error` code. Without them the run converts the same.
-- `page_fields`: `image`, `fields` (how many were in the prompt) and `dropped` (past the cap of 40).
+- `page_fields`: `image`, `fields` (how many were in the prompt), `dropped` (past the cap of 40) and,
+  on a second draw, `redrawn: true`.
 - `page_fields_missing`: `image`, and `fields`, the names no control in the first pass's HTML has.
   Only logged; no correction is made. A control a later correction removes is not reported here, but
   the tagged PDF's report lists it as `field_not_in_html`.
