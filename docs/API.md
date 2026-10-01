@@ -4370,7 +4370,8 @@ pages reported blank, which an empty document could not.
 A [tagged PDF](#get-a-tagged-pdf-optional) was made, or the tagger refused. `ms` is how long it took.
 `tagged_pdf` lists `fields_given`, the names of the fields that were filled in, and `retag`. The
 values are never logged. `tagged_pdf_failed` has the tagger's `code` and `error`. An `internal_error`'s
-message is left out, because it may quote a value.
+message is left out, because it may quote a value. The demo asks before it retags, so a demo retag
+logs `tagged_pdf_failed` with `already_tagged` first, then `tagged_pdf` with `retag: true`.
 
 ### `form_fields` / `page_fields` / `page_fields_missing`
 
