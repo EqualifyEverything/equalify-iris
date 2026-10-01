@@ -85,7 +85,7 @@ export function makeAuthMiddleware(store: Store, cfg: IrisConfig) {
     // other: a caller who presents the gate token is not thereby anybody.
     if (gate !== undefined) {
       const header = req.header("authorization") ?? "";
-      const match = header.match(/^Bearer\s+(.+)$/i);
+      const match = header.match(/^Bearer\s+(\S.*)$/i);
       // Compared after trimming, because `apiToken` trims what it read from config: a
       // configured `"  s3cret  "` must not be a gate that only an untrimmed copy opens.
       if (!match || match[1].trim() !== gate) {

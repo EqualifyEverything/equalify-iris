@@ -281,7 +281,7 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
   // first (free), then how many bytes of upload are already arriving, then the caller's
   // upload budget for the minute — and only then is a byte of this body read.
   r.post("/", requestSizeGate(), inFlightUploads, uploadBudget, uploadImages, async (req: AuthedRequest, res) => {
-    const files = (req.files as Express.Multer.File[] | undefined) ?? [];
+    const files = Array.isArray(req.files) ? req.files : [];
     if (files.length === 0) {
       sendError(res, 400, "invalid_request", "At least one file part named 'images' is required (image or PDF)");
       return;
