@@ -78,6 +78,11 @@ const EMPTY_STREAM_RETRY_MS = 400;
 // wording drifted.
 const EMPTY_STREAM_DETAIL = "no message_stop and no stop_reason";
 
+// A failed attempt that produced no output, which is the one kind sent again.
+function producedNothing(e: unknown): boolean {
+  return e instanceof EmptyStreamError || (e instanceof StalledStreamError && e.kind === "first_output");
+}
+
 // What the upstream actually sends in a usage block, which is a superset of what
 // `Usage` declares: today `service_tier` and a nested `cache_creation` breakdown ride
 // along beside the four counts, and a model release can add more without notice.
@@ -533,9 +538,10 @@ function outputCeilingRefused(model: string, asked: number, cause: unknown, capp
 //
 // ONE case out of that gap is retried here, and it is the one where neither of those
 // objections applies: a stream that closes having delivered nothing at all
-// (`EmptyStreamError`, issue #480 — a user lost a whole document to it). There is no
+// (`EmptyStreamError`, issue #480 — a user lost a whole document to it), or one our own
+// clock abandoned before any output (a `first_output` stall, issue #484). There is no
 // streamed output to discard and no document to resume from, so the request is simply
-// sent again, once. See `sendRetryingEmptyStream`.
+// sent again, once. See `sendRetryingNoOutput`.
 export class BedrockProvider implements ModelProvider {
   name = "bedrock";
   capabilities: Capability[] = ["text", "vision", "structured_output"];
@@ -676,7 +682,7 @@ export class BedrockProvider implements ModelProvider {
       spent: false,
     };
     try {
-      return await this.sendRetryingEmptyStream(req, system, first);
+      return await this.sendRetryingNoOutput(req, system, first);
     } catch (e) {
       // `first.spent` is the guarantee that sending it again costs nothing: a refusal
       // arrives before generation, so a failure that had already been billed for is not
@@ -751,7 +757,7 @@ export class BedrockProvider implements ModelProvider {
       // deployment's ceiling and below any cap this call carried.
       const second: Attempt = { maxTokens: stated, ceilingFrom: "model", spent: false };
       try {
-        return await this.sendRetryingEmptyStream(req, system, second);
+        return await this.sendRetryingNoOutput(req, system, second);
       } catch (again) {
         if (!refusedForOutputCeiling(again) || second.spent) throw again;
         // This page is lost either way — a third attempt is not on offer, since a model that
@@ -799,24 +805,22 @@ export class BedrockProvider implements ModelProvider {
     }
   }
 
-  // One attempt at one ceiling, sent a second time if the stream closed having delivered
-  // nothing (issue #480: a user's document failed with "0 chars received, no message_stop
-  // and no stop_reason", and the conversion was lost for a failure that had produced no
-  // content to protect).
+  // One attempt at one ceiling, sent a second time if it produced no output at all: the
+  // stream closed empty (issue #480: "0 chars received, no message_stop and no
+  // stop_reason"), or no output arrived within the first-output window (issue #484: 10 of
+  // luna's 308 UIC page calls, each a lost page).
   //
-  // Safe in the two ways the note above `BedrockProvider` says a mid-stream retry usually
-  // is not. Nothing is discarded: `EmptyStreamError` is raised only when not one character
-  // arrived, so there is no partial document to throw away and no risk of a passage
-  // shipping twice. And a stalled attempt is never retried: a stall is a `StalledStreamError`,
-  // checked before the completeness check that raises this, so the attempt this follows is
-  // one the upstream closed itself.
+  // Safe in the way the note above `BedrockProvider` says a mid-stream retry usually is
+  // not: both are raised only when not one character arrived, so there is no partial
+  // document to throw away and no risk of a passage shipping twice. An `idle` or `total`
+  // stall had output and is not retried.
   //
   // "Closed itself" does not mean "closed quickly". On the UIC deployment every empty stream
   // came from one model, us.openai.gpt-5.6-luna on Converse, after 42, 82 and 83 seconds of
   // silence (3 of its 308 page calls from 2026-09-01 to 09-24; the same model also hit the
   // 120 s first-output stall 10 times, and no other model did either). So the retry can add up
-  // to one more first-output window, 120 s, to a page. That is the price of not losing the
-  // document. MAX_TOTAL_MS does not cap it: each send arms its own total timer, so the
+  // to one more first-output window, 120 s, to a page, and a stall followed by a stall
+  // takes 240 s to fail. That is the price of not losing the page. MAX_TOTAL_MS does not cap it: each send arms its own total timer, so the
   // retry gets a fresh one. A worst-case call holds its slot for the empty send, then
   // EMPTY_STREAM_RETRY_MS, then a full MAX_TOTAL_MS. The output-ceiling retry already
   // works the same way.
@@ -828,11 +832,10 @@ export class BedrockProvider implements ModelProvider {
   // for — and `attempt.billed` keeps the abandoned attempt's counts in the call's reported
   // usage, so the run log shows what the retry cost rather than hiding it.
   //
-  // Once, not until it works. An upstream that answers an identical request with two empty
-  // streams is not having a blip, and a third attempt would only spend a third prompt to
-  // say so; the error names the attempt count so a run log can show that this is where it
-  // ended up.
-  private async sendRetryingEmptyStream(
+  // Once, not until it works. An upstream that answers an identical request with nothing
+  // twice is not having a blip, and a third attempt would only spend a third prompt to
+  // say so.
+  private async sendRetryingNoOutput(
     req: CompletionRequest,
     system: string,
     attempt: Attempt,
@@ -840,16 +843,16 @@ export class BedrockProvider implements ModelProvider {
     try {
       return await this.send(req, system, attempt);
     } catch (e) {
-      if (!(e instanceof EmptyStreamError)) throw e;
+      if (!producedNothing(e)) throw e;
       // Said on every occurrence rather than once per process, unlike the ceiling warnings
       // above: those report a standing config error that is the same news however many
       // pages meet it, while this is a transient upstream event whose FREQUENCY is the
       // whole question. A deployment seeing it on one page a week and one seeing it on
       // every page have different problems, and only the count tells them apart.
       console.warn(
-        `bedrock: ${req.model} closed a response stream having sent nothing at all, so the ` +
-          `request is being sent again once after ${EMPTY_STREAM_RETRY_MS}ms. Nothing was ` +
-          `generated, so nothing is being discarded — but the prompt is read, and paid for, ` +
+        `bedrock: ${req.model} ${e instanceof EmptyStreamError ? "closed a response stream having sent nothing at all" : "sent no output within the first-output window"}, ` +
+          `so the request is being sent again once after ${EMPTY_STREAM_RETRY_MS}ms. Nothing was ` +
+          `generated, so nothing is being discarded — but the prompt may be read, and paid for, ` +
           `a second time.`,
       );
       await new Promise((resolve) => setTimeout(resolve, EMPTY_STREAM_RETRY_MS));
@@ -1078,8 +1081,10 @@ export class BedrockProvider implements ModelProvider {
       if (text) arm("idle", this.idleTimeoutMs);
       else arm("first_output", this.firstOutputTimeoutMs);
     };
-    const stalled = (kind: StallKind): StalledStreamError =>
-      new StalledStreamError({
+    const stalled = (kind: StallKind): StalledStreamError => {
+      // Kept for the retry's report, as an empty stream's is below.
+      if (kind === "first_output") attempt.billed = addUsage(attempt.billed, usage);
+      return new StalledStreamError({
         provider: this.name,
         model: req.model,
         kind,
@@ -1091,6 +1096,7 @@ export class BedrockProvider implements ModelProvider {
               : this.maxTotalMs,
         chars: text.length,
       });
+    };
 
     // The clock starts before the request: time-to-first-token is exactly as much of
     // a stall risk as a gap mid-stream, and prompt processing happens in here too.
