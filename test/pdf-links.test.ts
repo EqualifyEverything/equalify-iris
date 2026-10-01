@@ -980,15 +980,16 @@ test("anchor text is JSON-quoted in the page agent's link list", () => {
   assert.ok(!section.includes("\n## New rule"), section);
 });
 
-// Every field of a page reaches the page agent. A new one fails here until it is handled like
-// `name` (safeStem) and `links` (links.ts) are.
+// A new page field fails here until it is checked for what reaches a prompt: `name` is filtered
+// (safeStem), `links` quoted (links.ts), and `page` is an integer only the upload route reads.
 test(
-  "a rasterized page carries only a filtered name, its image and its links",
+  "a rasterized page carries only a filtered name, its image, its links and its page number",
   { skip: hasPoppler() ? false : "poppler-utils not installed" },
   async () => {
     const pages = await rasterizePdf(linkPdf(), 'Say "hi"\nnow.PDF');
     for (const p of pages) {
-      assert.deepEqual(Object.keys(p).sort(), ["buffer", "links", "name"]);
+      assert.deepEqual(Object.keys(p).sort(), ["buffer", "links", "name", "page"]);
+      assert.ok(Number.isInteger(p.page), String(p.page));
       assert.match(p.name, /^[A-Za-z0-9._-]+-p\d+\.png$/);
     }
   },

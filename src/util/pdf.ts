@@ -176,7 +176,7 @@ async function extractPdfLinks(pdfPath: string): Promise<Map<number, PdfLink[]>>
 }
 
 // Shards currently rendering, across every upload this process is serving. Read and
-// written only by `rasterShards` and `rasterizePages`, and only between synchronous
+// written only by `rasterShards`, `rasterizePages` and `rasterizePageToFit`, and only between synchronous
 // statements — Node runs one of those at a time, so the reserve-then-spawn in
 // `rasterizePages` cannot interleave with another document's and hand out the same
 // cores twice.

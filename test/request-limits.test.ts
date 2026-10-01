@@ -29,7 +29,8 @@ import type { AuthedRequest } from "../src/auth/middleware.ts";
 import { limitsRouter } from "../src/routes/limits.ts";
 import { sessionsRouter } from "../src/routes/sessions.ts";
 import { Store } from "../src/store/db.ts";
-import { mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { chmodSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -701,3 +702,63 @@ test("an uploaded image's name is reduced to filename characters before it is st
     srv.close();
   }
 });
+
+// One 4000 pt square page: 8334 px at util/pdf.ts's DPI, over the 8000 px ceiling, so the
+// route renders it again smaller (issue #485).
+function foldoutPdf(): Buffer {
+  const objs = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 4000 4000] >>",
+  ];
+  let body = "%PDF-1.7\n";
+  const offsets: number[] = [];
+  objs.forEach((o, i) => {
+    offsets.push(body.length);
+    body += `${i + 1} 0 obj\n${o}\nendobj\n`;
+  });
+  const startxref = body.length;
+  body += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n`;
+  for (const off of offsets) body += `${String(off).padStart(10, "0")} 00000 n \n`;
+  body += `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${startxref}\n%%EOF\n`;
+  return Buffer.from(body, "latin1");
+}
+
+function realPdftoppm(): string | null {
+  try {
+    return execFileSync("sh", ["-c", "command -v pdftoppm"], { encoding: "utf8" }).trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+test(
+  "a re-render that fails gets the page's refusal, not pdftoppm's error",
+  { skip: realPdftoppm() ? false : "poppler-utils not installed" },
+  async () => {
+    // A pdftoppm that renders normally but fails the smaller re-render (`-scale-to`).
+    const bin = mkdtempSync(join(tmpdir(), "iris-fake-poppler-"));
+    writeFileSync(
+      join(bin, "pdftoppm"),
+      `#!/bin/sh\nfor a in "$@"; do [ "$a" = "-scale-to" ] && exit 1; done\nexec "${realPdftoppm()}" "$@"\n`,
+    );
+    chmodSync(join(bin, "pdftoppm"), 0o755);
+    const path = process.env.PATH;
+    process.env.PATH = `${bin}:${path}`;
+    const srv = await serveUploadRoute();
+    try {
+      const form = new FormData();
+      form.append("images", new Blob([new Uint8Array(foldoutPdf())], { type: "application/pdf" }), "foldout.pdf");
+      const res = await fetch(srv.url, { method: "POST", body: form });
+      const { error: body } = (await res.json()) as { error: { code: string; message: string } };
+      assert.equal(res.status, 400, body.message);
+      assert.equal(body.code, "invalid_request");
+      assert.match(body.message, /^Page 1 of foldout\.pdf renders to 8334x8334 px/);
+      assert.doesNotMatch(body.message, /pdftoppm|iris-pdf-fit/);
+    } finally {
+      process.env.PATH = path;
+      srv.close();
+      rmSync(bin, { recursive: true, force: true });
+    }
+  },
+);

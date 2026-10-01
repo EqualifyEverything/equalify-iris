@@ -662,9 +662,10 @@ export function rasterizedPageRejection(
 // WHICH pixels may be given up is the only real question, and the answer differs by
 // basis, which is why it is decided here rather than at the renderer:
 //
-//   documented — the long edge is a fact about the configured model: it downscales to
-//     that size before reading, so rendering to it discards exactly the pixels the model
-//     was going to discard anyway. This is the same trade `imageLimitsHint` already
+//   documented — the long edge is a fact about the configured models: the strictest
+//     downscales to that size before reading, so rendering to it discards the pixels that
+//     model was going to discard anyway. On a deployment whose vision agents differ, a
+//     model with a larger long edge loses the difference. This is the same trade `imageLimitsHint` already
 //     recommends to a caller with an oversized IMAGE, applied by Iris to a page the
 //     caller never sized.
 //   assumed — the long edge is a guess, so rendering to it would be throwing away
