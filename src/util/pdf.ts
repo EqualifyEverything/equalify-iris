@@ -26,6 +26,10 @@ export interface PageImage {
   // four pixels-worth of words with no target. Extracted separately and handed to
   // the page agent as ground truth (see pipeline/links.ts).
   links: PdfLink[];
+  // Which page of the PDF this image is, by the document's own numbering — what
+  // `rasterizePageToFit` needs to render it again. Absent for an uploaded image,
+  // which is not a page of anything.
+  page?: number;
 }
 
 // Thrown when a PDF exceeds the page cap, so the route can return a clean 400.
@@ -172,7 +176,7 @@ async function extractPdfLinks(pdfPath: string): Promise<Map<number, PdfLink[]>>
 }
 
 // Shards currently rendering, across every upload this process is serving. Read and
-// written only by `rasterShards` and `rasterizePages`, and only between synchronous
+// written only by `rasterShards`, `rasterizePages` and `rasterizePageToFit`, and only between synchronous
 // statements — Node runs one of those at a time, so the reserve-then-spawn in
 // `rasterizePages` cannot interleave with another document's and hand out the same
 // cores twice.
@@ -344,7 +348,58 @@ export async function rasterizePdf(pdf: Buffer, originalName: string): Promise<P
       name: `${base}-p${i + 1}.png`,
       buffer: readFileSync(join(dir, f)),
       links: links.get(pageNum(f)) ?? [],
+      page: pageNum(f),
     }));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// Render ONE page again, scaled so that neither side exceeds `longEdgePx`.
+//
+// Called only for a page whose render at `DPI` is over what the deployment can send
+// (providers/imageLimits.ts): the alternative for that page is refusing the whole
+// document, so fewer pixels beats no document, and which pixels may be given up is the
+// limits module's decision rather than this one's (`refitLongEdge`). Nothing that
+// converts today comes through here.
+//
+// `-scale-to` replaces `-r`: it fits the page inside a longEdgePx box preserving the
+// aspect ratio, so what comes back is the same page rendered smaller — never cropped,
+// and never a different page's ink. The page number is the PDF's own (`PageImage.page`),
+// which is what `-f`/`-l` count in.
+export async function rasterizePageToFit(pdf: Buffer, page: number, longEdgePx: number): Promise<Buffer> {
+  const dir = mkdtempSync(join(tmpdir(), "iris-pdf-fit-"));
+  try {
+    const pdfPath = join(dir, "in.pdf");
+    writeFileSync(pdfPath, pdf);
+    const out = join(dir, "pg");
+    // Reserved out of the host's render budget like any other shard (see
+    // `shardsRunning`): this is a pdftoppm process, and a count blind to it would hand
+    // the core it is using to the next document as well.
+    shardsRunning += 1;
+    try {
+      await execFileP("pdftoppm", [
+        "-png",
+        "-scale-to",
+        String(longEdgePx),
+        "-f",
+        String(page),
+        "-l",
+        String(page),
+        pdfPath,
+        out,
+      ]);
+    } finally {
+      shardsRunning -= 1;
+    }
+    const pngs = readdirSync(dir).filter((f) => f.endsWith(".png"));
+    // One page in, one image out. Anything else means the range did not mean what this
+    // thinks it means, and silently returning the first file would hand the caller
+    // another page's ink under this page's name.
+    if (pngs.length !== 1) {
+      throw new Error(`re-rendering page ${page} produced ${pngs.length} images, expected 1`);
+    }
+    return readFileSync(join(dir, pngs[0]));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

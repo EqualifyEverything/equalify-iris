@@ -12,7 +12,14 @@ import { runPipeline } from "../pipeline/orchestrator.ts";
 import type { AuthedRequest } from "../auth/middleware.ts";
 import { sendError } from "./errors.ts";
 import { summarizeRun } from "../diagnostics.ts";
-import { rasterizePdf, PdfTooLargeError, MAX_PDF_PAGES, type PageImage, type PdfLink } from "../util/pdf.ts";
+import {
+  rasterizePdf,
+  rasterizePageToFit,
+  PdfTooLargeError,
+  MAX_PDF_PAGES,
+  type PageImage,
+  type PdfLink,
+} from "../util/pdf.ts";
 import { outputBasenameFromUploads, convertedHtmlFilename, safeStem, titledAs } from "../util/outputNames.ts";
 import { captureFixtures } from "../pipeline/regression.ts";
 import type { Fragment } from "../pipeline/fragment.ts";
@@ -29,7 +36,9 @@ import {
   IMAGE_MEDIA_TYPES,
   imageRejection,
   rasterizedPageRejection,
+  refitLongEdge,
   resolveImageLimits,
+  shrunkPageRejection,
 } from "../providers/imageLimits.ts";
 import { imageDimensions } from "../util/imageSize.ts";
 import { readFields, tagPdf, taggedPdfCommand, tagTimeoutSeconds, TaggedPdfError } from "../util/taggedPdf.ts";
@@ -336,6 +345,10 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
     // carrying the link annotations on that page — the one part of a PDF that
     // rasterizing destroys, so it travels alongside the image (see pipeline/links.ts).
     const pages: PageImage[] = [];
+    // Pages that only fit after a second, smaller render. Collected rather than logged
+    // here because the session whose log this belongs in does not exist yet — the pages
+    // have to be measured before there is anything to record against (below).
+    const refits: { pdf: string; page: number; long_edge_px: number; from: string }[] = [];
     try {
       for (const f of files) {
         if (PDF_EXT.test(f.originalname)) {
@@ -346,14 +359,45 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
           // what the model accepts — and the run would then die inside the first
           // vision call, minutes in, which is the failure this route exists to catch.
           for (const [i, p] of rendered.entries()) {
+            const page = p.page ?? i + 1;
             const size = imageDimensions(p.buffer);
             const why = rasterizedPageRejection(
               f.originalname,
-              i + 1,
+              page,
               { bytes: p.buffer.length, width: size?.width, height: size?.height },
               imageLimits,
             );
-            if (why) throw new PageTooLargeError(why);
+            if (!why) continue;
+            // Iris chose these pixels, so before refusing the document it renders the
+            // page again at a size it can send (issue #485). Only this page, and only
+            // on the path that was about to fail: a document that converts today is
+            // rendered exactly as it was.
+            const target = refitLongEdge({ width: size?.width, height: size?.height }, imageLimits);
+            // A target means the page's dimensions parsed (`refitLongEdge` answers null
+            // otherwise), and `page` is set on everything `rasterizePdf` returns — but a
+            // rejection is the safe reading of either being absent, since re-rendering
+            // needs both the page to ask for and a size to ask for it at.
+            if (target === null || !size || p.page === undefined) throw new PageTooLargeError(why);
+            // A failed re-render gets the refusal it would have had, not pdftoppm's error.
+            const smaller = await rasterizePageToFit(f.buffer, p.page, target).catch(() => {
+              throw new PageTooLargeError(why);
+            });
+            const shrunk = imageDimensions(smaller);
+            const still = shrunkPageRejection(
+              f.originalname,
+              page,
+              target,
+              { bytes: smaller.length, width: shrunk?.width, height: shrunk?.height },
+              imageLimits,
+            );
+            if (still) throw new PageTooLargeError(still);
+            refits.push({
+              pdf: f.originalname,
+              page,
+              long_edge_px: target,
+              from: `${size.width}x${size.height}`,
+            });
+            p.buffer = smaller;
           }
           pages.push(...rendered);
         } else {
@@ -399,6 +443,19 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
       writeFileSync(paths.sessionLinks(sessionId), JSON.stringify(linksByOrder, null, 2));
     }
     keepSourcePdf(cfg, paths, sessionId, files);
+    // A page the model reads at lower resolution than the rest is a fact about this
+    // document's output, so the session says so rather than the deployment's stdout: the
+    // owner of a document whose fold-out reads worse than its letter pages can find out
+    // why from the log they already have (`GET /v1/sessions/{id}/logs`). Best-effort for
+    // the same reason `run_queued` is — a run must not fail to start over its own log.
+    if (refits.length) {
+      try {
+        const log = new RunLog(paths.sessionLog(sessionId));
+        for (const r of refits) log.event("page_refit", r);
+      } catch {
+        // ignore — observability must not block the run
+      }
+    }
 
     const record = store.createSession({
       session_id: sessionId,

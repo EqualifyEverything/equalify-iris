@@ -19,7 +19,9 @@ import {
   modelGeneration,
   rasterizedPageRejection,
   rawBytesForBase64Cap,
+  refitLongEdge,
   resolveImageLimits,
+  shrunkPageRejection,
   visionModelWarning,
 } from "../src/providers/imageLimits.ts";
 import { imageDimensions } from "../src/util/imageSize.ts";
@@ -875,6 +877,88 @@ test("a heavy page that is NOT large-format is diagnosed as density, not page si
   // It still has to say both things the caller might act on.
   assert.match(unmeasured, /smaller page size/);
   assert.match(unmeasured, /JPEG/);
+});
+
+// ----- Rendering a page again instead of refusing the document (issue #485) -----
+
+// A page over either limit is a page Iris rendered too big: the caller sent a PDF and
+// never chose its pixels. So the refusal is a last resort, and what these pin is the one
+// judgement in it — which pixels may be given up, which differs by basis and is the
+// difference between "the model was going to discard these anyway" and throwing away
+// detail nobody has checked the model does not read.
+
+const documented = () =>
+  resolveImageLimits(cfg({ default: "bedrock", bedrock: { region: "us-east-1", default_model: SONNET_46 } }));
+const assumed = () =>
+  resolveImageLimits(cfg({ default: "bedrock", bedrock: { region: "us-east-1", default_model: QWEN_VL } }));
+
+test("an oversized page is re-rendered at the size the model reads, when that is known", () => {
+  const limits = documented();
+  // A 55-inch square page — a poster or a fold-out — at util/pdf.ts's 150 DPI. Over the
+  // one ceiling the model errors on, and refusing it was the whole of issue #485.
+  assert.equal(refitLongEdge({ width: 8334, height: 8334 }, limits), 1568);
+  // Not just to the ceiling: on a documented basis the long edge is a fact about the
+  // model, which downscales to it before reading, so those are pixels it was going to
+  // discard. Rendering to 8000 would keep 8000 px of a picture read at 1568.
+  assert.equal(limits.max_long_edge_px, 1568);
+  // The byte cap reaches the same answer from a letter page — the dense-scan case, where
+  // the page is inside every dimension and still too heavy.
+  assert.equal(refitLongEdge({ width: 1275, height: 1650 }, limits), 1568);
+  // But only while there is something to give up. A page already at or under the size
+  // the model reads cannot be helped by rendering it again, and the caller gets the
+  // refusal with its own advice rather than two renders and the same refusal.
+  assert.equal(refitLongEdge({ width: 1212, height: 1568 }, limits), null);
+  assert.equal(refitLongEdge({ width: 800, height: 600 }, limits), null);
+});
+
+test("on a model nobody has published limits for, only the unsendable pixels are given up", () => {
+  const limits = assumed();
+  // The long edge is a guess here, so rendering to it would throw away detail this model
+  // may well have read — the quiet damage imageLimits.ts exists to avoid. The hard
+  // ceiling is different: nothing above it can be sent at all, so the pixels above it
+  // are lost either way, and the document is the only thing left to save.
+  assert.equal(refitLongEdge({ width: 8334, height: 8334 }, limits), 8000);
+  // And a page that is over on BYTES alone keeps its refusal: it is already inside the
+  // ceiling, so there is no size this can name without guessing on the model's behalf.
+  assert.equal(refitLongEdge({ width: 1275, height: 1650 }, limits), null);
+});
+
+test("a page whose dimensions did not parse is not re-rendered at a guessed size", () => {
+  // The target is a comparison against the long edge the page HAS. A header that would
+  // not parse has not said, and "cannot say" must never become a number here — the same
+  // rule the rejection itself follows.
+  assert.equal(refitLongEdge({}, documented()), null);
+  assert.equal(refitLongEdge({ width: 9000 }, documented()), null);
+});
+
+test("a page that fits once it is smaller is not refused, and one that still does not says so", () => {
+  const limits = documented();
+  // The poster above, re-rendered: 1568x1568 of the same ink, well inside both limits.
+  assert.equal(
+    shrunkPageRejection("poster.pdf", 3, 1568, { bytes: 900_000, width: 1568, height: 1568 }, limits),
+    null,
+  );
+  // The dense scan that is dense rather than large: smaller, and still over the cap.
+  // The caller's own remedies are still the ones to print…
+  const why = shrunkPageRejection("magazine.pdf", 4, 1568, { bytes: 4_100_000, width: 1212, height: 1568 }, limits);
+  assert.ok(why);
+  assert.match(why, /Page 4 of magazine\.pdf/);
+  assert.match(why, /density rather than page size/);
+  assert.match(why, /JPEG/);
+  // …and the one thing that message alone would get wrong is corrected: the dimensions
+  // it prints are a render the caller never asked for, so the sentence says the retry
+  // happened. Without it the obvious reply is to ask Iris to try a smaller size.
+  assert.match(why, /rendered this page again at 1568 px on the long edge/);
+  assert.match(why, /the size the vision model reads/);
+});
+
+test("the retried size is not attributed to a model nobody has checked", () => {
+  // Same care as `dimensionReason`: on an assumed basis 8000 px is Iris's own rule, not
+  // a size the model is known to read, and the sentence may not say otherwise.
+  const why = shrunkPageRejection("drawing.pdf", 1, 8000, { bytes: 4_100_000, width: 8000, height: 6000 }, assumed());
+  assert.ok(why);
+  assert.match(why, /rendered this page again at 8000 px on the long edge, the largest it will send/);
+  assert.doesNotMatch(why, /the vision model reads/);
 });
 
 // ----- GET /v1/limits -----
