@@ -8,7 +8,7 @@ const [command, ...rest] = process.argv.slice(2);
 const { values: a } = parseArgs({
   args: rest,
   strict: false,
-  options: { pdf: { type: "string" }, pages: { type: "string" }, values: { type: "string" }, out: { type: "string" }, report: { type: "string" }, json: { type: "boolean" }, help: { type: "boolean" } },
+  options: { pdf: { type: "string" }, pages: { type: "string" }, values: { type: "string" }, out: { type: "string" }, report: { type: "string" }, json: { type: "boolean" }, retag: { type: "boolean" }, help: { type: "boolean" } },
 });
 const fail = (code, message, exit) => {
   process.stderr.write(`iris-pdf: ${code}: ${message}\n`);
@@ -31,6 +31,7 @@ if (command === "fields") {
       : []),
   ]));
 } else if (command === "tag") {
+  if (pdf.includes("TAGGED") && !a.retag) fail("already_tagged", "The PDF is already tagged. Pass --retag to replace its tags.", 1);
   const values = JSON.parse(readFileSync(a.values, "utf8"));
   if ("unknown.field" in values) fail("bad_value", "No field is named unknown.field.", 3);
   if ("crash" in values) fail("internal_error", `Cannot set ${values.crash}.`, 3);
@@ -38,7 +39,7 @@ if (command === "fields") {
   const input = JSON.parse(readFileSync(a.pages, "utf8"));
   const mode = (statSync(a.values).mode & 0o777).toString(8);
   writeFileSync(a.out, "%PDF-fake " + JSON.stringify({ source: pdf, input, values, mode, scratch: a.values }));
-  writeFileSync(a.report, JSON.stringify({ tool: "iris-pdf 0.0.0-fake", warnings: [{ code: "duplicate_text_layer", page: 1 }] }));
+  writeFileSync(a.report, JSON.stringify({ tool: "iris-pdf 0.0.0-fake", warnings: [{ code: "duplicate_text_layer", page: 1 }, ...(a.retag ? [{ code: "retagged" }] : [])] }));
 } else {
   fail("bad_arguments", `Unknown command ${command}.`, 3);
 }

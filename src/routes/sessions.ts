@@ -634,6 +634,11 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
       sendError(res, 400, "invalid_request", "`values` must be an object of field name to value.");
       return;
     }
+    const retag: unknown = (req.body ?? {}).retag ?? false;
+    if (typeof retag !== "boolean") {
+      sendError(res, 400, "invalid_request", "`retag` must be true or false.");
+      return;
+    }
     if (tooBusy(res)) return;
     const log = new RunLog(paths.sessionLog(s.session_id));
     const started = Date.now();
@@ -660,11 +665,12 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
         pdfPath: src.pdf,
         input,
         values: values as Record<string, unknown>,
+        retag,
         scratchRoot: paths.pdfScratchRoot(),
         timeoutSeconds: tagTimeoutSeconds(cfg),
       });
       // Field names only. A value is never logged.
-      log.event("tagged_pdf", { ms: Date.now() - started, fields_given: Object.keys(values) });
+      log.event("tagged_pdf", { ms: Date.now() - started, fields_given: Object.keys(values), retag });
       res.json({ filename: `${base}_tagged.pdf`, pdf: pdf.toString("base64"), report });
     } catch (e) {
       // iris-pdf's own messages name fields and options, never values. Its
