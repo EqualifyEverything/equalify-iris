@@ -4374,12 +4374,13 @@ message is left out, because it may quote a value.
 With tagged PDFs on, the upload reads the PDF's form fields, and the page agent is asked to name
 each control after its field, so the tagger can tag the field where it sits.
 
-- `form_fields`: at upload, `fields` (how many were kept) and `unusable` (names dropped because a
-  quote, `<`, `>`, a backtick or a control character could end the attribute, or longer than 100
-  characters), or the tagger's `error` code. Without them the run converts the same.
+- `form_fields`: at upload, `fields` (how many were kept) and `unusable` (fields dropped: a name with
+  a quote, `'`, `<`, `>`, a backtick or a control character, a name over 100 characters, or no page
+  number), or the tagger's `error` code. Without them the run converts the same.
 - `page_fields`: `image`, `fields` (how many were in the prompt) and `dropped` (past the cap of 40).
-- `page_fields_missing`: `image`, and `fields`, the names no control in the HTML has. Only logged;
-  no correction is made.
+- `page_fields_missing`: `image`, and `fields`, the names no control in the first pass's HTML has.
+  Only logged; no correction is made. A control a later correction removes is not reported here, but
+  the tagged PDF's report lists it as `field_not_in_html`.
 
 ### `calibrate_call_failed`
 
