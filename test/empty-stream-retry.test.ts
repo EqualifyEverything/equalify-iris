@@ -12,13 +12,12 @@
 //   - Ended empty: nothing is in hand. Nothing to discard, nothing that can ship short, and
 //     nothing about the request the upstream objected to — so it is sent again.
 //
-// Two things are pinned as hard as the retry itself, because both are ways a retry does
-// damage rather than good. A stalled call must not become a retried one: it would double
-// the time a wedged session takes to fail, and `expired` is checked before the completeness
-// check that raises this, which is what makes that true. And the abandoned attempt's token
-// counts must survive into the surviving attempt's report: the Anthropic stream reports the
-// prompt's counts in `message_start`, so an attempt that got that far and closed was billed,
-// and a call that paid for two prompts must not be logged as having paid for one.
+// Bedrock also re-sends a call our clock abandoned before any output (a `first_output`
+// stall, issue #484), on the same grounds. A stall after output started is not retried.
+//
+// The abandoned attempt's token counts must survive into the surviving attempt's report: the
+// Anthropic stream reports the prompt's counts in `message_start`, so an attempt that got
+// that far was billed, and a call that paid for two prompts must not be logged as one.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { BedrockProvider } from "../src/providers/bedrock.ts";
@@ -190,21 +189,55 @@ test("a Bedrock stream that ends SHORT is not retried, and still reports what it
   assert.equal(sends.count(), 1);
 });
 
-test("a Bedrock call that stalls before any output is a stall, not an empty stream", async () => {
-  // The other safety pin, and the reason the retry cannot lengthen a wedged session: a call
-  // abandoned by our own clock has also received 0 characters, so if the completeness check
-  // were reached first it would look identical to #480 and be sent again — turning a
-  // 120-second failure into a 240-second one. `expired` is checked first, and this is what
-  // says so.
+// A client whose sends follow `script(send)`: "silent" waits for the abort and ends, "text"
+// sends one delta then goes silent, "late" sends one delta just after the abort, "ok" completes.
+function stubStalls(bedrock: BedrockProvider, script: (send: number) => "silent" | "text" | "late" | "ok") {
+  let sends = 0;
+  (bedrock as unknown as { client: unknown }).client = {
+    send: async (_cmd: unknown, opts: { abortSignal: AbortSignal }) => {
+      const kind = script(++sends);
+      const aborted = () =>
+        new Promise<void>((resolve) => opts.abortSignal.addEventListener("abort", () => resolve(), { once: true }));
+      return {
+        body: (async function* () {
+          if (kind === "ok") {
+            yield textDelta("<p>second</p>");
+            yield messageDelta("end_turn");
+            return;
+          }
+          if (kind === "text") yield textDelta("<p>partial");
+          await aborted();
+          if (kind === "late") yield textDelta("<p>late");
+        })(),
+      };
+    },
+  };
+  return { count: () => sends };
+}
+
+test("a Bedrock call that stalls before any output is sent again once, and the retry is delivered", async () => {
+  const bedrock = new BedrockProvider({ default_model: "m" }, { firstOutputTimeoutMs: 50 });
+  const sends = stubStalls(bedrock, (n) => (n === 1 ? "silent" : "ok"));
+  const [res, said] = await capturingWarnings(() => bedrock.complete(bedrockReq));
+  assert.equal(res.text, "<p>second</p>");
+  assert.equal(sends.count(), 2);
+  assert.match(said.join("\n"), /no output within the first-output window/);
+});
+
+test("a stalled attempt's prompt tokens stay in the retry's reported usage", async () => {
   const bedrock = new BedrockProvider({ default_model: "m" }, { firstOutputTimeoutMs: 50 });
   let sends = 0;
   (bedrock as unknown as { client: unknown }).client = {
     send: async (_cmd: unknown, opts: { abortSignal: AbortSignal }) => {
-      sends++;
+      const n = ++sends;
       return {
         body: (async function* () {
-          // Silent until the first-output clock fires, then end without throwing — the
-          // abort shape that reaches the completeness check rather than the catch.
+          yield messageStart({ input_tokens: 900 });
+          if (n === 2) {
+            yield textDelta("<p>ok</p>");
+            yield messageDelta("end_turn", { output_tokens: 40 });
+            return;
+          }
           await new Promise<void>((resolve) =>
             opts.abortSignal.addEventListener("abort", () => resolve(), { once: true }),
           );
@@ -212,12 +245,44 @@ test("a Bedrock call that stalls before any output is a stall, not an empty stre
       };
     },
   };
+  const [res] = await capturingWarnings(() => bedrock.complete(bedrockReq));
+  assert.deepEqual(res.usage, { input_tokens: 1800, output_tokens: 40 });
+});
+
+test("two first-output stalls fail as a stall, after two sends", async () => {
+  const bedrock = new BedrockProvider({ default_model: "m" }, { firstOutputTimeoutMs: 50 });
+  const sends = stubStalls(bedrock, () => "silent");
+  await capturingWarnings(() =>
+    assert.rejects(() => bedrock.complete(bedrockReq), (e: Error) => {
+      assert.ok(e instanceof StalledStreamError);
+      assert.equal(e.kind, "first_output");
+      return true;
+    }),
+  );
+  assert.equal(sends.count(), 2);
+});
+
+test("a first-output stall whose first text lands after the abort is not sent again", async () => {
+  const bedrock = new BedrockProvider({ default_model: "m" }, { firstOutputTimeoutMs: 50 });
+  const sends = stubStalls(bedrock, () => "late");
   await assert.rejects(() => bedrock.complete(bedrockReq), (e: Error) => {
     assert.ok(e instanceof StalledStreamError);
     assert.equal(e.kind, "first_output");
+    assert.ok(e.chars > 0);
     return true;
   });
-  assert.equal(sends, 1);
+  assert.equal(sends.count(), 1);
+});
+
+test("a Bedrock call that stalls after output started is not sent again", async () => {
+  const bedrock = new BedrockProvider({ default_model: "m" }, { firstOutputTimeoutMs: 50, idleTimeoutMs: 50 });
+  const sends = stubStalls(bedrock, () => "text");
+  await assert.rejects(() => bedrock.complete(bedrockReq), (e: Error) => {
+    assert.ok(e instanceof StalledStreamError);
+    assert.equal(e.kind, "idle");
+    return true;
+  });
+  assert.equal(sends.count(), 1);
 });
 
 test("the Converse path retries an empty stream too", async () => {
