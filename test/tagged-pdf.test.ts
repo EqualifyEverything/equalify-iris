@@ -248,6 +248,22 @@ test("POST /pdf passes the tagger's refusals on with its code", async () => {
   }
 });
 
+test("POST /pdf refuses an already-tagged PDF unless asked to retag it", async () => {
+  const s = await serve({ source: "%PDF TAGGED" });
+  try {
+    const refused = await s.tag({ values: {} });
+    assert.equal(refused.status, 422);
+    assert.equal((await refused.json()).error.code, "already_tagged");
+    assert.equal((await s.tag({ retag: "yes" })).status, 400);
+    const res = await s.tag({ values: {}, retag: true });
+    assert.equal(res.status, 200);
+    assert.deepEqual((await res.json()).report.warnings.map((w: { code: string }) => w.code), ["duplicate_text_layer", "retagged"]);
+    assert.match(readFileSync(s.paths.sessionLog(s.id), "utf8"), /"tagged_pdf".*"retag":true/);
+  } finally {
+    s.close();
+  }
+});
+
 test("POST /pdf waits for the finished document and stops a run that takes too long", async () => {
   const running = await serve({ status: "running" });
   try {
