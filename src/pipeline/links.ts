@@ -96,7 +96,8 @@ export function pageLinkContext(links: PdfLink[] = []): {
   const shown = links.slice(0, MAX_LINKS_PER_PAGE);
   const dropped = links.length - shown.length;
   const list = shown
-    .map((l, i) => `${i + 1}. ${l.text ? `"${l.text}"` : "(no text found under the link)"} -> ${l.href}`)
+    // JSON-quoted: the text is the PDF's, and a quote or newline in it must not end the quote.
+    .map((l, i) => `${i + 1}. ${l.text ? JSON.stringify(l.text) : "(no text found under the link)"} -> ${l.href}`)
     .join("\n");
   const section =
     `\n\n## Links on this page (from the source file's own link annotations)\n` +
@@ -137,7 +138,9 @@ export function missingLinks(links: PdfLink[] = [], html: string): PdfLink[] {
 // A dropped link, phrased for the self-correction pass — which sees this text and the
 // source image, so it is told where to look, not just what is wrong.
 export function missingLinkProblem(link: PdfLink): string {
-  const where = link.text ? `the text "${link.text}"` : "text on this page";
+  // Not JSON-quoted, unlike pageLinkContext: the model is told to find this exact text on the
+  // page, and an escape would not match it. Whitespace is collapsed, so it cannot start a line.
+  const where = link.text ? `the text "${link.text.replace(/\s+/g, " ")}"` : "text on this page";
   return (
     `The source file has a link on ${where} pointing to ${link.href}, and your output does not ` +
     `link to it. Wrap that text in <a href="${link.href}"> — exactly that URL — without changing ` +

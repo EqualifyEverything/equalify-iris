@@ -2941,6 +2941,13 @@ These are the rules both adapters enforce on a model call. The README states the
   arriving mid-render takes what is left, down to the single process it would have had before. Sharing
   it is the same decision as the global run cap: the resource being protected is the machine's, not the
   caller's.
+- **What of a document reaches a prompt.** A page's image, its filename and its link annotations;
+  no PDF metadata is read. Page names are cut to `[A-Za-z0-9._-]` and their last 100 characters
+  (`safeStem`). Link text is JSON-quoted in the link list and whitespace-collapsed in the
+  correction prompt (`links.ts`). The image can't be filtered: the text in it is what the model is
+  meant to read. Instructions printed on a page reach the model; the output lint and the review
+  check what it writes. Both page producers are typed `PageImage` (`src/util/pdf.ts`), so a new
+  field fails the typecheck until each one sets it.
 
 ## Designed for, and not built
 
