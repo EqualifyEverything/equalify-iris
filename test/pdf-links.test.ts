@@ -619,9 +619,26 @@ report_2026.pdf</a></p>`;
   // A lost link to the site's root is not "completed" by a full URL the document already linked.
   const report = `<a href="https://example.org/forms/annual-report.pdf">https://example.org/forms/annual-report.pdf</a>`;
   assert.deepEqual(droppedHrefs(`<p><a href="https://example.org">Home</a> ${report}</p>`, `<p>Home ${report}</p>`), ["https://example.org"]);
-  // A new URL completes only the longest lost URL it starts with.
+  // Nor by a URL the round newly linked, unless the lost link itself printed it.
+  const newly = `<p><a href="https://example.org">Home</a> https://example.org/forms/annual-report.pdf</p>`;
+  assert.deepEqual(droppedHrefs(newly, `<p>Home ${report}</p>`), ["https://example.org"]);
+  // A lost root and a repaired target in one round: only the repair is left out, even with the
+  // repaired URL linked twice.
   const both = `<p><a href="https://example.org">Home</a> <a href="https://example.org/forms/annual">https://example.org/forms/annual-report_2026.pdf</a></p>`;
   assert.deepEqual(droppedHrefs(both, `<p>Home ${repaired}</p>`), ["https://example.org"]);
+  const rootPrints = `<p><a href="https://example.org">https://example.org/forms/annual-report_2026.pdf</a> ${before}</p>`;
+  assert.deepEqual(completedHrefs(rootPrints, `<p>${repaired} ${repaired}</p>`), [
+    { from: "https://example.org/forms/annual", to: "https://example.org/forms/annual-report_2026.pdf" },
+  ]);
+  // The longer URL was already linked before the round: still a drop.
+  const full = "https://example.org/forms/annual-report_2026.pdf";
+  assert.deepEqual(droppedHrefs(`${before} ${repaired}`, `<p>${full}</p> ${repaired}`), ["https://example.org/forms/annual"]);
+  // The lost link printed the URL, but its target does not start it: still a drop.
+  assert.deepEqual(droppedHrefs(`<p><a href="https://example.net/x">${full}</a></p>`, repaired), ["https://example.net/x"]);
+  // The new link does not print its own URL: still a drop.
+  assert.deepEqual(droppedHrefs(before, `<p><a href="${full}">the annual report</a></p>`), ["https://example.org/forms/annual"]);
+  // Inner tags in the printed text are ignored.
+  assert.deepEqual(droppedHrefs(before, repaired.replace(/>(https[^<]*)</, "><span>$1</span><")), []);
   // Unwrapped to plain text: still a drop.
   assert.deepEqual(droppedHrefs(before, `<p>https://example.org/forms/annual-report_2026.pdf</p>`), ["https://example.org/forms/annual"]);
 });

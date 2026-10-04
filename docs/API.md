@@ -3095,7 +3095,7 @@ recovered by looking again — logged rather than repaired, and counted into `li
 ### `editor_links_completed`
 
 The Copy Editor replaced an `href` with a longer URL that starts with it and is the link's printed
-text (`iteration`, and `links`, each `{from, to}`). The longer URL must be new in that round. This happens when a PDF's link target is cut where the
+text (`iteration`, and `links`, each `{from, to}`). The old link must already have printed the longer URL, and the longer URL must be new in that round. This happens when a PDF's link target is cut where the
 printed URL wraps onto a second line. It is a repair, so it is not in `editor_links_dropped` or
 `links_dropped_rate`.
 

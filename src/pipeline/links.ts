@@ -175,24 +175,34 @@ export function droppedHrefs(before: string, after: string): string[] {
 // the wrap, and the editor, which sees the page, writes the whole printed URL. The link then goes
 // where the page says, so it is a repair and not a loss.
 //
-// The longer URL must be new in this round, and each one completes only the longest lost URL it
-// starts with. Otherwise a lost link to a site's root would count as completed by any full URL on
-// that site the document already linked.
+// The lost URL's own link must already have printed the longer URL, and the longer URL must be new
+// in this round. A string prefix alone would let a lost link to a site's root count as completed
+// by any full URL on that site.
 export function completedHrefs(before: string, after: string): { from: string; to: string }[] {
   const had = hrefsIn(before);
   const kept = hrefsIn(after);
-  const lost = [...had].filter((h) => isAbsolute(h) && !kept.has(h));
   const completed = new Map<string, string>();
-  for (const m of after.matchAll(/<a\b[^>]*?\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))[^>]*>([\s\S]*?)<\/a>/gi)) {
-    const to = normalizeHref(m[1] ?? m[2] ?? m[3] ?? "");
-    const text = normalizeHref(m[4]!.replace(/<[^>]*>/g, "").replace(/\s+/g, ""));
-    if (to !== text || had.has(to)) continue;
-    const from = lost
-      .filter((h) => to.length > h.length && to.startsWith(h) && !completed.has(h))
-      .sort((a, b) => b.length - a.length)[0];
-    if (from) completed.set(from, to);
+  const used = new Set<string>();
+  const selfLinked = new Set(anchorsIn(after).filter((b) => b.href === b.text).map((b) => b.href));
+  // Longest first, so a printed URL completes the longest lost URL it starts with.
+  for (const a of anchorsIn(before).sort((x, y) => y.href.length - x.href.length)) {
+    const { href: from, text: to } = a;
+    if (!isAbsolute(from) || kept.has(from) || completed.has(from) || used.has(to)) continue;
+    if (to.length <= from.length || !to.startsWith(from) || had.has(to)) continue;
+    if (!selfLinked.has(to)) continue;
+    completed.set(from, to);
+    used.add(to);
   }
   return [...completed].map(([from, to]) => ({ from, to })).sort((a, b) => (a.from < b.from ? -1 : 1));
+}
+
+// Each `<a href>` and its printed text with tags and whitespace removed, both normalized.
+function anchorsIn(html: string): { href: string; text: string }[] {
+  return [...html.matchAll(/<a\b[^>]*?\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))[^>]*>([\s\S]*?)<\/a>/gi)].map((m) => {
+    let text = m[4]!;
+    for (let prev = ""; prev !== text; ) [prev, text] = [text, text.replace(/<[^>]*>/g, "")];
+    return { href: normalizeHref(m[1] ?? m[2] ?? m[3] ?? ""), text: normalizeHref(text.replace(/\s+/g, "")) };
+  });
 }
 
 // Every in-document reference in the delivered document, and whether it lands (#234).
