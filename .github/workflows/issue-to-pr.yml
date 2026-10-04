@@ -375,7 +375,8 @@ jobs:
           jq -r '.[].number' /tmp/candidates.json | while read -r n; do
             if .github/scripts/owner-approved.sh "$n" >/dev/null; then echo "$n"; fi
           done | jq -R 'tonumber' | jq -s . > /tmp/approved.json
-          jq --slurpfile ok /tmp/approved.json '[.[] | select(.number as $n | $ok[0] | index($n))]' \
+          jq --slurpfile ok /tmp/approved.json \
+            '[.[] | select(any(.labels[]; .name == "maintainer")) | select(.number as $n | $ok[0] | index($n))]' \
             /tmp/candidates.json > /tmp/candidates-approved.json
           mv /tmp/candidates-approved.json /tmp/candidates.json
           if [ -n "${FORCED_ISSUE:-}" ] && [ "$(jq length /tmp/candidates.json)" -eq 0 ]; then

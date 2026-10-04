@@ -1038,7 +1038,8 @@ jobs:
 
             9. **CI and workflow security — conditional, and when it applies it comes FIRST.**
                Skip this item entirely unless the diff touches `.github/workflows/**`,
-               `.github/scripts/**` or `.github/actions/**`. `.github/scripts/` counts
+               `.github/scripts/**`, `.github/actions/**` or `.github/owners`, which decides
+               whose `maintainer` label sends an issue to `issue-to-pr.yml`. `.github/scripts/` counts
                because a workflow may keep part of itself there — GitHub refuses a `run:`
                block past 21000 characters, so `issue-triage.yml` holds its enforcement
                step in `.github/scripts/triage-decide.sh`, and that file decides whether an

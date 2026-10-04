@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, chmodSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parse } from "yaml";
@@ -21,13 +21,21 @@ case "$1 $2" in
 esac
 `;
 
-function run(script: string, files: Record<string, unknown>, env: Record<string, string> = {}) {
+// `owners` swaps in an owners file by running a copy of the script from the temp dir.
+function run(script: string, files: Record<string, unknown>, env: Record<string, string> = {}, owners?: string) {
   const dir = mkdtempSync(join(tmpdir(), "owner-gate-"));
   try {
     writeFileSync(join(dir, "gh"), FAKE_GH);
     chmodSync(join(dir, "gh"), 0o755);
     for (const [name, value] of Object.entries(files)) writeFileSync(join(dir, name), JSON.stringify(value));
-    const r = spawnSync(join(SCRIPTS, script), ["7"], {
+    let path = join(SCRIPTS, script);
+    if (owners !== undefined) {
+      mkdirSync(join(dir, "scripts"));
+      path = join(dir, "scripts", script);
+      copyFileSync(join(SCRIPTS, script), path);
+      writeFileSync(join(dir, "owners"), owners);
+    }
+    const r = spawnSync(path, ["7"], {
       encoding: "utf8",
       env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, FAKE_DIR: dir, GITHUB_REPOSITORY: "o/r", ...env },
     });
@@ -60,11 +68,14 @@ test("triage tags the owners once on an open issue no owner has approved", () =>
   assert.match(first.posted ?? "", /^@bbertucc: .*`maintainer` label/);
   assert.match(first.posted ?? "", /<!-- iris-ask-owners:v1 -->/);
   assert.equal(ask({ ...open, state: "CLOSED" }).posted, null);
-  for (const name of ["maintainer", "duplicate", "wontfix", "invalid"]) {
+  for (const name of ["maintainer", "duplicate", "wontfix", "invalid", "question", "no-auto-pr"]) {
     assert.equal(ask({ ...open, labels: [{ name }] }).posted, null, name);
   }
   assert.equal(ask({ ...open, labels: [{ name: "bug" }] }).posted !== null, true);
   assert.equal(ask({ ...open, comments: [{ body: first.posted }] }).posted, null, "already asked");
+  const none = run("ask-owners.sh", { "issue.json": open }, {}, "# no one\n\n");
+  assert.deepEqual([none.status, none.posted], [0, null], "no owners to ask");
+  assert.match(run("ask-owners.sh", { "issue.json": open }, {}, "# x\na\n  \nb\n").posted ?? "", /^@a @b: /);
 });
 
 test("issue-to-pr keeps only approved issues, and triage asks after every outcome", () => {
@@ -74,10 +85,14 @@ test("issue-to-pr keeps only approved issues, and triage asks after every outcom
   assert.ok(gate > pick.lastIndexOf("> /tmp/candidates.json"), "after both paths build the candidates");
   assert.ok(gate < pick.indexOf("COUNT=$(jq length /tmp/candidates.json)"), "before they are counted");
   assert.match(readFileSync(join(ROOT, ".github", "workflows", "issue-to-pr.yml"), "utf8"), /FORBIDDEN='[^']*\\\.github\/owners/);
+  assert.match(pick.slice(gate), /select\(any\(\.labels\[\]; \.name == "maintainer"\)\)/, "and the label is on it now");
+  const skip = pick.match(/SKIP_LABELS="([^"]*)"/)![1]!.split(" ");
+  const asks = readFileSync(join(SCRIPTS, "ask-owners.sh"), "utf8");
+  for (const name of skip) assert.ok(asks.includes(`"${name}"`), `ask-owners skips ${name} too`);
 
   const triage = parse(readFileSync(join(ROOT, ".github", "workflows", "issue-triage.yml"), "utf8"));
   const job = triage.jobs["ask-owners"];
   assert.equal(job.needs, "triage");
-  assert.match(job.if, /always\(\)/);
+  assert.match(job.if, /needs\.triage\.result == 'success'/);
   assert.match(job.steps.at(-1).run, /^\.github\/scripts\/ask-owners\.sh /);
 });

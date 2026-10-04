@@ -3,7 +3,7 @@
 #
 # Tags the owners in .github/owners once on an open issue that no owner has labelled `maintainer`,
 # so they can decide whether the maintainer should work on it. Posts nothing on a closed issue, on
-# one labelled `maintainer`, `duplicate`, `wontfix` or `invalid`, or on one it already asked on.
+# one labelled `maintainer` or with one of issue-to-pr.yml's SKIP_LABELS, or on one it already asked on.
 set -euo pipefail
 
 n="$1"
@@ -15,7 +15,7 @@ if [ "$(jq -r .state /tmp/ask-owners.json)" != "OPEN" ]; then
   echo "#$n is not open — not asking."
   exit 0
 fi
-skip=$(jq -r '[.labels[].name] | map(select(. == "maintainer" or . == "duplicate" or . == "wontfix" or . == "invalid")) | join(", ")' /tmp/ask-owners.json)
+skip=$(jq -r '[.labels[].name] | map(select(IN("maintainer", "wontfix", "invalid", "duplicate", "question", "no-auto-pr"))) | join(", ")' /tmp/ask-owners.json)
 if [ -n "$skip" ]; then
   echo "#$n is labelled $skip — not asking."
   exit 0
@@ -25,7 +25,11 @@ if jq -e --arg m "$marker" 'any(.comments[]; .body | contains($m))' /tmp/ask-own
   exit 0
 fi
 
-owners=$(grep -v '^[[:space:]]*#' "$here/../owners" | grep -v '^[[:space:]]*$' | sed 's/^/@/' | paste -sd' ' -)
+owners=$(grep -v -e '^[[:space:]]*#' -e '^[[:space:]]*$' "$here/../owners" | sed 's/^/@/' | paste -sd' ' -) || true
+if [ -z "$owners" ]; then
+  echo ".github/owners lists no one — not asking."
+  exit 0
+fi
 {
   printf '%s: this issue is ready for an owner to review. The maintainer works on it only after an owner adds the `maintainer` label.\n\n' "$owners"
   printf '%s\n' "$marker"

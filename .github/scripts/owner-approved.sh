@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Usage: owner-approved.sh <issue number>
 #
-# Exits 0 and prints the owner's login when an owner in .github/owners put the `maintainer` label
-# on the issue and it is still there. Exits 1 otherwise, including when the events can't be read.
+# Exits 0 and prints the owner's login when the last `maintainer` label event on the issue is an
+# add by an owner in .github/owners. Exits 1 otherwise, including when the events can't be read.
+# It does not read the current labels; issue-to-pr.yml checks those.
 #
 # Only accounts with triage access or higher can label an issue. The label event's actor is checked
 # too, because that access is wider than the owners list.
