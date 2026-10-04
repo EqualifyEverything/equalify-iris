@@ -196,6 +196,13 @@ export function completedHrefs(before: string, after: string): { from: string; t
   return [...completed].map(([from, to]) => ({ from, to })).sort((a, b) => (a.from < b.from ? -1 : 1));
 }
 
+// Absolute URLs in `after` that were not in `before`. Logged beside a drop, so a reader can tell a
+// link that was lost from one that was pointed somewhere else (#509).
+export function addedHrefs(before: string, after: string): string[] {
+  const had = hrefsIn(before);
+  return [...hrefsIn(after)].filter((h) => isAbsolute(h) && !had.has(h)).sort();
+}
+
 // Each `<a href>` and its printed text with tags and whitespace removed, both normalized.
 function anchorsIn(html: string): { href: string; text: string }[] {
   return [...html.matchAll(/<a\b[^>]*?\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))[^>]*>([\s\S]*?)<\/a>/gi)].map((m) => {

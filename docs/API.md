@@ -3088,7 +3088,9 @@ noticed nothing.
 
 ### `editor_links_dropped`
 
-An `href` present before that round's correction was missing after it (`iteration`, `hrefs`). A
+An `href` present before that round's correction was missing after it (`iteration`, `hrefs`, and
+`added`, up to 20 absolute `href`s the round introduced, not counting repairs logged as
+`editor_links_completed`, so a lost link can be told from a changed one). A
 link's target came from the source **file**, not from a page image, so a dropped one cannot be
 recovered by looking again — logged rather than repaired, and counted into `links_dropped_rate`.
 

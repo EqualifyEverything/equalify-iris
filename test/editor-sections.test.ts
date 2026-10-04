@@ -614,9 +614,27 @@ test("the round is measured like any other before the loop ends on it", async ()
     const result = await review(ctx, `${first}\n\n${LONG}`);
     const dropped = rec.events.find((e) => e.type === "editor_links_dropped");
     assert.deepEqual(dropped?.data.hrefs, ["https://example.com/a"]);
+    assert.deepEqual(dropped?.data.added, []);
     assert.equal(dropped?.data.iteration, 1);
     assert.equal(result.droppedLinks, 1);
     assert.ok(rec.events.some((e) => e.type === "editor_markers_changed"), "a marker the round dropped");
+  });
+});
+
+test("a link the round pointed somewhere else is logged with the href it became (#509)", async () => {
+  await withTemp(async (dir) => {
+    // A repair in the same round is logged as completed, not as added.
+    const full = "https://example.com/forms/annual-report.pdf";
+    const first = `<p><a href="https://example.com/a">a</a> <a href="https://example.com/keep">k</a> <a href="https://example.com/forms/annual">${full}</a> the rest of it</p>`;
+    const { ctx, rec } = ctxWith(dir, {
+      sectionAnswer: (s) =>
+        s.index === 1
+          ? s.html.replace("https://example.com/a", "https://example.com/b").replace("https://example.com/forms/annual\"", `${full}"`)
+          : s.html,
+    });
+    await review(ctx, `${first}\n\n${LONG}`);
+    const dropped = rec.events.find((e) => e.type === "editor_links_dropped");
+    assert.deepEqual(dropped?.data, { iteration: 1, hrefs: ["https://example.com/a"], added: ["https://example.com/b"] });
   });
 });
 
