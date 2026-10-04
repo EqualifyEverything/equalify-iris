@@ -166,7 +166,7 @@ export function missingLinkProblem(link: PdfLink): string {
 // A URL the rewrite lengthened to the one its link prints is not counted: see `completedHrefs`.
 export function droppedHrefs(before: string, after: string): string[] {
   const kept = hrefsIn(after);
-  const completed = new Set(completedHrefs(before, after));
+  const completed = new Set(completedHrefs(before, after).map((c) => c.from));
   return [...hrefsIn(before)].filter((h) => isAbsolute(h) && !kept.has(h) && !completed.has(h)).sort();
 }
 
@@ -174,17 +174,25 @@ export function droppedHrefs(before: string, after: string): string[] {
 // printed text (#503). A URL that wraps onto a second line in a PDF can carry a link target cut at
 // the wrap, and the editor, which sees the page, writes the whole printed URL. The link then goes
 // where the page says, so it is a repair and not a loss.
-export function completedHrefs(before: string, after: string): string[] {
+//
+// The longer URL must be new in this round, and each one completes only the longest lost URL it
+// starts with. Otherwise a lost link to a site's root would count as completed by any full URL on
+// that site the document already linked.
+export function completedHrefs(before: string, after: string): { from: string; to: string }[] {
+  const had = hrefsIn(before);
   const kept = hrefsIn(after);
-  const printed: string[] = [];
-  for (const m of after.matchAll(/<a\b[^>]*?\bhref\s*=\s*(?:"([^"]*)"|'([^']*)')[^>]*>([\s\S]*?)<\/a>/gi)) {
-    const href = normalizeHref(m[1] ?? m[2] ?? "");
-    const text = normalizeHref(m[3]!.replace(/<[^>]*>/g, "").replace(/\s+/g, ""));
-    if (href === text) printed.push(href);
+  const lost = [...had].filter((h) => isAbsolute(h) && !kept.has(h));
+  const completed = new Map<string, string>();
+  for (const m of after.matchAll(/<a\b[^>]*?\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))[^>]*>([\s\S]*?)<\/a>/gi)) {
+    const to = normalizeHref(m[1] ?? m[2] ?? m[3] ?? "");
+    const text = normalizeHref(m[4]!.replace(/<[^>]*>/g, "").replace(/\s+/g, ""));
+    if (to !== text || had.has(to)) continue;
+    const from = lost
+      .filter((h) => to.length > h.length && to.startsWith(h) && !completed.has(h))
+      .sort((a, b) => b.length - a.length)[0];
+    if (from) completed.set(from, to);
   }
-  return [...hrefsIn(before)]
-    .filter((h) => isAbsolute(h) && !kept.has(h) && printed.some((p) => p.length > h.length && p.startsWith(h)))
-    .sort();
+  return [...completed].map(([from, to]) => ({ from, to })).sort((a, b) => (a.from < b.from ? -1 : 1));
 }
 
 // Every in-document reference in the delivered document, and whether it lands (#234).

@@ -629,7 +629,10 @@ test("a link target the round lengthened to its printed URL is logged as complet
     });
     const result = await review(ctx, `${first}\n\n${LONG}`);
     const completed = rec.events.find((e) => e.type === "editor_links_completed");
-    assert.deepEqual(completed?.data, { iteration: 1, hrefs: ["https://example.com/forms/annual"] });
+    assert.deepEqual(completed?.data, {
+      iteration: 1,
+      links: [{ from: "https://example.com/forms/annual", to: "https://example.com/forms/annual-report.pdf" }],
+    });
     assert.equal(rec.events.some((e) => e.type === "editor_links_dropped"), false);
     assert.equal(result.droppedLinks, 0);
   });

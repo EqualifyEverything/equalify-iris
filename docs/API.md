@@ -319,7 +319,8 @@ curl -s -H "Authorization: Bearer $IRIS_QUALITY_TOKEN" "$BASE/quality?days=30"
     `truncated` beside `editor_truncated_rate` and the output ceiling. One threshold over both
     cannot be set honestly, which is why the weekly report's is still on the mixture and says so.
 * `links_dropped_rate` — share of documents where an `href` present before the copy editor was
-  missing after it.
+  missing after it. A URL the editor lengthened to the link's printed URL is not counted (see
+  [`editor_links_completed`](#editor_links_completed)).
 * `links_unresolved_rate` — share of documents that shipped with an in-document reference that
   lands nowhere: an `href="#"`, or a fragment naming an `id` the delivered document does not
   contain. Counted per document; the per-reference numbers, and *which* ids failed, are on the
@@ -3094,7 +3095,7 @@ recovered by looking again — logged rather than repaired, and counted into `li
 ### `editor_links_completed`
 
 The Copy Editor replaced an `href` with a longer URL that starts with it and is the link's printed
-text (`iteration`, `hrefs`, the old URLs). This happens when a PDF's link target is cut where the
+text (`iteration`, and `links`, each `{from, to}`). The longer URL must be new in that round. This happens when a PDF's link target is cut where the
 printed URL wraps onto a second line. It is a repair, so it is not in `editor_links_dropped` or
 `links_dropped_rate`.
 

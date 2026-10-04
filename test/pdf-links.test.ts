@@ -604,7 +604,11 @@ test("a target cut at a line wrap, lengthened to the printed URL, is a repair an
 report_2026.pdf</a></p>`;
   const repaired = `<p><a href="https://example.org/forms/annual-report_2026.pdf">https://example.org/forms/annual-report_2026.pdf</a></p>`;
   assert.deepEqual(droppedHrefs(before, repaired), []);
-  assert.deepEqual(completedHrefs(before, repaired), ["https://example.org/forms/annual"]);
+  assert.deepEqual(completedHrefs(before, repaired), [
+    { from: "https://example.org/forms/annual", to: "https://example.org/forms/annual-report_2026.pdf" },
+  ]);
+  // Unquoted, as a model sometimes writes it.
+  assert.deepEqual(droppedHrefs(before, repaired.replace(/href="([^"]*)"/, "href=$1")), []);
   // Longer, but not what the link prints: still a drop.
   const other = `<p><a href="https://example.org/forms/annual-other">https://example.org/forms/annual-report_2026.pdf</a></p>`;
   assert.deepEqual(droppedHrefs(before, other), ["https://example.org/forms/annual"]);
@@ -612,6 +616,12 @@ report_2026.pdf</a></p>`;
   // The printed URL, but not starting with the old target: still a drop.
   const elsewhere = `<p><a href="https://example.net/x">https://example.net/x</a></p>`;
   assert.deepEqual(droppedHrefs(before, elsewhere), ["https://example.org/forms/annual"]);
+  // A lost link to the site's root is not "completed" by a full URL the document already linked.
+  const report = `<a href="https://example.org/forms/annual-report.pdf">https://example.org/forms/annual-report.pdf</a>`;
+  assert.deepEqual(droppedHrefs(`<p><a href="https://example.org">Home</a> ${report}</p>`, `<p>Home ${report}</p>`), ["https://example.org"]);
+  // A new URL completes only the longest lost URL it starts with.
+  const both = `<p><a href="https://example.org">Home</a> <a href="https://example.org/forms/annual">https://example.org/forms/annual-report_2026.pdf</a></p>`;
+  assert.deepEqual(droppedHrefs(both, `<p>Home ${repaired}</p>`), ["https://example.org"]);
   // Unwrapped to plain text: still a drop.
   assert.deepEqual(droppedHrefs(before, `<p>https://example.org/forms/annual-report_2026.pdf</p>`), ["https://example.org/forms/annual"]);
 });

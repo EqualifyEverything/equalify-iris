@@ -3362,7 +3362,7 @@ export async function runReview(
       ctx.log.event("editor_links_dropped", { iteration: iterations, hrefs: dropped });
     }
     const completed = completedHrefs(before, body);
-    if (completed.length) ctx.log.event("editor_links_completed", { iteration: iterations, hrefs: completed });
+    if (completed.length) ctx.log.event("editor_links_completed", { iteration: iterations, links: completed });
     // See BODY_MARKERS: the only place a marker's DISAPPEARANCE is recorded. An arrival is also
     // recorded on the page path, by `markers_added` on `page_corrected` (#373) — additions only,
     // because that corrector is handed the image and resolving an illegible passage is its job. The
