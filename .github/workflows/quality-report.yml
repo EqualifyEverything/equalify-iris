@@ -316,9 +316,9 @@ jobs:
           # resolve. Some floor is inherent — a source document can be genuinely
           # ambiguous — so this is set where "one in seven" starts to look systemic.
           UNRESOLVED_RATE_MAX=0.15
-          # Fraction of documents where a link present in the source was missing from
-          # the editor's output. Lower, because this is content loss rather than an
-          # imperfect fix: the user's document had a link and ours does not.
+          # Fraction of documents where an `href` present before the copy editor was
+          # missing after it. Lower, because some of these are content loss: the user's
+          # document had a link and ours does not. Some are a link changed (#503, #509).
           LINKS_DROPPED_RATE_MAX=0.02
           # Zero, meaning ANY document whose lint pass errored. Such a document has no
           # accessibility verdict at all: it ships unchecked, and the review loop had

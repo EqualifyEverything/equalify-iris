@@ -37,7 +37,7 @@ import {
 import { flatten } from "./flatten.ts";
 import { examplesForPrompt } from "./memory.ts";
 import { knownPages, pageIndex, type IndexedPage } from "./pageindex.ts";
-import { completedHrefs, droppedHrefs } from "./links.ts";
+import { addedHrefs, completedHrefs, droppedHrefs } from "./links.ts";
 import { sameWordedHeadingNote, sameWordedHeadingRuns } from "./headings.ts";
 
 export interface ReviewIssue {
@@ -3357,11 +3357,13 @@ export async function runReview(
     // A link the editor dropped is unrecoverable and invisible to every later check
     // in the loop — see droppedHrefs for why this is checked here and in code.
     const dropped = droppedHrefs(before, body);
+    const completed = completedHrefs(before, body);
     if (dropped.length) {
       droppedLinks += dropped.length;
-      ctx.log.event("editor_links_dropped", { iteration: iterations, hrefs: dropped });
+      const repaired = new Set(completed.map((c) => c.to));
+      const added = addedHrefs(before, body).filter((h) => !repaired.has(h));
+      ctx.log.event("editor_links_dropped", { iteration: iterations, hrefs: dropped, added });
     }
-    const completed = completedHrefs(before, body);
     if (completed.length) ctx.log.event("editor_links_completed", { iteration: iterations, links: completed });
     // See BODY_MARKERS: the only place a marker's DISAPPEARANCE is recorded. An arrival is also
     // recorded on the page path, by `markers_added` on `page_corrected` (#373) — additions only,
