@@ -112,6 +112,8 @@ that human is reading, not whether they read it.
 opened or reopened**. It reads the new issue, finds the open issue it most resembles, and — only
 when a second, independent session fails to refute the claim — closes the new one as a duplicate
 with a comment naming the survivor. Anything short of that is commented and reported, never closed.
+An issue it leaves open, with no skip label, gets one comment tagging the owners in
+`.github/owners`, asking for the `maintainer` label.
 
 It exists because the dedupe already in the app cannot do this, and was never trying to.
 `src/github/issue.ts` refuses to file an `Agent update proposal:` whose title exactly matches an
@@ -261,6 +263,10 @@ UTC**. It reads the open issues, ranks them by what most improves Iris, and open
 **one** pull request for the top issue it can finish well, with a review requested from
 **@bbertucc**.
 
+It works only on an issue an owner listed in [`.github/owners`](../.github/owners) has labelled
+`maintainer`, a dispatch by number included. [Closing duplicate issues](#closing-duplicate-issues)
+tags the owners on each new issue it leaves open, so they can make that call.
+
 [Automated code review](#automated-code-review) raised the ceiling on how much review this
 maintainership can absorb; this spends some of that headroom on the other side of the same
 bottleneck — issues that are correct, small, and never picked up. A reported barrier that sits open
@@ -378,8 +384,8 @@ A deployment nobody else runs must never be able to turn this project's `main` r
 [`.github/workflows/quality-report.yml`](../.github/workflows/quality-report.yml) runs **Saturdays at
 20:00 UTC**. It reads `GET /v1/quality` on a live deployment, compares a handful of
 rates against thresholds held in that workflow file, and opens one issue per crossed threshold.
-[Scheduled issue triage](#scheduled-issue-triage) then ranks those issues with everything else and
-may open a PR against one.
+Once an owner labels one `maintainer`, [Scheduled issue triage](#scheduled-issue-triage) ranks it
+with everything else and may open a PR against it.
 
 Everything before this depended on somebody typing. An issue, or a session's feedback — the loop is
 good, but a person has to start it. Meanwhile Iris grades itself on every single run: how many

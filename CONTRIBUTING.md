@@ -21,13 +21,14 @@ By participating you agree to our [Code of Conduct](CODE_OF_CONDUCT.md).
   one per content type". `chartDataAgent.md` is the shape that earns its place.
 - **Code** — bug fixes and improvements via pull request.
 
-A well-written issue may get a pull request without you doing anything else. A scheduled workflow
-ranks the open issues Sun–Wed and opens one PR for the most pressing one it can finish well
+A well-written issue may get a pull request without you doing anything else. An owner first labels
+it `maintainer` (a bot tags them when it's time). A scheduled workflow then ranks those issues
+Sun–Wed and opens one PR for the most pressing one it can finish well
 ([details](docs/ci.md#scheduled-issue-triage)) — accessibility barriers rank first, and small
 user-visible fixes reported against the demo rank well because they review cleanly. It never
 touches an issue labelled `no-auto-pr`, never files a second PR for an issue it has already tried,
 and stops entirely when nothing is eligible. If you'd rather own the fix yourself, say so on the
-issue and add that label.
+issue and ask for the `no-auto-pr` label.
 
 **You get the credit for it.** A PR from that workflow names you in its body and carries a
 `Co-authored-by` trailer for your account on the commit, so the merged commit is attributed to you

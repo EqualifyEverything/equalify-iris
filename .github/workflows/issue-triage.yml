@@ -1015,3 +1015,24 @@ jobs:
         # `.github/scripts/` is also in `issue-to-pr.yml`'s forbidden paths and in
         # `code-review.yml`'s CI-security gate, for the same reason.
         run: .github/scripts/triage-decide.sh
+
+  # Tags the owners in .github/owners on an issue triage left open, so they can decide whether the
+  # maintainer should work on it. Its own job so that none of triage's early exits skip it, and it
+  # waits for triage to succeed, so a failed triage doesn't use up the one ask.
+  ask-owners:
+    needs: triage
+    if: ${{ needs.triage.result == 'success' && inputs.dry_run != true }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Ask the owners
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NUMBER: ${{ github.event.issue.number || inputs.issue_number }}
+        run: .github/scripts/ask-owners.sh "$NUMBER"
