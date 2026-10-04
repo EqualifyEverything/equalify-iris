@@ -5,8 +5,10 @@ FROM node:24-slim
 # git: agents/ is a git checkout (SHA pinning) and the contribution
 # workflow inspects it. poppler-utils: pdftoppm/pdfinfo for rasterizing uploaded
 # PDFs into per-page images, and pdftohtml for reading their link annotations,
-# which rasterizing destroys (src/pipeline/links.ts).
-RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates poppler-utils \
+# which rasterizing destroys (src/pipeline/links.ts). `upgrade` takes Debian's security fixes
+# before the node image is rebuilt with them, which the `scan` check needs (docs/ci.md).
+RUN apt-get update && apt-get upgrade -y \
+    && apt-get install -y --no-install-recommends git ca-certificates poppler-utils \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
