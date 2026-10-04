@@ -1,0 +1,6 @@
+# Owners: the people who decide what the maintainer works on. One GitHub login per line.
+#
+# The maintainer agent and `issue-to-pr.yml` work only on an issue an owner has labelled
+# `maintainer`. `issue-triage.yml` tags these owners when a new issue needs that decision.
+# Read from `main`, and on `issue-to-pr.yml`'s forbidden paths, so a PR cannot add itself.
+bbertucc

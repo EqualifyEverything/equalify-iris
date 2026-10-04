@@ -25,6 +25,9 @@ name: Issue to PR
 # "Claims" means a closing keyword or an `issue-<n>` branch, not a passing `#<n>`
 # in prose; see `Pick an issue` for why, and for every reason a run is skipped.
 #
+# It works only on an issue an owner in .github/owners has labelled `maintainer`,
+# a dispatch by number included. issue-triage.yml tags the owners for that call.
+#
 # Requires the same two repo settings as code-review.yml, and nothing new:
 #   - secret  AWS_BEDROCK_ROLE_ARN — the OIDC role. Its trust policy covers this
 #     repo's `refs/heads/*` subjects, which is what a `schedule` or
@@ -316,7 +319,8 @@ jobs:
             # already made the "is this worth doing" call, so skip labels and a
             # past rejection do not veto them — asking again by hand is exactly
             # how you overrule a rejection. A second PR for an issue that is
-            # still in the queue is just a mess, so that one still applies.
+            # still in the queue is just a mess, so that one still applies. So
+            # does the owner's `maintainer` label, checked below for both paths.
             if grep -qxF "$FORCED_ISSUE" /tmp/open-auto-issues.txt; then
               echo "should_run=false" >> "$GITHUB_OUTPUT"
               printf 'Skipped: issue #%s already has an open `iris-auto` PR.\n' \
@@ -366,6 +370,21 @@ jobs:
             echo "forced=false" >> "$GITHUB_OUTPUT"
           fi
 
+          # Only issues an owner approved: an owner in .github/owners added the `maintainer` label.
+          # This applies to a dispatch by number too, and fails closed if the events can't be read.
+          jq -r '.[].number' /tmp/candidates.json | while read -r n; do
+            if .github/scripts/owner-approved.sh "$n" >/dev/null; then echo "$n"; fi
+          done | jq -R 'tonumber' | jq -s . > /tmp/approved.json
+          jq --slurpfile ok /tmp/approved.json '[.[] | select(.number as $n | $ok[0] | index($n))]' \
+            /tmp/candidates.json > /tmp/candidates-approved.json
+          mv /tmp/candidates-approved.json /tmp/candidates.json
+          if [ -n "${FORCED_ISSUE:-}" ] && [ "$(jq length /tmp/candidates.json)" -eq 0 ]; then
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+            printf 'Skipped: no owner has labelled issue #%s `maintainer`.\n' "$FORCED_ISSUE" >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::Issue #$FORCED_ISSUE needs the \`maintainer\` label from an owner in .github/owners."
+            exit 1
+          fi
+
           COUNT=$(jq length /tmp/candidates.json)
           echo "candidate issues: $COUNT"
           if [ "$COUNT" -eq 0 ]; then
@@ -379,8 +398,8 @@ jobs:
               echo
               echo 'Every open issue is linked by an open pull request (anyone'"'"'s — see the table'
               echo 'above if there is one), already attempted by this workflow (open or'
-              echo 'previously-rejected PR), or carries a skip label. Nothing was run — no model'
-              echo 'call, no PR, no comment.'
+              echo 'previously-rejected PR), carries a skip label, or has no `maintainer` label'
+              echo 'from an owner. Nothing was run — no model call, no PR, no comment.'
             } >> "$GITHUB_STEP_SUMMARY"
             echo "::notice::No eligible open issue — nothing to do."
             exit 0
@@ -902,7 +921,7 @@ jobs:
           # an issue closes — into `.github/scripts/triage-decide.sh`. A privilege
           # boundary drawn at a directory name follows the privilege, not the name,
           # so anywhere a workflow's own logic lives belongs in this pattern.
-          FORBIDDEN='^(\.github/workflows/|\.github/scripts/|\.github/CODEOWNERS|LICENSE|infra/|\.env)'
+          FORBIDDEN='^(\.github/workflows/|\.github/scripts/|\.github/CODEOWNERS|\.github/owners|LICENSE|infra/|\.env)'
 
           RESULT=/tmp/iris-auto-result.json
           CLAIMED_PR=""
