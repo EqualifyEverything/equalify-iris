@@ -1006,7 +1006,9 @@ only which field names were given.
 The answer is `{"filename", "pdf", "report"}`: the file name to save as, the PDF in base64, and the
 tagger's report. `report.warnings` lists what the tagger could not do cleanly, such as a form field
 it could not find in the HTML. The demo page turns each warning into a plain sentence. A PDF that
-was already tagged has its old tags replaced, with a `retagged` warning.
+was already tagged has its old tags replaced, with a `retagged` warning. This needs iris-pdf with
+[equalify-iris-pdf#8](https://github.com/EqualifyEverything/equalify-iris-pdf/pull/8). An older one
+answers `422 already_tagged`.
 
 The session must have finished (`ready_for_review` or `closed`), or you get `409 invalid_state`. The
 PDF is tagged from the first pass's HTML for each page, before review. A page that failed extraction is

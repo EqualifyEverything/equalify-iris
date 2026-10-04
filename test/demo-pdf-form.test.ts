@@ -130,3 +130,21 @@ test("a late /fields reply is dropped after a new document, a re-run, or a newer
   const check = body.indexOf("if (stale()) return;", last);
   assert.ok(check > last && check < body.indexOf("show('pdf-part')"), "no await between the last check and the change");
 });
+
+// The submit handler, run against stand-ins for the page and the server.
+test("the demo sends only the values, and shows a refusal as an error", async () => {
+  const start = demoHtml.indexOf("async (ev) =>", demoHtml.indexOf("$('pdf-form').addEventListener('submit'"));
+  const end = demoHtml.lastIndexOf("});", demoHtml.indexOf("$('restart-btn')"));
+  const sent: unknown[] = [], errors: string[] = [];
+  const api = async (_path: string, opts: { body: string }) => {
+    sent.push(JSON.parse(opts.body));
+    return { ok: false, status: 422, json: async () => ({ error: { code: "encrypted", message: "The PDF is encrypted." } }) };
+  };
+  const handler = new Function(
+    "$", "sessionId", "api", "live", "setError", "fieldValues", "errMessage",
+    `return ${demoHtml.slice(start, end)}};`,
+  )(() => ({ disabled: false }), "ses_1", api, () => {}, (m: string) => m && errors.push(m), () => ({ name: "Ada" }), async (res: { json: () => Promise<{ error: { message: string } }> }) => (await res.json()).error.message);
+  await handler({ preventDefault() {} });
+  assert.deepEqual(sent, [{ values: { name: "Ada" } }]);
+  assert.deepEqual(errors, ["Could not tag the PDF: The PDF is encrypted."]);
+});
