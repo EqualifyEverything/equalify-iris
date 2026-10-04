@@ -1005,10 +1005,10 @@ only which field names were given.
 
 The answer is `{"filename", "pdf", "report"}`: the file name to save as, the PDF in base64, and the
 tagger's report. `report.warnings` lists what the tagger could not do cleanly, such as a form field
-it could not find in the HTML. The demo page turns each warning into a plain sentence.
-
-A PDF that is already tagged gets `422 already_tagged`. Send `"retag": true` to replace its tags
-with tags from the HTML. The report then has a `retagged` warning.
+it could not find in the HTML. The demo page turns each warning into a plain sentence. A PDF that
+was already tagged has its old tags replaced, with a `retagged` warning. This needs iris-pdf with
+[equalify-iris-pdf#8](https://github.com/EqualifyEverything/equalify-iris-pdf/pull/8). An older one
+answers `422 already_tagged`.
 
 The session must have finished (`ready_for_review` or `closed`), or you get `409 invalid_state`. The
 PDF is tagged from the first pass's HTML for each page, before review. A page that failed extraction is
@@ -4368,10 +4368,9 @@ pages reported blank, which an empty document could not.
 ### `tagged_pdf` / `tagged_pdf_failed`
 
 A [tagged PDF](#get-a-tagged-pdf-optional) was made, or the tagger refused. `ms` is how long it took.
-`tagged_pdf` lists `fields_given`, the names of the fields that were filled in, and `retag`. The
-values are never logged. `tagged_pdf_failed` has the tagger's `code` and `error`. An `internal_error`'s
-message is left out, because it may quote a value. The demo asks before it retags, so a demo retag
-logs `tagged_pdf_failed` with `already_tagged` first, then `tagged_pdf` with `retag: true`.
+`tagged_pdf` lists `fields_given`, the names of the fields that were filled in. The values are
+never logged. `tagged_pdf_failed` has the tagger's `code` and `error`. An `internal_error`'s
+message is left out, because it may quote a value.
 
 ### `form_fields` / `page_fields` / `page_fields_missing`
 

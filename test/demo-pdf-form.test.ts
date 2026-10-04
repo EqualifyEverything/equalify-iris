@@ -95,12 +95,14 @@ test("the report's warnings come back as one sentence per kind", () => {
       { code: "missing_alt", page: 2 },
       { code: "field_not_in_html", page: 1 },
       { code: "no_title" },
+      { code: "retagged" },
       { code: "something_new" },
     ],
   });
   assert.deepEqual(notes, [
     "2 images have no description.",
     "One form field was not found in the HTML, so a screen reader reaches it at the end of its page.",
+    "The PDF's old tags were replaced with tags from the HTML.",
     "Note from the tagger: something_new.",
   ]);
   assert.deepEqual(pdfNotes({ warnings: [] }), []);
@@ -130,40 +132,19 @@ test("a late /fields reply is dropped after a new document, a re-run, or a newer
 });
 
 // The submit handler, run against stand-ins for the page and the server.
-function submitHandler(replies: { status: number; body: unknown }[], answer: boolean) {
+test("the demo sends only the values, and shows a refusal as an error", async () => {
   const start = demoHtml.indexOf("async (ev) =>", demoHtml.indexOf("$('pdf-form').addEventListener('submit'"));
   const end = demoHtml.lastIndexOf("});", demoHtml.indexOf("$('restart-btn')"));
-  const sent: unknown[] = [], said: string[] = [], asked: string[] = [], errors: string[] = [];
+  const sent: unknown[] = [], errors: string[] = [];
   const api = async (_path: string, opts: { body: string }) => {
     sent.push(JSON.parse(opts.body));
-    const r = replies.shift()!;
-    const res = { ok: r.status < 400, status: r.status, json: async () => r.body, clone: () => res };
-    return res;
+    return { ok: false, status: 422, json: async () => ({ error: { code: "encrypted", message: "The PDF is encrypted." } }) };
   };
-  const $ = () => ({ disabled: false });
   const handler = new Function(
-    "$", "sessionId", "api", "confirm", "live", "setError", "fieldValues", "errMessage",
+    "$", "sessionId", "api", "live", "setError", "fieldValues", "errMessage",
     `return ${demoHtml.slice(start, end)}};`,
-  )($, "ses_1", api, (q: string) => (asked.push(q), answer), (m: string) => said.push(m), (m: string) => m && errors.push(m), () => ({}), async (res: { json: () => Promise<{ error: { message: string } }> }) => (await res.json()).error.message);
-  return { run: () => handler({ preventDefault() {} }), sent, said, asked, errors };
-}
-
-test("an already-tagged PDF is retagged only after the reader says yes", async () => {
-  const already = { status: 422, body: { error: { code: "already_tagged", message: "The PDF is already tagged." } } };
-  const no = submitHandler([already], false);
-  await no.run();
-  assert.deepEqual(no.sent, [{ values: {}, retag: false }]);
-  assert.equal(no.asked.length, 1);
-  assert.deepEqual(no.errors, []);
-  assert.equal(no.said.at(-1), "The PDF was not retagged.");
-
-  const yes = submitHandler([already, { status: 500, body: { error: { message: "stop here" } } }], true);
-  await yes.run();
-  assert.deepEqual(yes.sent, [{ values: {}, retag: false }, { values: {}, retag: true }]);
-  assert.deepEqual(yes.errors, ["Could not tag the PDF: stop here"]);
-
-  // Any other refusal is shown, not asked about.
-  const other = submitHandler([{ status: 422, body: { error: { code: "encrypted", message: "The PDF is encrypted." } } }], true);
-  await other.run();
-  assert.deepEqual([other.asked, other.sent.length, other.errors], [[], 1, ["Could not tag the PDF: The PDF is encrypted."]]);
+  )(() => ({ disabled: false }), "ses_1", api, () => {}, (m: string) => m && errors.push(m), () => ({ name: "Ada" }), async (res: { json: () => Promise<{ error: { message: string } }> }) => (await res.json()).error.message);
+  await handler({ preventDefault() {} });
+  assert.deepEqual(sent, [{ values: { name: "Ada" } }]);
+  assert.deepEqual(errors, ["Could not tag the PDF: The PDF is encrypted."]);
 });
