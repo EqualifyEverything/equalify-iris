@@ -318,7 +318,7 @@ jobs:
           UNRESOLVED_RATE_MAX=0.15
           # Fraction of documents where an `href` present before the copy editor was
           # missing after it. Lower, because some of these are content loss: the user's
-          # document had a link and ours does not. Some are a link changed (#503, #509).
+          # document had a link and ours does not. Some are a link pointed elsewhere (#509).
           LINKS_DROPPED_RATE_MAX=0.02
           # Zero, meaning ANY document whose lint pass errored. Such a document has no
           # accessibility verdict at all: it ships unchecked, and the review loop had

@@ -163,13 +163,6 @@ export function missingLinkProblem(link: PdfLink): string {
 // footnotes when it fixes their structure — so including them would report ordinary
 // work as loss and bury the case that matters.
 //
-// Absolute URLs in `after` that were not in `before`. Logged beside a drop, so a reader can tell a
-// link that was lost from one that was pointed somewhere else (#509).
-export function addedHrefs(before: string, after: string): string[] {
-  const had = hrefsIn(before);
-  return [...hrefsIn(after)].filter((h) => isAbsolute(h) && !had.has(h)).sort();
-}
-
 // A URL the rewrite lengthened to the one its link prints is not counted: see `completedHrefs`.
 export function droppedHrefs(before: string, after: string): string[] {
   const kept = hrefsIn(after);
@@ -201,6 +194,13 @@ export function completedHrefs(before: string, after: string): { from: string; t
     used.add(to);
   }
   return [...completed].map(([from, to]) => ({ from, to })).sort((a, b) => (a.from < b.from ? -1 : 1));
+}
+
+// Absolute URLs in `after` that were not in `before`. Logged beside a drop, so a reader can tell a
+// link that was lost from one that was pointed somewhere else (#509).
+export function addedHrefs(before: string, after: string): string[] {
+  const had = hrefsIn(before);
+  return [...hrefsIn(after)].filter((h) => isAbsolute(h) && !had.has(h)).sort();
 }
 
 // Each `<a href>` and its printed text with tags and whitespace removed, both normalized.

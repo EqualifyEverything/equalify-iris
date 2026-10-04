@@ -3361,7 +3361,7 @@ export async function runReview(
     if (dropped.length) {
       droppedLinks += dropped.length;
       const repaired = new Set(completed.map((c) => c.to));
-      const added = addedHrefs(before, body).filter((h) => !repaired.has(h));
+      const added = addedHrefs(before, body).filter((h) => !repaired.has(h)).slice(0, 20);
       ctx.log.event("editor_links_dropped", { iteration: iterations, hrefs: dropped, added });
     }
     if (completed.length) ctx.log.event("editor_links_completed", { iteration: iterations, links: completed });
