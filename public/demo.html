@@ -577,24 +577,10 @@
       $('pdf-btn').disabled = true;
       live('Tagging your PDF. This can take a minute.');
       try {
-        const values = fieldValues($('pdf-field-list'));
-        const post = (retag) => api('/sessions/' + sessionId + '/pdf', {
+        const res = await api('/sessions/' + sessionId + '/pdf', {
           method: 'POST', headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ values, retag }),
+          body: JSON.stringify({ values: fieldValues($('pdf-field-list')) }),
         });
-        let res = await post(false);
-        // A PDF that is already tagged is only retagged if the reader says so.
-        if (res.status === 422) {
-          const code = await res.clone().json().then((j) => j.error && j.error.code, () => null);
-          if (code === 'already_tagged') {
-            if (!confirm('This PDF is already tagged. Retagging replaces its existing tags with tags from Iris\'s HTML. Retag it?')) {
-              live('The PDF was not retagged.');
-              return;
-            }
-            live('Retagging your PDF.');
-            res = await post(true);
-          }
-        }
         if (!res.ok) throw new Error(await errMessage(res));
         const out = await res.json();
         const bytes = Uint8Array.from(atob(out.pdf), (c) => c.charCodeAt(0));

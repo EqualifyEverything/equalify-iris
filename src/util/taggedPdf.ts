@@ -121,7 +121,7 @@ export type TagInput = { lang?: string; title?: string; pages: { sourcePage: num
 // neither them nor the tagged PDF.
 export async function tagPdf(
   command: string,
-  args: { pdfPath: string; input: TagInput; values: Record<string, unknown>; retag?: boolean; scratchRoot: string; timeoutSeconds: number },
+  args: { pdfPath: string; input: TagInput; values: Record<string, unknown>; scratchRoot: string; timeoutSeconds: number },
 ): Promise<{ pdf: Buffer; report: unknown }> {
   mkdirSync(args.scratchRoot, { recursive: true });
   const dir = mkdtempSync(join(args.scratchRoot, "pdf-"));
@@ -130,8 +130,6 @@ export async function tagPdf(
     writeFileSync(f("pages.json"), JSON.stringify(args.input));
     writeFileSync(f("values.json"), JSON.stringify(args.values), { mode: 0o600 });
     const argv = ["tag", "--pdf", args.pdfPath, "--pages", f("pages.json"), "--values", f("values.json"), "--out", f("out.pdf"), "--report", f("report.json")];
-    // An already-tagged PDF is refused (`already_tagged`) unless the user asked to replace its tags.
-    if (args.retag) argv.push("--retag");
     try {
       await execFileP(command, argv, { maxBuffer: MAX_BUFFER, timeout: args.timeoutSeconds * 1000 });
     } catch (e) {
