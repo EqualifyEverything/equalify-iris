@@ -199,9 +199,8 @@ export function completedHrefs(before: string, after: string): { from: string; t
 // Each `<a href>` and its printed text with tags and whitespace removed, both normalized.
 function anchorsIn(html: string): { href: string; text: string }[] {
   return [...html.matchAll(/<a\b[^>]*?\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))[^>]*>([\s\S]*?)<\/a>/gi)].map((m) => {
-    let text = m[4]!;
-    for (let prev = ""; prev !== text; ) [prev, text] = [text, text.replace(/<[^>]*>/g, "")];
-    return { href: normalizeHref(m[1] ?? m[2] ?? m[3] ?? ""), text: normalizeHref(text.replace(/\s+/g, "")) };
+    const text = m[4]!.replace(/<[^>]*>/g, "").replace(/[<>\s]+/g, "");
+    return { href: normalizeHref(m[1] ?? m[2] ?? m[3] ?? ""), text: normalizeHref(text) };
   });
 }
 
