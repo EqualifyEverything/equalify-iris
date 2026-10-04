@@ -78,14 +78,16 @@ test("triage tags the owners once on an open issue no owner has approved", () =>
   assert.match(run("ask-owners.sh", { "issue.json": open }, {}, "# x\na\n  \nb\n").posted ?? "", /^@a @b: /);
 });
 
-test("issue-to-pr keeps only approved issues, and triage asks after every outcome", () => {
+test("issue-to-pr keeps only approved issues, and triage asks once triage succeeds", () => {
   const itp = parse(readFileSync(join(ROOT, ".github", "workflows", "issue-to-pr.yml"), "utf8"));
   const pick: string = itp.jobs.propose.steps.find((s: { id?: string }) => s.id === "triage").run;
+  const built = pick.lastIndexOf("> /tmp/candidates.json");
+  const label = pick.indexOf('select(any(.labels[]; .name == "maintainer"))');
   const gate = pick.indexOf(".github/scripts/owner-approved.sh");
-  assert.ok(gate > pick.lastIndexOf("> /tmp/candidates.json"), "after both paths build the candidates");
-  assert.ok(gate < pick.indexOf("COUNT=$(jq length /tmp/candidates.json)"), "before they are counted");
+  const counted = pick.indexOf("COUNT=$(jq length /tmp/candidates.json)");
+  assert.ok(built < label && label < gate, "the current label is checked first, after both paths build the candidates");
+  assert.ok(gate < counted, "before they are counted");
   assert.match(readFileSync(join(ROOT, ".github", "workflows", "issue-to-pr.yml"), "utf8"), /FORBIDDEN='[^']*\\\.github\/owners/);
-  assert.match(pick.slice(gate), /select\(any\(\.labels\[\]; \.name == "maintainer"\)\)/, "and the label is on it now");
   const skip = pick.match(/SKIP_LABELS="([^"]*)"/)![1]!.split(" ");
   const asks = readFileSync(join(SCRIPTS, "ask-owners.sh"), "utf8");
   for (const name of skip) assert.ok(asks.includes(`"${name}"`), `ask-owners skips ${name} too`);

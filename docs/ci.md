@@ -112,8 +112,8 @@ that human is reading, not whether they read it.
 opened or reopened**. It reads the new issue, finds the open issue it most resembles, and — only
 when a second, independent session fails to refute the claim — closes the new one as a duplicate
 with a comment naming the survivor. Anything short of that is commented and reported, never closed.
-An issue it leaves open gets one comment tagging the owners in `.github/owners`, asking for the
-`maintainer` label.
+An issue it leaves open, with no skip label, gets one comment tagging the owners in
+`.github/owners`, asking for the `maintainer` label.
 
 It exists because the dedupe already in the app cannot do this, and was never trying to.
 `src/github/issue.ts` refuses to file an `Agent update proposal:` whose title exactly matches an
