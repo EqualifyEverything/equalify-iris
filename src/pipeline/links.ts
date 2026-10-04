@@ -162,9 +162,29 @@ export function missingLinkProblem(link: PdfLink): string {
 // anchors.ts renames colliding ids as pages are joined, and the editor renumbers
 // footnotes when it fixes their structure — so including them would report ordinary
 // work as loss and bury the case that matters.
+//
+// A URL the rewrite lengthened to the one its link prints is not counted: see `completedHrefs`.
 export function droppedHrefs(before: string, after: string): string[] {
   const kept = hrefsIn(after);
-  return [...hrefsIn(before)].filter((h) => isAbsolute(h) && !kept.has(h)).sort();
+  const completed = new Set(completedHrefs(before, after));
+  return [...hrefsIn(before)].filter((h) => isAbsolute(h) && !kept.has(h) && !completed.has(h)).sort();
+}
+
+// Absolute URLs a rewrite replaced with a longer one that starts with it and is the link's own
+// printed text (#503). A URL that wraps onto a second line in a PDF can carry a link target cut at
+// the wrap, and the editor, which sees the page, writes the whole printed URL. The link then goes
+// where the page says, so it is a repair and not a loss.
+export function completedHrefs(before: string, after: string): string[] {
+  const kept = hrefsIn(after);
+  const printed: string[] = [];
+  for (const m of after.matchAll(/<a\b[^>]*?\bhref\s*=\s*(?:"([^"]*)"|'([^']*)')[^>]*>([\s\S]*?)<\/a>/gi)) {
+    const href = normalizeHref(m[1] ?? m[2] ?? "");
+    const text = normalizeHref(m[3]!.replace(/<[^>]*>/g, "").replace(/\s+/g, ""));
+    if (href === text) printed.push(href);
+  }
+  return [...hrefsIn(before)]
+    .filter((h) => isAbsolute(h) && !kept.has(h) && printed.some((p) => p.length > h.length && p.startsWith(h)))
+    .sort();
 }
 
 // Every in-document reference in the delivered document, and whether it lands (#234).

@@ -620,6 +620,21 @@ test("the round is measured like any other before the loop ends on it", async ()
   });
 });
 
+test("a link target the round lengthened to its printed URL is logged as completed, not dropped (#503)", async () => {
+  await withTemp(async (dir) => {
+    const first = `<p><a href="https://example.com/forms/annual">https://example.com/forms/annual-report.pdf</a> the rest of it</p>`;
+    const fixed = `<p><a href="https://example.com/forms/annual-report.pdf">https://example.com/forms/annual-report.pdf</a> the rest of it</p>`;
+    const { ctx, rec } = ctxWith(dir, {
+      sectionAnswer: (s) => (s.index === 1 ? s.html.replace(first, fixed) : s.html),
+    });
+    const result = await review(ctx, `${first}\n\n${LONG}`);
+    const completed = rec.events.find((e) => e.type === "editor_links_completed");
+    assert.deepEqual(completed?.data, { iteration: 1, hrefs: ["https://example.com/forms/annual"] });
+    assert.equal(rec.events.some((e) => e.type === "editor_links_dropped"), false);
+    assert.equal(result.droppedLinks, 0);
+  });
+});
+
 test("a round answered piece by piece is not a round that converged", async () => {
   await withTemp(async (dir) => {
     // `review_converged` claims the editor read the whole document, decided it was better left

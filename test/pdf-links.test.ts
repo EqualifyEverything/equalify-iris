@@ -15,6 +15,7 @@ import {
   type PdfLink,
 } from "../src/util/pdf.ts";
 import {
+  completedHrefs,
   droppedHrefs,
   missingLinkProblem,
   missingLinks,
@@ -595,6 +596,24 @@ test("a rewrite that loses a link is detectable; one that only renames anchors i
   assert.deepEqual(droppedHrefs(before, `<p><a href="https://example.org/a">a</a> <a href="#fn-2">1</a></p>`), []);
   // Link text may change (2.4.4) as long as the target survives.
   assert.deepEqual(droppedHrefs(before, `<p><a href="https://example.org/a">the annual report</a></p>`), []);
+});
+
+test("a target cut at a line wrap, lengthened to the printed URL, is a repair and not a drop (#503)", () => {
+  // The PDF's link target stops where the printed URL wraps. The editor writes the whole printed URL.
+  const before = `<p><a href="https://example.org/forms/annual">https://example.org/forms/annual-
+report_2026.pdf</a></p>`;
+  const repaired = `<p><a href="https://example.org/forms/annual-report_2026.pdf">https://example.org/forms/annual-report_2026.pdf</a></p>`;
+  assert.deepEqual(droppedHrefs(before, repaired), []);
+  assert.deepEqual(completedHrefs(before, repaired), ["https://example.org/forms/annual"]);
+  // Longer, but not what the link prints: still a drop.
+  const other = `<p><a href="https://example.org/forms/annual-other">https://example.org/forms/annual-report_2026.pdf</a></p>`;
+  assert.deepEqual(droppedHrefs(before, other), ["https://example.org/forms/annual"]);
+  assert.deepEqual(completedHrefs(before, other), []);
+  // The printed URL, but not starting with the old target: still a drop.
+  const elsewhere = `<p><a href="https://example.net/x">https://example.net/x</a></p>`;
+  assert.deepEqual(droppedHrefs(before, elsewhere), ["https://example.org/forms/annual"]);
+  // Unwrapped to plain text: still a drop.
+  assert.deepEqual(droppedHrefs(before, `<p>https://example.org/forms/annual-report_2026.pdf</p>`), ["https://example.org/forms/annual"]);
 });
 
 // ---------------------------------------------------------------------------
