@@ -38,7 +38,7 @@ export BASE=http://localhost:8080/v1
 
 ```bash
 curl -s "$BASE/health"
-# {"status":"ok","service":"equalify-iris","version":"1.0.0"}
+# {"status":"ok","service":"equalify-iris","version":"1.1.0"}
 ```
 
 `version` is the running build's, so this is how you check a deployment is the one you meant to

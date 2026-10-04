@@ -124,7 +124,7 @@ Check it's alive, and which build it is:
 
 ```bash
 curl http://localhost:8080/v1/health
-# {"status":"ok","service":"equalify-iris","version":"1.0.0"}
+# {"status":"ok","service":"equalify-iris","version":"1.1.0"}
 ```
 
 Or just open the **accessible browser app** at `http://localhost:8080/` for a no-API walkthrough — no
