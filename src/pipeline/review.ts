@@ -37,7 +37,7 @@ import {
 import { flatten } from "./flatten.ts";
 import { examplesForPrompt } from "./memory.ts";
 import { knownPages, pageIndex, type IndexedPage } from "./pageindex.ts";
-import { droppedHrefs } from "./links.ts";
+import { completedHrefs, droppedHrefs } from "./links.ts";
 import { sameWordedHeadingNote, sameWordedHeadingRuns } from "./headings.ts";
 
 export interface ReviewIssue {
@@ -3361,6 +3361,8 @@ export async function runReview(
       droppedLinks += dropped.length;
       ctx.log.event("editor_links_dropped", { iteration: iterations, hrefs: dropped });
     }
+    const completed = completedHrefs(before, body);
+    if (completed.length) ctx.log.event("editor_links_completed", { iteration: iterations, links: completed });
     // See BODY_MARKERS: the only place a marker's DISAPPEARANCE is recorded. An arrival is also
     // recorded on the page path, by `markers_added` on `page_corrected` (#373) — additions only,
     // because that corrector is handed the image and resolving an illegible passage is its job. The

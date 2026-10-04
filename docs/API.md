@@ -319,7 +319,8 @@ curl -s -H "Authorization: Bearer $IRIS_QUALITY_TOKEN" "$BASE/quality?days=30"
     `truncated` beside `editor_truncated_rate` and the output ceiling. One threshold over both
     cannot be set honestly, which is why the weekly report's is still on the mixture and says so.
 * `links_dropped_rate` — share of documents where an `href` present before the copy editor was
-  missing after it.
+  missing after it. A URL the editor lengthened to the link's printed URL is not counted (see
+  [`editor_links_completed`](#editor_links_completed)).
 * `links_unresolved_rate` — share of documents that shipped with an in-document reference that
   lands nowhere: an `href="#"`, or a fragment naming an `id` the delivered document does not
   contain. Counted per document; the per-reference numbers, and *which* ids failed, are on the
@@ -1062,8 +1063,8 @@ The events worth grepping for have a section each below, and the index is a link
 the index when you have a `type` off a log line and want to know what it means; read a section when
 you want to know what the field it names is for and what it costs.
 
-**The index is the whole log.** `src/` emits **124** event types and every one of them has a section
-below — **116** sections, because a few cover two or three events that are only read together. So a
+**The index is the whole log.** `src/` emits **125** event types and every one of them has a section
+below — **117** sections, because a few cover two or three events that are only read together. So a
 `type` you cannot find here is not one the index skipped: it is a misread line, or a name `src/` no
 longer emits.
 
@@ -1137,6 +1138,7 @@ emits fails it too.
 | [`editor_images_refused`](#editor_images_refused) | The payload was refused as too large, so it was re-sent **without** images |
 | [`editor_fidelity_observed`](#editor_fidelity_observed) | The Copy Editor reports a disagreement **nobody asked it about** |
 | [`editor_links_dropped`](#editor_links_dropped) | An `href` present before that round's correction was missing after it |
+| [`editor_links_completed`](#editor_links_completed) | The Copy Editor lengthened an `href` to the URL its link prints |
 | [`internal_links`](#internal_links) | The delivered document has an in-document reference that lands nowhere |
 | [`delivered_markup`](#delivered_markup) | The delivered document's own structure disagrees with itself |
 | [`delivered_structure`](#delivered_structure) | Four structural defects **no rule in the gate reports** |
@@ -3089,6 +3091,13 @@ noticed nothing.
 An `href` present before that round's correction was missing after it (`iteration`, `hrefs`). A
 link's target came from the source **file**, not from a page image, so a dropped one cannot be
 recovered by looking again — logged rather than repaired, and counted into `links_dropped_rate`.
+
+### `editor_links_completed`
+
+The Copy Editor replaced an `href` with a longer URL that starts with it and is the text its own
+link printed (`iteration`, and `links`, each `{from, to}`). The longer URL must be new in that round. This happens when a PDF's link target is cut where the
+printed URL wraps onto a second line. It is a repair, so it is not in `editor_links_dropped` or
+`links_dropped_rate`.
 
 ### `internal_links`
 
