@@ -91,7 +91,7 @@
 
   <header>
     <h1>Equalify Iris</h1>
-    <p class="tagline">Turn images of document pages into accessible HTML.</p>
+    <p class="tagline">Turn a PDF or page images into accessible HTML<span id="tagline-pdf" hidden>, and get the PDF back tagged</span>.</p>
     <!-- Filled from GET /v1/stats after load, and left hidden if that fails or
          nothing has been converted yet: an empty boast is worse than none. Not a
          live region — it is page content that happens to arrive late, not a
@@ -754,6 +754,7 @@
         if (!res.ok) return;
         const l = await res.json();
         taggedPdfOn = Boolean(l && l.tagged_pdf === true);
+        $('tagline-pdf').hidden = !taggedPdfOn;
         const bytes = Number(l && l.image && l.image.max_bytes);
         if (!Number.isFinite(bytes) || bytes < 1) return;
         uploadLimits = { maxBytes: bytes, hint: String(l.image.hint || '') };
