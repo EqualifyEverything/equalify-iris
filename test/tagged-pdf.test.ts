@@ -4,7 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import express from "express";
 import type { AddressInfo } from "node:net";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -194,11 +194,27 @@ test("a flat form lists the fields tagging makes from its HTML, and only then ta
       assert.equal(s.tagRuns(), c.runs, `case ${i}`);
       assert.deepEqual((existsSync(s.paths.pdfScratchRoot()) ? readdirSync(s.paths.pdfScratchRoot()) : []).filter((n) => n.startsWith("pdf-")), [], `case ${i}: scratch removed`);
       if (i === 0) {
+        const log = () => readFileSync(s.paths.sessionLog(s.id), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+        assert.deepEqual(log().map((e) => [e.type, e.created]), [["tagged_pdf_fields", 1]]);
+        const listed = (await (await s.fields()).json()).fields;
+        assert.equal(listed[0].created, true, "a created field is marked");
+        assert.equal(s.tagRuns(), 1, "asked again: the list is reused, not re-tagged");
+        // New extracted pages: tagged again.
+        const later = new Date(Date.now() + 5000);
+        utimesSync(s.paths.sessionFinalFragments(s.id), later, later);
+        await names(s);
+        assert.equal(s.tagRuns(), 2, "the pages changed: tagged again");
         // The download fills the created field by that name.
         const res = await s.tag({ values: { "full-name": "Test Person" } });
         assert.equal(res.status, 200);
         const out = JSON.parse(Buffer.from((await res.json()).pdf, "base64").toString().slice(10));
         assert.deepEqual(out.values, { "full-name": "Test Person" });
+      }
+      if (i === 4) {
+        const events = readFileSync(s.paths.sessionLog(s.id), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+        assert.deepEqual(events.map((e) => [e.type, e.code]), [["tagged_pdf_fields_failed", "text_lost"]]);
+        await names(s);
+        assert.equal(s.tagRuns(), 2, "a failure is not kept, so it is tried again");
       }
     } finally {
       s.close();

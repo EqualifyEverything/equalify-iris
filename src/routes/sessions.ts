@@ -1,7 +1,7 @@
 import { Router } from "express";
 import type { Request, Response, NextFunction } from "express";
 import multer from "multer";
-import { writeFileSync, readFileSync, existsSync, rmSync } from "node:fs";
+import { writeFileSync, readFileSync, existsSync, rmSync, statSync } from "node:fs";
 import { extname, join } from "node:path";
 import { ulid } from "ulid";
 import type { IrisConfig } from "../config.ts";
@@ -629,6 +629,10 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
     };
   }
 
+  // A flat form's created fields, per session. The tagger names them the same way on every
+  // run, so the list holds until the extracted pages change.
+  const createdCache = new Map<string, { mtimeMs: number; fields: (PdfField & { created: true })[] }>();
+
   // GET /v1/sessions/{id}/fields — the source PDF's form fields, for a fill-in form.
   r.get("/:id/fields", async (req: AuthedRequest, res) => {
     const src = sourcePdf(req, res);
@@ -636,20 +640,40 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
     if (tooBusy(res)) return;
     tagging++;
     try {
-      let fields = await readFields(src.command, src.pdf);
+      const fields: PdfField[] = await readFields(src.command, src.pdf);
       // A PDF with no fields, whose HTML has form controls: a flat form. Tagging gives it
-      // fields, so list those. If that fails, list none; the download says why.
+      // fields, so list those, marked `created`. If that fails, list none; the download
+      // says why.
       if (!fields.length && readyToTag(src.s)) {
-        fields = await (async () => {
+        const id = src.s.session_id;
+        const mtimeMs = statSync(paths.sessionFinalFragments(id)).mtimeMs;
+        const hit = createdCache.get(id);
+        if (hit?.mtimeMs === mtimeMs) {
+          res.json({ fields: hit.fields });
+          return;
+        }
+        const started = Date.now();
+        let created: (PdfField & { created: true })[] = [];
+        let code: string | undefined;
+        try {
           const { input } = tagInput(src.s);
-          if (!input.pages.some((p) => /<(input|select|textarea)\b/i.test(p.html))) return [];
-          return createdFields(src.command, {
-            pdfPath: src.pdf,
-            input,
-            scratchRoot: paths.pdfScratchRoot(),
-            timeoutSeconds: tagTimeoutSeconds(cfg),
-          });
-        })().catch(() => []);
+          if (input.pages.some((p) => /<(input|select|textarea)\b/i.test(p.html))) {
+            const made = await createdFields(src.command, {
+              pdfPath: src.pdf,
+              input,
+              scratchRoot: paths.pdfScratchRoot(),
+              timeoutSeconds: tagTimeoutSeconds(cfg),
+            });
+            created = made.map((f) => ({ ...f, created: true as const }));
+            new RunLog(paths.sessionLog(id)).event("tagged_pdf_fields", { ms: Date.now() - started, created: created.length });
+          }
+          createdCache.set(id, { mtimeMs, fields: created });
+        } catch (e) {
+          code = e instanceof TaggedPdfError ? e.code : "tagger_failed";
+          new RunLog(paths.sessionLog(id)).event("tagged_pdf_fields_failed", { ms: Date.now() - started, code });
+        }
+        res.json({ fields: created });
+        return;
       }
       res.json({ fields });
     } catch (e) {

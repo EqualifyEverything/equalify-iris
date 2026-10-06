@@ -440,6 +440,8 @@
     function renderFields(doc, list, fields) {
       const el = (tag, props = {}) => Object.assign(doc.createElement(tag), props);
       const req = (f) => (f.required ? ' (required on the form)' : '');
+      // A field Iris made for a flat form is named like `home-address-2`. Read it as words.
+      const label = (f) => (f.created ? f.name.replace(/[-_]+/g, ' ').replace(/^./, (c) => c.toUpperCase()) : f.name) + req(f);
       let n = 0;
       for (const f of fields) {
         if (f.readonly) continue;
@@ -447,7 +449,7 @@
         let box;
         if (f.type === 'text' || (f.type === 'combobox' && f.editable)) {
           box = el('div');
-          box.append(el('label', { htmlFor: id, textContent: f.name + req(f) }));
+          box.append(el('label', { htmlFor: id, textContent: label(f) }));
           const input = el('input', { id, type: 'text' });
           if (f.maxlen) input.maxLength = f.maxlen;
           if (f.options.length) {
@@ -459,7 +461,7 @@
           box.append(input);
         } else if (f.type === 'radio' || f.type === 'checkbox') {
           box = el('fieldset');
-          box.append(el('legend', { textContent: f.name + req(f) }));
+          box.append(el('legend', { textContent: label(f) }));
           // A chosen radio cannot be unchosen, so "leave it" is a choice of its own. A
           // checkbox is asked the same way: the page cannot show whether the PDF has it
           // checked, so an unticked box would not say "leave it" or "untick it".
@@ -474,7 +476,7 @@
           });
         } else if (f.type === 'combobox' || f.type === 'listbox') {
           box = el('div');
-          box.append(el('label', { htmlFor: id, textContent: f.name + req(f) }));
+          box.append(el('label', { htmlFor: id, textContent: label(f) }));
           const select = el('select', { id, multiple: f.multiSelect });
           if (!f.multiSelect) select.append(el('option', { value: '', textContent: 'Leave as it is' }));
           for (const o of f.options) select.append(el('option', { value: o, textContent: o }));
