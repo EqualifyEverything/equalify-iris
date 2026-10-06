@@ -987,7 +987,8 @@ curl -s -H "$AUTH" "$BASE/sessions/$SID/fields" | jq '.fields[0]'
 ```
 
 `type` is one of `text`, `checkbox`, `radio`, `combobox`, `listbox`, `button` or `signature`. A PDF with
-no form gives `{"fields": []}`. It can answer `404`, `409 no_source_pdf`, `422` for a PDF the tagger
+no form gives `{"fields": []}`, unless its HTML has form controls. Then tagging makes the fields, so this
+tags the PDF once and lists those, by the names `/pdf` fills. It can answer `404`, `409 no_source_pdf`, `422` for a PDF the tagger
 refuses, or `503 busy`, the same as below.
 
 **Get the tagged PDF:**

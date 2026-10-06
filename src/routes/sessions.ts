@@ -42,7 +42,7 @@ import {
 } from "../providers/imageLimits.ts";
 import { imageDimensions } from "../util/imageSize.ts";
 import { usableFieldName } from "../pipeline/fields.ts";
-import { readFields, tagPdf, taggedPdfCommand, tagTimeoutSeconds, TaggedPdfError, type PdfField } from "../util/taggedPdf.ts";
+import { createdFields, readFields, tagPdf, taggedPdfCommand, tagTimeoutSeconds, TaggedPdfError, type PdfField, type TagInput } from "../util/taggedPdf.ts";
 
 // 50 MB is a memory bound, not the image limit. It stays well above what an image may
 // be (see imageLimits.ts) because a PDF legitimately is: 25 pages of scans is a large
@@ -602,6 +602,33 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
     return true;
   }
 
+  function readyToTag(s: SessionRecord): boolean {
+    return (s.status === "ready_for_review" || s.status === "closed") && existsSync(paths.sessionFinalFragments(s.session_id));
+  }
+  // The download's name, and the pages as extracted, for the tagger. Order is the PDF's page
+  // number, because the session is one PDF. A page that failed extraction holds only its
+  // `@page-failed` note, so it is left out and the tagger reports it untagged.
+  function tagInput(s: SessionRecord): { base: string; input: TagInput } {
+    const finalPath = paths.sessionFinalFragments(s.session_id);
+    const base = existsSync(paths.sessionSourceName(s.session_id))
+      ? readFileSync(paths.sessionSourceName(s.session_id), "utf8").trim() || "document"
+      : "document";
+    const { fragments = [] } = JSON.parse(readFileSync(finalPath, "utf8")) as { fragments?: Fragment[] };
+    const outPath = paths.sessionOutput(s.session_id);
+    const output = existsSync(outPath) ? readFileSync(outPath, "utf8") : "";
+    return {
+      base,
+      input: {
+        lang: output.match(/<html\b[^>]*\blang="([^"]+)"/i)?.[1],
+        title: base,
+        pages: [...fragments]
+          .filter((f) => !f.innerHtml.trimStart().startsWith("<!-- @page-failed"))
+          .sort((a, b) => a.order - b.order)
+          .map((f) => ({ sourcePage: f.order, html: f.innerHtml })),
+      },
+    };
+  }
+
   // GET /v1/sessions/{id}/fields — the source PDF's form fields, for a fill-in form.
   r.get("/:id/fields", async (req: AuthedRequest, res) => {
     const src = sourcePdf(req, res);
@@ -609,7 +636,22 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
     if (tooBusy(res)) return;
     tagging++;
     try {
-      res.json({ fields: await readFields(src.command, src.pdf) });
+      let fields = await readFields(src.command, src.pdf);
+      // A PDF with no fields, whose HTML has form controls: a flat form. Tagging gives it
+      // fields, so list those. If that fails, list none; the download says why.
+      if (!fields.length && readyToTag(src.s)) {
+        fields = await (async () => {
+          const { input } = tagInput(src.s);
+          if (!input.pages.some((p) => /<(input|select|textarea)\b/i.test(p.html))) return [];
+          return createdFields(src.command, {
+            pdfPath: src.pdf,
+            input,
+            scratchRoot: paths.pdfScratchRoot(),
+            timeoutSeconds: tagTimeoutSeconds(cfg),
+          });
+        })().catch(() => []);
+      }
+      res.json({ fields });
     } catch (e) {
       taggerError(res, e);
     } finally {
@@ -624,8 +666,7 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
     const src = sourcePdf(req, res);
     if (!src) return;
     const { s } = src;
-    const finalPath = paths.sessionFinalFragments(s.session_id);
-    if ((s.status !== "ready_for_review" && s.status !== "closed") || !existsSync(finalPath)) {
+    if (!readyToTag(s)) {
       sendError(res, 409, "invalid_state", "The PDF can be tagged once the session is ready_for_review.");
       return;
     }
@@ -639,23 +680,7 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
     const started = Date.now();
     tagging++;
     try {
-      const base = existsSync(paths.sessionSourceName(s.session_id))
-        ? readFileSync(paths.sessionSourceName(s.session_id), "utf8").trim() || "document"
-        : "document";
-      // The pages as extracted, by page order. Order is the PDF's page number, because
-      // the session is one PDF. A page that failed extraction holds only its
-      // `@page-failed` note, so it is left out and the tagger reports it untagged.
-      const { fragments = [] } = JSON.parse(readFileSync(finalPath, "utf8")) as { fragments?: Fragment[] };
-      const outPath = paths.sessionOutput(s.session_id);
-      const output = existsSync(outPath) ? readFileSync(outPath, "utf8") : "";
-      const input = {
-        lang: output.match(/<html\b[^>]*\blang="([^"]+)"/i)?.[1],
-        title: base,
-        pages: [...fragments]
-          .filter((f) => !f.innerHtml.trimStart().startsWith("<!-- @page-failed"))
-          .sort((a, b) => a.order - b.order)
-          .map((f) => ({ sourcePage: f.order, html: f.innerHtml })),
-      };
+      const { base, input } = tagInput(s);
       const { pdf, report } = await tagPdf(src.command, {
         pdfPath: src.pdf,
         input,

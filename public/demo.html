@@ -167,8 +167,8 @@
       </div>
 
       <!-- Only where this deployment makes tagged PDFs (GET /v1/limits `tagged_pdf`) and
-           the upload was one PDF. The fields come from that PDF (GET .../fields), so the
-           form is built when the result is shown. -->
+           the upload was one PDF. The fields come from that PDF, or for a flat form from
+           tagging it (GET .../fields), so the form is built when the result is shown. -->
       <div id="pdf-part" hidden>
         <h3 id="pdf-h">Get your PDF back, tagged</h3>
         <p>The same PDF you uploaded, tagged so a screen reader can read it in order. The pages look the same. The tags come from Iris's first reading of each page, before review, so the HTML above is the more accurate version.</p>

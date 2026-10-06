@@ -123,6 +123,23 @@ export async function tagPdf(
   command: string,
   args: { pdfPath: string; input: TagInput; values: Record<string, unknown>; scratchRoot: string; timeoutSeconds: number },
 ): Promise<{ pdf: Buffer; report: unknown }> {
+  return inScratch(command, args, (out, report) => ({ pdf: readFileSync(out), report: JSON.parse(readFileSync(report, "utf8")) }));
+}
+
+// The fields a flat form gets when tagged: iris-pdf makes them from the HTML's controls, and
+// names them the same way on every run. So tag it with no values and read them off the output.
+export async function createdFields(
+  command: string,
+  args: { pdfPath: string; input: TagInput; scratchRoot: string; timeoutSeconds: number },
+): Promise<PdfField[]> {
+  return inScratch(command, { ...args, values: {} }, (out) => readFields(command, out));
+}
+
+async function inScratch<T>(
+  command: string,
+  args: { pdfPath: string; input: TagInput; values: Record<string, unknown>; scratchRoot: string; timeoutSeconds: number },
+  read: (out: string, report: string) => T | Promise<T>,
+): Promise<T> {
   mkdirSync(args.scratchRoot, { recursive: true });
   const dir = mkdtempSync(join(args.scratchRoot, "pdf-"));
   const f = (name: string) => join(dir, name);
@@ -135,7 +152,7 @@ export async function tagPdf(
     } catch (e) {
       throw failure(e);
     }
-    return { pdf: readFileSync(f("out.pdf")), report: JSON.parse(readFileSync(f("report.json"), "utf8")) };
+    return await read(f("out.pdf"), f("report.json"));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
