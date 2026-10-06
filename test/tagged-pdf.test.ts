@@ -217,11 +217,11 @@ test("a flat form lists the fields tagging makes from its HTML, and only then ta
         assert.equal(s.tagRuns(), 1, "a failure is kept for a minute");
         mock.timers.enable({ apis: ["Date"], now: Date.now() + 61_000 });
         try {
-          await names(s);
+          await Promise.all([names(s), names(s)]);
         } finally {
           mock.timers.reset();
         }
-        assert.equal(s.tagRuns(), 2, "then tried again");
+        assert.equal(s.tagRuns(), 2, "then tried again, once for both asks");
       }
     } finally {
       s.close();
@@ -249,6 +249,19 @@ test("the created-fields cache keeps the newest 200 sessions", () => {
   const route = readFileSync(join(dirname(FAKE), "..", "..", "src", "routes", "sessions.ts"), "utf8");
   assert.match(route, /const CACHED_SESSIONS = 200;/);
   assert.match(route, /remember\(createdCache, id, entry, CACHED_SESSIONS\);/);
+});
+
+test("a session log that cannot be written does not cost the created fields", async () => {
+  const s = await serve({ source: "%PDF FLAT", page1: '<label>Full name <input type="text"></label>' });
+  try {
+    rmSync(s.paths.sessionLog(s.id), { force: true });
+    mkdirSync(s.paths.sessionLog(s.id)); // appending to a directory throws
+    const res = await s.fields();
+    assert.equal(res.status, 200);
+    assert.deepEqual(((await res.json()).fields as { name: string }[]).map((f) => f.name), ["full-name"]);
+  } finally {
+    s.close();
+  }
 });
 
 test("unreadable extracted pages: /fields lists none, /pdf answers 500", async () => {

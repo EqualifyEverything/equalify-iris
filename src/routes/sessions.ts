@@ -648,6 +648,14 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
   async function makeFields(src: { s: SessionRecord; command: string; pdf: string }): Promise<Created | null> {
     const id = src.s.session_id;
     const started = Date.now();
+    // An unwritable log must not cost the list it describes.
+    const note = (write: (log: RunLog) => void) => {
+      try {
+        write(new RunLog(paths.sessionLog(id)));
+      } catch {
+        // the list is the answer; its log line is not
+      }
+    };
     try {
       const { input } = tagInput(src.s);
       if (!input.pages.some((p) => /<(input|select|textarea)\b/i.test(p.html))) return [];
@@ -657,11 +665,11 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
         scratchRoot: paths.pdfScratchRoot(),
         timeoutSeconds: tagTimeoutSeconds(cfg),
       });
-      new RunLog(paths.sessionLog(id)).event("tagged_pdf_fields", { ms: Date.now() - started, created: made.length });
+      note((log) => log.event("tagged_pdf_fields", { ms: Date.now() - started, created: made.length }));
       return made.map((f) => ({ ...f, created: true as const }));
     } catch (e) {
       const code = e instanceof TaggedPdfError ? e.code : "tagger_failed";
-      new RunLog(paths.sessionLog(id)).event("tagged_pdf_fields_failed", { ms: Date.now() - started, code });
+      note((log) => log.event("tagged_pdf_fields_failed", { ms: Date.now() - started, code }));
       return null;
     }
   }
