@@ -26,7 +26,7 @@ function extract(name: string): string {
   throw new Error(`unbalanced braces reading ${name} from public/demo.html`);
 }
 
-type Field = { name: string; type: string; options: string[]; required?: boolean; readonly?: boolean; maxlen?: number | null; editable?: boolean; multiSelect?: boolean };
+type Field = { name: string; type: string; options: string[]; created?: boolean; required?: boolean; readonly?: boolean; maxlen?: number | null; editable?: boolean; multiSelect?: boolean };
 const renderFields = new Function(`${extract("renderFields")}; return renderFields;`)() as (doc: Document, list: Element, fields: Field[]) => number;
 const fieldValues = new Function(`${extract("fieldValues")}; return fieldValues;`)() as (list: Element) => Record<string, unknown>;
 const pdfNotes = new Function(`${extract("pdfNotes")}; return pdfNotes;`)() as (report: unknown) => string[];
@@ -61,6 +61,19 @@ test("every settable field gets one labelled control, and the rest get none", as
   const lint = await runAxe(doc.documentElement.outerHTML);
   assert.equal(lint.error, undefined, `axe-core did not run: ${lint.error}`);
   assert.deepEqual(lint.violations, []);
+});
+
+test("a field made for a flat form is labelled in words, and sent under its own name", () => {
+  const doc = new JSDOM('<!DOCTYPE html><html lang="en"><head><title>t</title></head><body><form id="f"></form></body></html>').window.document;
+  const list = doc.getElementById("f")!;
+  renderFields(doc, list, [
+    { name: "home-address-2", type: "text", options: [], created: true },
+    { name: "pay_by", type: "radio", options: ["Cash", "Card"], created: true },
+    { name: "applicant.name-x", type: "text", options: [] },
+  ] as Field[]);
+  assert.deepEqual([...list.querySelectorAll("label, legend")].map((l) => l.textContent).filter((t) => !["Leave as it is", "Cash", "Card"].includes(t!)), ["Home address 2", "Pay by", "applicant.name-x"]);
+  (list.querySelector('[data-field="home-address-2"] input') as HTMLInputElement).value = "x";
+  assert.deepEqual(fieldValues(list), { "home-address-2": "x" });
 });
 
 test("an untouched form sends nothing, so the PDF keeps what it had", () => {

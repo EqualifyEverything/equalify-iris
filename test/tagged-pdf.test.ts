@@ -1,16 +1,16 @@
 // The optional tagged-PDF output (src/util/taggedPdf.ts). `iris-pdf` is a separate
 // project, so these tests run a stand-in for it (test/fixtures/fake-iris-pdf.mjs).
-import { test } from "node:test";
+import { mock, test } from "node:test";
 import assert from "node:assert/strict";
 import express from "express";
 import type { AddressInfo } from "node:net";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { IrisConfig } from "../src/config.ts";
 import type { AuthedRequest } from "../src/auth/middleware.ts";
-import { keepPdfFields, keepSourcePdf, sessionsRouter } from "../src/routes/sessions.ts";
+import { keepPdfFields, keepSourcePdf, remember, sessionsRouter } from "../src/routes/sessions.ts";
 import { enumerateInputs } from "../src/pipeline/orchestrator.ts";
 import { limitsRouter } from "../src/routes/limits.ts";
 import { Store } from "../src/store/db.ts";
@@ -32,7 +32,7 @@ function cfg(dir: string, command?: string, timeout_seconds?: number): IrisConfi
 }
 
 // A session made from one PDF, finished, with two extracted pages.
-async function serve(opts: { command?: string; source?: string | null; status?: string; timeout?: number } = {}) {
+async function serve(opts: { command?: string; source?: string | null; status?: string; timeout?: number; page1?: string } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "iris-tagged-pdf-"));
   const config = cfg(dir, "command" in opts ? opts.command : FAKE, opts.timeout);
   const store = new Store(config.storage.database);
@@ -46,7 +46,7 @@ async function serve(opts: { command?: string; source?: string | null; status?: 
   const frag = (order: number, innerHtml: string) => ({ image: `p${order}.png`, order, agent: "page.md", region: "page", innerHtml, edges: [], log: "" });
   // Stored out of order on purpose: the pages must reach the tagger by page order.
   // Page 3 failed extraction, so it holds only its note.
-  const pages = [frag(2, "<p>two</p>"), frag(3, "<!-- @page-failed 3: timeout -->"), frag(1, "<h1>one</h1>")];
+  const pages = [frag(2, "<p>two</p>"), frag(3, "<!-- @page-failed 3: timeout -->"), frag(1, opts.page1 ?? "<h1>one</h1>")];
   writeFileSync(paths.sessionFinalFragments(id), JSON.stringify({ fragments: pages, body: "" }));
   writeFileSync(paths.sessionOutput(id), '<!DOCTYPE html><html lang="fr"><head><title>x</title></head><body></body></html>');
 
@@ -66,6 +66,7 @@ async function serve(opts: { command?: string; source?: string | null; status?: 
     paths,
     id,
     fields: () => fetch(`${base}/sessions/${id}/fields`),
+    tagRuns: () => (existsSync(join(paths.sessionDir(id), "tag-runs.txt")) ? readFileSync(join(paths.sessionDir(id), "tag-runs.txt"), "utf8").split("\n").length - 1 : 0),
     tag: (body: unknown) =>
       fetch(`${base}/sessions/${id}/pdf`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
     limits: () => fetch(`${base}/limits`),
@@ -169,6 +170,115 @@ test("GET /fields passes the PDF's fields through", async () => {
   }
 });
 
+test("a flat form lists the fields tagging makes from its HTML, and only then tags it", async () => {
+  const names = async (s: Awaited<ReturnType<typeof serve>>) => {
+    const res = await s.fields();
+    assert.equal(res.status, 200);
+    return ((await res.json()).fields as { name: string }[]).map((f) => f.name);
+  };
+  const form = '<h1>one</h1><label>Full name <input type="text"></label>';
+  const cases = [
+    { opts: { source: "%PDF FLAT", page1: form }, fields: ["full-name"], runs: 1 },
+    // No control in the HTML, or not extracted yet: nothing to make, so no tag runs.
+    { opts: { source: "%PDF FLAT" }, fields: [], runs: 0 },
+    { opts: { source: "%PDF FLAT", page1: form, status: "processing" }, fields: [], runs: 0 },
+    // The PDF has fields of its own: those, and no tag.
+    { opts: { page1: form }, fields: ["applicant.name", "applicant.consent"], runs: 0 },
+    // Tagging fails: no fields to offer, and the download will say why.
+    { opts: { source: "%PDF FLAT TAGFAIL", page1: form }, fields: [], runs: 1 },
+  ];
+  for (const [i, c] of cases.entries()) {
+    const s = await serve(c.opts);
+    try {
+      assert.deepEqual(await names(s), c.fields, `case ${i}`);
+      assert.equal(s.tagRuns(), c.runs, `case ${i}`);
+      assert.deepEqual((existsSync(s.paths.pdfScratchRoot()) ? readdirSync(s.paths.pdfScratchRoot()) : []).filter((n) => n.startsWith("pdf-")), [], `case ${i}: scratch removed`);
+      if (i === 0) {
+        const log = () => readFileSync(s.paths.sessionLog(s.id), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+        assert.deepEqual(log().map((e) => [e.type, e.created]), [["tagged_pdf_fields", 1]]);
+        const listed = (await (await s.fields()).json()).fields;
+        assert.equal(listed[0].created, true, "a created field is marked");
+        assert.equal(s.tagRuns(), 1, "asked again: the list is reused, not re-tagged");
+        // New extracted pages: tagged again.
+        const later = new Date(Date.now() + 5000);
+        utimesSync(s.paths.sessionFinalFragments(s.id), later, later);
+        await names(s);
+        assert.equal(s.tagRuns(), 2, "the pages changed: tagged again");
+        // The download fills the created field by that name.
+        const res = await s.tag({ values: { "full-name": "Test Person" } });
+        assert.equal(res.status, 200);
+        const out = JSON.parse(Buffer.from((await res.json()).pdf, "base64").toString().slice(10));
+        assert.deepEqual(out.values, { "full-name": "Test Person" });
+      }
+      if (i === 4) {
+        const events = readFileSync(s.paths.sessionLog(s.id), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+        assert.deepEqual(events.map((e) => [e.type, e.code]), [["tagged_pdf_fields_failed", "text_lost"]]);
+        await names(s);
+        assert.equal(s.tagRuns(), 1, "a failure is kept for a minute");
+        mock.timers.enable({ apis: ["Date"], now: Date.now() + 61_000 });
+        try {
+          await Promise.all([names(s), names(s)]);
+        } finally {
+          mock.timers.reset();
+        }
+        assert.equal(s.tagRuns(), 2, "then tried again, once for both asks");
+      }
+    } finally {
+      s.close();
+    }
+  }
+});
+
+test("two asks at once for a flat form's fields share one tag", async () => {
+  const s = await serve({ source: "%PDF FLAT", page1: '<label>Full name <input type="text"></label>' });
+  try {
+    const both = await Promise.all([s.fields(), s.fields()]);
+    for (const res of both) assert.deepEqual(((await res.json()).fields as { name: string }[]).map((f) => f.name), ["full-name"]);
+    assert.equal(s.tagRuns(), 1);
+  } finally {
+    s.close();
+  }
+});
+
+test("the created-fields cache keeps the newest 200 sessions", () => {
+  const m = new Map<string, number>();
+  for (const k of ["a", "b", "c"]) remember(m, k, 1, 2);
+  assert.deepEqual([...m.keys()], ["b", "c"]);
+  remember(m, "b", 2, 2);
+  assert.deepEqual([...m.entries()], [["c", 1], ["b", 2]], "a set key becomes the newest");
+  const route = readFileSync(join(dirname(FAKE), "..", "..", "src", "routes", "sessions.ts"), "utf8");
+  assert.match(route, /const CACHED_SESSIONS = 200;/);
+  assert.match(route, /remember\(createdCache, id, entry, CACHED_SESSIONS\);/);
+});
+
+test("a session log that cannot be written does not cost the created fields", async () => {
+  const s = await serve({ source: "%PDF FLAT", page1: '<label>Full name <input type="text"></label>' });
+  try {
+    rmSync(s.paths.sessionLog(s.id), { force: true });
+    mkdirSync(s.paths.sessionLog(s.id)); // appending to a directory throws
+    const res = await s.fields();
+    assert.equal(res.status, 200);
+    assert.deepEqual(((await res.json()).fields as { name: string }[]).map((f) => f.name), ["full-name"]);
+  } finally {
+    s.close();
+  }
+});
+
+test("unreadable extracted pages: /fields lists none, /pdf answers 500", async () => {
+  const s = await serve({ source: "%PDF FLAT" });
+  try {
+    writeFileSync(s.paths.sessionFinalFragments(s.id), "{not json");
+    const res = await s.fields();
+    assert.equal(res.status, 200);
+    assert.deepEqual((await res.json()).fields, []);
+    const tagged = await s.tag({});
+    assert.equal(tagged.status, 500);
+    assert.equal((await tagged.json()).error.code, "tagger_failed");
+  } finally {
+    s.close();
+  }
+});
+
 test("a deployment without the command, or a session without a PDF, says so", async () => {
   const off = await serve({ command: undefined });
   try {
@@ -209,7 +319,7 @@ test("POST /pdf tags the pages in page order, leaves out a failed page, fills th
     // The values, and the filled PDF, are gone once the answer is sent.
     assert.equal(existsSync(made.scratch), false);
     assert.equal(dirname(made.scratch).startsWith(s.paths.pdfScratchRoot()), true);
-    assert.deepEqual(readdirSync(s.paths.pdfScratchRoot()).filter((f) => f.startsWith("pdf-")), []);
+    assert.deepEqual((existsSync(s.paths.pdfScratchRoot()) ? readdirSync(s.paths.pdfScratchRoot()) : []).filter((f) => f.startsWith("pdf-")), []);
     const log = readFileSync(s.paths.sessionLog(s.id), "utf8");
     assert.match(log, /"tagged_pdf"/);
     assert.match(log, /applicant\.name/, "the field names are logged");

@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Stands in for the `iris-pdf` command in test/tagged-pdf.test.ts. Same arguments, exit
 // codes and one-line errors, and no PDF work. Its "PDF" is JSON of what it was given.
-import { readFileSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { parseArgs } from "node:util";
 
 const [command, ...rest] = process.argv.slice(2);
@@ -22,7 +23,11 @@ if (a.help) {
 const pdf = readFileSync(a.pdf, "utf8");
 if (pdf.includes("ENCRYPTED")) fail("encrypted", "The PDF is encrypted.", 1);
 
-if (command === "fields") {
+// A "PDF" holding FLAT is a flat form: no fields, until tagging makes one from an <input>.
+if (command === "fields" && pdf.includes("FLAT")) {
+  const made = pdf.startsWith("%PDF-fake ") && JSON.parse(pdf.slice(10)).input.pages.some((p) => p.html.includes("<input"));
+  console.log(JSON.stringify(made ? [{ name: "full-name", type: "text", page: 1, options: [], required: false, readonly: false, maxlen: null, editable: false, multiSelect: false }] : []));
+} else if (command === "fields") {
   console.log(JSON.stringify([
     { name: "applicant.name", type: "text", page: 1, options: [], required: true, readonly: false, maxlen: 40, editable: false, multiSelect: false },
     { name: "applicant.consent", type: "checkbox", page: 1, options: ["Yes"], required: false, readonly: false, maxlen: null, editable: false, multiSelect: false },
@@ -31,6 +36,9 @@ if (command === "fields") {
       : []),
   ]));
 } else if (command === "tag") {
+  // So a test can tell whether a tag ran: one line per run, beside the source.
+  appendFileSync(join(dirname(a.pdf), "tag-runs.txt"), "tag\n");
+  if (pdf.includes("TAGFAIL")) fail("text_lost", "Page 1 lost text.", 2);
   const values = JSON.parse(readFileSync(a.values, "utf8"));
   if ("unknown.field" in values) fail("bad_value", "No field is named unknown.field.", 3);
   if ("crash" in values) fail("internal_error", `Cannot set ${values.crash}.`, 3);

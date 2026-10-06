@@ -167,8 +167,8 @@
       </div>
 
       <!-- Only where this deployment makes tagged PDFs (GET /v1/limits `tagged_pdf`) and
-           the upload was one PDF. The fields come from that PDF (GET .../fields), so the
-           form is built when the result is shown. -->
+           the upload was one PDF. The fields come from that PDF, or for a flat form from
+           tagging it (GET .../fields), so the form is built when the result is shown. -->
       <div id="pdf-part" hidden>
         <h3 id="pdf-h">Get your PDF back, tagged</h3>
         <p>The same PDF you uploaded, tagged so a screen reader can read it in order. The pages look the same. The tags come from Iris's first reading of each page, before review, so the HTML above is the more accurate version.</p>
@@ -440,6 +440,8 @@
     function renderFields(doc, list, fields) {
       const el = (tag, props = {}) => Object.assign(doc.createElement(tag), props);
       const req = (f) => (f.required ? ' (required on the form)' : '');
+      // A field Iris made for a flat form is named like `home-address-2`. Read it as words.
+      const label = (f) => (f.created ? f.name.replace(/[-_]+/g, ' ').replace(/^./, (c) => c.toUpperCase()) : f.name) + req(f);
       let n = 0;
       for (const f of fields) {
         if (f.readonly) continue;
@@ -447,7 +449,7 @@
         let box;
         if (f.type === 'text' || (f.type === 'combobox' && f.editable)) {
           box = el('div');
-          box.append(el('label', { htmlFor: id, textContent: f.name + req(f) }));
+          box.append(el('label', { htmlFor: id, textContent: label(f) }));
           const input = el('input', { id, type: 'text' });
           if (f.maxlen) input.maxLength = f.maxlen;
           if (f.options.length) {
@@ -459,7 +461,7 @@
           box.append(input);
         } else if (f.type === 'radio' || f.type === 'checkbox') {
           box = el('fieldset');
-          box.append(el('legend', { textContent: f.name + req(f) }));
+          box.append(el('legend', { textContent: label(f) }));
           // A chosen radio cannot be unchosen, so "leave it" is a choice of its own. A
           // checkbox is asked the same way: the page cannot show whether the PDF has it
           // checked, so an unticked box would not say "leave it" or "untick it".
@@ -474,7 +476,7 @@
           });
         } else if (f.type === 'combobox' || f.type === 'listbox') {
           box = el('div');
-          box.append(el('label', { htmlFor: id, textContent: f.name + req(f) }));
+          box.append(el('label', { htmlFor: id, textContent: label(f) }));
           const select = el('select', { id, multiple: f.multiSelect });
           if (!f.multiSelect) select.append(el('option', { value: '', textContent: 'Leave as it is' }));
           for (const o of f.options) select.append(el('option', { value: o, textContent: o }));

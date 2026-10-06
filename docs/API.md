@@ -987,7 +987,15 @@ curl -s -H "$AUTH" "$BASE/sessions/$SID/fields" | jq '.fields[0]'
 ```
 
 `type` is one of `text`, `checkbox`, `radio`, `combobox`, `listbox`, `button` or `signature`. A PDF with
-no form gives `{"fields": []}`. It can answer `404`, `409 no_source_pdf`, `422` for a PDF the tagger
+no form gives `{"fields": []}`.
+
+A flat form, such as a scan, has no fields until it is tagged. If its HTML has form controls, Iris
+tags it once and lists the fields it made, each with `"created": true`. `POST /pdf` fills them by
+those names. This needs iris-pdf with
+[equalify-iris-pdf#16](https://github.com/EqualifyEverything/equalify-iris-pdf/pull/16). An older
+one makes no fields, so the list is empty.
+
+It can answer `404`, `409 no_source_pdf`, `422` for a PDF the tagger
 refuses, or `503 busy`, the same as below.
 
 **Get the tagged PDF:**
@@ -1063,8 +1071,8 @@ The events worth grepping for have a section each below, and the index is a link
 the index when you have a `type` off a log line and want to know what it means; read a section when
 you want to know what the field it names is for and what it costs.
 
-**The index is the whole log.** `src/` emits **125** event types and every one of them has a section
-below — **117** sections, because a few cover two or three events that are only read together. So a
+**The index is the whole log.** `src/` emits **127** event types and every one of them has a section
+below — **118** sections, because a few cover two or three events that are only read together. So a
 `type` you cannot find here is not one the index skipped: it is a misread line, or a name `src/` no
 longer emits.
 
@@ -1191,6 +1199,7 @@ emits fails it too.
 | [`contribution_failed`](#contribution_failed) | The filing step threw, **after** `run_complete` |
 | [`run_failed`](#run_failed) | The run threw, so there is **no document** |
 | [`tagged_pdf` / `tagged_pdf_failed`](#tagged_pdf--tagged_pdf_failed) | A tagged PDF was made, or could not be |
+| [`tagged_pdf_fields` / `tagged_pdf_fields_failed`](#tagged_pdf_fields--tagged_pdf_fields_failed) | A flat form was tagged to list its fields, or could not be |
 | [`form_fields` / `page_fields` / `page_fields_missing`](#form_fields--page_fields--page_fields_missing) | The PDF's form field names were read, shown to a page, or not used |
 | [`calibrate_call_failed`](#calibrate_call_failed) | One calibration verifier call threw — a tool's line, never a run's |
 
@@ -4382,6 +4391,13 @@ A [tagged PDF](#get-a-tagged-pdf-optional) was made, or the tagger refused. `ms`
 `tagged_pdf` lists `fields_given`, the names of the fields that were filled in. The values are
 never logged. `tagged_pdf_failed` has the tagger's `code` and `error`. An `internal_error`'s
 message is left out, because it may quote a value.
+
+### `tagged_pdf_fields` / `tagged_pdf_fields_failed`
+
+`GET /fields` tagged a flat form to list the fields it gets. `ms` is how long it took.
+`tagged_pdf_fields` has `created`, how many fields were made. `tagged_pdf_fields_failed` has the
+tagger's `code`. A made list is reused until the extracted pages change. A failure is reused for a
+minute after it ends, so a failing form writes at most one line a minute while it is asked.
 
 ### `form_fields` / `page_fields` / `page_fields_missing`
 

@@ -1,7 +1,7 @@
 import { Router } from "express";
 import type { Request, Response, NextFunction } from "express";
 import multer from "multer";
-import { writeFileSync, readFileSync, existsSync, rmSync } from "node:fs";
+import { writeFileSync, readFileSync, existsSync, rmSync, statSync } from "node:fs";
 import { extname, join } from "node:path";
 import { ulid } from "ulid";
 import type { IrisConfig } from "../config.ts";
@@ -42,7 +42,7 @@ import {
 } from "../providers/imageLimits.ts";
 import { imageDimensions } from "../util/imageSize.ts";
 import { usableFieldName } from "../pipeline/fields.ts";
-import { readFields, tagPdf, taggedPdfCommand, tagTimeoutSeconds, TaggedPdfError, type PdfField } from "../util/taggedPdf.ts";
+import { createdFields, readFields, tagPdf, taggedPdfCommand, tagTimeoutSeconds, TaggedPdfError, type PdfField, type TagInput } from "../util/taggedPdf.ts";
 
 // 50 MB is a memory bound, not the image limit. It stays well above what an image may
 // be (see imageLimits.ts) because a PDF legitimately is: 25 pages of scans is a large
@@ -143,6 +143,13 @@ function ownedSession(store: Store, id: string, userId: number): SessionRecord |
   const s = store.getSession(id);
   if (!s || s.github_user_id !== userId) return undefined;
   return s;
+}
+
+// Set `key` as the newest entry, and drop the oldest past `max`. A Map keeps insertion order.
+export function remember<K, V>(map: Map<K, V>, key: K, value: V, max: number): void {
+  map.delete(key);
+  map.set(key, value);
+  while (map.size > max) map.delete(map.keys().next().value!);
 }
 
 // Keep the upload for a tagged PDF later, when this deployment makes them and the upload
@@ -602,6 +609,71 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
     return true;
   }
 
+  function readyToTag(s: SessionRecord): boolean {
+    return (s.status === "ready_for_review" || s.status === "closed") && existsSync(paths.sessionFinalFragments(s.session_id));
+  }
+  // The download's name, and the pages as extracted, for the tagger. Order is the PDF's page
+  // number, because the session is one PDF. A page that failed extraction holds only its
+  // `@page-failed` note, so it is left out and the tagger reports it untagged.
+  function tagInput(s: SessionRecord): { base: string; input: TagInput } {
+    const finalPath = paths.sessionFinalFragments(s.session_id);
+    const base = existsSync(paths.sessionSourceName(s.session_id))
+      ? readFileSync(paths.sessionSourceName(s.session_id), "utf8").trim() || "document"
+      : "document";
+    const { fragments = [] } = JSON.parse(readFileSync(finalPath, "utf8")) as { fragments?: Fragment[] };
+    const outPath = paths.sessionOutput(s.session_id);
+    const output = existsSync(outPath) ? readFileSync(outPath, "utf8") : "";
+    return {
+      base,
+      input: {
+        lang: output.match(/<html\b[^>]*\blang="([^"]+)"/i)?.[1],
+        title: base,
+        pages: [...fragments]
+          .filter((f) => !f.innerHtml.trimStart().startsWith("<!-- @page-failed"))
+          .sort((a, b) => a.order - b.order)
+          .map((f) => ({ sourcePage: f.order, html: f.innerHtml })),
+      },
+    };
+  }
+
+  // A flat form's created fields, per session. The tagger names them the same way on every
+  // run, so a list holds until the extracted pages change. A failure (null) holds a minute,
+  // so a failing form cannot keep the tagger busy. A run in progress is shared. The oldest
+  // of more than 200 sessions is dropped.
+  type Created = (PdfField & { created: true })[];
+  const createdCache = new Map<string, { mtimeMs: number; until: number; fields: Promise<Created | null> }>();
+  const FAILURE_KEPT_MS = 60_000;
+  const CACHED_SESSIONS = 200;
+
+  async function makeFields(src: { s: SessionRecord; command: string; pdf: string }): Promise<Created | null> {
+    const id = src.s.session_id;
+    const started = Date.now();
+    // An unwritable log must not cost the list it describes.
+    const note = (write: (log: RunLog) => void) => {
+      try {
+        write(new RunLog(paths.sessionLog(id)));
+      } catch {
+        // the list is the answer; its log line is not
+      }
+    };
+    try {
+      const { input } = tagInput(src.s);
+      if (!input.pages.some((p) => /<(input|select|textarea)\b/i.test(p.html))) return [];
+      const made = await createdFields(src.command, {
+        pdfPath: src.pdf,
+        input,
+        scratchRoot: paths.pdfScratchRoot(),
+        timeoutSeconds: tagTimeoutSeconds(cfg),
+      });
+      note((log) => log.event("tagged_pdf_fields", { ms: Date.now() - started, created: made.length }));
+      return made.map((f) => ({ ...f, created: true as const }));
+    } catch (e) {
+      const code = e instanceof TaggedPdfError ? e.code : "tagger_failed";
+      note((log) => log.event("tagged_pdf_fields_failed", { ms: Date.now() - started, code }));
+      return null;
+    }
+  }
+
   // GET /v1/sessions/{id}/fields — the source PDF's form fields, for a fill-in form.
   r.get("/:id/fields", async (req: AuthedRequest, res) => {
     const src = sourcePdf(req, res);
@@ -609,7 +681,26 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
     if (tooBusy(res)) return;
     tagging++;
     try {
-      res.json({ fields: await readFields(src.command, src.pdf) });
+      const fields: PdfField[] = await readFields(src.command, src.pdf);
+      // A PDF with no fields, whose HTML has form controls: a flat form. Tagging gives it
+      // fields, so list those, marked `created`. If that fails, list none; the download
+      // says why.
+      if (!fields.length && readyToTag(src.s)) {
+        const id = src.s.session_id;
+        const mtimeMs = statSync(paths.sessionFinalFragments(id)).mtimeMs;
+        let hit = createdCache.get(id);
+        if (!hit || hit.mtimeMs !== mtimeMs || Date.now() >= hit.until) {
+          const entry = { mtimeMs, until: Infinity, fields: makeFields(src) };
+          remember(createdCache, id, entry, CACHED_SESSIONS);
+          void entry.fields.then((f) => {
+            if (f === null) entry.until = Date.now() + FAILURE_KEPT_MS;
+          });
+          hit = entry;
+        }
+        res.json({ fields: (await hit.fields) ?? [] });
+        return;
+      }
+      res.json({ fields });
     } catch (e) {
       taggerError(res, e);
     } finally {
@@ -624,8 +715,7 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
     const src = sourcePdf(req, res);
     if (!src) return;
     const { s } = src;
-    const finalPath = paths.sessionFinalFragments(s.session_id);
-    if ((s.status !== "ready_for_review" && s.status !== "closed") || !existsSync(finalPath)) {
+    if (!readyToTag(s)) {
       sendError(res, 409, "invalid_state", "The PDF can be tagged once the session is ready_for_review.");
       return;
     }
@@ -639,23 +729,7 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
     const started = Date.now();
     tagging++;
     try {
-      const base = existsSync(paths.sessionSourceName(s.session_id))
-        ? readFileSync(paths.sessionSourceName(s.session_id), "utf8").trim() || "document"
-        : "document";
-      // The pages as extracted, by page order. Order is the PDF's page number, because
-      // the session is one PDF. A page that failed extraction holds only its
-      // `@page-failed` note, so it is left out and the tagger reports it untagged.
-      const { fragments = [] } = JSON.parse(readFileSync(finalPath, "utf8")) as { fragments?: Fragment[] };
-      const outPath = paths.sessionOutput(s.session_id);
-      const output = existsSync(outPath) ? readFileSync(outPath, "utf8") : "";
-      const input = {
-        lang: output.match(/<html\b[^>]*\blang="([^"]+)"/i)?.[1],
-        title: base,
-        pages: [...fragments]
-          .filter((f) => !f.innerHtml.trimStart().startsWith("<!-- @page-failed"))
-          .sort((a, b) => a.order - b.order)
-          .map((f) => ({ sourcePage: f.order, html: f.innerHtml })),
-      };
+      const { base, input } = tagInput(s);
       const { pdf, report } = await tagPdf(src.command, {
         pdfPath: src.pdf,
         input,
