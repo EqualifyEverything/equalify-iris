@@ -4396,7 +4396,8 @@ message is left out, because it may quote a value.
 
 `GET /fields` tagged a flat form to list the fields it gets. `ms` is how long it took.
 `tagged_pdf_fields` has `created`, how many fields were made. `tagged_pdf_fields_failed` has the
-tagger's `code`. A list is reused until the extracted pages change, so this is written once per change.
+tagger's `code`. A made list is reused until the extracted pages change. A failure is reused for a
+minute, so a failing form writes about one line a minute while it is asked.
 
 ### `form_fields` / `page_fields` / `page_fields_missing`
 

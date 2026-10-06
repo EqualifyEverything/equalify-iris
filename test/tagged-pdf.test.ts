@@ -1,6 +1,6 @@
 // The optional tagged-PDF output (src/util/taggedPdf.ts). `iris-pdf` is a separate
 // project, so these tests run a stand-in for it (test/fixtures/fake-iris-pdf.mjs).
-import { test } from "node:test";
+import { mock, test } from "node:test";
 import assert from "node:assert/strict";
 import express from "express";
 import type { AddressInfo } from "node:net";
@@ -10,7 +10,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { IrisConfig } from "../src/config.ts";
 import type { AuthedRequest } from "../src/auth/middleware.ts";
-import { keepPdfFields, keepSourcePdf, sessionsRouter } from "../src/routes/sessions.ts";
+import { keepPdfFields, keepSourcePdf, remember, sessionsRouter } from "../src/routes/sessions.ts";
 import { enumerateInputs } from "../src/pipeline/orchestrator.ts";
 import { limitsRouter } from "../src/routes/limits.ts";
 import { Store } from "../src/store/db.ts";
@@ -214,12 +214,41 @@ test("a flat form lists the fields tagging makes from its HTML, and only then ta
         const events = readFileSync(s.paths.sessionLog(s.id), "utf8").trim().split("\n").map((l) => JSON.parse(l));
         assert.deepEqual(events.map((e) => [e.type, e.code]), [["tagged_pdf_fields_failed", "text_lost"]]);
         await names(s);
-        assert.equal(s.tagRuns(), 2, "a failure is not kept, so it is tried again");
+        assert.equal(s.tagRuns(), 1, "a failure is kept for a minute");
+        mock.timers.enable({ apis: ["Date"], now: Date.now() + 61_000 });
+        try {
+          await names(s);
+        } finally {
+          mock.timers.reset();
+        }
+        assert.equal(s.tagRuns(), 2, "then tried again");
       }
     } finally {
       s.close();
     }
   }
+});
+
+test("two asks at once for a flat form's fields share one tag", async () => {
+  const s = await serve({ source: "%PDF FLAT", page1: '<label>Full name <input type="text"></label>' });
+  try {
+    const both = await Promise.all([s.fields(), s.fields()]);
+    for (const res of both) assert.deepEqual(((await res.json()).fields as { name: string }[]).map((f) => f.name), ["full-name"]);
+    assert.equal(s.tagRuns(), 1);
+  } finally {
+    s.close();
+  }
+});
+
+test("the created-fields cache keeps the newest 200 sessions", () => {
+  const m = new Map<string, number>();
+  for (const k of ["a", "b", "c"]) remember(m, k, 1, 2);
+  assert.deepEqual([...m.keys()], ["b", "c"]);
+  remember(m, "b", 2, 2);
+  assert.deepEqual([...m.entries()], [["c", 1], ["b", 2]], "a set key becomes the newest");
+  const route = readFileSync(join(dirname(FAKE), "..", "..", "src", "routes", "sessions.ts"), "utf8");
+  assert.match(route, /const CACHED_SESSIONS = 200;/);
+  assert.match(route, /remember\(createdCache, id, entry, CACHED_SESSIONS\);/);
 });
 
 test("unreadable extracted pages: /fields lists none, /pdf answers 500", async () => {

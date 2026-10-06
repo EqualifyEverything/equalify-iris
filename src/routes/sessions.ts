@@ -145,6 +145,13 @@ function ownedSession(store: Store, id: string, userId: number): SessionRecord |
   return s;
 }
 
+// Set `key` as the newest entry, and drop the oldest past `max`. A Map keeps insertion order.
+export function remember<K, V>(map: Map<K, V>, key: K, value: V, max: number): void {
+  map.delete(key);
+  map.set(key, value);
+  while (map.size > max) map.delete(map.keys().next().value!);
+}
+
 // Keep the upload for a tagged PDF later, when this deployment makes them and the upload
 // was one PDF on its own. Then the PDF's page N is the session's page N.
 export function keepSourcePdf(
@@ -630,8 +637,34 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
   }
 
   // A flat form's created fields, per session. The tagger names them the same way on every
-  // run, so the list holds until the extracted pages change.
-  const createdCache = new Map<string, { mtimeMs: number; fields: (PdfField & { created: true })[] }>();
+  // run, so a list holds until the extracted pages change. A failure (null) holds a minute,
+  // so a failing form cannot keep the tagger busy. A run in progress is shared. The oldest
+  // of more than 200 sessions is dropped.
+  type Created = (PdfField & { created: true })[];
+  const createdCache = new Map<string, { mtimeMs: number; until: number; fields: Promise<Created | null> }>();
+  const FAILURE_KEPT_MS = 60_000;
+  const CACHED_SESSIONS = 200;
+
+  async function makeFields(src: { s: SessionRecord; command: string; pdf: string }): Promise<Created | null> {
+    const id = src.s.session_id;
+    const started = Date.now();
+    try {
+      const { input } = tagInput(src.s);
+      if (!input.pages.some((p) => /<(input|select|textarea)\b/i.test(p.html))) return [];
+      const made = await createdFields(src.command, {
+        pdfPath: src.pdf,
+        input,
+        scratchRoot: paths.pdfScratchRoot(),
+        timeoutSeconds: tagTimeoutSeconds(cfg),
+      });
+      new RunLog(paths.sessionLog(id)).event("tagged_pdf_fields", { ms: Date.now() - started, created: made.length });
+      return made.map((f) => ({ ...f, created: true as const }));
+    } catch (e) {
+      const code = e instanceof TaggedPdfError ? e.code : "tagger_failed";
+      new RunLog(paths.sessionLog(id)).event("tagged_pdf_fields_failed", { ms: Date.now() - started, code });
+      return null;
+    }
+  }
 
   // GET /v1/sessions/{id}/fields — the source PDF's form fields, for a fill-in form.
   r.get("/:id/fields", async (req: AuthedRequest, res) => {
@@ -647,32 +680,16 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
       if (!fields.length && readyToTag(src.s)) {
         const id = src.s.session_id;
         const mtimeMs = statSync(paths.sessionFinalFragments(id)).mtimeMs;
-        const hit = createdCache.get(id);
-        if (hit?.mtimeMs === mtimeMs) {
-          res.json({ fields: hit.fields });
-          return;
+        let hit = createdCache.get(id);
+        if (!hit || hit.mtimeMs !== mtimeMs || Date.now() >= hit.until) {
+          const entry = { mtimeMs, until: Infinity, fields: makeFields(src) };
+          remember(createdCache, id, entry, CACHED_SESSIONS);
+          void entry.fields.then((f) => {
+            if (f === null) entry.until = Date.now() + FAILURE_KEPT_MS;
+          });
+          hit = entry;
         }
-        const started = Date.now();
-        let created: (PdfField & { created: true })[] = [];
-        let code: string | undefined;
-        try {
-          const { input } = tagInput(src.s);
-          if (input.pages.some((p) => /<(input|select|textarea)\b/i.test(p.html))) {
-            const made = await createdFields(src.command, {
-              pdfPath: src.pdf,
-              input,
-              scratchRoot: paths.pdfScratchRoot(),
-              timeoutSeconds: tagTimeoutSeconds(cfg),
-            });
-            created = made.map((f) => ({ ...f, created: true as const }));
-            new RunLog(paths.sessionLog(id)).event("tagged_pdf_fields", { ms: Date.now() - started, created: created.length });
-          }
-          createdCache.set(id, { mtimeMs, fields: created });
-        } catch (e) {
-          code = e instanceof TaggedPdfError ? e.code : "tagger_failed";
-          new RunLog(paths.sessionLog(id)).event("tagged_pdf_fields_failed", { ms: Date.now() - started, code });
-        }
-        res.json({ fields: created });
+        res.json({ fields: (await hit.fields) ?? [] });
         return;
       }
       res.json({ fields });
