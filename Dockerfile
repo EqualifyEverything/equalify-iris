@@ -1,6 +1,6 @@
 # Multi-arch image (linux/amd64, linux/arm64). Mac Mini and Linux ARM
 # workstations are first-class targets (README, "One machine, no vendor lock-in").
-FROM node:24-slim
+FROM node:25-slim
 
 # git: agents/ is a git checkout (SHA pinning) and the contribution
 # workflow inspects it. poppler-utils: pdftoppm/pdfinfo for rasterizing uploaded
