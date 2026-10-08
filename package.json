@@ -24,7 +24,7 @@
   "dependencies": {
     "@aws-sdk/client-bedrock-runtime": "^3.1141.0",
     "@octokit/rest": "^21.0.2",
-    "axe-core": "4.11.4",
+    "axe-core": "4.14.0",
     "express": "^4.21.1",
     "express-rate-limit": "^8.7.0",
     "jsdom": "25.0.1",
