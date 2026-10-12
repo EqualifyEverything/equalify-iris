@@ -53,8 +53,9 @@ github:
 providers:
   default: openrouter
   # Per-agent overrides: `<agent>: <provider>` or `<agent>: { provider: ..., model: ... }`.
-  # Agents: page, reader, copy_editor, feedback, builder. Any other key is ignored.
-  # A `model:` without `provider:` uses `default`. To add overrides, uncomment the
+  # Agents: page, reader, copy_editor, feedback, builder, plus any specialist in `agents/`.
+  # Any other key is ignored. A `model:` without `provider:` uses `default`. A model is
+  # picked in this order: per_agent, then the provider's per_capability, then default_model. To add overrides, uncomment the
   # `per_agent:` key below too, and delete this empty one.
   per_agent: {}
   # per_agent:

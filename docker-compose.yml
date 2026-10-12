@@ -16,7 +16,8 @@ services:
       IRIS_QUALITY_TOKEN: ${IRIS_QUALITY_TOKEN:-}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
       # For Bedrock, add the standard AWS credential variables.
-    # A startup error, like a missing token, repeats in `docker compose logs` instead of exiting.
+    # Restart after a crash or reboot, but not after `docker compose stop`. A startup error,
+    # like a missing token, restarts in a loop; `docker compose logs` shows the message.
     restart: unless-stopped
     # Same check as the Dockerfile, with this deployment's timings.
     healthcheck:
