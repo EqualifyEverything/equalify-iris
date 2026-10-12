@@ -107,14 +107,20 @@ test("the same marker fails on a <span> host", async () => {
   assert.deepEqual(found, ["aria-prohibited-attr[serious]"], `${marker} should be the reported violation`);
 });
 
-// Since axe 4.13, aria-labelledby pointing at visible text is "needs review", not a
-// violation, so the gate does not report this shape. The prompt never offers it.
+// Since axe 4.13, a prohibited aria-labelledby is "needs review", not a violation, whatever
+// it points at and on either host. So the gate reports none of these. The prompt never
+// offers them.
 test("on aria-labelledby, axe asks for review and the gate says nothing", async () => {
-  const marker = '<p role="doc-pagebreak" aria-labelledby="doc-title" id="page-5"></p>';
-  const found = await rules(marker);
-  if (found === null) return;
-  assert.deepEqual(found, []);
-  assert.deepEqual(await prohibitedAttr(marker), { violations: 0, incomplete: 1 });
+  for (const marker of [
+    '<p role="doc-pagebreak" aria-labelledby="doc-title" id="page-5"></p>',
+    '<p role="doc-pagebreak" aria-labelledby="nope" id="page-5"></p>', // names nothing
+    '<span role="doc-pagebreak" aria-labelledby="doc-title" id="page-5"></span>',
+  ]) {
+    const found = await rules(marker);
+    if (found === null) return;
+    assert.deepEqual(found, [], marker);
+    assert.deepEqual(await prohibitedAttr(marker), { violations: 0, incomplete: 1 }, marker);
+  }
 });
 
 test("the shape the page agent is now told to emit is clean", async () => {
@@ -130,7 +136,7 @@ test("the shape the page agent is now told to emit is clean", async () => {
 });
 
 // The two facts the prompt reasons from, as axe-core itself records them. They are the
-// reason the rule is a shape and not "avoid aria-label": if a version bump ever moved
+// reason the rule is a shape and not "avoid aria-label": if a version bump ever removed
 // either one, the prompt's stated reasoning would be wrong even though every verdict above
 // still held, and nothing else in the suite would notice.
 test("axe's own role table is why the marker is a named <hr> and not a <p> with text", () => {
