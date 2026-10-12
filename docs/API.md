@@ -5436,7 +5436,8 @@ All errors share one shape:
 Common codes: `unauthorized` (401 — see [Authenticate](#authenticate) for the three things it can
 mean), `session_not_found` (404), `invalid_state` (409), `invalid_request` (400), `rate_limited`
 (429, carries `Retry-After` — see [Rate limits](#rate-limits-how-often-you-may-ask)),
-`upload_too_large` (413), `server_error` (500).
+`upload_too_large` (413), `body_too_large` (413, a JSON body over 2 MB), `not_found` (404, no such
+route), `server_error` (500). Another 4xx refused while reading the request is `invalid_request`.
 
 A run that fails reports why in the `error` field of `GET /v1/sessions/{id}`. One worth
 recognizing:

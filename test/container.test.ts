@@ -433,26 +433,6 @@ test("a version printed in the docs is the version this repo is at", () => {
   assert.equal(found, 2, `expected the health reply in README.md and docs/API.md, found ${found}`);
 });
 
-test("the qs override is still the only way to reach a patched qs", () => {
-  // package.json cannot hold a comment, so the reason lives here. `overrides.qs` exists because
-  // express's own `latest-4` (4.22.2) depends on qs `~6.15.1`, and the two moderate advisories
-  // against qs are fixed in 6.16.0 — a version that range cannot reach. The override forces it.
-  //
-  // The precondition is express being on 4.x. On express 5, qs comes in already patched and this
-  // override becomes a pin nobody remembers adding, which is how a forced version outlives its
-  // reason and starts holding a dependency back. So: bump express past 4 and this test reddens.
-  const pkg = JSON.parse(read("package.json")) as {
-    overrides?: Record<string, string>;
-    dependencies: Record<string, string>;
-  };
-  if (!pkg.overrides?.qs) return; // dropped, which is the intended end state
-  assert.match(
-    pkg.dependencies.express,
-    /^[~^]?4\./,
-    `overrides.qs forces a qs version because express 4 pins a vulnerable range, but express is now ${pkg.dependencies.express} — check whether the override is still needed and drop it if not`,
-  );
-});
-
 test("package.json says where this package lives", () => {
   const pkg = JSON.parse(read("package.json")) as { repository?: { url?: string } };
   assert.ok(

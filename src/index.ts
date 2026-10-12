@@ -20,6 +20,7 @@ import { statsRouter } from "./routes/stats.ts";
 import { limitsRouter } from "./routes/limits.ts";
 import { clearPdfScratch, taggedPdfStatus } from "./util/taggedPdf.ts";
 import { qualityRouter } from "./routes/quality.ts";
+import { errorHandler, notFound } from "./routes/errors.ts";
 import { visionModelWarning } from "./providers/imageLimits.ts";
 import { generalRateLimit } from "./util/requestLimits.ts";
 import { VERSION } from "./version.ts";
@@ -328,6 +329,8 @@ app.get("/demo", (_req, res) => res.redirect(302, "/"));
 const auth = makeAuthMiddleware(store, cfg);
 app.use("/v1/me", auth, meRouter(cfg));
 app.use("/v1/sessions", auth, sessionsRouter(cfg, store));
+app.use(notFound);
+app.use(errorHandler);
 
 const port = cfg.server.port;
 app.listen(port, () => {
