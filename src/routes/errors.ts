@@ -1,4 +1,4 @@
-import type { Response } from "express";
+import type { NextFunction, Request, Response } from "express";
 
 // Standard error structure.
 export function sendError(
@@ -9,4 +9,20 @@ export function sendError(
   details: Record<string, unknown> = {},
 ): void {
   res.status(httpStatus).json({ error: { code, message, details } });
+}
+
+// Last middleware. Express 5 sends a handler's thrown or rejected error here; without this
+// the caller gets an HTML stack trace instead of the shape above.
+export function errorHandler(err: unknown, _req: Request, res: Response, next: NextFunction): void {
+  if (res.headersSent) return next(err);
+  const e = (err ?? {}) as { status?: unknown; statusCode?: unknown; expose?: unknown; message?: unknown };
+  const status = typeof e.status === "number" ? e.status : e.statusCode;
+  // The body parser's own refusals: a malformed or oversized JSON body.
+  if (typeof status === "number" && status >= 400 && status < 500) {
+    const message = e.expose && typeof e.message === "string" ? e.message : "Bad request";
+    sendError(res, status, status === 413 ? "upload_too_large" : "invalid_request", message);
+    return;
+  }
+  console.error("unhandled route error:", err);
+  sendError(res, 500, "server_error", "Unexpected server error. See the server log.");
 }
