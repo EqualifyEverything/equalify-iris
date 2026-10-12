@@ -1,479 +1,112 @@
-# Equalify Iris deployment configuration.
-#
-# ${ENV_VAR} references are expanded from the process environment at startup.
-# Changes require a restart in v1 (hot-reload is out of scope).
+# Equalify Iris configuration. Copy to config.yaml.
+# ${VAR} is read from the environment at startup. Restart to apply a change.
 
 server:
   port: 8080
-  # Public URL of this deployment. Printed at startup so you can check the running
-  # process is the one you meant to deploy. Iris builds no URLs from it.
+  # Printed at startup so you can check the running process is the one you meant to
+  # deploy. Iris builds no URLs from it.
   base_url: http://localhost:8080
-  # Shared secret a caller must send as `Authorization: Bearer <token>` to convert
-  # a document, read a session, or call GET /v1/me. Those are the only routes it
-  # covers. It does not close the whole API: GET /v1/health, /v1/limits, /v1/stats
-  # and /v1/quality answer whether it is set or not, and none of them returns a
-  # document, a session or an identity.
-  #
-  # Blank (the default) means the API is OPEN: anyone who can reach this deployment
-  # can convert documents and can read any session whose id they have. That is what
-  # makes the bundled demo page work — it holds no credential.
-  #
-  # Set it to close the deployment. It is NOT a GitHub token and grants nothing on
-  # GitHub; it only decides who may call the API. Everything still runs as the one
-  # GitHub account in `github.token` below. Setting it also means the demo page
-  # cannot be used against this deployment, since the page sends no token.
+  # Callers must send `Authorization: Bearer <token>` to convert, read sessions or call
+  # /v1/me. Blank means anyone who can reach Iris can use it, which the demo page needs.
+  # Not a GitHub token.
   api_token: ${IRIS_API_TOKEN}
-  # Shared secret gating GET /v1/quality, the deployment-wide tally of how good
-  # the output has been. Read by the weekly quality-report workflow,
-  # which files an issue when a rate crosses a threshold.
-  #
-  # Blank (default) means the endpoint answers 404 — opting in is deliberate.
-  #
-  # Keep it separate from `api_token` above rather than reusing that value. The
-  # reader is a scheduled workflow that needs a page tally, and `api_token` would
-  # give it every session's document as well. Setting `api_token` does not gate
-  # this endpoint: the workflow holds this token and not that one, so the tally
-  # still answers on a closed deployment. Aggregate-only by construction; no
-  # document content is exposed.
+  # Secret for GET /v1/quality, read by the weekly quality report. Blank makes it 404.
+  # Keep it separate from api_token.
   quality_token: ${IRIS_QUALITY_TOKEN}
-  # How many proxies sit in front of this deployment. Set it to 1 behind a single
-  # Caddy/nginx (2 behind a CDN in front of that, and so on), and leave it unset
-  # when Iris is exposed directly. Express's own vocabulary also works for a
-  # topology a count cannot describe — `loopback`, or a comma-separated list of
-  # proxy addresses and subnets; anything else warns and trusts nothing.
-  #
-  # It decides whose address the rate limits below count against. Unset, every
-  # request behind a proxy presents as the proxy's own address, so all of your
-  # users share one bucket — the log warns if it sees an X-Forwarded-For while
-  # this is unset. `true` is accepted but coerced to 1 with a warning: trusting
-  # the whole chain means believing the part of the header the CLIENT wrote, which
-  # would let any caller mint a fresh address per request.
+  # Number of proxies in front of Iris (1 behind one Caddy/nginx). Unset behind a proxy,
+  # every caller shares one rate-limit bucket.
   trust_proxy: ${IRIS_TRUST_PROXY}
-  #
-  # What one caller may ask of this deployment per minute. v1 is a
-  # single process with a synchronous SQLite store, so a request flood is felt by
-  # everyone using it — including the runs already in flight — and the run cap
-  # below cannot help, since the cheap endpoints never reach the queue.
-  #
-  # Everything is counted PER ADDRESS. There is nothing better to count against:
-  # one deployment is one GitHub account, and `server.api_token` is shared, so
-  # keying on the credential would put every caller in one bucket. The cost is
-  # that users behind one NAT or proxy share a bucket, which is why the defaults
-  # sit an order of magnitude above a working client (the demo page polls a
-  # running session every 2.5s). Omit any key for its default; a valueless or
-  # non-positive key is treated as unset rather than as "allow nothing".
-  #
-  # `GET /v1/limits` publishes whatever is in effect, and a refused request gets
-  # 429 with `Retry-After`, so a client can pace itself instead of guessing.
+  # Per-address limits. GET /v1/limits shows what is in effect; a refused request gets 429.
   rate_limits:
-    # Everything under /v1 except the liveness probe.
     general_per_minute: 240
-    # POST /v1/sessions. A conversion takes minutes and runs are queued, so
-    # uploads past this only wait on each other.
     upload_per_minute: 12
-    # Megabytes of upload body being RECEIVED at once, across all callers — the
-    # one number here that bounds memory rather than request count, and so the
-    # first to lower on a small machine. Each request is charged what its
-    # Content-Length declares (a request that declares nothing is charged the
-    # 128 MB per-request ceiling), so ordinary uploads never wait on each other
-    # and only genuinely large concurrent ones are refused.
+    # Upload megabytes being received at once, across all callers. Lower it on a small machine.
     max_upload_memory_mb: 256
-    # Set false to turn all of the above off — e.g. where a proxy in front of Iris
-    # already limits requests AND is the only way in. Off means no counting at
-    # all, and `GET /v1/limits` then reports `rate_limits: null`.
+    # false turns all limits off, e.g. when a proxy already limits.
     enabled: true
 
 storage:
-  # Root directory for sessions/, tmp/, and the agents/ git checkout.
   data_dir: ./data
-  # Path to the agent library git checkout. Modified ONLY by `git pull`
-  # from upstream.
+  # The agent library checkout. Changed only by `git pull`.
   agents_dir: ./agents
-  # Session metadata store. SQLite by default; a postgres URL is a supported
-  # alternative for multi-instance deployments (not implemented in v1).
   database: ./data/iris.sqlite
 
-# Optional: give back the uploaded PDF, tagged for accessibility, with form fields filled
-# in. Needs the `iris-pdf` command from
-# https://github.com/EqualifyEverything/equalify-iris-pdf, which is not part of Iris.
-# Blank (the default) turns it off, and Iris works as it does without it.
-#
-# With it on, a session made from one PDF keeps that PDF, and the demo page offers
-# a form for the PDF's fields and "Download tagged PDF". Form values are personal data:
-# they are used for one request, and Iris stores neither them nor the filled PDF.
+# Optional: return the uploaded PDF tagged, with form fields filled. Needs the `iris-pdf`
+# command from https://github.com/EqualifyEverything/equalify-iris-pdf. Blank turns it off.
+# Form values are used for one request and never stored.
 tagged_pdf:
-  # The command to run, e.g. `iris-pdf` if it is on PATH.
   command: ${IRIS_PDF_COMMAND}
-  # How long one PDF may take before the command is stopped.
   timeout_seconds: 300
 
-# Iris has ONE GitHub identity: the token below. The server holds it, callers never
-# see it, and nobody signs in. Every session is owned by that account and every issue
-# Iris files is filed under it.
-#
-# What that costs, and Iris says so at every boot:
-#   - Contributors get no credit. A suggestion produced by someone else's document is
-#     filed under this account, with their feedback quoted in the body.
-#   - `GET /v1/sessions` lists the DEPLOYMENT's sessions, not one caller's. Anyone who
-#     may call the API can see what everyone converted. A private deployment wants
-#     `server.api_token` set.
-#   - Rate limits count per address, since every request is the same account.
-#
-# Earlier versions signed each user in through a GitHub App device flow, which is where
-# the credit came from. It is gone: see docs/design-notes.md for what it cost to run.
-#
-# Nothing here opens pull requests — contributions are filed as issues.
-#
-# The token is never persisted. It stays in memory, so a copy of the SQLite database
-# is not GitHub access.
+# Iris's one GitHub identity. Every session is owned by it and every issue is filed as it.
+# See docs/github-auth.md.
 github:
-  # REQUIRED. A fine-grained personal access token with `Issues: read and write` on
-  # `upstream_repo` and nothing else. Iris refuses to start without it.
-  #
-  # Set it from the environment, as here, and keep it out of the file. It expires and
-  # nothing renews it: when it does, filing fails with a 403/404 whose log line names
-  # this key. Conversions keep working — filing is the part that stops.
+  # REQUIRED. A fine-grained token with `Issues: read and write` on upstream_repo only.
+  # When it expires, filing fails and conversions keep working.
   token: ${IRIS_GITHUB_TOKEN}
-  # The upstream agent library repo — where agent-suggestion issues are filed. The
-  # token above needs issue write access to THIS repository.
+  # Where agent-suggestion issues are filed.
   upstream_repo: ${IRIS_UPSTREAM_REPO}
-  # GitHub API base URL. Override for GitHub Enterprise (e.g.
-  # https://github.example.com/api/v3). Defaults to public GitHub when omitted.
+  # Only for GitHub Enterprise, e.g. https://github.example.com/api/v3.
   api_base_url: ${GITHUB_API_BASE_URL}
 
-# LLM provider abstraction (see docs/models.md). Each agent declares a capability;
-# the deployment decides which provider serves it.
+# Which model serves each agent. docs/models.md says what to pick and what each costs.
 providers:
-  # The provider serving anything with no override below. `openrouter` rather than
-  # the reference deployment's `bedrock` on purpose: it is one credential and no
-  # cloud account, which is the shorter path to a first working run. Switch to
-  # bedrock if you are already on AWS and want IAM-scoped access or its billing.
   default: openrouter
-  # Per-agent overrides. Two forms:
-  #   <agent>: <provider>                      # route this agent to a provider
-  #   <agent>: { provider: ..., model: ... }   # also pin a specific model
-  # Model resolution falls back: per-agent model -> provider per_capability ->
-  # provider default_model. Agent names are the file stem. The agents actually
-  # dispatched today are: page (extraction), reader + copy_editor (review),
-  # feedback (verify/classify/train), builder (drafts suggested agents), plus any
-  # specialist in agents/ that the page agent names.
-  # No overrides by default. To add some, uncomment the KEY BELOW TOO and delete this
-  # line — an entry indented under `per_agent: {}` is not an addition to an empty map,
-  # it is a parse error at startup.
+  # Per-agent overrides: `<agent>: <provider>` or `<agent>: { provider: ..., model: ... }`.
+  # Agents: page, reader, copy_editor, feedback, builder, plus any specialist in `agents/`.
+  # Any other key is ignored. A `model:` without `provider:` uses `default`. A model is
+  # picked in this order: per_agent, then the provider's per_capability, then default_model. To add overrides, uncomment the
+  # `per_agent:` key below too, and delete this empty one.
   per_agent: {}
-  # Run the Feedback Agent (VERIFY/CLASSIFY/TRAIN) on a DIFFERENT or stronger model
-  # than the page agent, so verification doesn't share the generator's blind spots
-  # (recommended) — which is why no example below puts `feedback` on the page agent's model.
-  # (`copy_editor` and `feedback` do share one below; that is fine, neither generates pages.)
-  # Every key below is an agent from the list above, and that is not cosmetic: an entry
-  # naming anything else is IGNORED — the call falls through to the provider's own model,
-  # so the swap does not happen. This block used to offer a `table:` line; there has never
-  # been a table agent, and it silently did nothing. Two things say so now, one at each
-  # end: boot warns about a key it cannot route (config.ts `perAgentKeyWarning`), and
-  # diagnostics reports `models` per agent, so `by_agent.page.models` on a finished run
-  # names the model that agent actually answered on. The warning before, the evidence after.
-  # A `model:` with no `provider:` resolves against `default` above, and nothing checks that
-  # the id belongs there: a Bedrock model id on an OpenRouter deployment fails on every call
-  # of the run. Name both when you pin a model that was measured on the other provider.
   # per_agent:
-  #   page: { provider: bedrock, model: us.openai.gpt-5.6-luna }   # suggested; needs `api: converse`
-  #   copy_editor: { model: anthropic/claude-opus-4.7 }   # stronger model, same provider
+  #   page: { provider: bedrock, model: us.openai.gpt-5.6-luna }   # needs `api: converse`
+  #   copy_editor: { model: anthropic/claude-opus-4.7 }
   #   reader: { provider: bedrock, model: us.anthropic.claude-haiku-4-5-20251001-v1:0 }
   #   feedback: { model: anthropic/claude-opus-4.7 }
-  # `copy_editor` is one line for two jobs — the review round and the merge of a table
-  # split across a page break — so they cannot be put on different models. Which model is
-  # worth putting on which agent, with the prices each was measured at: docs/models.md.
 
-  # WHICH MODELS TO RUN. Iris has no model defaults — nothing in its code names a model, so
-  # what a deployment writes here is the whole answer. Two starting points, both real:
-  #
-  # **$0 — self-hosted.** Point the `openrouter` block's `base_url` below at a local ollama /
-  # vLLM / llama.cpp server and set `default_model` to what it serves. That adapter — not the
-  # bedrock one — is the OpenAI-compatible one, so it is the block to reuse. Iris speaks
-  # `POST /chat/completions`, so nothing else changes and there is no per-token bill. The
-  # agents that read page images need a model that accepts images. No round has measured this
-  # path: it costs nothing and promises nothing.
-  #
-  # **The suggested setup — Sonnet 4.6 everywhere, GPT-5.6 luna on `page`:**
-  #
-  #   providers:
-  #     default: bedrock
-  #     bedrock:
-  #       api: converse                             # required — see below
-  #       default_model: us.anthropic.claude-sonnet-4-6
-  #     per_agent:
-  #       page: { provider: bedrock, model: us.openai.gpt-5.6-luna }
-  #
-  # This is the one configuration with whole-run numbers behind it: 100 scanned pages end to
-  # end, priced per step, in docs/cost.md — about **10.7¢ a page**, on these models. It is what
-  # the reference deployment runs. Three things about it:
-  #
-  # - **`api: converse` is not optional here.** Left out, this block defaults to `invoke` and
-  #   sends an Anthropic-native body, which a non-Claude id rejects — every `page` call fails.
-  #   The key is block-wide: it moves every agent on this provider, not the one named.
-  # - **The `us.` prefix is part of the id.** That model is inference-profile-only on Bedrock
-  #   and cannot be invoked under its bare id.
-  # - **It is cheaper and slightly worse on accessibility.** luna cost about 15% less than the
-  #   Kimi K2.5 it replaced over the three steps a page costs, on the same 100 pages, and lost 0
-  #   pages where Kimi lost 2 — but it is one axe violation worse over that corpus.
-  #   docs/models.md "What each suggestion was measured on" says what that costs.
-  #
-  # Both provider blocks below name Sonnet 4.6 because every whole-run figure was measured on
-  # it, and because `max_tokens` below is OUR setting and not the model's: how often a dense
-  # page overruns that ceiling, and the shrink floor and section headroom that decide what
-  # happens when one does, were sized against how Sonnet behaves at it. Another model is a
-  # supported choice costing no code change (see per_agent above) — it is just not one those
-  # thresholds were tuned for. It also moves the long edge `GET /v1/limits` and the upload hint
-  # publish, since that number follows the model generation (see image_limits below). Only what
-  # is published: the long edge is advice about downscaling and rejects nothing, and the two
-  # limits an upload is actually refused by do not follow the model at all.
-  #
-  # Cheaper models have been measured per agent, unevenly — seven arms on `page`, four on
-  # `reader`, none on the other three. docs/models.md has every measurement and what each model
-  # is worth on which agent.
-  #
-  # Checked against the deployment 2026-09-10.
-
-  # OpenRouter model IDs are `vendor/model` slugs (dot-versioned). Full list:
-  # https://openrouter.ai/models
+  # Any OpenAI-compatible endpoint works, including a local ollama or vLLM server. Keep the
+  # block name and a non-empty api_key. The page agent needs a model that reads images.
   openrouter:
     api_key: ${OPENROUTER_API_KEY}
-    # Any OpenAI-compatible endpoint works here, which is the $0 path above: give a local
-    # server its own URL and whatever model it serves. Keep this block's NAME — `openrouter`
-    # and `bedrock` are the only two names Iris can build a provider for — and keep `api_key`
-    # set to something non-empty, since startup refuses an empty one whether the endpoint
-    # checks it or not.
-    #   base_url: http://localhost:11434/v1        # ollama
-    #   default_model: qwen2.5-vl:7b               # must accept images for the page agent
     base_url: https://openrouter.ai/api/v1
     default_model: anthropic/claude-sonnet-4.6
-    # Output-token ceiling per call. A dense page (a full-page table or form) is
-    # the binding case; hit the ceiling and the model stops mid-tag. Iris now
-    # FAILS such a call rather than passing the fragment downstream, so if you see
-    # "hit the ... output ceiling", raise this. Omit for the default (32000).
+    # Output-token ceiling per call. Raise it if the log says a page hit it.
     max_tokens: 32000
-    # What one uploaded image may be, on this provider. LEAVE THIS UNSET — the
-    # limits follow the model automatically (src/providers/imageLimits.ts knows the
-    # documented per-image cap for each provider and the long edge for each Claude
-    # generation), and they are what `POST /v1/sessions` rejects an oversized upload
-    # by and what `GET /v1/limits` publishes.
-    #
-    # Override only for something that table cannot know: a model released after it
-    # was written, a platform with its own cap, or a vision model Anthropic did not
-    # make. That last case is the one Iris warns about at boot — Claude's vision
-    # documentation is the only source behind the pixel limits and the format list, so
-    # on any other model they are conservative guesses rather than facts, and the hint
-    # `GET /v1/limits` publishes says so instead of promising what the model discards.
-    # Setting `max_long_edge_px` here is how you say you have read that model's own
-    # documentation; it silences the warning and the qualification with it — but only
-    # where this block serves nothing Iris can already place. This key is per provider
-    # BLOCK and the question is per MODEL, so on a block whose `default_model` is a Claude
-    # and onto which `providers.per_agent` (a sibling of these blocks, not a key on one)
-    # routes one agent to something else, a number here could have been read from either
-    # model, and Iris will not take it as an answer about the one it does not know.
-    # It still applies (it is your block) — to every agent on it, including the ones whose
-    # own documented long edge is smaller, which sends those larger images for no gain
-    # anyone has documented. On that deployment there is nothing to set: the boot warning
-    # names the models the block is shared with and asks for nothing.
-    #
-    # Setting these too HIGH does not raise what the model accepts — it re-creates the
-    # failure the check exists to prevent, where an upload is accepted and then dies
-    # minutes later inside a model call.
-    # Each value is read from the block of the provider it belongs to and then the
-    # STRICTEST across the agents that see an upload is what gets published, so a
-    # tighter number set here still narrows the limit in a mixed deployment where
-    # this provider only serves some of them.
+    # Upload limits follow the model. Leave unset unless the model is newer than Iris or
+    # not a Claude.
     # image_limits:
-    #   max_base64_bytes: 5242880   # provider's per-image cap, in base64 characters
-    #   max_image_bytes: 3932160    # bytes on disk; defaults to 3/4 of the above
-    #   max_long_edge_px: 1568      # published as advice; nothing is rejected for it
-    #
-    # Ask the model to cache the prompt prefix each call re-sends (the agent's own
-    # prompt, which is identical on every page of every document). ON by default and
-    # best left that way: a cache read bills at a tenth of the input rate, so on a
-    # 25-page document the page agent's prompt is paid for once instead of 25 times,
-    # and nothing about the output changes. Iris decides per call whether the prefix is
-    # long enough to be worth it AND whether this model can be asked at all
-    # (src/providers/promptCache.ts): an id it cannot read as a Claude model of a caching
-    # generation gets no breakpoint, so a `per_agent` swap to another vendor's model turns
-    # caching off for that agent whatever this setting says. Priced rather than guessed —
-    # docs/models.md "How a swap fails quietly" measures it on the largest such swap, where
-    # the incumbent had 84.8% of its prompt served from cache and the swap still won: the loss
-    # is inside the saving, not on top of it.
-    #
-    # It is not free in every case, which is why the numbers are worth reading rather
-    # than assuming: a WRITE bills at 1.25x, so an agent called only once in a run pays
-    # a 25% surcharge on its prompt and gets no read back for it. That is a few hundred
-    # tokens against the tens of thousands the multi-call agents save, and the write is
-    # re-read by the next run within the cache's ~5 minute window on a busy deployment.
-    #
-    # Set false only if this provider's upstream REJECTS `cache_control` — an
-    # Anthropic field, so the risk is real only behind a broker that picks the upstream
-    # for you, and the symptom is unmistakable: every call fails with a 400 naming the
-    # field. `GET /v1/sessions/:id/diagnostics` reports `tokens.cache_read` and
-    # `tokens.cache_write`, which is where you can see it working.
+    #   max_base64_bytes: 5242880
+    #   max_image_bytes: 3932160
+    #   max_long_edge_px: 1568
+    # Prompt caching is on. Turn it off only if the upstream rejects `cache_control`.
     # prompt_cache: false
-    #
-    # How long a cache entry should live: `5m` (the default) or `1h`. This is a
-    # question about YOUR TRAFFIC, not about Iris, and the arithmetic decides it: a
-    # write costs 1.25x at five minutes and 2x at an hour, while a read costs 0.1x
-    # either way — so five minutes pays for itself on the second use of a prefix and
-    # an hour needs a third.
-    #
-    # Within one run the default never expires: every page reads the same page-agent
-    # prefix and each read restarts the clock, so a 25-page document stays warm on
-    # `5m` whatever it costs in wall time. What an hour buys is the gap BETWEEN runs.
-    # Convert a document every twenty minutes and each prefix is written once an hour
-    # instead of three times; convert one a day and every run pays 2x for an entry
-    # nothing will ever read again. Unset, or anything unrecognized, is `5m`.
-    #
-    # Verified on the first-party Claude API and on Bedrock. Behind a broker that picks
-    # the upstream for you, whether the field survives the hop is between you and that
-    # broker: Iris cannot tell you. The two TTLs differ in what a write is BILLED at,
-    # not in the token counts `GET /v1/sessions/:id/diagnostics` reports, so a broker
-    # that quietly strips the field reads exactly like one that honours it — your
-    # provider's own billing is the only place the answer shows up. What Iris does
-    # catch is a value it cannot read (`60m`, `1 hour`): that warns at startup and
-    # falls back to 5m.
-    #
-    # If an upstream refuses the field outright the failure is loud rather than quiet —
-    # every call 400s, the same way it would for `cache_control` itself — and
-    # `prompt_cache: false` is the way back.
+    # `5m` (default) or `1h`. An hour pays off when documents arrive less than an hour apart.
     # prompt_cache_ttl: 1h
     per_capability:
       vision: anthropic/claude-sonnet-4.6
       structured_output: anthropic/claude-sonnet-4.6
       text: anthropic/claude-sonnet-4.6
 
-  # Bedrock model IDs are hyphen-versioned and need a region prefix: current
-  # Claude models are cross-region-inference only, so the bare `anthropic.*` form
-  # is rejected for on-demand use — use `us.` (or `global.`). Confirm what your
-  # account/region has enabled with:
-  #   aws bedrock list-inference-profiles --region us-east-1 \
-  #     --query 'inferenceProfileSummaries[].inferenceProfileId'
+  # Bedrock ids need a `us.` or `global.` prefix. Credentials come from the AWS chain.
   bedrock:
     region: us-east-1
-    # See the note on which model, above openrouter.
     default_model: us.anthropic.claude-sonnet-4-6
-    # See the note on openrouter.max_tokens above. Retries are handled by the AWS
-    # SDK's own `standard` strategy (3 attempts, exponential backoff, throttling +
-    # 5xx + network errors), so there is no retry knob here.
-    #
-    # This number can be more output than a model will ACCEPT, which is a different
-    # failure from hitting the ceiling: several non-Claude models on Bedrock cap
-    # output well below 32000 and refuse the request outright rather than clamping
-    # it (Amazon Nova Pro caps at 10000). Such a request is sent again at the
-    # ceiling Bedrock names in the rejection, and that number is what every later
-    # call to that model asks for in the same process — so the cost of the swap is
-    # one rejected request per call already IN FLIGHT when the first one is refused
-    # (five at a time by default, see extraction_concurrency) and none after that.
-    # Nothing is billed for a request Bedrock never read. The warning naming this
-    # key is printed once per model, because the config is still the thing to fix.
-    #
-    # So a model swap done here alone does not lose a document, but do read that
-    # warning: a ceiling the MODEL enforces is not one the thresholds above were
-    # sized against, and a dense page can then truncate where it used to fit.
     max_tokens: 32000
-    # See the notes on openrouter.image_limits, openrouter.prompt_cache and
-    # openrouter.prompt_cache_ttl above; the same overrides exist here and are just as
-    # unnecessary in normal use. Bedrock serves the Anthropic Messages API directly, so
-    # it is the one provider where `cache_control` cannot arrive at an upstream that has
-    # never heard of it — and the one where `prompt_cache_ttl: 1h` reaches the model that
-    # honours it rather than a broker that may not.
     per_capability:
       vision: us.anthropic.claude-sonnet-4-6
       structured_output: us.anthropic.claude-sonnet-4-6
       text: us.anthropic.claude-sonnet-4-6
-    # WHICH BEDROCK API the calls go out on. `invoke` (the default, and what is left set
-    # here by omission) is InvokeModelWithResponseStream carrying an Anthropic Messages
-    # body — the model-selection sprint's per-agent measurements were taken through it,
-    # and the one deployment round taken through `converse` is named below. `converse` is
-    # ConverseStream, whose request shape belongs to Bedrock rather than to a model
-    # vendor, and which is therefore the only one of the two that can reach a model
-    # Anthropic did not make: `default_model` above cannot name a Qwen or a Nova on
-    # `invoke`, whatever the config comments imply, because such a model rejects the
-    # body outright.
-    #
-    # If you do point a vision model there that is not a Claude, read the note on
-    # image_limits above first: what Iris publishes about uploads is documented for
-    # Claude and guessed for anything else, and boot says which one you are running.
-    #
-    # Left off HERE because parity between the two is still not measured head-to-head,
-    # not because `converse` is doubted (issue #178). The two send the same prompt, ask
-    # for the same cache breakpoints on the same text, and report the same four token
-    # counts under different names — all of which is tested. What is now known from
-    # running it: the reference deployment has served every agent over `converse` since
-    # 2026-09-02, and a 100-page round through it priced out at $0.1071/page (#324). That
-    # round changed the page model at the same time, so it says `converse` works and says
-    # nothing about parity — one variable at a time is how a model comparison stays
-    # interpretable. **This key is block-wide**: setting it for one non-Claude agent moves
-    # every agent on this provider onto ConverseStream. Anything but `invoke` or
-    # `converse` is ignored, with a warning at boot.
+    # `invoke` (default) reaches Claude models only. `converse` is needed for any other
+    # model, and applies to every agent on this provider.
     # api: converse
 
 defaults:
-  # How many reader/editor rounds a document gets before the review loop stops and
-  # lists whatever is left in `unresolved.md`. This is the only place it is set:
-  # it seeds the deployment account's default the first time Iris resolves its
-  # GitHub identity, and a session cannot override it per request — how many
-  # rounds a document needs is discovered by the loop, not something the
-  # uploader can know in advance.
-  # It seeds once, when that account row is created. Changing it on a deployment
-  # that already has one does nothing, even after a restart: the stored default
-  # stands until `data/iris.sqlite` is recreated, which also drops session
-  # history. Set it before the first run.
+  # Review rounds per document. Read once, when the database is created. Set it before the
+  # first run.
   max_review_iterations: 3
-  # How many pages to extract in parallel within a single run. Pages are
-  # independent (one vision pass each), so this is a pure speed knob: a 25-page
-  # document costs up to ~5 sequential model calls per page, and extracting
-  # pages serially is the dominant source of end-to-end latency.
-  #
-  # It bounds the review phase the same way: the Reader reads the assembled
-  # document a window at a time, and those calls are independent too, so they go
-  # out together under this same cap. One run's in-flight model calls therefore
-  # never exceed this number, whichever phase it is in.
-  #
-  # Raise it if your provider's rate limits allow; lower it (or set 1 for fully
-  # serial) if you hit 429s. Both adapters retry throttling responses (OpenRouter
-  # by hand, Bedrock via the AWS SDK's standard strategy), but backing off is
-  # slower than not being throttled. Clamped to 1..16; omit for the default.
+  # Model calls one run makes at once (1-16). Lower it if you get 429s.
   extraction_concurrency: 5
-  # How many pipeline runs execute at once ACROSS sessions. This is the knob that
-  # bounds what the machine as a whole is doing: each run holds a jsdom+axe
-  # instance and up to extraction_concurrency model calls, so peak in-flight calls
-  # are the PRODUCT of the two (the default 2 x 5 = 10).
-  #
-  # Uploads over the cap WAIT — a session sits in `status: "queued"` until a slot
-  # frees, and the wait is recorded in its run log (`run_queued` / `run_dequeued`
-  # with `waited_ms`). Nothing is rejected: the upload has already been received
-  # and written to disk, so refusing it would throw away work the user has already
-  # paid for. Order is strictly FIFO and the cap is global, not per user.
-  #
-  # This is the knob to raise first on a bigger box. Clamped to 1..32; omit for
-  # the default. Needing more than a handful means you want multiple instances and
-  # a shared Postgres store, which v1 does not implement.
+  # Runs at once across all sessions (1-32). Extra uploads wait in a queue.
   max_concurrent_runs: 2
-  # How many corrected pages a run re-verifies FOR MEASUREMENT ONLY. Extraction
-  # checks every page against its image and re-renders the ones that fail; this
-  # buys a second check of the re-rendered page, to see whether the correction
-  # actually cleared what it was bought to fix. It decides nothing at any value —
-  # the corrected page is delivered either way — and it is counted apart in
-  # `GET /v1/diagnostics` as `verification.rechecks.sampled` / `sampled_ok`.
-  #
-  # 1 (the default) costs about 1% of a document and gives you a COUNT per run,
-  # not a rate: one draw cannot be a percentage, and reading it as one is how "half
-  # of corrections work" got quoted off two verdicts. The measured answer, from a
-  # 57-page census, is that 26% of corrected pages pass the re-check against a 2%
-  # floor for re-asking about the uncorrected page (issue #288).
-  #
-  # 0 turns it off, and so does anything below 1 — this is a count of pages, and a
-  # fraction floors like every other count here, so `0.5` is no measurement rather
-  # than a little of one.
-  #
-  # A number at or above your page count re-verifies EVERY
-  # corrected page — the only setting that yields a rate over corrected pages
-  # rather than over the pages the sample happened to land on — and costs one extra
-  # Feedback Agent call per correction, which on a document where most pages are
-  # corrected is roughly half the price of the per-page checking again. Raise it to
-  # measure your own documents; leave it alone otherwise.
+  # Corrected pages re-checked per run, for measurement only. 0 turns it off.
   recheck_sample_size: 1

@@ -1,9 +1,6 @@
-# Reference single-machine deployment: SQLite + local filesystem +
-# one configured model provider is enough for a single-user deployment.
+# Single-machine deployment. Set the variables in .env (see .env.example), then:
 #
 #   docker compose up
-#
-# Set the referenced variables in a .env file (see .env.example) first.
 
 services:
   iris:
@@ -13,37 +10,16 @@ services:
       - "8080:8080"
     environment:
       IRIS_UPSTREAM_REPO: ${IRIS_UPSTREAM_REPO}
-      # The deployment's one GitHub identity. Required — the container exits at startup
-      # without it. See .env.example.
       IRIS_GITHUB_TOKEN: ${IRIS_GITHUB_TOKEN}
-      # The shared secret callers must present, or blank for an open deployment (which is
-      # what the browser app at / needs). Blank on a public URL means public.
       IRIS_API_TOKEN: ${IRIS_API_TOKEN:-}
-      # Number of reverse proxies in front of this container (1 behind a single
-      # Caddy/nginx). Blank trusts nothing, which makes every caller behind a proxy
-      # share one rate-limit bucket. See .env.example.
       IRIS_TRUST_PROXY: ${IRIS_TRUST_PROXY:-}
-      # GET /v1/quality's own secret. Blank (default) makes that endpoint 404. Listed here
-      # because .env.example offers it, and a variable this file drops is one an operator
-      # sets and then cannot find.
       IRIS_QUALITY_TOKEN: ${IRIS_QUALITY_TOKEN:-}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
-      # For Bedrock instead, supply the standard AWS credential env vars.
-    # Come back up after a crash or a host reboot, but not after `docker compose stop` —
-    # a deliberate stop should stay stopped. `on-failure:N` would give up after N tries;
-    # surviving a reboot is worth more here, and it is what `on-failure` does not do (a
-    # reboot stops the container cleanly, so there is no failure to retry).
-    #
-    # The cost, worth knowing before you read the log: a startup error that will never
-    # come right on its own — a missing IRIS_GITHUB_TOKEN, an unwritable ./data — becomes
-    # a loop rather than one exit. `docker compose logs` shows the same message repeating,
-    # and each of those messages says what to change.
+      # For Bedrock, add the standard AWS credential variables.
+    # Restart after a crash or reboot, but not after `docker compose stop`. A startup error,
+    # like a missing token, restarts in a loop; `docker compose logs` shows the message.
     restart: unless-stopped
-    # Report the container unhealthy when the service stops answering, so `docker ps` and any
-    # supervisor above it can tell "running" from "working". The command is the Dockerfile's
-    # HEALTHCHECK; it is repeated here only to give this single-machine deployment its own
-    # timings, and both poll /v1/health, which is mounted above the rate limiter for exactly
-    # this caller.
+    # Same check as the Dockerfile, with this deployment's timings.
     healthcheck:
       test:
         [
@@ -57,27 +33,10 @@ services:
       start_period: 20s
       retries: 3
     volumes:
-      # Persist sessions/, tmp/, and the SQLite DB across restarts.
-      #
-      # The container runs as uid 1000 (the image's `node` user, see Dockerfile), and a
-      # bind-mounted host directory keeps its HOST ownership. On Linux, `./data` must
-      # therefore be writable by uid 1000, and it fails at STARTUP rather than on the first
-      # upload: src/index.ts creates sessions/ and tmp/ at import, so the container exits
-      # before binding the port and `restart:` below turns that into a loop. The log says
-      # which chown to run. Two remedies: `sudo chown -R 1000:1000 ./data`, or add
-      # `user: "1234:1234"` to this service to run as whichever uid owns the directory.
-      #
-      # A fresh clone already contains `./data` (data/.gitkeep is tracked for exactly this
-      # reason), so the daemon never has to create the mount source itself — which it would
-      # make root-owned, failing for every host user rather than only for uid != 1000.
-      #
-      # On macOS and Windows nothing is needed: Docker runs in a VM whose file sharing
-      # remaps ownership, so `./data` fills up owned by you.
+      # Sessions and the database. The container runs as uid 1000, so on Linux ./data must be
+      # writable by it: `sudo chown -R 1000:1000 ./data`. Not needed on macOS or Windows.
       - ./data:/app/data
-      # The agent library is a git checkout modified only by `git pull`
-      # (README.md "Configuration"). Iris never writes here — `src/store/paths.ts` says every
-      # path it writes is under `data_dir`, and an agent a session builds goes to
-      # `tmp/<id>/agents/` — so this mount only has to be readable by uid 1000.
+      # Read-only to Iris; changed only by `git pull`.
       - ./agents:/app/agents
-      # Override the default env-driven config with your own if desired.
+      # To use your own config.yaml:
       # - ./config.yaml:/app/config.yaml:ro
