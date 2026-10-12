@@ -12,7 +12,10 @@ import { sendError } from "../routes/errors.ts";
 // They stay on the request rather than becoming module-level reads because every route and
 // every pipeline stage already takes them from here, and because a test can then drive a
 // route with a chosen identity without reaching into this module's memo.
-export interface AuthedRequest extends Request {
+//
+// Params are plain strings: no route here uses a wildcard, the one case Express 5 types as
+// an array.
+export interface AuthedRequest extends Request<Record<string, string>> {
   user?: UserRecord;
   token?: string;
 }
