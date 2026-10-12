@@ -98,19 +98,28 @@ test("the reported marker — a labelled, empty <p> — is a serious violation o
   );
 });
 
-// aria-labelledby is prohibited on `paragraph` for the same reason and is the shape a model
-// reaches for when told not to use aria-label — so the prompt's example is pinned in both
-// forms. Pointed at a real heading, so this fails for being prohibited rather than for
-// dangling. A `<span>` host is here too: it is the other element a model reaches for, and
-// it fails for its own reason — a roleless generic may not be named either.
-test("the same marker fails on aria-labelledby, and on a <span> host", async () => {
+// A `<span>` host fails too: it is the other element a model reaches for, and a roleless
+// generic may not be named either.
+test("the same marker fails on a <span> host", async () => {
+  const marker = '<span role="doc-pagebreak" aria-label="Page 5" id="page-5"></span>';
+  const found = await rules(marker);
+  if (found === null) return;
+  assert.deepEqual(found, ["aria-prohibited-attr[serious]"], `${marker} should be the reported violation`);
+});
+
+// Since axe 4.13, a prohibited aria-labelledby is "needs review", not a violation, whatever
+// it points at and on either host. So the gate reports none of these. The prompt never
+// offers them.
+test("on aria-labelledby, axe asks for review and the gate says nothing", async () => {
   for (const marker of [
     '<p role="doc-pagebreak" aria-labelledby="doc-title" id="page-5"></p>',
-    '<span role="doc-pagebreak" aria-label="Page 5" id="page-5"></span>',
+    '<p role="doc-pagebreak" aria-labelledby="nope" id="page-5"></p>', // names nothing
+    '<span role="doc-pagebreak" aria-labelledby="doc-title" id="page-5"></span>',
   ]) {
     const found = await rules(marker);
     if (found === null) return;
-    assert.deepEqual(found, ["aria-prohibited-attr[serious]"], `${marker} should be the reported violation`);
+    assert.deepEqual(found, [], marker);
+    assert.deepEqual(await prohibitedAttr(marker), { violations: 0, incomplete: 1 }, marker);
   }
 });
 
@@ -127,7 +136,7 @@ test("the shape the page agent is now told to emit is clean", async () => {
 });
 
 // The two facts the prompt reasons from, as axe-core itself records them. They are the
-// reason the rule is a shape and not "avoid aria-label": if a version bump ever moved
+// reason the rule is a shape and not "avoid aria-label": if a version bump ever removed
 // either one, the prompt's stated reasoning would be wrong even though every verdict above
 // still held, and nothing else in the suite would notice.
 test("axe's own role table is why the marker is a named <hr> and not a <p> with text", () => {
@@ -144,7 +153,7 @@ test("axe's own role table is why the marker is a named <hr> and not a <p> with 
   // Naming is permitted on the role: the report above is the host element's doing.
   assert.equal(roles["doc-pagebreak"].prohibitedAttrs, undefined, "doc-pagebreak now prohibits attributes itself");
   assert.deepEqual(roles["doc-pagebreak"].superclassRole, ["separator"]);
-  assert.deepEqual(roles.paragraph.prohibitedAttrs, ["aria-label", "aria-labelledby"]);
+  for (const attr of ["aria-label", "aria-labelledby"]) assert.ok(roles.paragraph.prohibitedAttrs?.includes(attr), attr);
 
   // And the reason a name is the only way to say which page: the marker's contents are not
   // exposed, so a number written as text is not a name and is not read as content either.
