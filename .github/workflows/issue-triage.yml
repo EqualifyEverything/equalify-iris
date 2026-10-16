@@ -6,13 +6,11 @@ name: Issue Triage
 # naming the survivor. Anything short of that is commented and reported, never
 # closed.
 #
-# It exists because the upstream dedupe cannot do this. `src/github/issue.ts`
-# already refuses to file an `Agent update proposal:` whose title exactly matches
-# an open one, and that is the right check to have there — it is cheap, it is
-# deterministic, and it needs no model. What it cannot see is that "procedure
-# steps must be marked up at heading" and "when steps are nested inside a named
-# section" are one rule described twice. Exact-title dedupe is not failing at
-# semantic dedupe; it was never attempting it. This workflow is that second tier,
+# It exists because the grouping in `agent-suggestions.yml` cannot do all of this.
+# That job files one `Agent update proposal:` per agent and lesson slug, which is
+# cheap and deterministic. What it cannot see is that "procedure steps must be
+# marked up at heading" and "when steps are nested inside a named section" are one
+# rule described twice. This workflow is that second tier,
 # and it is deliberately the expensive tier: it runs once per new issue, on one
 # issue, and it can close at most that one.
 #

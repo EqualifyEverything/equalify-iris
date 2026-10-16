@@ -27,6 +27,22 @@ export interface UserRecord {
   created_at: string;
 }
 
+export type SuggestionKind = "new_agent" | "agent_update";
+
+// One agent suggestion (#539). `reason` is the page agent's own words for why a new
+// agent is needed. `detail` is the proposal for an agent_update.
+export interface SuggestionRow {
+  kind: SuggestionKind;
+  agent: string;
+  session_id: string;
+  page?: string;
+  // An update's lesson slug, so one session's two lessons are two rows. '' for new agents.
+  lesson?: string;
+  reason?: string | null;
+  detail?: unknown;
+  recorded_at?: string;
+}
+
 export interface SessionRecord {
   session_id: string;
   github_user_id: number;
@@ -814,9 +830,8 @@ export class Store {
       -- No github_token column, and no fork_repo column. The token is never
       -- persisted (see UserRecord above); fork_repo belonged to an earlier
       -- fork-and-PR design, which was never built and is not going to be --
-      -- contributions are filed as issues under this deployment's single
-      -- identity, and nobody is credited: what a body identifies is the
-      -- session, not a person (see github/issue.ts).
+      -- contributions are saved as suggestions and filed by a workflow, and
+      -- nobody is credited: a suggestion names a session, not a person.
       CREATE TABLE IF NOT EXISTS users (
         github_user_id INTEGER PRIMARY KEY,
         github_login TEXT NOT NULL,
@@ -881,6 +896,23 @@ export class Store {
       -- b-tree.
       -- The write cost is per completed run, not per request.
       CREATE INDEX IF NOT EXISTS idx_run_signals_recorded ON run_signals(recorded_at);
+
+      -- Agent suggestions, served at GET /v1/suggestions and filed as issues by
+      -- .github/workflows/agent-suggestions.yml (#539). One row per suggestion: a
+      -- new agent asked for on a page, or a gated update to an existing agent.
+      -- UNIQUE so recording the same one twice (a feedback re-run, a backfill) keeps
+      -- one row. page is '' for updates; lesson is '' for new agents.
+      CREATE TABLE IF NOT EXISTS suggestions (
+        kind TEXT NOT NULL,
+        agent TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        page TEXT NOT NULL DEFAULT '',
+        lesson TEXT NOT NULL DEFAULT '',
+        reason TEXT,
+        detail TEXT,
+        recorded_at TEXT NOT NULL,
+        UNIQUE (kind, session_id, agent, page, lesson)
+      );
     `);
     // ...and the column the CREATE TABLE above cannot add to a database that
     // already has a sessions table.
@@ -1386,6 +1418,58 @@ export class Store {
       this.db.exec("ROLLBACK");
       throw e;
     }
+  }
+
+  // Record suggestions; a repeat of the same (kind, session, agent, page, lesson) replaces
+  // the earlier row.
+  addSuggestions(rows: SuggestionRow[]): void {
+    if (rows.length === 0) return;
+    const insert = this.db.prepare(
+      `INSERT OR REPLACE INTO suggestions (kind, agent, session_id, page, lesson, reason, detail, recorded_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      for (const r of rows) {
+        insert.run(
+          r.kind,
+          r.agent,
+          r.session_id,
+          r.page ?? "",
+          r.lesson ?? "",
+          r.reason ?? null,
+          r.detail === undefined ? null : JSON.stringify(r.detail),
+          r.recorded_at ?? new Date().toISOString(),
+        );
+      }
+      this.db.exec("COMMIT");
+    } catch (e) {
+      this.db.exec("ROLLBACK");
+      throw e;
+    }
+  }
+
+  // Every suggestion ever recorded, oldest first. GET /v1/suggestions groups them.
+  listSuggestions(): SuggestionRow[] {
+    const rows = this.db
+      .prepare(
+        `SELECT kind, agent, session_id, page, lesson, reason, detail, recorded_at
+         FROM suggestions ORDER BY recorded_at, rowid`,
+      )
+      .all() as {
+      kind: SuggestionKind; agent: string; session_id: string; page: string; lesson: string;
+      reason: string | null; detail: string | null; recorded_at: string;
+    }[];
+    return rows.map((r) => ({
+      kind: r.kind,
+      agent: r.agent,
+      session_id: r.session_id,
+      page: r.page,
+      lesson: r.lesson,
+      reason: r.reason,
+      detail: r.detail === null ? null : JSON.parse(r.detail),
+      recorded_at: r.recorded_at,
+    }));
   }
 
   /**

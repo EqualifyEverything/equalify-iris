@@ -11,24 +11,21 @@ Iris refuses to start without the token, so this is not optional setup.
 
 1. Go to [github.com/settings/personal-access-tokens/new](https://github.com/settings/personal-access-tokens/new)
    (**Fine-grained tokens** → Generate new token).
-2. Repository access: **Only select repositories** → your `upstream_repo`.
-3. Permissions → Repository permissions → **Issues: Read and write**. Nothing else.
-4. Set an expiry you will remember. Nothing renews it.
-5. Put the value in the environment as `IRIS_GITHUB_TOKEN`; the example config reads it from there.
+2. Repository access: **Public repositories (read-only)**. Add no permissions: Iris only asks GitHub
+   who the token belongs to.
+3. Set an expiry you will remember. Nothing renews it.
+4. Put the value in the environment as `IRIS_GITHUB_TOKEN`; the example config reads it from there.
 
 ```yaml
 github:
   token: ${IRIS_GITHUB_TOKEN}
-  upstream_repo: https://github.com/your-org/your-agent-library
 ```
 
-The token is never sent to a browser and never written to the database. Issues get filed as whatever
-account made it — so make it an account you are willing to see on those issues, and consider a
-service account rather than your own.
+The token is never sent to a browser and never written to the database. Iris files nothing on
+GitHub: suggestions are saved and filed by a workflow ([Contributions](API.md#contributions-automatic)).
 
-**When it expires, conversions keep working.** Filing is the only thing that stops, with a 403 or 404
-whose log line names `github.token`. Nothing else breaks, which is why an expired token is easy to
-miss — put the expiry date in a calendar.
+**When it expires, every request answers 401** until you replace it and restart. Put the expiry date
+in a calendar.
 
 ## What one identity costs
 
@@ -37,7 +34,7 @@ per-caller identity, and none of them is a bug:
 
 | What | Why |
 | --- | --- |
-| Contributors get **no attribution** | Every issue is filed as your token's account. The issue says what a session found, not who found it. |
+| Contributors get **no attribution** | A suggestion says what a session found, not who found it. |
 | `GET /v1/sessions` lists **the deployment's** sessions | Ownership is one account, so there is no such thing as "the caller's sessions". Anyone who can call it sees every session id, and an id is all `/output` needs. |
 | Uploads are limited **per address** | The only credential a caller can present is shared, so keying a budget on it would put the whole internet in one bucket. Behind NAT, callers share a budget — and `server.trust_proxy` has to be right or they all look like the proxy. |
 | A visitor can read **another visitor's** document | Given the session id. Sessions are not isolated from each other, because there is nobody to isolate. |
@@ -73,7 +70,7 @@ deployment either hands the secret to the people who should use it, or accepts s
 
 ### What the gate does not cover
 
-The gate is attached to `/v1/me` and `/v1/sessions`, and to nothing else. Four endpoints are outside
+The gate is attached to `/v1/me` and `/v1/sessions`, and to nothing else. Five endpoints are outside
 it and answer on a gated deployment. None touches a document or an identity:
 
 | Endpoint | Why |
@@ -82,6 +79,7 @@ it and answer on a gated deployment. None touches a document or an identity:
 | `GET /v1/limits` | Someone deciding whether their scan is small enough should not need the key to find out. |
 | `GET /v1/stats` | A deployment-wide tally, no per-session detail. |
 | `GET /v1/quality` | Has its own token (`server.quality_token`) and 404s unless you set it. |
+| `GET /v1/suggestions` | Uses that same token, and 404s unless you set it. |
 
 If any of those must be private too, put it behind your reverse proxy. Iris will not do it for you.
 
@@ -95,12 +93,6 @@ and without one `GET /user` per request. Fix the token and restart.
 **`500 github.token is not configured`** — only reachable from a config that never went through
 validation. A deployment that booted has the key.
 
-Filing failures are separate and never fail a run: they are logged as `agent_issue_failed` /
-`agent_update_issue_failed` with a `hint`. The likely cause is always the same one now — that PAT's
-access to `upstream_repo`. Expect **404** more often than 403: GitHub does not reveal repositories a
-credential cannot see, so no access reads as "no such repo". A misspelled `upstream_repo` is identical
-on the wire, and the hint says so rather than blaming one.
-
 ## Coming from an earlier build
 
 - **Delete `data/iris.sqlite`.** An early build stored a token per user in a `github_token` column.
@@ -110,8 +102,8 @@ on the wire, and the hint says so rather than blaming one.
   column no current build writes. The file also still holds live plaintext tokens, so delete it rather
   than archiving it. You lose session history and nothing else.
 - **Delete these keys.** `github.client_id`, `github.client_secret`, `github.oauth_scope`,
-  `github.oauth_base_url`, `github.anonymous_token`, `github.issue_token`, and
-  `server.rate_limits.auth_per_minute`. They are ignored, not errors — but leaving them in a config
+  `github.oauth_base_url`, `github.anonymous_token`, `github.issue_token`,
+  `server.rate_limits.auth_per_minute` and `github.upstream_repo`. They are ignored, not errors — but leaving them in a config
   file describes a deployment you do not have.
 - **`POST /v1/auth/github/device` and its poll endpoint are gone** (404). Any client running the
   device flow needs updating: it now sends either nothing or `server.api_token`.

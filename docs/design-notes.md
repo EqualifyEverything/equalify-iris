@@ -61,7 +61,7 @@ Each decision below is one bullet, and the headings only group them:
   duplicated output for nested structures like forms. Reconciliation also cannot run until
   extraction emits fragment edge data, and it currently emits none. A Builder Agent that drafts
   session-scoped agents into `tmp/<id>/agents/` is likewise designed for and not built — what ships
-  instead files the drafted agent as an issue (below).
+  instead saves a suggestion that a workflow files as an issue (below).
 
   Reconciliation's *within-page* job is gone for the same reason. It was there to clean up after the
   fan-out, and one page now yields one fragment from one agent, so there are never two fragments
@@ -111,9 +111,8 @@ Each decision below is one bullet, and the headings only group them:
   decline and the contribution filter. A suggestion's name is prose a model wrote, not a filename
   (`STANDARD` itself spells one entry `formField`), so `"Table"` is ordinary output. While the nine
   files existed, `agents/Table.md` resolved on a case-insensitive volume and absorbed it. With them
-  gone, an exact-match filter would draft an agent and file a public issue on the upstream repo —
-  under the deployment's own GitHub account, the only identity Iris has — for a type the page pass
-  covers.
+  gone, an exact-match filter would save a suggestion for a type the page pass covers, and the daily
+  workflow would file it as a public issue.
 - **No provenance comments in the output.** `@source` / `@agent` / `@fragment` wrappers travel with
   a fragment through the pipeline, and an early design kept them in the final HTML. Iris delivers
   clean content-only HTML instead. The comments leak pipeline internals into a document meant to be
@@ -137,26 +136,18 @@ Each decision below is one bullet, and the headings only group them:
   `@page-uncorrected` lists pages whose content IS in the document and never passed Iris's own
   fidelity check. `@review-unread` gives how many of the windows the document was read in came back
   with no usable answer — `@lint-unavailable`'s warning, about a different gate.
-- **Contributions are issues, not PRs.** Instead of fork+PR-on-close, when the extractor flags
-  content a specialist would handle better, Iris drafts that agent and files a
-  `New agent suggestion: <type>` GitHub issue with the agent code + context. Feedback that
-  generalizes files an
-  `Agent update proposal: <agent> — <lesson>` issue the same way. Both are simpler to triage, and
-  they need no write access to a fork — so nothing forks and nothing pushes. The `pending_prs` and
-  `prs_opened` response fields, the `skip_prs` parameter and the `fork_repo` field on `/v1/me`
-  belonged to that flow and are **not** part of the API. Issues are filed with the deployment's one
-  token, `github.token` — there is
-  [no per-user identity to file as](../README.md#one-github-identity-and-no-sign-in), which costs the
-  attribution and buys the whole login flow being gone. Filing fails softly, and there is now one
-  credential a 403 or 404 can be about, so the hint logged with the failure names it rather than
-  having to work out which of three was used.
+- **Contributions are issues, filed by a workflow, not by Iris (#539).** Iris saves each new-agent
+  suggestion and each agent update proposal on the deployment. A daily workflow,
+  `.github/workflows/agent-suggestions.yml`, reads them from `/v1/suggestions`, groups the ones that
+  mean the same thing, and opens or updates one issue per idea. Iris used to file an issue per
+  suggestion itself, which gave a page of near-duplicates (`scientificFigureAgent`,
+  `scientific-figure`, …) and needed `issues: write` on the deployment's token. Now the token needs no
+  permissions, and grouping happens where every suggestion can be seen at once.
 
-  The update title carries a slug of the **lesson**, not just the agent, because the agent on that
-  path is always `page.md`. With the agent alone, every proposal ever made computed one title, and
-  the title-based dedupe then skipped every one of them after the first — silently, for as long as
-  that first issue stayed open. That was observed on the UIC deployment, where one issue blocked the
-  path for a day. A repeat report of the same lesson now comments on its issue with the new session
-  and corroboration count instead of being dropped, so no lesson leaves without a trace.
+  Proposals are grouped by agent and a slug of the **lesson**, not by agent alone, because the agent on
+  that path is always `page.md`. Grouped by agent alone, every proposal would land on one issue.
+  Nothing forks and nothing pushes: the `pending_prs` and `prs_opened` response fields, the `skip_prs`
+  parameter and the `fork_repo` field on `/v1/me` are **not** part of the API.
 - **Review issues are attributed by page, not by `@source` region.** The Reader's issue format was
   designed around the `@source` region ids of the per-region fan-out, which extraction no longer
   produces and which are stripped from the deliverable anyway (above). Issues instead carry

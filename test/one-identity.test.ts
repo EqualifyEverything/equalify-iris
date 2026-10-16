@@ -118,7 +118,6 @@ async function deploy(
   const cfg = {
     github: {
       api_base_url: gh.base,
-      upstream_repo: "https://github.com/example/iris",
       ...(opts.token === null ? {} : { token: opts.token ?? TOKEN }),
     },
     server: opts.gate === undefined ? {} : { api_token: opts.gate },
@@ -131,7 +130,7 @@ async function deploy(
 
   const app = express();
   app.use(makeAuthMiddleware(store, cfg));
-  app.use("/v1/me", meRouter(cfg));
+  app.use("/v1/me", meRouter());
   // Off by default. Most tests here need the cheapest route that forces the identity to
   // resolve; only the repoint test needs a route that filters BY that identity.
   if (opts.sessions) app.use("/v1/sessions", sessionsRouter(cfg, store));
@@ -261,7 +260,7 @@ test("the body of /v1/me describes the deployment, not the caller", async () => 
     // it must run the same middleware an upload does rather than answer from config. That
     // it reports the deployment's own login is the part a reader of the page could
     // misunderstand as "who am I signed in as".
-    assert.equal(body.upstream_repo, "https://github.com/example/iris");
+    assert.equal(body.github_user_id, GH_USER.id);
   } finally {
     d.close();
   }
@@ -428,7 +427,7 @@ test("a config with no github.token is refused at startup, by name", () => {
     const base =
       `storage:\n  data_dir: ${dir}\n  agents_dir: ${dir}\n  database: ${join(dir, "iris.sqlite")}\n` +
       `providers:\n  default: openrouter\n  openrouter:\n    api_key: k\n    default_model: m\n` +
-      `github:\n  upstream_repo: https://github.com/example/iris\n`;
+      `github:\n`;
     const empty = join(dir, "empty.yaml");
     writeFileSync(empty, `${base}  token: ""\n`);
     assert.throws(
@@ -437,7 +436,7 @@ test("a config with no github.token is refused at startup, by name", () => {
         /github\.token is not set/.test(e.message) &&
         // Fatal is only worth it if the message is the fix: which kind of token, what it
         // needs to be able to do, and where the example reads it from.
-        /issues:write/.test(e.message) &&
+        /needs no permissions/.test(e.message) &&
         /IRIS_GITHUB_TOKEN/.test(e.message),
       "a deployment with no identity started anyway, and every /v1/me and /v1/sessions request would 500",
     );

@@ -6,30 +6,11 @@
 // The base URL is passed in rather than hardcoded so a deployment can target GitHub
 // Enterprise, and so the suite can drive this against a mock host.
 //
-// What the token is used for, and it is only three things:
+// The token is used for one thing: `GET /user`, here, to name the account sessions belong
+// to. Iris files no issues (#539), so the token needs no repository permissions at all.
 //
-//   1. `GET /user`, here, to name the account sessions and issues belong to.
-//   2. Filing agent-suggestion and agent-update issues on `upstream_repo` — see
-//      src/github/issue.ts.
-//   3. The dedupe that runs before each of those: a title search for the issue already
-//      tracking this lesson, and a comment on it when there is one.
+// One operator-visible consequence of there being one token:
 //
-// So the narrowest credential that works is a fine-grained personal access token scoped to
-// `upstream_repo` alone with `Issues: read and write`. The READ half is for the dedupe in
-// (3), not for a label — `ensureLabel` is gone (src/github/issue.ts, and both filing paths
-// pass no `labels`), because GitHub silently drops labels set by a filer without push
-// access. Do not add one back on the strength of a comment here. Nothing pushes, nothing
-// opens pull requests, and nothing reads code, so a classic `repo` token grants far more
-// than this service uses.
-//
-// Two operator-visible consequences of there being one token:
-//
-//   - Every issue is filed under this account, and NOBODY IS CREDITED. Neither body carries
-//     a human identifier — see the two builders in src/github/issue.ts: what identifies a
-//     contribution is the session id. On the feedback path the user's own words are quoted
-//     verbatim, which is a trace of a person, not an attribution of one. Do not read this
-//     as licence to put a `@name` in a body: issue.ts wraps user text in a code span
-//     precisely so a name inside it cannot notify anyone.
 //   - A fine-grained PAT EXPIRES, and nothing here refreshes it. The day it lapses, every
 //     request 401s with "could not authenticate to GitHub" and the fix is a new token in
 //     config. GitHub emails the token's owner before that happens; there is no in-process

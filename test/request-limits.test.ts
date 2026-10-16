@@ -67,7 +67,6 @@ function cfg(rate_limits?: Partial<RateLimitConfig>): IrisConfig {
     storage: { data_dir: "/tmp/iris-test", agents_dir: "agents", database: ":memory:" },
     github: {
       token: "ghp_test",
-      upstream_repo: "https://github.com/o/r",
       api_base_url: "https://api.github.com",
     },
     providers: { default: "openrouter", openrouter: { api_key: "k", default_model: "anthropic/claude-sonnet-4.6" } },

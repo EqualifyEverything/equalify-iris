@@ -27,8 +27,8 @@ const EXAMPLE = fileURLToPath(new URL("../config.example.yaml", import.meta.url)
 // lands — not that each agent was configured separately. It is still the assertion that
 // would catch the file naming a provider it does not define, or an agent the comment lists
 // that resolution has no route for, and it is what an operator uncommenting a per_agent
-// line runs into. `builder` is in the list for the same reason as the rest: it is dispatched.
-const AGENTS = ["page", "reader", "copy_editor", "feedback", "builder"];
+// line runs into.
+const AGENTS = ["page", "reader", "copy_editor", "feedback"];
 const CAPABILITIES: Capability[] = ["text", "vision", "structured_output"];
 
 // The two variables the file expands and cannot start without: a model provider and the

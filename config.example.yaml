@@ -44,14 +44,11 @@ branding:
   name: ${IRIS_BRAND_NAME}
   logo_file: ${IRIS_BRAND_LOGO}
 
-# Iris's one GitHub identity. Every session is owned by it and every issue is filed as it.
-# See docs/github-auth.md.
+# Iris's one GitHub identity. Every session is owned by it. See docs/github-auth.md.
 github:
-  # REQUIRED. A fine-grained token with `Issues: read and write` on upstream_repo only.
-  # When it expires, filing fails and conversions keep working.
+  # REQUIRED. A fine-grained token; it needs no permissions. When it expires, every
+  # request answers 401 until it is replaced.
   token: ${IRIS_GITHUB_TOKEN}
-  # Where agent-suggestion issues are filed.
-  upstream_repo: ${IRIS_UPSTREAM_REPO}
   # Only for GitHub Enterprise, e.g. https://github.example.com/api/v3.
   api_base_url: ${GITHUB_API_BASE_URL}
 
@@ -59,7 +56,7 @@ github:
 providers:
   default: openrouter
   # Per-agent overrides: `<agent>: <provider>` or `<agent>: { provider: ..., model: ... }`.
-  # Agents: page, reader, copy_editor, feedback, builder, plus any specialist in `agents/`.
+  # Agents: page, reader, copy_editor, feedback, plus any specialist in `agents/`.
   # Any other key is ignored. A `model:` without `provider:` uses `default`. A model is
   # picked in this order: per_agent, then the provider's per_capability, then default_model. To add overrides, uncomment the
   # `per_agent:` key below too, and delete this empty one.

@@ -562,7 +562,7 @@ jobs:
           COOLDOWN_DAYS=30
 
           # Every issue this workflow has ever filed, open or closed, found by title
-          # prefix. Searched then compared exactly, mirroring src/github/issue.ts: the
+          # prefix. Searched then compared exactly: the
           # `in:title` search is a full-text phrase match rather than an equality
           # test, so it returns a superset and the comparison below decides.
           #

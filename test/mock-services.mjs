@@ -22,16 +22,9 @@ function json(res, status, obj) {
 // `GET /user` is the only GitHub route, and everything else falls through to a 404 naming
 // the path. (`GET /__user_lookups` below is also served, but it is this mock's own
 // instrument — no such path exists on api.github.com and Iris never calls it.)
-// Iris's whole GitHub surface is that call (auth/github.ts) plus issue search,
-// create and comment (github/issue.ts) — it files issues, and never forks, branches,
-// commits a file or opens a pull request.
-//
-// The three filing calls are left UNHANDLED on purpose: a run that tries to file gets the
-// fall-through 404, which is how the e2e proves filing fails without failing the run (see
-// its specialist-dispatch step). So the fall-through is a fixture, not just a safety net —
-// which is why this mock should answer nothing it does not have to. It used to fake a
-// fork-and-PR flow left over from when contributions were pull requests; a service that
-// started forking again would have passed its tests on that fake 202.
+// Iris's whole GitHub surface is that call (auth/github.ts). It files nothing: suggestions
+// are saved and filed by a workflow (#539). So this mock should answer nothing else, and a
+// service that started calling GitHub again would meet the fall-through 404.
 
 // The one credential this mock accepts, and it must be the value e2e.sh puts in
 // `github.token`. Checked rather than ignored: the deployment's PAT is now the only

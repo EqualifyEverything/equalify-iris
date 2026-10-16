@@ -550,15 +550,42 @@ token above. Verify the pair with `gh workflow run quality-report.yml -f dry_run
 waiting for the weekly schedule; [ci.md](ci.md)'s "Weekly quality report" section has the full procedure,
 including why a green run that declines to file is the expected result on a young deployment.
 
+## Agent suggestions (shared secret, off by default)
+
+`GET /v1/suggestions` returns every suggestion this deployment has saved, grouped
+([Contributions](#contributions-automatic)). It uses the same `server.quality_token` as
+[`/v1/quality`](#quality-tally-shared-secret-off-by-default): **404** when it is unset, **401**
+without it.
+
+```bash
+curl -s -H "Authorization: Bearer $QUALITY_TOKEN" "$BASE/suggestions"
+```
+```json
+{
+  "new_agents": [
+    { "key": "barchart", "names": [{ "name": "barChartAgent", "count": 3 }], "count": 3, "sessions": 2,
+      "first_seen": "2026-10-01T12:00:00.000Z", "last_seen": "2026-10-09T08:30:00.000Z",
+      "pages": [{ "session_id": "ses_...", "page": "page-004.png" }],
+      "reasons": ["A grouped bar chart with twelve series."] }
+  ],
+  "agent_updates": [
+    { "agent": "page.md", "lesson_slug": "keep-footnote-numbers", "count": 2, "sessions": 2,
+      "first_seen": "2026-10-02T10:00:00.000Z", "last_seen": "2026-10-07T15:00:00.000Z",
+      "latest": { "session_id": "ses_...", "summary": "...", "diff_preview": "...", "content": "...",
+                  "lesson": { "instruction": "...", "feedback": "...", "count": 2 } } }
+  ]
+}
+```
+
+`key` groups names that differ only in case, punctuation, or a trailing "agent" or "specialist".
+`pages` and `reasons` hold the 10 most recent. `latest` is the newest proposal for that lesson, with
+the full proposed prompt in `content`.
+
 ## Authenticate
 
 **There is no sign-in.** You do not create an account, run an OAuth flow, or hand Iris a GitHub
-token. The deployment holds one GitHub credential of its own (`github.token`, server-side only) and
-uses it for every session's feedback. Nothing you send is a GitHub credential.
-
-That has one cost worth knowing before you use it: **your contributions are filed under the
-deployment's account, not yours.** Feedback still reaches the shared agent library, and it still
-improves Iris for the next person, but your name is not on it.
+token. The deployment holds one GitHub credential of its own (`github.token`, server-side only),
+used only to name its account. Nothing you send is a GitHub credential.
 
 The operator chooses one of two modes.
 
@@ -584,7 +611,7 @@ To find out which kind you are talking to, call `GET /v1/me` with no header: **2
 ### What the gate covers
 
 `server.api_token` protects `/v1/me` and everything under `/v1/sessions`, and nothing else — the
-gate is attached to those two mounts rather than to `/v1` as a whole. Four endpoints are outside it
+gate is attached to those two mounts rather than to `/v1` as a whole. Five endpoints are outside it
 and stay reachable on a gated deployment, on purpose. None of them touches a document or an
 identity:
 
@@ -594,6 +621,7 @@ identity:
 | [`GET /v1/limits`](#upload-limits-unauthenticated) | Someone deciding whether their scan is small enough should not need the key to find out. |
 | [`GET /v1/stats`](#public-tally-unauthenticated) | A deployment-wide tally with no per-session detail. |
 | [`GET /v1/quality`](#quality-tally-shared-secret-off-by-default) | Has its own separate token, and is 404 unless the operator set it. |
+| [`GET /v1/suggestions`](#agent-suggestions-shared-secret-off-by-default) | Uses the quality token, and is 404 unless the operator set it. |
 
 *Operators:* an earlier build stored a token per user, in a `github_token` column. There is no
 migration — delete any `data/iris.sqlite` from before that change. The service refuses to start
@@ -611,14 +639,12 @@ curl -s -H "$AUTH" "$BASE/me"
 {
   "github_login": "iris-tester",
   "github_user_id": 4242,
-  "upstream_repo": "https://github.com/example/iris",
   "defaults": { "max_review_iterations": 3 }
 }
 ```
 
-`github_login` is the account this deployment files contributions as. `upstream_repo` is where it
-files them. `defaults.max_review_iterations` is the review cap every session gets. There is no
-`fork_repo` field: contributions are filed as issues, so no fork is ever created.
+`github_login` is the deployment's GitHub account. `defaults.max_review_iterations` is the review
+cap every session gets.
 
 *Operators:* the cap is copied into this account when the deployment first authenticates, so raising
 it in config later does not change what this endpoint reports. It stands until `data/iris.sqlite` is
@@ -1071,8 +1097,8 @@ The events worth grepping for have a section each below, and the index is a link
 the index when you have a `type` off a log line and want to know what it means; read a section when
 you want to know what the field it names is for and what it costs.
 
-**The index is the whole log.** `src/` emits **127** event types and every one of them has a section
-below — **118** sections, because a few cover two or three events that are only read together. So a
+**The index is the whole log.** `src/` emits **123** event types and every one of them has a section
+below — **114** sections, because a few cover two or three events that are only read together. So a
 `type` you cannot find here is not one the index skipped: it is a misread line, or a name `src/` no
 longer emits.
 
@@ -1189,14 +1215,10 @@ emits fails it too.
 | [`eval_gate`](#eval_gate) | Candidate against current, over the fixtures **both** could be scored on |
 | [`agent_update_blocked`](#agent_update_blocked) | A proposed prompt change was refused — two shapes, told apart by `reason` |
 | [`agent_updates_proposed`](#agent_updates_proposed) | A proposal cleared both gates and was written to the session |
-| [`agent_update_issue`](#agent_update_issue) | The proposal reached GitHub, as an issue or as a comment on one |
-| [`agent_update_issue_failed`](#agent_update_issue_failed) | Filing the proposal threw, and the run carried on |
-| [`agent_update_issue_skipped`](#agent_update_issue_skipped) | No GitHub token, so the proposal stayed on disk |
 | [`feedback_training_failed`](#feedback_training_failed) | The whole training step threw, and the document still shipped |
 | [`run_complete`](#run_complete) | The run's terminal marker, and the state it delivered |
-| [`agent_issue`](#agent_issue) | A new-agent suggestion was filed — or its `url` says it was a duplicate |
-| [`agent_issue_failed`](#agent_issue_failed) | A suggestion did not get filed, and which of the two calls failed |
-| [`contribution_failed`](#contribution_failed) | The filing step threw, **after** `run_complete` |
+| [`suggestions_recorded`](#suggestions_recorded) | New-agent suggestions were saved for the maintainers, **after** `run_complete` |
+| [`contribution_failed`](#contribution_failed) | Saving them threw, **after** `run_complete` |
 | [`run_failed`](#run_failed) | The run threw, so there is **no document** |
 | [`tagged_pdf` / `tagged_pdf_failed`](#tagged_pdf--tagged_pdf_failed) | A tagged PDF was made, or could not be |
 | [`tagged_pdf_fields` / `tagged_pdf_fields_failed`](#tagged_pdf_fields--tagged_pdf_fields_failed) | A flat form was tagged to list its fields, or could not be |
@@ -4104,8 +4126,8 @@ the correction was judged specific to this document, which is the outcome this p
 `"unknown"` is neither of those — it is a reply that could not be read, reaching the same branch.
 
 Recording is not what gates training. The update-proposal path runs on the same correction either
-way; with no recorded lesson, the issue it may file is titled from the model's one-line summary
-instead ([`agent_update_issue`](#agent_update_issue)).
+way; with no recorded lesson, the proposal is grouped by the model's one-line summary instead
+([Contributions](#contributions-automatic)).
 
 ### `feedback_learned`
 
@@ -4223,7 +4245,7 @@ A proposed prompt change was not proposed after all: `agent` is the file it was 
 [`eval_gate`](#eval_gate) line above it, and there is no `failures` field at all — nothing broke, the
 candidate simply scored lower.
 
-Nothing is filed on either path, and the document the correction was about is unaffected: it was
+Nothing is saved on either path, and the document the correction was about is unaffected: it was
 delivered before the training step began.
 
 ### `agent_updates_proposed`
@@ -4237,51 +4259,8 @@ any earlier round's proposals and deduped by agent — so a session that propose
 these lines, each saying 1, over a file holding one entry per agent. Today that entry count is always
 1 as well: every proposal is for `page.md`.
 
-### `agent_update_issue`
-
-The proposal was filed on the upstream repo: `url` points at what to look at, `action` is `created` or
-`commented`, and `lesson_slug` is the slug the title was deduped by (`null` when nothing could be
-slugged).
-
-**`commented` is a success, not a proposal that was dropped.** Every proposal targets the same
-`page.md`, so before the lesson slug was part of the title, one open issue silently swallowed every
-later lesson from every user. A repeat now lands as a comment on the issue already tracking that
-lesson, carrying this session's id and its corroboration count, and `url` anchors that comment rather
-than the issue.
-
-The slug prefers the recorded lesson's instruction, because that string is stable across the sessions
-that corroborate it. With no recorded lesson ([`feedback_classified`](#feedback_classified)) it is a
-slug of the model's one-line summary, which is re-worded every run — so it separates lessons without
-reliably matching itself. `lesson_slug: null` is the case with no dedupe left at all: the title falls
-back to a bare `Agent update proposal: <agent>`, which can only ever match the one issue already open
-under it.
-
-The dedupe is a GitHub search, with the index lag described under
-[Contributions](#contributions-automatic): two sessions reporting the same lesson within a minute of
-each other can each write `created`.
-
-### `agent_update_issue_failed`
-
-Filing threw and the run carried on: `agent`, `error`, and `hint` when the failure looks like a
-permissions problem.
-
-`hint` is present only for a 403 or 404 that reached GitHub and does not look like a rate limit. Its
-absence is therefore not a claim that the credential is fine — a 403 whose headers say the rate limit
-is exhausted, and any error from a call that never reached GitHub at all, both arrive here without
-one.
-
-The document was delivered before this line was written, and the proposal is still on disk in the
-session's `agent-updates.md`. Filing is a side effect ([Contributions](#contributions-automatic)).
-
-### `agent_update_issue_skipped`
-
-The deployment has no `github.token`, so nothing was filed: `agent` is the file the proposal was
-about, and `reason` is `no github token`, the only value it takes.
-
-The proposal stays in the session's `agent-updates.md`, which is where it was written either way —
-what this line says is that it stayed there. A deployment that booted cannot reach this line
-(`github.token` is required at startup), so seeing it means the pipeline was driven directly — a
-local run or a test — rather than through the API.
+The proposal is also saved for the maintainers, and served by
+[`GET /v1/suggestions`](#agent-suggestions-shared-secret-off-by-default).
 
 ### `feedback_training_failed`
 
@@ -4318,57 +4297,25 @@ finished run's duration up to this line.
 There is no `pages` field here. The count of source pages is `images` on [`run_start`](#run_start),
 and `pages` on [`extraction_start`](#extraction_start).
 
-It is the run's terminal marker and **not the last line of the log**. The suggestion filing below runs
-after it, so [`agent_issue`](#agent_issue), [`agent_issue_failed`](#agent_issue_failed) and
-[`contribution_failed`](#contribution_failed) can all appear underneath it.
+It is the run's terminal marker and **not the last line of the log**. Suggestions are saved after it,
+so [`suggestions_recorded`](#suggestions_recorded) and [`contribution_failed`](#contribution_failed)
+can appear underneath it.
 
-### `agent_issue`
+### `suggestions_recorded`
 
-A new-agent suggestion was filed on the upstream repo: `agent` is the normalized content type, and
-`url` the issue.
+New-agent suggestions from this run were saved for the maintainers: `agents` lists the names and
+`count` the rows (one per agent and page). They are served by
+[`GET /v1/suggestions`](#agent-suggestions-shared-secret-off-by-default).
 
-**`url` is not always a URL.** A suggestion whose title already matches an open issue is skipped
-rather than filed, and the field then carries the literal string `(duplicate — skipped)`. That is the
-only thing separating the two outcomes on this line; there is no second field for it. The other filing
-path comments instead of skipping ([`agent_update_issue`](#agent_update_issue)), because its titles are
-not unique per document and skipping lost lessons.
-
-`agent` is a normalized type, and the checks that come before this line leave no trace. A suggestion
-naming one of the standard types, one this run has already filed under a different capitalization, or
-one the library or the session already has an agent for is dropped before anything is drafted, and
-this step writes nothing when that happens. Drafting is a vision call, which is what those checks are
-worth.
-
-### `agent_issue_failed`
-
-A new-agent suggestion did not get filed: `agent`, `error`, `stage`, and `hint` on the filing stage
-only.
-
-`stage` says which call failed, and the two are held apart deliberately. `stage: "draft"` is the
-**model** call that writes the proposed agent markdown; `stage: "file"` is GitHub. A provider error's
-message can itself contain `403` — the status is formatted into the text — so under one `try` a
-drafting failure would be indistinguishable from a permissions failure, and would collect a hint about
-a GitHub App that was never involved. A `stage: "draft"` line therefore never carries `hint`.
-
-On `stage: "file"`, `hint` follows the rule described under
-[`agent_update_issue_failed`](#agent_update_issue_failed): a 403 or 404 that reached GitHub and does
-not look like a rate limit.
-
-Either way the loop continues to the next suggestion, and neither stage costs the caller the document.
+A suggestion naming a standard type, or an agent the library or the session already has, is dropped
+first and leaves no trace. With nothing left, this line is not written.
 
 ### `contribution_failed`
 
-The suggestion-filing step threw outside its own two catches: `error` is the only field. Like
-[`feedback_training_failed`](#feedback_training_failed), it is written by a catch in
-`src/pipeline/orchestrator.ts` rather than by the step it is about, and it is named after neither — so
-a grep for that step's own lines, which are the `agent_issue` ones, does not find it.
+Saving the suggestions threw: `error` is the only field. It is written by a catch in
+`src/pipeline/orchestrator.ts`, like [`feedback_training_failed`](#feedback_training_failed).
 
-Both of the failures **inside** it are already contained per suggestion
-([`agent_issue_failed`](#agent_issue_failed)), so a line here is the step's own work — reading the
-agent library to decide which suggestions are new — rather than a draft or a filing.
-
-This line comes **after** [`run_complete`](#run_complete), and it does not fail the session. The
-document was delivered well before it; a second feedback round can have started by then.
+This line comes **after** [`run_complete`](#run_complete), and it does not fail the session.
 
 ### `run_failed`
 
@@ -5376,7 +5323,7 @@ done
 ## Close the session (finalize + clean up)
 
 Locks the output and deletes `tmp/<id>/`. Requires `status` = `ready_for_review` (else `409`).
-Contributions are handled automatically during the run (see below), so close does not open PRs.
+Contributions are saved during the run ([Contributions](#contributions-automatic)), so close does nothing more.
 
 ```bash
 curl -s -X POST -H "$AUTH" "$BASE/sessions/$SID/close"
@@ -5387,45 +5334,25 @@ curl -s -X POST -H "$AUTH" "$BASE/sessions/$SID/close"
 
 ## Contributions (automatic)
 
-Every session gives something back, and there is no opt-out. This is why the API requires a GitHub
-token at all.
+Every session gives something back, and there is no opt-out. Iris saves two kinds of suggestion on
+the deployment during the run:
 
-Two things get filed as GitHub issues on the upstream repo, server-side during the run. Each is
-identified by its title prefix rather than by a label, because GitHub silently drops labels set by a
-filer without push access — which is most filers here:
+- **New agent suggestions** — the extractor met content that a dedicated agent would handle better,
+  such as a chart type. Iris saves the name, the page, and the model's reason.
+- **Agent update proposals** — your `/feedback` produced a change that generalizes beyond your
+  document and passed the agent's own fixtures. Iris saves the lesson and the proposed prompt.
 
-- **New agent suggestions** (`New agent suggestion: <type>`) — when the extractor meets content a
-  dedicated specialist agent would handle better than the general pass, Iris drafts that agent and
-  files it with the code + context.
-- **Agent improvements** (`Agent update proposal: <agent> — <lesson>`) — when your `/feedback`
-  produces a change that generalizes beyond your document, and it survives the agent's regression
-  fixtures. The title carries a short slug of the lesson as well as the agent, and the issue body
-  carries the lesson, how many sessions have reported it, and your feedback verbatim.
+Iris itself files nothing on GitHub. A daily workflow, `.github/workflows/agent-suggestions.yml`,
+reads [`GET /v1/suggestions`](#agent-suggestions-shared-secret-off-by-default), groups suggestions
+that mean the same thing, and opens or updates one issue per idea. Counts keep growing on an issue
+after it is closed, so a maintainer can see demand return.
 
-Both are filed with the deployment's own token, not yours — you do not have one, and what that costs
-is spelled out at the end of this section. There is no PR/fork flow: `/close` returns no `prs_opened`
-and requests accept no `skip_prs`.
+Saving never fails your run. A failure is logged as [`contribution_failed`](#contribution_failed).
+The issues name no user, because the deployment has one identity for every caller.
 
-Both dedupe against an open issue with the same title, found by searching GitHub — a new agent
-suggestion skips, an agent improvement **comments on the existing issue** with your session and the
-updated proposal. The improvement path has to do more than skip because its title is not unique per
-document: every proposal targets the same `page.md`, so before the lesson slug was in the title, one
-open issue silently discarded every later lesson from every user for as long as it stayed open. A
-lesson never disappears now — worst case it lands as a comment on a related issue.
-
-That search is the only dedupe, and GitHub's search index is not immediate — two sessions that report
-the same thing within a minute or two of each other can each file one. Deliberate: a duplicate costs
-a maintainer one click, and hard-failing the check would cost you your document.
-
-Filing never fails your run — a contribution is a side effect, and a GitHub outage must not cost
-you a document you already paid for. It is logged as `agent_issue_failed` instead, with a hint
-naming the likely cause when the failure looks like a permissions problem (usually: the GitHub App
-is not installed on `upstream_repo`).
-
-**Everything is filed under the deployment's own account** (`github.token`) — there is no per-user
-identity to credit. So the issue says what your session found, and not who found it. If attribution
-matters to you, file it yourself against `upstream_repo`; the issue Iris opens is a normal issue and
-you can comment on it.
+*Operators:* unlike [`/v1/quality`](#quality-tally-shared-secret-off-by-default), this carries
+model-written text about your documents — the reasons and the proposed prompts — into public issues.
+Run the workflow only against a deployment whose documents are public.
 
 ## Errors
 

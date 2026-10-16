@@ -1054,11 +1054,9 @@ export function summarizeRun(
   // that has been working since it was killed.
   //
   // Recency is measured from the last event rather than from an open CALL, because the
-  // longest step in this window may not be a model call at all: filing the agent-update
-  // issue is a GitHub request (github/issue.ts) with no timeout of its own, and a stalled
-  // one holds the run's `max_concurrent_runs` slot while `openCalls` is empty. Keying on
-  // an open call would freeze the clock on exactly that run, which is the one still
-  // occupying the machine.
+  // longest step in this window may not be a model call at all, and a stall outside one
+  // holds the run's `max_concurrent_runs` slot while `openCalls` is empty. Keying on an open call would
+  // freeze the clock on exactly that run, which is the one still occupying the machine.
   //
   // What it costs: a live run stalled for longer than the ceiling in a step that logs
   // nothing is measured to its last event, so its `elapsed_ms` stops climbing. That is

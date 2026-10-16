@@ -23,13 +23,13 @@
 //
 // What that covers, exactly, so no one reads more into a green run than is there: nine steps are
 // driven behaviourally — `extract`, `verify`, `correct`, `recheck_sampled`, `feedback_scope`,
-// `read`, `edit`, `edit_section`, `table_join`. The remaining eight — `recheck_binding`,
+// `read`, `edit`, `edit_section`, `table_join`. The remaining seven — `recheck_binding`,
 // `specialist`, `specialist_merge`, `feedback_learn`, `agent_update`, `agent_regression`,
-// `agent_calibrate`, `contribute` — reach paths that need a multi-page document, a real provider or
+// `agent_calibrate` — reach paths that need a multi-page document, a real provider or
 // a training round, and are held only by the source scan in the last test. That scan proves a
 // literal is passed at SOME call site, so it catches a mislabel that leaves a member unused, and
 // test 1 catches a `recheck_binding` ↔ `recheck_sampled` swap; it would NOT catch two of those
-// eight being swapped with each other, since both literals would still be present.
+// seven being swapped with each other, since both literals would still be present.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync } from "node:fs";
@@ -515,7 +515,6 @@ test("every step in the vocabulary is passed by a call site, and every call site
     "src/pipeline/tables.ts",
     "src/pipeline/feedback.ts",
     "src/pipeline/calibration.ts",
-    "src/pipeline/contribute.ts",
   ];
   for (const f of files) {
     const text = src(f);

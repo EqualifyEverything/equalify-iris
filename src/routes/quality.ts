@@ -14,7 +14,7 @@ export const DEFAULT_QUALITY_TTL_MS = 300_000;
 // which would itself be the leak, so the lengths are equalized by hashing-free
 // padding: both sides are compared at the configured token's length and a
 // wrong-length presentation simply cannot match.
-function tokenMatches(presented: string, configured: string): boolean {
+export function tokenMatches(presented: string, configured: string): boolean {
   const a = Buffer.from(presented, "utf8");
   const b = Buffer.from(configured, "utf8");
   if (a.length !== b.length) {
@@ -28,7 +28,7 @@ function tokenMatches(presented: string, configured: string): boolean {
 
 // The bearer token on the request, if it presented one in the form the rest of the
 // API uses.
-function bearer(header: string | undefined): string | null {
+export function bearer(header: string | undefined): string | null {
   const m = /^Bearer\s+(\S.*)$/i.exec(header ?? "");
   return m ? m[1].trim() : null;
 }

@@ -9,7 +9,6 @@ services:
     ports:
       - "8080:8080"
     environment:
-      IRIS_UPSTREAM_REPO: ${IRIS_UPSTREAM_REPO}
       IRIS_GITHUB_TOKEN: ${IRIS_GITHUB_TOKEN}
       IRIS_API_TOKEN: ${IRIS_API_TOKEN:-}
       IRIS_TRUST_PROXY: ${IRIS_TRUST_PROXY:-}

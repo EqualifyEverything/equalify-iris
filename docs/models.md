@@ -30,7 +30,7 @@ The ids below are **Bedrock ids**, spelled as the reference deployment writes th
 | `feedback` | verifies each page: pass, or a list of problems | `us.anthropic.claude-sonnet-4-6` | **keep** (#330) |
 | `copy_editor` | applies the review; joins a table split across a page break | `us.anthropic.claude-sonnet-4-6`, or `us.openai.gpt-5.6-luna` | **recommended, not applied** (#329) |
 | `reader` | reads the assembled document and proposes edits | `us.anthropic.claude-sonnet-4-6` | **declined** (#313) |
-| `builder`, specialists | drafts a specialist agent for a content type a page asked for | anything | ~$0.04 a call, 2 calls in the whole sprint |
+| specialists | an agent from `agents/` that a page asks for | anything | not measured |
 
 ```yaml
 providers:
@@ -129,11 +129,6 @@ document and is ahead on both quality halves: 21 of 23 provable defect instances
 6 documents obeying the issue list against 3 of 10. Worth about **−26% of the bill** (#329). That
 result only appeared once the round attached the page images the agent receives in production; the
 round that withheld them ranked the two the other way.
-
-**`builder` — nothing measured, and its cost is not separable from the specialists'.** A run whose
-pages named no specialist spends nothing here, and the same gate leaves the specialist at zero one
-step downstream, so a report that prices the two separately is pricing one cause twice. Two calls in
-the whole sprint, about $0.04 each.
 
 **`reader` — declined.** The cheap arm was 77% cheaper at 78% of the incumbent's own agreement floor,
 and the decision turned on what the missing 22% was, not on the ratio (#313). Note that 78% is a

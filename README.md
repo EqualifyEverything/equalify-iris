@@ -44,12 +44,11 @@ The pipeline as **implemented today** runs in three phases:
    several chunks is read in parallel under the same concurrency cap, and the issues the chunks
    raise stay in chunk order.
 
-When Iris meets content a specialist agent would handle better than the general pass, it drafts
-that agent and **files a GitHub issue titled `New agent suggestion: <type>`** (with the agent code
-and context) on `upstream_repo`. Maintainers triage those issues; merged agents become part of the
-shared `agents/` library. The title prefix is what identifies them — not a label, for a reason worth
-knowing before you change it
-([design notes](docs/design-notes.md#learning-from-feedback)).
+When Iris meets content a specialist agent would handle better than the general pass, it saves a
+suggestion: the agent's name, the page, and why. Feedback that improves an agent is saved the same
+way. A daily workflow groups these and files one GitHub issue per idea
+([Contributions](docs/API.md#contributions-automatic)). Maintainers triage those issues; merged agents
+become part of the shared `agents/` library.
 
 ## Terms
 
@@ -137,8 +136,8 @@ Deployment is configured in `config.yaml`. `${ENV_VAR}` references are expanded 
 at startup; changes require a restart. **[`config.example.yaml`](config.example.yaml) documents every
 key inline** — this section is the decisions an operator has to make, not the key list.
 
-- **GitHub — required.** `github.token` is a fine-grained PAT with `Issues: read and write` on
-  `upstream_repo`, and Iris will not start without it. There is no app to register and no OAuth app:
+- **GitHub — required.** `github.token` is a fine-grained PAT with no permissions; Iris uses it only
+  to name its account, and will not start without it. There is no app to register and no OAuth app:
   nothing here runs a login flow. See [One GitHub identity](#one-github-identity-and-no-sign-in).
 - **Who may call the API.** `server.api_token` is a shared secret, blank by default. Blank means
   **open** — anyone who can reach the port can convert documents and spend your model budget. Set it
@@ -182,16 +181,16 @@ key inline** — this section is the decisions an operator has to make, not the 
 ### One GitHub identity, and no sign-in
 
 Iris holds **one** GitHub token, server-side, and callers never present a GitHub credential. That
-token is what files each session's feedback back to the shared agent library as an issue on
-`upstream_repo`. **Contributing back is the sustainability model, not an implementation detail:** the
+token only names the deployment's account. Each session's suggestions are saved on the deployment and
+filed upstream by a maintainer workflow ([Contributions](docs/API.md#contributions-automatic)).
+**Contributing back is the sustainability model, not an implementation detail:** the
 agents in `agents/` get better because sessions run against real documents and real corrections, and a
 deployment that consumed the service without contributing would be taking from a library nobody was
 refilling.
 
 What the single identity costs, all of which Iris warns about at boot:
 
-- **No attribution.** Every issue is filed as your token's account. It says what a session found, not
-  who found it.
+- **No attribution.** A suggestion says what a session found, not who found it.
 - **No session isolation.** `GET /v1/sessions` lists *the deployment's* sessions, and a session id is
   all it takes to read that document. Visitors are not walled off from each other, because there is
   nobody to wall off.
@@ -223,8 +222,9 @@ in the other direction: it has its own shared secret and 404s unless you set it.
 | `GET  /v1/health` | Liveness probe (never gated) |
 | `GET  /v1/stats` | Public tally of pages converted, plus a two-number quality summary (never gated; aggregate only) |
 | `GET  /v1/quality` | Deployment-wide tally of output *quality* (own shared secret, off by default; aggregate only) |
+| `GET  /v1/suggestions` | Saved agent suggestions, grouped, for the filing workflow (quality token, off by default) |
 | `GET  /v1/limits` | What an upload may be — formats, per-image size, page cap (never gated) |
-| `GET  /v1/me` | What this deployment is: its GitHub account, upstream repo and defaults. Also the probe for whether it is gated |
+| `GET  /v1/me` | What this deployment is: its GitHub account and defaults. Also the probe for whether it is gated |
 | `GET  /v1/sessions` | List **the deployment's** sessions — see the note above on isolation |
 | `POST /v1/sessions` | Create a session, upload images and/or PDFs (`multipart/form-data`) |
 | `GET  /v1/sessions/{id}` | Poll status |

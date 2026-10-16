@@ -440,7 +440,7 @@ jobs:
           # keys on *risk*, and the two disagree exactly where it matters most — a
           # 6-line change to an auth check or a token choice is both the smallest
           # possible diff and the most dangerous. Most of the highest-risk files
-          # (src/auth/*, src/github/issue.ts, src/store/paths.ts, contribute.ts,
+          # (src/auth/*, src/store/paths.ts, contribute.ts,
           # src/providers/*) are under the 8KB floor and already arrive in full;
           # these are the ones big enough to be dropped:
           #   routes/sessions.ts — per-session ownership checks, Must flag #3
@@ -970,25 +970,17 @@ jobs:
                Injected CSS/styling in agent output is also a defect — agents are required to
                emit unstyled semantic HTML.
 
-            2. **Upstream side effects.** `src/github/issue.ts` writes to a *third-party* repo
-               from two paths: `createAgentIssue` (titled `New agent suggestion: <type>`) and
-               `createAgentUpdateIssue` (titled `Agent update proposal: <agent> — <lesson slug>`).
-               The title is the only identifier these issues have — labels were removed because
-               GitHub silently drops labels set by a filer without push access, which broke both
-               triage and the dedupe for the majority of filers, so treat a reintroduced label as
-               a defect. Both dedupe by exact title against a title search, and both swallow
-               search failures; on a match the suggestion path skips and the update path comments
-               on the issue it found. Treat the update title's lesson slug as load-bearing: the
-               agent there is always `page.md`, so a title without the slug has ONE possible value,
-               and a dedupe that skips on it discards every proposal after the first — silently,
-               for every user, until someone closes that issue. That was a real outage of the
-               learning path, not a hypothetical. Flag any change that widens what gets filed,
-               weakens the dedupe, narrows the dedupe key back toward a single value, turns the
-               update path's comment back into a silent skip, files under the wrong identity, or
-               turns a swallowed error into a hard failure (or vice-versa) without saying so.
-               There is exactly one filing identity now — the deployment's `github.token` — so
-               flag any change that reintroduces a second one, or that sends a caller-supplied
-               credential to GitHub.
+            2. **Upstream side effects.** Iris calls GitHub only for `GET /user`. It saves
+               agent suggestions, and `.github/scripts/agent-suggestions.mjs` files them as
+               issues titled `New agent suggestion: <concept>` and `Agent update proposal:
+               <agent> — <lesson slug>`. The title and the keys marker in the body are the only
+               identifiers; labels are dropped for filers without push access, so treat a
+               reintroduced label as a defect. Treat the update title's lesson slug as
+               load-bearing: the agent there is always `page.md`, so without the slug every
+               proposal lands on one issue. Flag any change that makes Iris call GitHub again,
+               writes outside the script's marked section of a body, publishes document text
+               beyond the saved reasons and proposals, or sends a caller-supplied credential to
+               GitHub.
 
             3. **Auth, tokens, and secrets.** `src/auth/` answers two separate questions: may this
                caller use the API at all (`server.api_token`, optional, checked BEFORE GitHub is

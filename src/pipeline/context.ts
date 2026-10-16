@@ -4,6 +4,7 @@ import type { ProviderRouter, Image } from "../providers/index.ts";
 import { IMAGE_MEDIA_TYPES } from "../providers/imageLimits.ts";
 import type { Paths } from "../store/paths.ts";
 import type { RunLog } from "../store/runlog.ts";
+import type { SuggestionRow } from "../store/db.ts";
 import type { IrisConfig } from "../config.ts";
 import type { PdfLink } from "../util/pdf.ts";
 import type { PdfField } from "../util/taggedPdf.ts";
@@ -41,10 +42,9 @@ export interface PipelineContext {
   // read off `cfg` at the claim site for the same reason as the line above: one place
   // resolves it, and a phase cannot disagree with the number the run was started with.
   recheckSampleSize: number;
-  // The deployment's GitHub token (`github.token`) — used to file agent-suggestion and
-  // agent-update issues. Optional because a run started without one still produces a
-  // document; it just contributes nothing back.
-  githubToken?: string;
+  // Where agent suggestions are recorded (Store.addSuggestions; #539). Optional so a
+  // test can build a context without a store.
+  recordSuggestions?: (rows: SuggestionRow[]) => void;
 }
 
 // The extension -> media type map lives with the rest of the model's input limits

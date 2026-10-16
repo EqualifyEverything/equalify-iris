@@ -108,9 +108,9 @@ export interface IrisConfig {
     // Set it and a call to either mount must send `Authorization: Bearer <it>`. Two things
     // follow, and both are the point rather than a limitation:
     //
-    //   - It is NOT a GitHub token, so a copy that leaks costs a rate-limit bypass rather
-    //     than write access to `github.upstream_repo`. Same reasoning as `quality_token`
-    //     above, which is where this pattern comes from.
+    //   - It is NOT a GitHub token, so a copy that leaks costs a rate-limit bypass and
+    //     nothing on GitHub. Same reasoning as `quality_token` above, which is where this
+    //     pattern comes from.
     //   - The demo page cannot use a deployment that sets it. The page holds no
     //     credential by design, so a gated deployment is an API-only one.
     //
@@ -146,7 +146,6 @@ export interface IrisConfig {
   // Optional. The demo page's name and logo (src/branding.ts).
   branding?: { name?: string; logo_file?: string };
   github: {
-    upstream_repo: string;
     // Overridable for GitHub Enterprise (and for testing). Defaults below.
     api_base_url: string; // e.g. https://api.github.com
     // The deployment's ONE GitHub identity: a PAT the operator sets, held server-side,
@@ -161,8 +160,6 @@ export interface IrisConfig {
     //
     // What that costs, stated here because it is invisible from outside:
     //
-    //   - Every issue Iris opens is filed under this account, so a contributor gets no
-    //     attribution for the agent they caused to be suggested.
     //   - Every session has the same owner, so `GET /v1/sessions` lists the
     //     deployment's sessions rather than one visitor's, and one visitor can read
     //     another's document by its id. A deployment where that matters wants
@@ -170,9 +167,8 @@ export interface IrisConfig {
     //   - Uploads are counted per ADDRESS, since a shared identity is one bucket for
     //     everyone (util/requestLimits.ts).
     //
-    // Never send this to a browser. It carries `issues: write` on `upstream_repo`, so a
-    // page that passed it to callers would be publishing it; the demo page sends no
-    // credential at all and the server supplies this one.
+    // Never send this to a browser: a page that passed it to callers would be publishing
+    // it. The demo page sends no credential at all and the server supplies this one.
     token?: string;
   };
   providers: {
@@ -444,9 +440,9 @@ function validateConfig(cfg: IrisConfig, unset: Set<string>, path: string): void
   // document or read one, which is the whole service.
   if (!githubToken(cfg)) {
     problems.push(
-      `github.token is not set. Iris needs one GitHub PAT, held by the server, to own every session and file ` +
-        `every issue: create a fine-grained token with issues:write on github.upstream_repo and set it (the ` +
-        `example config reads it from IRIS_GITHUB_TOKEN). It is never sent to a browser.`,
+      `github.token is not set. Iris needs one GitHub PAT, held by the server, to own every session: ` +
+        `create a fine-grained token (it needs no permissions) and set it (the example config reads it ` +
+        `from IRIS_GITHUB_TOKEN). It is never sent to a browser.`,
     );
   }
 
@@ -562,14 +558,14 @@ export function bedrockApiWarning(providers: IrisConfig["providers"]): string | 
 // read the call sites that dispatch them. Each one is the first argument of a
 // `router.complete` call: `page` (extraction's extract, correct and specialist-merge
 // passes), `reader` and `copy_editor` (the review round, and the table join, which shares
-// the copy editor's entry), `feedback` (every verify, recheck and feedback-round call) and
-// `builder` (drafting a specialist agent for a contribution).
+// the copy editor's entry) and `feedback` (every verify, recheck and feedback-round call).
+// `builder` is gone: drafting a suggested agent moved to a GitHub workflow (#539).
 //
 // A hand list in a file that cannot check itself, so test/config-agents.test.ts derives the
 // same set from the `router.complete` call sites in src/ and fails if the two disagree.
 // That is the coupling worth pinning: the list going stale is how the examples this warning
 // exists to catch went wrong in the first place.
-const DISPATCHED_AGENTS = ["page", "reader", "copy_editor", "feedback", "builder"] as const;
+const DISPATCHED_AGENTS = ["page", "reader", "copy_editor", "feedback"] as const;
 
 // A boot-time warning for a `providers.per_agent` key that names no agent Iris dispatches.
 //

@@ -1,11 +1,10 @@
 import { loadAgent } from "../agents/loader.ts";
-import { loadImage, type PipelineContext } from "./context.ts";
-import { ACCESSIBILITY_REQUIREMENTS } from "./accessibility.ts";
-import { createAgentIssue, installHintFor } from "../github/issue.ts";
+import type { PipelineContext } from "./context.ts";
+import type { SuggestionRow } from "../store/db.ts";
 
 // The content types the general page pass covers itself. A
 // suggestion naming one of these is declined rather than dispatched, and never
-// filed as a new agent to build (see extraction.ts).
+// recorded as a new agent to build (see extraction.ts).
 //
 // These were nine agent FILES until they were deleted as unreachable: every one of
 // them was declined by name here before `loadAgent` was ever called, so no run
@@ -39,10 +38,10 @@ export function logicalType(name: string): string {
 // Case-insensitive, because the name is free text a model wrote and the consequence of
 // a miss is not symmetric. `STANDARD` spells one entry `formField`, so `"FormField"` or
 // `"Table"` — spellings a model will produce, since these are prose descriptions of
-// content types and not filenames — used to fall through to `draftAgent` and
-// `createAgentIssue`: a public issue on the upstream repo, proposing a specialist for a
-// type the page pass has always handled. A false decline costs one specialist that the page
-// pass covers anyway; a false accept costs a spurious proposal on a public tracker.
+// content types and not filenames — used to fall through and be filed as a public issue
+// proposing a specialist for a type the page pass has always handled. A false decline
+// costs one specialist that the page pass covers anyway; a false accept costs a spurious
+// proposal on a public tracker.
 //
 // This used to be backstopped by `loadAgent` finding `agents/table.md` — on a
 // case-insensitive volume, `agents/Table.md` too. Those nine files are gone (they
@@ -58,94 +57,32 @@ export function isStandardType(logical: string): boolean {
   return STANDARD_LOWER.has(logical.toLowerCase());
 }
 
-const DRAFT_SYSTEM = `Draft a NEW content-agent markdown file for a content type the general extractor flagged as
-needing a specialist. The file MUST contain these sections:
-
-# <Type> Agent
-## Purpose
-## Required capability     (one or more of: text, vision, structured_output)
-## System prompt           (specialist instructions; demand semantic, accessible HTML; forbid CSS/styling)
-## Output contract         (an accessible HTML fragment)
-
-Return ONLY the markdown file content (no code fences).`;
-
 export interface Suggestion {
   name: string;
   reason: string;
   image: string;
 }
 
-async function draftAgent(ctx: PipelineContext, s: Suggestion): Promise<string> {
-  const img = ctx.images.find((i) => i.name === s.image);
-  const res = await ctx.router.complete(
-    "builder",
-    "vision",
-    [
-      { role: "system", content: DRAFT_SYSTEM },
-      {
-        role: "user",
-        content: `Draft an agent for content type "${s.name}". Why a specialist is warranted: ${s.reason}. First seen on "${s.image}".\n\n${ACCESSIBILITY_REQUIREMENTS}`,
-      },
-    ],
-    { step: "contribute", images: img ? [loadImage(img)] : [] },
-  );
-  return res.text.trim();
-}
-
-// For each genuinely-new suggested content type, draft an agent and file a
-// labeled GitHub issue with the code + context.
-//
-// Filed as the deployment's own GitHub account (`github.token`), because that is the only
-// identity this service has. Nobody's session carries a credential of their own, so the
-// issue body credits the session instead of the account — see `createAgentIssue`.
-export async function runContribution(ctx: PipelineContext, suggestions: Suggestion[]): Promise<void> {
-  const token = ctx.githubToken;
-  if (!token || suggestions.length === 0) return;
-
+// Record each genuinely new suggested agent type (#539). Iris only records; a scheduled
+// workflow (.github/workflows/agent-suggestions.yml) reads GET /v1/suggestions, groups
+// the names and files the issues.
+export function recordSuggestions(ctx: PipelineContext, suggestions: Suggestion[]): void {
+  if (!ctx.recordSuggestions || suggestions.length === 0) return;
+  const rows: SuggestionRow[] = [];
   const seen = new Set<string>();
   for (const s of suggestions) {
     // Normalized and tested for standardness the same way dispatchSpecialist does it —
     // one shared pair of functions, because when the two normalized separately they
-    // disagreed and the disagreement was a filed issue. See `isStandardType` for why
-    // the fallthrough is expensive: a draft is a vision call, and the issue goes up on a
-    // public tracker.
+    // disagreed.
     const name = logicalType(s.name);
-    if (!name || isStandardType(name) || seen.has(name.toLowerCase())) continue;
-    // Deduplicated case-insensitively too: `"chartData"` and `"chartdata"` in one run
-    // are two vision calls and two issues for the same proposal.
-    seen.add(name.toLowerCase());
+    const key = `${name.toLowerCase()}\0${s.image}`;
+    if (!name || isStandardType(name) || seen.has(key)) continue;
+    seen.add(key);
     // Skip if the library (or this session) already has the agent.
     if (loadAgent(name, { agentsDir: ctx.paths.agentsDir, tmpAgentsDir: ctx.paths.tmpAgentsDir(ctx.sessionId) })) continue;
-    // Drafting is a MODEL call and is kept out of the GitHub try below: a
-    // provider error is a plain Error whose message can contain "403"
-    // (src/providers/openrouter.ts formats the status into the text), and inside
-    // one try it would be indistinguishable from a GitHub permissions failure.
-    // Both still fail softly — a contribution is a side effect.
-    let markdown: string;
-    try {
-      markdown = await draftAgent(ctx, s);
-    } catch (e) {
-      ctx.log.event("agent_issue_failed", { agent: name, error: (e as Error)?.message ?? String(e), stage: "draft" });
-      continue;
-    }
-    try {
-      const url = await createAgentIssue(token, ctx.cfg.github.upstream_repo, ctx.cfg.github.api_base_url, {
-        agentName: name,
-        agentMarkdown: markdown,
-        reason: s.reason,
-        sourcePage: s.image,
-        sessionId: ctx.sessionId,
-      });
-      ctx.log.event("agent_issue", { agent: name, url: url ?? "(duplicate — skipped)" });
-    } catch (e) {
-      // A 403 is swallowed here by design, so the log line has to carry the
-      // diagnosis — see installHintFor.
-      ctx.log.event("agent_issue_failed", {
-        agent: name,
-        error: (e as Error)?.message ?? String(e),
-        stage: "file",
-        ...installHintFor(e),
-      });
-    }
+    rows.push({ kind: "new_agent", agent: name, session_id: ctx.sessionId, page: s.image, reason: s.reason || null });
   }
+  if (rows.length === 0) return;
+  ctx.recordSuggestions(rows);
+  ctx.log.event("suggestions_recorded", { agents: [...new Set(rows.map((r) => r.agent))], count: rows.length });
 }

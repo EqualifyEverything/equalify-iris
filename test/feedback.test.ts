@@ -14,6 +14,7 @@ import {
 } from "../src/pipeline/feedback.ts";
 import type { PipelineContext } from "../src/pipeline/context.ts";
 import type { Paths } from "../src/store/paths.ts";
+import type { SuggestionRow } from "../src/store/db.ts";
 
 // contentCoverage backs the regression gate's content-preservation check: it
 // measures how much of a fixture's accepted output a candidate (re-run with an
@@ -93,7 +94,7 @@ function gateCtx(
   fixtures: Fixture[],
   opts: {
     proposal?: string;
-    githubToken?: string;
+    recordSuggestions?: (rows: SuggestionRow[]) => void;
     // How many fixture checks this run may have in flight. 1 — the default — is the
     // serial behaviour every test below was written against.
     concurrency?: number;
@@ -131,13 +132,9 @@ function gateCtx(
   let inFlight = 0;
   const ctx = {
     sessionId: "ses_test",
-    githubToken: opts.githubToken,
+    recordSuggestions: opts.recordSuggestions,
     cfg: {
       github: {
-        // A full URL, not "o/r": parseRepo only accepts the github.com form, and
-        // the shorthand throws before the filing path ever reaches GitHub — which
-        // would make the 403 test below pass on the wrong error.
-        upstream_repo: "https://github.com/example/iris",
         api_base_url: "https://api.github.test",
       },
     },
@@ -489,28 +486,20 @@ test("evalAgentScores reports per-fixture scores, not just their mean", async ()
   });
 });
 
-// The agent-update proposal is filed as a GitHub issue on the same soft-failure terms as
-// runContribution's new-agent issue, so a 403 caused by `github.token` lacking Issues write
-// on `upstream_repo` reaches an operator only through the log line. This asserts that path
-// carries the diagnosis too — it was added to the suggestion path first and this one was
-// missed, which is easy to repeat since the two are in different files with no shared call
-// site. What the diagnosis SAYS is pinned in test/contribute-403.test.ts; what matters here
-// is that the same one arrives.
-test("a 403 filing an agent-update issue carries the permissions hint", async () => {
+// A proposal that passes the gates is recorded for the agent-suggestions workflow (#539),
+// which files the issue. Iris itself makes no GitHub call.
+test("a gated agent-update proposal is recorded as a suggestion", async () => {
   await withTemp(async (dir) => {
-    const { ctx, events } = gateCtx(dir, "table.md", [{ accepted: JUDGEABLE, produces: JUDGEABLE }], {
-      // A token is required to reach the filing call at all; without one the code
-      // logs agent_update_issue_skipped and never tries.
-      githubToken: "ghp_deployment",
+    const rows: SuggestionRow[] = [];
+    const { ctx } = gateCtx(dir, "table.md", [{ accepted: JUDGEABLE, produces: JUDGEABLE }], {
+      recordSuggestions: (r) => rows.push(...r),
     });
     const realFetch = globalThis.fetch;
-    globalThis.fetch = (async () =>
-      new Response(JSON.stringify({ message: "Resource not accessible by personal access token" }), {
-        status: 403,
-        headers: { "content-type": "application/json" },
-      })) as unknown as typeof globalThis.fetch;
+    let fetched = 0;
+    globalThis.fetch = (async () => { fetched++; return new Response("{}"); }) as unknown as typeof globalThis.fetch;
+    let proposals;
     try {
-      await proposeAgentUpdatesFromFeedback(ctx, {
+      proposals = await proposeAgentUpdatesFromFeedback(ctx, {
         agentFile: "table.md",
         before: "<p>old body</p>",
         after: "<p>new body</p>",
@@ -519,11 +508,18 @@ test("a 403 filing an agent-update issue carries the permissions hint", async ()
     } finally {
       globalThis.fetch = realFetch;
     }
-    const failed = events.find((e) => e.type === "agent_update_issue_failed");
-    assert.ok(failed, `no agent_update_issue_failed event: ${events.map((e) => e.type).join(", ")}`);
-    const hint = String(failed.data.hint ?? "");
-    assert.match(hint, /github\.token/, "the update path logged no permissions hint");
-    assert.match(hint, /Issues: read and write/i, "the hint did not say where to fix it");
+    assert.equal(fetched, 0, "recording a proposal reached the network");
+    assert.equal(proposals.length, 1);
+    assert.equal(rows.length, 1);
+    const [row] = rows;
+    assert.equal(row.kind, "agent_update");
+    assert.equal(row.agent, "table.md");
+    assert.equal(row.session_id, "ses_test");
+    const detail = row.detail as { content: string; summary: string; diff_preview: string; lesson_slug: string | null };
+    assert.equal(detail.content, proposals[0].content);
+    assert.equal(detail.summary, proposals[0].summary);
+    assert.equal(detail.diff_preview, proposals[0].diff_preview);
+    assert.ok(detail.lesson_slug, "no lesson slug to title the issue by");
   });
 });
 

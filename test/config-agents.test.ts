@@ -325,10 +325,8 @@ test("docs/models.md's recommendation table is exactly the agents a deployment c
 // vocabulary below needs a phrase adding, or the summary stopped answering the question a reader
 // came for.
 //
-// Four, not five: `page`, `reader`, `copy_editor` and `feedback` are the agents a model decision has
-// been taken or recommended on. `builder` is exempt because it genuinely has no disposition in this
-// vocabulary — its §0 cell is a zero with a date on it, not a keep or a swap — and forcing it into
-// one would be inventing a decision nobody took. Add an agent here when a decision is taken on it.
+// `page`, `reader`, `copy_editor` and `feedback` are the agents a model decision has been taken or
+// recommended on. Add an agent here when a decision is taken on it.
 const DECIDED = ["page", "reader", "copy_editor", "feedback"] as const;
 
 const DISPOSITIONS = [
