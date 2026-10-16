@@ -70,6 +70,7 @@
 // declines outright wherever either half's span parses to anything outside its own table, which
 // leaves that pair to the editor exactly as today.
 import { JSDOM, VirtualConsole } from "jsdom";
+import { assertParseable } from "./parse-depth.ts";
 import { extractJson } from "../util/json.ts";
 import { isTruncatedResponseError } from "../providers/types.ts";
 import type { PipelineContext } from "./context.ts";
@@ -194,6 +195,7 @@ export function tableSpans(html: string): { start: number; end: number }[] {
 function parse(html: string): Document {
   const virtualConsole = new VirtualConsole();
   virtualConsole.on("jsdomError", () => {});
+  assertParseable(html);
   return new JSDOM(`<body>${html}</body>`, { virtualConsole }).window.document;
 }
 
@@ -1283,15 +1285,13 @@ async function joinCall(
 const pairKey = (p: ContinuationPair) => `${p.first.html}\u0000${p.second.html}`;
 
 // A parse, which is the one thing in this stage that can throw, and the reason "never throws" below
-// needs enforcing rather than asserting. jsdom builds the tree by recursion, so a body nested a few
-// hundred thousand levels deep — measured: 200,000 `<div>`s, or the same nesting inside a table cell
-// — raises `RangeError: Maximum call stack size exceeded` out of the parser itself. That shape is not
-// hypothetical here: `anchors.ts` refuses to rewrite a page past 500 levels and delivers it as
-// written, so a document reaching this stage can carry arbitrary nesting, and `assembly.ts` already
-// names it as the reachable case for the LINT overflowing. The lint's throw is caught and delivered
-// as `@lint-unavailable` (#164); an uncaught one here would fail the session instead, on a document
-// that shipped before this stage existed. Returns null so the caller can decline the pair — or the
-// whole document — the way it declines everything else.
+// needs enforcing rather than asserting. A body nested past `MAX_PARSE_DEPTH` makes the parse throw
+// `RangeError` (see parse-depth.ts). That shape is not hypothetical here: `anchors.ts` refuses to
+// rewrite a page past 500 levels and delivers it as written, so a document reaching this stage can
+// carry arbitrary nesting. The lint's throw is caught and delivered as `@lint-unavailable` (#164); an
+// uncaught one here would fail the session instead, on a document that shipped before this stage
+// existed. Returns null so the caller can decline the pair — or the whole document — the way it
+// declines everything else.
 function attempt<T>(read: () => T): T | null {
   try {
     return read();

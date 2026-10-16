@@ -5,28 +5,15 @@
 // on. This file pins the three halves of the fix — the verdict, the log line, the delivered
 // document.
 //
-// The failure it was written against was a property of the DOCUMENT, not of the environment,
-// and one document in four hit it on a real bench round. jsdom's selector engine (nwsapi)
-// compiles a selector into JavaScript source and evaluates it with `Function`, whose body is
-// strict; it converts the CSS escapes in an attribute VALUE but splices an attribute NAME in
-// raw. axe escapes the names it builds selectors from, correctly — `1x` becomes `\31 x` — so
-// the source reaches V8 as `e.getAttribute("\31 x")`, where `\31` is an octal escape and a
-// SyntaxError in strict mode. The whole rule set died with it: one such attribute anywhere in
-// a 25-page document and there was no verdict on any of it.
+// The failure it was written against came from the DOCUMENT. Up to jsdom 25, jsdom's selector
+// engine (nwsapi) compiled an escaped attribute name such as `\31 x` (the name `1x`) into strict
+// JavaScript, where `\31` is an octal escape and a SyntaxError. One such attribute, which leaked
+// JSON produces by the dozen, and the rule set had no verdict on a 25-page document. #257 worked
+// around it by removing those names from the lint's copy; jsdom 30 dropped nwsapi, so the
+// workaround is gone (#535). The first two tests keep that document as a regression test.
 //
-// An attribute name beginning with a digit is not exotic. The document that provoked #164 had
-// leaked JSON in its body — `aria-label=\"Footnote 1\"` as text — which the HTML parser
-// tokenises into an attribute named `1\"`, several dozen times over.
-//
-// #257 took that failure away: `runAxe` now removes attributes whose names no valid markup
-// produces from its own copy of the document, and counts them, so the fixture below LINTS.
-// Two consequences for this file, and both are deliberate. Its fixture is now a regression
-// test for the strip and a watch on the jsdom bug underneath it — read the first two tests
-// that way rather than deleting them. And the reporting the rest of it pins is still what has
-// to happen for whatever fails next, so it is founded on a hand-built failure (unconditional,
-// since every consumer here takes a `LintResult`) plus the deep-nesting document, which is the
-// only failure this environment can still provoke through `runAxe` and provokes it only when
-// the stack has the headroom to notice.
+// The reporting the rest of this file pins is for whatever fails next. It rests on a hand-built
+// failure plus the deep-nesting document, which makes axe overflow the stack while it runs.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { JSDOM, VirtualConsole } from "jsdom";
@@ -48,9 +35,7 @@ import type { Paths } from "../src/store/paths.ts";
 const MARKED = `<p>See <a href="#fn-1" 1x="">1</a></p>`;
 const PLAIN = `<p>See <a href="#real">the note</a></p>`;
 const UNCOMPILABLE = `<h1>Report</h1>${MARKED.repeat(2)}${PLAIN.repeat(3)}<p id="fn-1">A note.</p>`;
-// The same document with the one attribute removed. It was here to keep the claim honest —
-// what broke the gate was that attribute and not the shape around it — and it is now the
-// control the strip is measured against: the two documents have to lint the same way.
+// The same document with the one attribute removed: the control. The two must lint the same way.
 const COMPILABLE = UNCOMPILABLE.replaceAll(` 1x=""`, "");
 
 // Deep enough that walking the tree overflows the stack, and the one failure `runAxe` can
@@ -87,31 +72,22 @@ function recorder(): { ctx: PipelineContext; events: { type: string; data: Recor
 
 test("the document that used to take the gate offline now lints, and says what it carried", async () => {
   const lint = await runAxe(wrapDocument(UNCOMPILABLE));
-  // This returned `error: "axe-core could not run in this environment: Octal escape sequences
-  // are not allowed in strict mode.", errorWhere: "run", errorName: "SyntaxError"` for every
-  // commit up to #257 — a document with nothing wrong with it, on which nothing could be
-  // found. If this assertion starts failing, the strip in `runAxe` has stopped reaching
-  // something it used to reach; the fixture is the reproduction and is worth keeping either way.
+  // Up to #257 this returned `error: "axe-core could not run in this environment: Octal escape
+  // sequences are not allowed in strict mode.", errorWhere: "run"` on a document with nothing wrong
+  // with it. Since #535 it lints with nothing removed.
   assert.equal(lint.error, undefined, "the octal-escape failure is back on the document it was fixed for");
   assert.deepEqual(lint.violations, [], "the gate ran but on a different document than the one handed to it");
-  // Both `1x=""` attributes, counted rather than silently dropped: the debris is evidence of a
-  // leak one stage earlier and the count is the only symptom it has. Removed as well as counted,
-  // which is the narrower thing and the whole reason this document lints now — a digit-leading name
-  // is one the selector compiler cannot take. Pinned in full, with the names and the boundary
-  // between counted and removed, in test/lint-malformed-attributes.test.ts.
+  // Both `1x=""` attributes are counted (see test/lint-malformed-attributes.test.ts).
   assert.equal(lint.malformedAttributes, 2);
-  assert.equal(lint.malformedAttributesRemoved, 2);
 
   const clean = await runAxe(wrapDocument(COMPILABLE));
   assert.deepEqual(clean.violations, [], "the same document without that attribute lints differently");
   assert.equal(clean.malformedAttributes, undefined, "an attribute that is not there was counted");
 });
 
-test("what the selector engine cannot compile, at the layer that cannot compile it", () => {
-  // One layer below axe, so a jsdom bump can be judged without reasoning about which selector
-  // axe happened to build — and, since #257, the only place the bug is still observable at all.
-  // That is the reason to keep it: the strip above is a workaround, and a workaround with no
-  // test on the thing it works around is a workaround nobody can ever retire.
+test("the selector engine compiles the escaped name it used to choke on", () => {
+  // One layer below axe, so a jsdom bump can be judged without knowing which selector axe built.
+  // If this starts throwing again, the #257 removal in lint.ts has to come back.
   const dom = new JSDOM(`<!DOCTYPE html><html><body><p id="9a" class="9c" rel="9r" 1x="">hi</p></body></html>`, {
     virtualConsole: new VirtualConsole(),
   });
@@ -121,24 +97,10 @@ test("what the selector engine cannot compile, at the layer that cannot compile 
     ["id", "class", "rel", "1x"],
     "the HTML parser rejected an attribute name beginning with a digit, so this fixture is moot",
   );
-  // `\31 x` is what CSS escaping of the attribute name `1x` produces — correct CSS, and the
-  // only way to write that name in a selector.
-  assert.throws(
-    () => doc.querySelectorAll(`[\\31 x]`),
-    /Octal escape sequences are not allowed in strict mode/,
-    "jsdom now compiles this selector — the bug this fixture exists for is fixed",
-  );
-  // And the contrast that says it is the ESCAPED NAME and nothing else, which is what makes a
-  // strip aimed at names sufficient rather than merely helpful. A digit-leading id, class or
-  // attribute VALUE needs the same `\39` escape and compiles fine — nwsapi converts the escapes
-  // in those and splices only the name in raw — so no document axe can build a selector for
-  // survives the strip and still kills the run.
-  for (const selector of [`#\\39 a`, `.\\39 c`, `[rel=\\39 r]`, `[rel="9r"]`]) {
-    assert.equal(doc.querySelectorAll(selector).length, 1, `${selector} no longer compiles either`);
+  // `\31 x` is the CSS escape of `1x`, and the only way to write that name in a selector.
+  for (const selector of [`[\\31 x]`, `[\\31 x=""]`, `#\\39 a`, `.\\39 c`, `[rel=\\39 r]`, `[rel="9r"]`]) {
+    assert.equal(doc.querySelectorAll(selector).length, 1, `${selector} does not compile or does not match`);
   }
-  // The same name reached through the DOM rather than through a selector is unremarkable, which
-  // is why the parser keeps it and the document ships with it.
-  assert.equal(doc.querySelector("p")!.getAttribute("1x"), "");
 });
 
 test("the failure the rest of this file is built on is the one runAxe returns", async () => {

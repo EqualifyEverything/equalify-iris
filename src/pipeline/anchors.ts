@@ -1,4 +1,5 @@
 import { JSDOM, VirtualConsole } from "jsdom";
+import { assertParseable } from "./parse-depth.ts";
 
 // Make the ids of independently extracted pages unique across the assembled
 // document, while leaving every reference that already worked
@@ -324,6 +325,7 @@ type ParsedPage = { dom: JSDOM | null; rewritable: boolean };
 function parseFragment(innerHtml: string): ParsedPage {
   let dom: JSDOM;
   try {
+    assertParseable(innerHtml);
     dom = new JSDOM(`<body>${innerHtml}</body>`, { virtualConsole: new VirtualConsole() });
   } catch {
     return { dom: null, rewritable: false };

@@ -259,6 +259,7 @@ test("the lint-error body names which step failed, from the tally", { skip }, ()
   // The reason the sentence exists: `run` is the one step with a known cause, and
   // saying so is what makes a NEW cause recognisable as new.
   assert.match(body, /#257/);
+  assert.match(body, /#535/);
   // 0.0857… × 70 documents, rounded — the number the three counts are read against,
   // printed rather than left to the reader to multiply out.
   assert.match(body, /A sum below the 6 document\(s\) in the rate/);

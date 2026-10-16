@@ -367,13 +367,8 @@ curl -s -H "Authorization: Bearer $IRIS_QUALITY_TOKEN" "$BASE/quality?days=30"
   failed — carries `lint_error` with `lint_error_where` (`parse`, `inject` or `run`),
   `lint_error_name` and the first frames of `lint_error_stack`, which is what makes one occurrence
   chaseable; `axe-core` and `jsdom` are pinned to exact versions so the linter's behaviour changes
-  only when someone changes it. One cause of this rate is now prevented rather than reported: an
-  attribute name the selector engine cannot compile used to take the whole rule set offline, so the
-  lint drops **those** names from its own copy of the document before axe walks it and reports them
-  on the line instead (`malformed_attributes_removed`, with `malformed_attributes` counting every
-  malformed name whether or not it had to go, and `lint_debris` where there is no `assembly` line —
-  #257). A run with `malformed_attributes_removed` set and no `lint_error` is a document that used
-  to be delivered unchecked.
+  only when someone changes it. Up to jsdom 25, an attribute name beginning with a digit
+  could take the whole rule set offline (#257); jsdom 30 fixed that (#535).
 * `lint_error_where` — which of the three steps failed on those documents: `parse` (jsdom refused
   the assembled HTML), `inject` (axe's own source would not evaluate, which is a dependency problem
   and cannot depend on the document) or `run` (the rule pass threw while walking the document).
@@ -3588,10 +3583,8 @@ an `@lint-unavailable` comment.
 ### `lint_debris`
 
 The linted body carried attributes whose **names no valid markup produces**:
-`malformed_attributes` (how many, exact), `malformed_attributes_removed` (how many of them the
-lint had to take out of its own copy of the document for axe to run at all — absent when none,
-which is the ordinary case), and `malformed_attribute_names` (up to three of the names, removed
-ones first, each cut at 40 characters). The same fields appear on the `assembly` line; this event
+`malformed_attributes` (how many, exact) and `malformed_attribute_names` (up to three of the names,
+each cut at 40 characters). The same fields appear on the `assembly` line; this event
 carries `stage: "correction_round"` (plus `iteration`) or `stage: "feedback_relint"`, matching
 `lint_unavailable`.
 
@@ -3602,18 +3595,11 @@ leak puts `\"doc-pagebreak\"` in a `role` and `\"page-1\"` in an `id` (#233, #23
 role, a marker that announces the wrong text, and a dead target for every reference to it. Those
 are findable only by reading the document; this is a number.
 
-A removal is not cosmetic: axe escapes an attribute name it builds a selector from, a name
-beginning with a digit escapes to `\39`, jsdom's selector engine splices the name into JavaScript
-source where that is an octal escape, and the SyntaxError killed **the entire rule set** — one
-such attribute anywhere in a 25-page document and there was no verdict on any of it (#257). So
-`malformed_attributes_removed` on a line is a run that would otherwise have had no verdict on any
-page. Everything else is counted and **left in place**, because removing an attribute takes the
-rules that read it away too: a name that lost a quote (`aria-label"Note"`) is reported by
-`aria-valid-attr` — critical, wcag2a — *because* it is malformed, and removing it turns that
-document into a clean pass.
-
-The document that ships keeps every byte either way, including the removed ones: what the
-attribute was meant to be is not this stage's to decide.
+Nothing is removed from the document the lint checks, because removing an attribute takes the
+rules that read it away too: `aria-valid-attr` (critical, wcag2a) reports `aria-label"Note"`
+*because* it is malformed. Up to jsdom 25, `malformed_attributes_removed` also counted digit-leading
+names the lint removed so axe could run at all (#257). jsdom 30 does not need that, so the field is
+gone (#535). The document that ships keeps every byte.
 
 ### `editor_patch`
 
@@ -3836,8 +3822,7 @@ nothing anyone could reproduce from. The document that provoked it needs no seco
 reconstruct: this lints `wrapDocument(assembleBody(fragments))`, both pure, and `fragments.json` is
 written before this phase runs.
 
-`malformed_attributes`, `malformed_attributes_removed` and `malformed_attribute_names` are the same
-three fields [`lint_debris`](#lint_debris) carries, on the same argument. Later lints of the same
+`malformed_attributes` and `malformed_attribute_names` are the same two fields [`lint_debris`](#lint_debris) carries, on the same argument. Later lints of the same
 document have no `assembly` line to sit on: a correction round's re-lint and a feedback re-run that
 skipped assembly report through [`lint_unavailable`](#lint_unavailable) and `lint_debris` with a
 `stage` instead.

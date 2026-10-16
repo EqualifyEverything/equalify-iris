@@ -1,4 +1,5 @@
 import { JSDOM, VirtualConsole } from "jsdom";
+import { assertParseable } from "./parse-depth.ts";
 
 // Questions about the delivered document that the lint gate structurally cannot ask
 // (#240, #255).
@@ -431,6 +432,7 @@ export function markupReport(html: string): MarkupReport {
   let structure = emptyStructure();
   let dom: JSDOM | undefined;
   try {
+    assertParseable(html);
     dom = new JSDOM(html, { virtualConsole: new VirtualConsole() });
     for (const table of dom.window.document.querySelectorAll("table")) {
       tables++;

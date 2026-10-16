@@ -272,36 +272,24 @@ Places where a decision was left open, and where v1 intentionally stops:
   is wasted output, not something a reader loses, and mixing it into a rate about harm would move
   that rate for the wrong reason. Like the two above, nothing here is repaired and no run fails on
   it.
-- **The lint counts every attribute name no valid markup produces, and removes the few that stop it
-  running (issue #257).** Not tidying: an attribute name beginning with a digit took the entire rule
-  set offline. axe needs a unique CSS path for the elements it reports; where an id is unusable and
-  a similar sibling must be disambiguated it enumerates attributes, and a CSS escape is the hex
-  codepoint, so a name starting `9` escapes to `\39`. jsdom's selector engine compiles selectors
-  into JavaScript source, where `\39` is an octal escape and a SyntaxError in strict mode. One such
-  attribute pair anywhere in a 25-page document and there was no verdict on any of it — which
-  happened to six delivered documents, 150 pages, every defect on them unexamined.
+- **The lint counts every attribute name no valid markup produces, and removes none of them.** Up
+  to jsdom 25, two digit-leading names took the whole rule set offline: jsdom's selector engine could
+  not compile axe's escaped selector (`\39`), and six delivered 25-page documents went unchecked.
+  `runAxe` removed those names from its own copy (#257). jsdom 30 dropped that engine, so the removal
+  is gone (#535). Nothing else was ever removed, because **removing an attribute takes the rules that
+  read it away too**: `aria-valid-attr` (critical, WCAG 2 A) fires on `aria-label"Note"` *because*
+  the name is malformed.
 
-  `runAxe` removes those names from **its own copy** of the document before axe walks it. The
-  delivered bytes are untouched, because what a name like `1\"` was meant to be is a question for
-  the stage that produced it.
-
-  The removal is limited to the escape shape the compiler chokes on, and everything else malformed is
-  counted and left where it is, because **removing an attribute takes the rules that read it away
-  too**. `aria-valid-attr` (critical, WCAG 2 A) fires on a name that lost a quote —
-  `aria-label"Note"` — *because* the name is malformed, so a wider strip turns that document into a
-  clean pass with a log-line number as the only trace. What the predicate is, is
-  checked against both libraries it makes a claim about: axe's own `escapeSelector` and nwsapi
-  itself, name by name.
-
-  The count is reported (`malformed_attributes`, plus `malformed_attributes_removed` when the linted
-  copy differed, on the `assembly` line or `lint_debris`), because the name is the only symptom of
-  the leak. Its other three harms — an invalid `role`, a marker announcing the wrong text, an `id` no
-  reference resolves to — are findable only by reading the document (#233, #234). It is counted on
-  **every** document rather than only on ones that break, since a number that appears only after a
-  crash cannot answer whether the leak upstream is fixed. Two boundaries are worth knowing. An
-  attribute VALUE beginning with a digit, and an id or class beginning with one, are escaped
-  correctly by the same engine and are never removed. And `<template>` content is reached by neither
-  the strip nor axe, so debris there is uncounted and also harmless.
+  The count (`malformed_attributes`, on the `assembly` line or `lint_debris`) stays, because the name
+  is the only symptom of an escaping leak one stage earlier. The leak's other harms — an invalid
+  `role`, a marker announcing the wrong text, an `id` nothing resolves to — show only in the document
+  (#233, #234). The delivered bytes are never changed. `<template>` content is not counted, and axe
+  does not check it either.
+- **A document nested too deeply is refused before it is parsed (#535).** jsdom 30 parses deep
+  nesting in time that grows with the square of the depth, where jsdom 25 threw. `assertParseable`
+  (`src/pipeline/parse-depth.ts`) estimates the depth from the source in one pass and throws the same
+  `RangeError` past 11,000 levels, so every caller keeps its old behaviour. jsdom 25 parsed 10,000
+  levels and threw by 12,000.
 
 ## Assembly: one document out of many pages
 

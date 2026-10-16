@@ -1,4 +1,5 @@
 import { JSDOM, VirtualConsole } from "jsdom";
+import { assertParseable } from "./parse-depth.ts";
 import { mapWithConcurrency } from "../util/concurrency.ts";
 import type { AgentSpec } from "../agents/loader.ts";
 import type { InputImage, PipelineContext } from "./context.ts";
@@ -66,6 +67,7 @@ interface Opened {
 
 function parse(html: string): Opened | null {
   try {
+    assertParseable(html);
     const doc = new JSDOM(`<body>${html}</body>`, { virtualConsole: new VirtualConsole() }).window.document;
     return { doc, baseline: doc.body.innerHTML };
   } catch {
