@@ -1,10 +1,10 @@
-// The demo page's name and logo (#542). Default: "Equalify Iris", no logo.
+// The demo page's name and logo (#542). Default: "Equalify Iris - Uploader Demo", no logo.
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { extname } from "node:path";
 import type { IrisConfig } from "./config.ts";
 
-export const DEFAULT_NAME = "Equalify Iris";
+export const DEFAULT_NAME = "Equalify Iris - Uploader Demo";
 
 // No SVG: an SVG served from this origin can run script.
 const LOGO_TYPES: Record<string, string> = {
@@ -49,6 +49,6 @@ export function brandDemo(html: string, brand: Brand): string {
   const name = escapeHtml(brand.name);
   const logo = brand.logo ? `<img class="brand-logo" src="/brand-logo?v=${brand.logo.hash}" alt="">` : "";
   return html
-    .replace(`<title>${DEFAULT_NAME} — Try it</title>`, `<title>${name} — Try it</title>`)
+    .replace(`<title>${DEFAULT_NAME}</title>`, `<title>${name}</title>`)
     .replace(`<h1>${DEFAULT_NAME}</h1>`, `<h1>${logo}${name}</h1>`);
 }

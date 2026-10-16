@@ -13,17 +13,17 @@ const cfg = (branding?: IrisConfig["branding"]) => ({ branding }) as IrisConfig;
 
 test("with no branding the page is unchanged", () => {
   const brand = loadBrand(cfg());
-  assert.deepEqual(brand, { name: "Equalify Iris" });
+  assert.deepEqual(brand, { name: "Equalify Iris - Uploader Demo" });
   assert.equal(brandDemo(demoHtml, brand), demoHtml);
   // Blank env vars expand to "", which also means the default.
-  assert.deepEqual(loadBrand(cfg({ name: "", logo_file: "" })), { name: "Equalify Iris" });
+  assert.deepEqual(loadBrand(cfg({ name: "", logo_file: "" })), { name: "Equalify Iris - Uploader Demo" });
 });
 
 test("a name replaces the title and heading, escaped", () => {
   const out = brandDemo(demoHtml, loadBrand(cfg({ name: "UIC <Equalify> Iris" })));
-  assert.match(out, /<title>UIC &lt;Equalify&gt; Iris — Try it<\/title>/);
+  assert.match(out, /<title>UIC &lt;Equalify&gt; Iris<\/title>/);
   assert.match(out, /<h1>UIC &lt;Equalify&gt; Iris<\/h1>/);
-  assert.doesNotMatch(out, /<h1>Equalify Iris<\/h1>/);
+  assert.doesNotMatch(out, /<h1>Equalify Iris - Uploader Demo<\/h1>/);
 });
 
 test("a logo goes left of the name, as a decorative image", async () => {
