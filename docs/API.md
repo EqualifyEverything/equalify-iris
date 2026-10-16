@@ -5308,7 +5308,7 @@ the deployment during the run:
 - **Agent update proposals** — your `/feedback` produced a change that generalizes beyond your
   document and passed the agent's own fixtures. Iris saves the lesson and the proposed prompt.
 
-Iris itself files nothing on GitHub. A daily workflow, `.github/workflows/agent-suggestions.yml`,
+Iris itself files nothing on GitHub. A workflow that runs Sunday to Thursday, `.github/workflows/agent-suggestions.yml`,
 reads [`GET /v1/suggestions`](#agent-suggestions-shared-secret-off-by-default), groups suggestions
 that mean the same thing, and opens or updates one issue per idea. Counts keep growing on an issue
 after it is closed, so a maintainer can see demand return.

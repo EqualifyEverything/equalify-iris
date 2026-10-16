@@ -20,7 +20,9 @@ name: Agent Suggestions
 
 on:
   schedule:
-    - cron: '0 14 * * *'
+    # Sunday to Thursday. Nobody reads Friday's or Saturday's issues before Monday, and
+    # Sunday's run files everything saved since Thursday.
+    - cron: '0 14 * * 0-4'
   workflow_dispatch:
     inputs:
       dry_run:
