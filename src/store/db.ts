@@ -47,7 +47,7 @@ export interface SessionRecord {
   // `queued` and then possibly to `failed`; counting on status alone would make
   // the public number dip every time someone asked Iris to try again.
   first_completed_at: string | null;
-  // sha256 of what was uploaded, so the quality tally can count distinct files, not just
+  // sha256 of what was uploaded, so the quality tally can count distinct uploads, not just
   // sessions (#509). One file: that file's own hash, which `shasum -a 256` reproduces. Several:
   // the hash of their hashes, in upload order. Null on sessions from before the column. Never
   // served: the session routes pick their fields.
@@ -506,7 +506,7 @@ export interface QualityStats {
   window_days: number;
   // Every count and rate here is per SESSION. A file uploaded three times is three documents.
   documents: number;
-  // How many distinct uploaded files those documents are, by `sessions.source_sha256` (#509).
+  // How many distinct uploads those documents came from, by `sessions.source_sha256` (#509).
   // Sessions from before that column are not in it; `documents_unhashed` counts them.
   files: number;
   documents_unhashed: number;

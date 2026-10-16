@@ -207,9 +207,10 @@ curl -s -H "Authorization: Bearer $IRIS_QUALITY_TOKEN" "$BASE/quality?days=30"
   reason given there), and it is the whole reason the tally is stored the way it is: a
   clean run produces no violation rows, so counting "documents that had a problem" would divide by
   the bad documents alone and report every rate near 100%.
-* `files` — how many distinct files those documents came from. Each upload's sha256 is stored, so
-  one file uploaded three times is 3 documents and 1 file. For one file, the hash is the file's own
-  sha256. For several, it is the sha256 of their hex hashes joined by newlines, in upload order.
+* `files` — how many distinct uploads those documents came from. Each upload's sha256 is stored, so
+  one file uploaded three times is 3 documents and 1 upload. For one file, the hash is the file's own
+  sha256. For several, it is the sha256 of their hex hashes joined by newlines, in upload order, so the
+  same images in another order or another grouping count as a different upload.
 * `documents_unhashed` — documents whose session predates the hash, so they are in `documents` but
   not in `files`.
 * `mean_rounds` — mean **editor** passes per document, against `defaults.max_review_iterations`. The

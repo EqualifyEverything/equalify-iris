@@ -52,6 +52,8 @@ const skip = hasJq() ? false : "jq not installed";
 const TALLY = {
   window_days: 30,
   documents: 70,
+  files: 41,
+  documents_unhashed: 3,
   documents_linted: 64,
   since: "2026-08-13T16:45:08.867Z",
   mean_rounds: 0.8857142857142857,
@@ -278,12 +280,15 @@ test("a deployment that records no step gets no breakdown sentence, not three ze
   assert.match(body, /Start with `src\/pipeline\/lint\.ts`/);
 });
 
-test("the body says how many distinct files the documents came from (#509)", { skip }, () => {
-  const body = renderBody("lint-error", { ...TALLY, files: 41, documents_unhashed: 3 });
-  assert.match(body, /The 70 documents came from 41 distinct uploaded files \(3 documents predate file hashing/);
-  assert.ok(!renderBody("lint-error", { ...TALLY, files: 41, documents_unhashed: 0 }).includes("predate"));
-  // A deployment older than the field gets no sentence.
-  assert.ok(!renderBody("lint-error").includes("distinct uploaded files"));
+test("the body says how many distinct uploads the documents came from (#509)", { skip }, () => {
+  const body = renderBody("lint-error");
+  assert.match(body, /The 70 documents came from 41 distinct uploads \(3 documents predate upload hashing/);
+  assert.ok(!renderBody("lint-error", { ...TALLY, documents_unhashed: 0 }).includes("predate"));
+  // Every document predates the hash: "came from 0 uploads" would be false, so no sentence.
+  assert.ok(!renderBody("lint-error", { ...TALLY, files: 0, documents_unhashed: 70 }).includes("distinct uploads"));
+  // A deployment older than the field gets no sentence either.
+  const { files: _f, documents_unhashed: _u, ...older } = TALLY;
+  assert.ok(!renderBody("lint-error", older).includes("distinct uploads"));
 });
 
 // The state the test above cannot reach, and the one the reference deployment was

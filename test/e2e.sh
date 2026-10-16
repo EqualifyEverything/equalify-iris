@@ -1480,7 +1480,7 @@ extra=$(echo "$q" | jq -c --argjson allowed "$allowed" '([paths(scalars) | last]
 # Every upload here went through POST /v1/sessions, so each has a hash, and the tests
 # re-upload the same images, so there are fewer files than documents (#509).
 echo "$q" | jq -e '.documents_unhashed == 0 and .files >= 1 and .files < .documents' >/dev/null \
-  && pass "the documents are $(echo "$q" | jq -r '.files') distinct file(s), all hashed" \
+  && pass "the documents are $(echo "$q" | jq -r '.files') distinct upload(s), all hashed" \
   || fail "quality" "files=$(echo "$q" | jq -r '.files') unhashed=$(echo "$q" | jq -r '.documents_unhashed') documents=$(echo "$q" | jq -r '.documents')"
 
 # The window is echoed back clamped, so a caller reads what it got rather than what

@@ -180,10 +180,11 @@
     }[.key] // "No description available for finding key `\(.key)`."
   end) as $detail
 | "**Measured:** `\(.metric)` = \(.value) (threshold \(.threshold))\n\n"
-  # `files` is absent on a deployment older than #509, so the line is skipped there.
-  + (if $tally.files then
-       "The \($tally.documents) documents came from \($tally.files) distinct uploaded files"
-       + (if ($tally.documents_unhashed // 0) > 0 then " (\($tally.documents_unhashed) documents predate file hashing and are not in that count)" else "" end)
+  # Skipped when `files` is absent (a deployment older than #509) or 0 (every document in the
+  # window predates the hash), because "came from 0 uploads" would be false.
+  + (if ($tally.files // 0) > 0 then
+       "The \($tally.documents) documents came from \($tally.files) distinct uploads"
+       + (if ($tally.documents_unhashed // 0) > 0 then " (\($tally.documents_unhashed) documents predate upload hashing and are not in that count)" else "" end)
        + ".\n\n"
      else "" end)
   + $detail
