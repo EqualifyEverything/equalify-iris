@@ -73,7 +73,8 @@ export function suggestionKey(name: string): string {
 // The agent a suggestion names: the file of that exact name, or else the one library
 // specialist whose name has the same key. The page agent wrote `chartData` while the file is
 // chartDataAgent.md, and an exact match alone never ran it. Never resolves to page.md,
-// feedback.md or a standard type.
+// feedback.md or a standard type. The key match reads the library only, the same files the
+// page agent is shown, so a session-built agent runs only under its exact name.
 export function findSpecialist(ctx: PipelineContext, logical: string): AgentSpec | null {
   const dirs = { agentsDir: ctx.paths.agentsDir, tmpAgentsDir: ctx.paths.tmpAgentsDir(ctx.sessionId) };
   const exact = loadAgent(logical, dirs);

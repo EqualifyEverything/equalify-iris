@@ -31,7 +31,11 @@ interface Recorded {
 // resolve — which is the case a directory-listing-based decline would get wrong.
 // No feedback.md, so verifyAgentOutput short-circuits to ok and these tests stay
 // about dispatch.
-function makeCtx(dir: string, suggestedName: string | null): { ctx: PipelineContext; rec: Recorded } {
+function makeCtx(
+  dir: string,
+  suggestedName: string | null,
+  specialistHtml = `<p>${SUGGEST_MARK} fragment</p>`,
+): { ctx: PipelineContext; rec: Recorded } {
   const agentsDir = join(dir, "agents");
   const fragDir = join(dir, "fragments");
   const inputDir = join(dir, "input");
@@ -61,7 +65,7 @@ function makeCtx(dir: string, suggestedName: string | null): { ctx: PipelineCont
         rec.calls.push({ agent, prompt });
         // A specialist asked for just its own content type.
         if (prompt.includes("Extract ONLY the content your contract covers")) {
-          return { text: JSON.stringify({ no_content: false, html: `<p>${SUGGEST_MARK} fragment</p>` }) };
+          return { text: JSON.stringify({ no_content: false, html: specialistHtml }) };
         }
         // The page agent, called a second time to splice a fragment in.
         if (sys.includes("You merge a higher-fidelity HTML fragment")) {
@@ -286,4 +290,16 @@ test("a looser name does not run a standard agent, the page agent or another spe
       assert.equal(ranSpecialist(rec), false, name);
     });
   }
+});
+
+test("a specialist's comments never reach the page", async () => {
+  await withTemp(async (dir) => {
+    // chartDataAgent.md asked for @source wrappers, and the delivered page carries no comments.
+    const html = "<!-- @source x --><figure>c</figure><!-- @end-source --><!<!---->-- y";
+    const { ctx, rec } = makeCtx(dir, "chartDataAgent", html);
+    await runExtraction(ctx);
+    const merge = rec.calls.find((c) => c.prompt.includes("Specialist (chartDataAgent) fragment"))!.prompt;
+    assert.match(merge, /<figure>c<\/figure>/);
+    assert.doesNotMatch(merge, /@source|@end-source|<!--/);
+  });
 });

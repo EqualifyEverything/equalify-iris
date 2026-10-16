@@ -31,7 +31,7 @@ You MUST:
 - Do NOT add CSS, classes, inline styles, or event handlers.
 
 ## Output contract
-Return a single HTML fragment wrapped in @source / @end-source comments: the
-`<figure>` followed by its data `<table>`. The fragment log entry MUST record the detected
-chart type, the series and category counts, any approximated (`~`) or `unreadable` values,
-and the `alt`-text decision (meaningful vs. justified empty).
+Return the `<figure>` followed by its data `<table>` as the "html" field, with no HTML
+comments. In a "log" field beside it, record the detected chart type, the series and category
+counts, any approximated (`~`) or `unreadable` values, and the `alt`-text decision (meaningful
+vs. justified empty).

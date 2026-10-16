@@ -11,8 +11,8 @@
 //   3. rewrites the counts on every issue it touches.
 //
 // A key on an issue closed as done is grouped again: Iris still asking means the agent is not
-// running. A key on an issue closed as not planned stays there, so a rejected idea is not
-// filed again.
+// running. A key on an issue closed as not planned or as a duplicate stays there, so a
+// rejected idea is not filed again.
 //
 // Iris owns only the part of a body between the two markers, so people can edit the rest.
 //
@@ -67,6 +67,18 @@ const day = (iso) => (iso || "").slice(0, 10);
 // no section. Stripping only `<!--` once is not enough: `<!<!---->--` rebuilds it.
 const quote = (s) => s.replace(/[<>]/g, "").replace(/\s+/g, " ").trim();
 
+// The issues a key can stay on: open ones, and ones closed as not planned or as a duplicate,
+// so a rejected idea is not filed again. A key on an issue closed as done is grouped again.
+export function keepsKeys(issue) {
+  return issue.state === "open" || issue.state_reason === "not_planned" || issue.state_reason === "duplicate";
+}
+
+// The agent a grouping reply or a concept names, matched by key as dispatch matches it.
+export function matchAgent(agents, name) {
+  const key = suggestionKey(name.replace(/\.md$/, ""));
+  return agents.find((a) => a.key === key);
+}
+
 // The file a drafted agent is saved as. Dispatch finds a specialist by file name, and the page
 // agent is shown these names, so the issue states it. Follows chartDataAgent.md.
 export function agentFile(concept) {
@@ -76,12 +88,16 @@ export function agentFile(concept) {
   return `${camel || "new"}Agent.md`;
 }
 
+// The content types the page agent covers itself. Same list as STANDARD in
+// src/pipeline/contribute.ts; dispatch declines these, so they are never a naming miss.
+export const STANDARD = new Set(["paragraph", "heading", "list", "table", "formfield", "image", "quote", "caption", "footnote"]);
+
 // Agents in the library that a suggestion can name: everything in agents/ but the page and
-// feedback agents. `about` is the file's first line after its title.
+// feedback agents and the standard types. `about` is the file's first line after its title.
 export function libraryAgents(dir, fs) {
   return fs
     .readdirSync(dir)
-    .filter((f) => f.endsWith(".md") && f !== "page.md" && f !== "feedback.md")
+    .filter((f) => f.endsWith(".md") && f !== "page.md" && f !== "feedback.md" && !STANDARD.has(f.slice(0, -3).toLowerCase()))
     .sort()
     .map((f) => {
       const text = fs.readFileSync(`${dir}/${f}`, "utf8");
@@ -189,7 +205,7 @@ export const SPECIALIST_CONTRACT = [
   "- The general page agent renders the whole page first. When it names this agent, Iris sends the agent",
   "  the page image, with this file as the system prompt and Iris's accessibility requirements after it.",
   '- The agent must reply with only JSON: {"no_content": false, "html": "<accessible HTML fragment>"}, or',
-  '  {"no_content": true} when the page has none of its content.',
+  '  {"no_content": true} when the page has none of its content. The fragment has no HTML comments.',
   "- The fragment replaces the page agent's own rendering of that content. It holds only this content,",
   "  not the rest of the page.",
   "- The \"## Required capability\" section must list vision.",
@@ -206,6 +222,17 @@ export function draftPrompt(concept, groups, example, file) {
     "Follow the shape of this existing agent file. Write plain, concise language. Reply with the markdown file only.",
     "",
     example,
+  ].join("\n");
+}
+
+// The run summary for keys that name an agent Iris already has. Filed nowhere.
+export function missedSummary(missed) {
+  return [
+    "## Suggestions that name an agent Iris already has",
+    "",
+    "The page agent asked for these by another name, so the agent did not run. Nothing was filed.",
+    "",
+    ...missed.map(([k, a]) => `- ${k} → ${a}`),
   ].join("\n");
 }
 
@@ -260,7 +287,7 @@ async function main() {
   const issues = await allIssues();
   // Open issues, and closed ones Iris should leave alone. See the header.
   const concepts = issues.filter(
-    (i) => i.title.startsWith(NEW_PREFIX) && (i.state === "open" || i.state_reason === "not_planned"),
+    (i) => i.title.startsWith(NEW_PREFIX) && keepsKeys(i),
   );
   const keyed = new Map();
   for (const i of concepts) for (const k of issueKeys(i)) if (!keyed.has(k)) keyed.set(k, i);
@@ -288,7 +315,7 @@ async function main() {
     const fresh = new Map(); // concept name -> groups
     for (const g of unassigned) {
       const a = assigned.get(g.key);
-      const agent = a?.agent ? agents.find((x) => x.name === a.agent) : undefined;
+      const agent = a?.agent ? matchAgent(agents, a.agent) : undefined;
       const target = a?.issue ? concepts.find((i) => i.number === a.issue) : undefined;
       if (agent) {
         missed.push([g.key, agent.name]);
@@ -309,6 +336,12 @@ async function main() {
         continue;
       }
       const file = agentFile(concept);
+      // A concept named like an agent Iris has is that agent, not a new file over it.
+      const existing = matchAgent(agents, file);
+      if (existing) {
+        missed.push(...keys.map((k) => [k, existing.name]));
+        continue;
+      }
       const draft = await ask(draftPrompt(concept, groups, example, file));
       const body = withSection(
         [
@@ -339,15 +372,9 @@ async function main() {
   }
 
   if (missed.length) {
-    const lines = [
-      "## Suggestions that name an agent Iris already has",
-      "",
-      "The page agent asked for these by another name, so the agent did not run. Nothing was filed.",
-      "",
-      ...missed.map(([k, a]) => `- ${k} → ${a}`),
-    ];
-    console.log(lines.join("\n"));
-    if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, lines.join("\n") + "\n");
+    const text = missedSummary(missed);
+    console.log(text);
+    if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, text + "\n");
   }
 
   for (const g of report.agent_updates) {

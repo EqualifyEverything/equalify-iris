@@ -4438,7 +4438,21 @@ async function runSpecialist(ctx: PipelineContext, agent: AgentSpec, img: InputI
   ctx.log.agentCall({ agent, phase: "extraction", image: img.name, output: res.text });
   const parsed = extractJson<{ no_content?: boolean; html?: string }>(res.text);
   if (!parsed || parsed.no_content || !parsed.html?.trim()) return null;
-  return repaired(ctx, "specialist", img, parsed.html.trim());
+  const html = withoutComments(parsed.html).trim();
+  return html ? repaired(ctx, "specialist", img, html) : null;
+}
+
+// A specialist's fragment goes into the delivered page, which carries no comments
+// (assembly.ts). A specialist prompt can still ask for them: chartDataAgent.md asked for
+// `@source` wrappers until #567. Repeated until nothing changes, because removing one comment
+// can join the pieces of another, and an unclosed `<!--` runs to the end, as it does in a parser.
+function withoutComments(html: string): string {
+  let out = html;
+  for (let prev = ""; prev !== out; ) {
+    prev = out;
+    out = out.replace(/<!--[\s\S]*?(?:-->|$)/g, "");
+  }
+  return out;
 }
 
 // Splice a specialist fragment into the page body, replacing the page's own

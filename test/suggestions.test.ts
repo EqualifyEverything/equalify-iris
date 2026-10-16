@@ -10,6 +10,7 @@ import { Store, type SuggestionRow } from "../src/store/db.ts";
 import { groupSuggestions, suggestionKey, suggestionsRouter } from "../src/routes/suggestions.ts";
 // @ts-expect-error — a plain .mjs script with no types.
 import * as script from "../.github/scripts/agent-suggestions.mjs";
+import { STANDARD } from "../src/pipeline/contribute.ts";
 
 const TOKEN = "fake-quality-token";
 
@@ -192,4 +193,28 @@ test("the drafter is told how Iris runs a specialist and every saved reason", ()
   assert.match(prompt, /"no_content": true/);
   assert.match(prompt, /replaces the page agent's own rendering/);
   for (const r of reasons) assert.ok(prompt.includes(r), r);
+});
+
+test("a key leaves an issue closed as done, and stays on one that was rejected", () => {
+  assert.equal(script.keepsKeys({ state: "open" }), true);
+  assert.equal(script.keepsKeys({ state: "closed", state_reason: "not_planned" }), true);
+  assert.equal(script.keepsKeys({ state: "closed", state_reason: "duplicate" }), true);
+  assert.equal(script.keepsKeys({ state: "closed", state_reason: "completed" }), false);
+});
+
+test("an agent is matched by key, so a draft never names a file Iris has", () => {
+  const agents = script.libraryAgents("agents", { readdirSync, readFileSync });
+  for (const n of ["chartDataAgent", "chartDataAgent.md", "chartdataagent", "Chart Data"])
+    assert.equal(script.matchAgent(agents, n)?.name, "chartDataAgent", n);
+  assert.equal(script.matchAgent(agents, script.agentFile("Chart Data Specialist"))?.name, "chartDataAgent");
+  assert.equal(script.matchAgent(agents, "chart"), undefined);
+  const text = script.missedSummary([["chart", "chartDataAgent"]]);
+  assert.match(text, /- chart → chartDataAgent/);
+  assert.match(text, /Nothing was filed/);
+});
+
+test("the script's standard types are dispatch's, and are never offered as agents", () => {
+  assert.deepEqual([...script.STANDARD].sort(), [...STANDARD].map((s) => s.toLowerCase()).sort());
+  const fs = { readdirSync: () => ["page.md", "feedback.md", "Table.md", "chartDataAgent.md"], readFileSync: () => "# T\nabout" };
+  assert.deepEqual(script.libraryAgents("x", fs).map((a: { name: string }) => a.name), ["chartDataAgent"]);
 });
