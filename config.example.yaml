@@ -39,10 +39,12 @@ tagged_pdf:
   timeout_seconds: 300
 
 # Optional: the demo page's name and logo. Blank shows "Equalify Iris - Uploader" with no logo.
-# The logo is a .png, .jpg or .webp file, shown left of the name.
+# The logo is a .png, .jpg or .webp file, shown left of the name. logo_alt is its alt text,
+# usually the organisation's name as the logo writes it.
 branding:
   name: ${IRIS_BRAND_NAME}
   logo_file: ${IRIS_BRAND_LOGO}
+  logo_alt: ${IRIS_BRAND_LOGO_ALT}
 
 # Which model serves each agent. docs/models.md says what to pick and what each costs.
 providers:
