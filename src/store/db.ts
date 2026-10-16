@@ -1420,8 +1420,8 @@ export class Store {
     }
   }
 
-  // Record suggestions; a repeat of the same (kind, session, agent, page) replaces the
-  // earlier row.
+  // Record suggestions; a repeat of the same (kind, session, agent, page, lesson) replaces
+  // the earlier row.
   addSuggestions(rows: SuggestionRow[]): void {
     if (rows.length === 0) return;
     const insert = this.db.prepare(
