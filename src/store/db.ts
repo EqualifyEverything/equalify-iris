@@ -792,6 +792,18 @@ export class Store {
   constructor(path: string) {
     mkdirSync(dirname(path), { recursive: true });
     this.db = new DatabaseSync(path);
+    // busy_timeout is 0 on a fresh node:sqlite connection — "fail immediately",
+    // not "wait for the lock". WAL still allows only one writer, so without a
+    // timeout a second process's UPDATE against a held write lock throws
+    // ERR_SQLITE_ERROR instead of completing. That would break claimSession in
+    // the very scenario that justifies it: a loser is supposed to report 0
+    // changed rows so the caller can answer 409, and a synchronous throw in a
+    // handler is an uncaught exception (there is no error middleware) — a 500.
+    // Every write here is a single-statement autocommit, so contention lasts
+    // microseconds; 5s is a ceiling for the multi-process case, not a budget.
+    // Set first, because dropGitHubIdentity below takes the write lock. It writes nothing to
+    // the file, so a database refused below is still unmodified.
+    this.db.exec(`PRAGMA busy_timeout = 5000`);
     // BEFORE any DDL or PRAGMA below. Refusing to adopt a file and then writing to
     // it anyway is a contradiction, and the writes are not harmless: the steps below
     // drop the old session indexes and a column, create a new index, and switch the
@@ -802,18 +814,8 @@ export class Store {
     this.rejectLegacyUsersTable(path);
     // Also before the schema block: its index no longer names github_user_id.
     this.dropGitHubIdentity();
-    // busy_timeout is 0 on a fresh node:sqlite connection — "fail immediately",
-    // not "wait for the lock". WAL still allows only one writer, so without a
-    // timeout a second process's UPDATE against a held write lock throws
-    // ERR_SQLITE_ERROR instead of completing. That would break claimSession in
-    // the very scenario that justifies it: a loser is supposed to report 0
-    // changed rows so the caller can answer 409, and a synchronous throw in a
-    // handler is an uncaught exception (there is no error middleware) — a 500.
-    // Every write here is a single-statement autocommit, so contention lasts
-    // microseconds; 5s is a ceiling for the multi-process case, not a budget.
     this.db.exec(`
       PRAGMA journal_mode = WAL;
-      PRAGMA busy_timeout = 5000;
       -- No owner column: every session belongs to the deployment (#540).
       CREATE TABLE IF NOT EXISTS sessions (
         session_id TEXT PRIMARY KEY,
@@ -1003,15 +1005,23 @@ export class Store {
   /**
    * Sessions used to belong to the GitHub account behind `github.token` (#459). They now
    * belong to the deployment (#540), so the owner column and the `users` table go. Every
-   * session is kept. Idempotent: a database without the column falls straight through.
+   * session is kept. A database with neither takes no lock, so a normal boot writes nothing.
    *
    * The indexes go first, because SQLite will not drop a column an index names.
    */
   private dropGitHubIdentity(): void {
-    const cols = this.db.prepare(`PRAGMA table_info(sessions)`).all() as { name: string }[];
+    const hasOwner = () =>
+      (this.db.prepare(`PRAGMA table_info(sessions)`).all() as { name: string }[]).some(
+        (c) => c.name === "github_user_id",
+      );
+    const hasUsers = () =>
+      this.db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'users'`).all()
+        .length > 0;
+    if (!hasOwner() && !hasUsers()) return;
     this.db.exec("BEGIN IMMEDIATE");
     try {
-      if (cols.some((c) => c.name === "github_user_id")) {
+      // Read again under the lock: another process may have migrated first.
+      if (hasOwner()) {
         this.db.exec(`
           DROP INDEX IF EXISTS idx_sessions_user;
           DROP INDEX IF EXISTS idx_sessions_user_page;

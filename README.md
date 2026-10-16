@@ -270,7 +270,6 @@ src/
   tools/calibrate.ts     # CLI for that measurement; nothing in a run imports it
   util/queue.ts          # bounded FIFO run queue (cross-session concurrency cap)
   auth/                  # the optional API gate
-  github/                # files agent-suggestion issues, identified by title prefix
   store/                 # node:sqlite metadata store + on-disk session layout
   routes/                # /v1 endpoints
   version.ts             # the running build's version, reported by GET /v1/health

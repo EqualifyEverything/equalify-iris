@@ -411,3 +411,24 @@ test("a session_id containing the separator does not truncate the cursor", () =>
   const c = { created_at: T(0), session_id: "ses_a|b" };
   assert.deepEqual(parseCursor(encodeCursor(c)), c);
 });
+
+test("a current database opens while another process holds the write lock", () => {
+  // A normal boot has nothing to migrate, so it must take no lock. Before the fix it
+  // took one on every boot, before busy_timeout was set, and threw "database is locked".
+  const dir = mkdtempSync(join(tmpdir(), "iris-lock-"));
+  try {
+    const path = join(dir, "iris.sqlite");
+    new Store(path).createSession({ session_id: "ses_a", iterations_max: 3, image_count: 1 });
+    const other = new DatabaseSync(path);
+    other.exec("BEGIN IMMEDIATE");
+    other.exec(`UPDATE sessions SET updated_at = updated_at`);
+    try {
+      assert.deepEqual(walk(new Store(path), 1).ids, ["ses_a"]);
+    } finally {
+      other.exec("ROLLBACK");
+      other.close();
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
