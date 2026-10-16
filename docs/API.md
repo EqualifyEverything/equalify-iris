@@ -2222,9 +2222,11 @@ it did not resolve to a file, and on the three lines after a successful load, th
 
 `reason` distinguishes the two ways to get here. `empty name` means the request normalized to nothing,
 and `agent` is then the raw string, since that is what a maintainer has to recognize. `no agent file of
-that name` means it normalized fine and no file matched — `chart` for `chartDataAgent.md`, a display
-name, a plural. Both are one defect in practice: the model's wording and the library's filenames
-disagree, and the specialist silently does not run.
+that name` means it normalized fine and no file matched, exactly or by its key (case, punctuation and
+a trailing "agent" or "specialist" ignored, so `chartData` runs `chartDataAgent.md`). `chart`, a
+display name or a plural still misses. Both are one defect in practice: the model's wording and the
+library's filenames disagree, and the specialist silently does not run. The page agent's prompt lists
+the library's specialists by name to prevent it.
 
 The two lists are the explanation, and they are kept apart on purpose. `candidates` is what **was**
 dispatchable — real files, so a near-miss reads as a near-miss without a second run to investigate.

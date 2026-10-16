@@ -23,7 +23,7 @@ import { missingLinkProblem, missingLinks, pageLinkContext, unexpectedHrefs } fr
 import { missingFields, pageFieldContext } from "./fields.ts";
 import { duplicateIdProblem, duplicateIds, idAudit } from "./anchors.ts";
 import { splitWordAudit, splitWordContradictions, splitWordProblem } from "./hyphens.ts";
-import { STANDARD as STANDARD_AGENTS, isStandardType, logicalType } from "./contribute.ts";
+import { STANDARD as STANDARD_AGENTS, findSpecialist, isStandardType, logicalType } from "./contribute.ts";
 import { isTruncatedResponseError, replyExcerpt, TruncatedResponseError } from "../providers/types.ts";
 import type { Fragment } from "./fragment.ts";
 
@@ -3602,8 +3602,31 @@ export function correctionCeiling(
 // page, they were never page-specific text. Same for the lessons. What stays in the
 // user message is what actually differs per call: the filename and page number, that
 // page's link targets, the user's feedback, and the page's previous output.
-function pageSystem(agent: AgentSpec, lessons: string): string {
-  return `${agent.content}\n\n${ACCESSIBILITY_REQUIREMENTS}${lessons}`;
+function pageSystem(ctx: PipelineContext, agent: AgentSpec, lessons: string): string {
+  return `${agent.content}${specialistList(ctx)}\n\n${ACCESSIBILITY_REQUIREMENTS}${lessons}`;
+}
+
+// The specialists a `suggested_agent` can run, by the exact name dispatch resolves. page.md
+// does not know which files a deployment has, so it guessed: `chart`, `statisticalChart` and
+// `dataVisualization` were all asked for while `chartDataAgent.md` sat unused. Library files
+// only, not this session's built agents, so the prompt is the same on every call in a session.
+function specialistList(ctx: PipelineContext): string {
+  let names: string[];
+  try {
+    names = readdirSync(ctx.paths.agentsDir)
+      .filter((f) => f.endsWith(".md"))
+      .map((f) => f.slice(0, -3))
+      .filter((n) => n !== PAGE_AGENT && n !== "feedback" && !isStandardType(n))
+      .sort();
+  } catch {
+    return "";
+  }
+  if (names.length === 0) return "";
+  return (
+    `\n\n## Specialists in this deployment\n${names.join(", ")}.\n` +
+    `If one of these fits, put its name in "suggested_agent" exactly as written here. ` +
+    `Any other name runs nothing, so use another name only for content none of these covers.`
+  );
 }
 
 // Three repairs to a page reply, on the line where that reply becomes markup Iris keeps: soft
@@ -3765,7 +3788,7 @@ async function renderPage(
     PAGE_AGENT,
     "vision",
     [
-      { role: "system", content: pageSystem(agent, lessons) },
+      { role: "system", content: pageSystem(ctx, agent, lessons) },
       { role: "user", content: user },
     ],
     { step: "extract", images: [loadImage(img)] },
@@ -4346,7 +4369,7 @@ async function correctPage(
       // cache the first one wrote instead of paying for a near-copy of it. It also
       // gains the lessons, which this pass never had: a correction that re-derives the
       // page without them can undo the very thing a past correction taught.
-      { role: "system", content: pageSystem(agent, lessons) },
+      { role: "system", content: pageSystem(ctx, agent, lessons) },
       { role: "user", content: user },
     ],
     {
@@ -4601,10 +4624,7 @@ async function dispatchSpecialist(
     ctx.log.event("specialist_declined", { agent: logical, image: img.name, reason: "standard type" });
     return { html: pageHtml, dispatched: false };
   }
-  const specialist = loadAgent(logical, {
-    agentsDir: ctx.paths.agentsDir,
-    tmpAgentsDir: ctx.paths.tmpAgentsDir(ctx.sessionId),
-  });
+  const specialist = findSpecialist(ctx, logical);
   if (!specialist) {
     ctx.log.event("specialist_unresolved", {
       agent: logical,

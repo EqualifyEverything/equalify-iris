@@ -241,3 +241,49 @@ test("no suggestion means no dispatch events at all", async () => {
     }
   });
 });
+
+test("the page agent is told which specialists it can name", async () => {
+  await withTemp(async (dir) => {
+    // A model that cannot see the library guesses: "chart" and "statisticalChart" were both
+    // asked for while chartDataAgent.md was there. `table.md` is a standard type and page.md
+    // and feedback.md are not specialists, so none of those is offered.
+    const { ctx, rec } = makeCtx(dir, null);
+    writeFileSync(join(dir, "agents", "feedback.md"), "# Feedback\n");
+    await runExtraction(ctx);
+    const page = rec.calls.find((c) => c.agent === "page")!.prompt;
+    assert.match(page, /## Specialists in this deployment\nchartDataAgent\.\n/);
+    assert.match(page, /exactly as written here/);
+  });
+});
+
+test("with no specialists on disk, the page prompt lists none", async () => {
+  await withTemp(async (dir) => {
+    const { ctx, rec } = makeCtx(dir, null);
+    rmSync(join(dir, "agents", "chartDataAgent.md"));
+    await runExtraction(ctx);
+    const page = rec.calls.find((c) => c.agent === "page")!.prompt;
+    assert.ok(!page.includes("Specialists in this deployment"));
+  });
+});
+
+test("a name that differs from the file only by an Agent suffix or case still runs it", async () => {
+  for (const name of ["chartData", "ChartDataSpecialist", "chart-data"]) {
+    await withTemp(async (dir) => {
+      // The page agent wrote `chartData` on real pages; the file is chartDataAgent.md.
+      const { ctx, rec } = makeCtx(dir, name);
+      await runExtraction(ctx);
+      assert.deepEqual(ev(rec, "specialist_dispatched").map((e) => e.data.agent), ["chartDataAgent.md"], name);
+      assert.equal(ev(rec, "specialist_unresolved").length, 0, name);
+    });
+  }
+});
+
+test("a looser name does not run a standard agent, the page agent or another specialist", async () => {
+  for (const name of ["tableAgent", "pageAgent", "chart"]) {
+    await withTemp(async (dir) => {
+      const { ctx, rec } = makeCtx(dir, name);
+      await runExtraction(ctx);
+      assert.equal(ranSpecialist(rec), false, name);
+    });
+  }
+});

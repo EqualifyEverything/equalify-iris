@@ -1,4 +1,5 @@
-import { loadAgent } from "../agents/loader.ts";
+import { readdirSync } from "node:fs";
+import { loadAgent, type AgentSpec } from "../agents/loader.ts";
 import type { PipelineContext } from "./context.ts";
 import type { SuggestionRow } from "../store/db.ts";
 
@@ -57,6 +58,40 @@ export function isStandardType(logical: string): boolean {
   return STANDARD_LOWER.has(logical.toLowerCase());
 }
 
+// The key that groups spellings of one agent name: lowercase letters and digits, with a
+// trailing "agent" or "specialist" dropped. `chartData`, `ChartDataAgent` and
+// `chart-data-specialist` share one key. GET /v1/suggestions groups by it too.
+export function suggestionKey(name: string): string {
+  let k = name.toLowerCase().replace(/[^a-z0-9]/g, "");
+  for (;;) {
+    const next = k.replace(/(agent|specialist)$/, "");
+    if (next === k || !next) return k;
+    k = next;
+  }
+}
+
+// The agent a suggestion names: the file of that exact name, or else the one library
+// specialist whose name has the same key. The page agent wrote `chartData` while the file is
+// chartDataAgent.md, and an exact match alone never ran it. Never resolves to page.md,
+// feedback.md or a standard type.
+export function findSpecialist(ctx: PipelineContext, logical: string): AgentSpec | null {
+  const dirs = { agentsDir: ctx.paths.agentsDir, tmpAgentsDir: ctx.paths.tmpAgentsDir(ctx.sessionId) };
+  const exact = loadAgent(logical, dirs);
+  if (exact) return exact;
+  const key = suggestionKey(logical);
+  let files: string[];
+  try {
+    files = readdirSync(ctx.paths.agentsDir);
+  } catch {
+    return null;
+  }
+  const match = files
+    .filter((f) => f.endsWith(".md"))
+    .map((f) => f.slice(0, -3))
+    .filter((n) => n !== "page" && n !== "feedback" && !isStandardType(n) && suggestionKey(n) === key);
+  return match.length === 1 ? loadAgent(match[0], dirs) : null;
+}
+
 export interface Suggestion {
   name: string;
   reason: string;
@@ -79,7 +114,7 @@ export function recordSuggestions(ctx: PipelineContext, suggestions: Suggestion[
     if (!name || isStandardType(name) || seen.has(key)) continue;
     seen.add(key);
     // Skip if the library (or this session) already has the agent.
-    if (loadAgent(name, { agentsDir: ctx.paths.agentsDir, tmpAgentsDir: ctx.paths.tmpAgentsDir(ctx.sessionId) })) continue;
+    if (findSpecialist(ctx, name)) continue;
     rows.push({ kind: "new_agent", agent: name, session_id: ctx.sessionId, page: s.image, reason: s.reason || null });
   }
   if (rows.length === 0) return;

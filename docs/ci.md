@@ -365,11 +365,16 @@ two diffs, not something to decide by timestamp.
 `GET /v1/suggestions` and turns them into issues:
 
 - **New agent suggestions.** Each issue lists the name keys it covers, in a comment in its body. A key
-  no issue covers goes to one model call, which puts it under an existing issue or a new concept. A
-  new concept gets an issue with a drafted agent.
+  no issue covers goes to one model call, which puts it under an agent Iris already has, an existing
+  issue, or a new concept. A new concept gets an issue with a drafted agent and the file name to save
+  it as.
+- **Names for agents Iris already has.** These are naming misses, not missing agents. The run summary
+  lists them and nothing is filed.
+- **Closed issues.** A key on an issue closed as done is grouped again, since Iris still asking means
+  the agent is not running. A key on an issue closed as not planned stays there.
 - **Agent update proposals.** One issue per agent and lesson, with the latest proposal's diff.
 
-Every run rewrites the counts on the issues it touches, open or closed. It owns only the part of a
+Every run rewrites the counts on the issues it touches. It owns only the part of a
 body between its two markers, so edit the rest freely.
 
 It uses the same `QUALITY_URL` and `QUALITY_TOKEN` as the weekly quality report, plus

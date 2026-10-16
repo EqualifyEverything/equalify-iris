@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import express from "express";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { AddressInfo } from "node:net";
@@ -156,3 +156,40 @@ test("a row read back keeps its lesson, so writing it again does not collapse tw
     store.addSuggestions(store.listSuggestions());
     assert.deepEqual(store.listSuggestions().map((r) => r.lesson), ["a", "b"]);
   }));
+
+test("a drafted agent is named the way dispatch will look it up", () => {
+  assert.equal(script.agentFile("Scientific Figure And Plot Specialist"), "scientificFigureAndPlotAgent.md");
+  assert.equal(script.agentFile("Flowchart"), "flowchartAgent.md");
+  assert.equal(script.agentFile("Chart Data Agent"), "chartDataAgent.md");
+  const section = script.newAgentSection(["flow"], [], "flowchartAgent.md");
+  assert.match(section, /Save the agent as `agents\/flowchartAgent\.md`/);
+  assert.doesNotMatch(script.newAgentSection(["flow"], []), /Save the agent/);
+});
+
+test("grouping is offered the library's agents, and can assign a key to one", () => {
+  const agents = script.libraryAgents("agents", { readdirSync, readFileSync });
+  assert.deepEqual(agents.map((a: { name: string }) => a.name), ["chartDataAgent"]);
+  assert.equal(agents[0].key, "chartdata");
+  const prompt = script.groupingPrompt(
+    [
+      { number: 5, title: "New agent suggestion: Maps", state: "open", body: "" },
+      { number: 6, title: "New agent suggestion: Music", state: "closed", body: "" },
+    ],
+    [{ key: "chart", names: [{ name: "chart" }], reasons: ["a bar chart"] }],
+    agents,
+  );
+  assert.match(prompt, /Existing agents:\n- chartDataAgent: Convert charts/);
+  assert.match(prompt, /#5 Maps \(keys/);
+  assert.match(prompt, /#6 Music \(rejected\)/);
+  const out = script.parseAssignments('{"assign":[{"key":"chart","agent":"chartDataAgent"}]}', ["chart"]);
+  assert.deepEqual([...out], [["chart", { agent: "chartDataAgent" }]]);
+});
+
+test("the drafter is told how Iris runs a specialist and every saved reason", () => {
+  const reasons = Array.from({ length: 10 }, (_, i) => `reason ${i}`);
+  const prompt = script.draftPrompt("Flowchart", [{ names: [{ name: "flowchart" }], reasons }], "EXAMPLE", "flowchartAgent.md");
+  assert.match(prompt, /saved as agents\/flowchartAgent\.md/);
+  assert.match(prompt, /"no_content": true/);
+  assert.match(prompt, /replaces the page agent's own rendering/);
+  for (const r of reasons) assert.ok(prompt.includes(r), r);
+});

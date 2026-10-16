@@ -1,21 +1,14 @@
 import { Router } from "express";
+import { suggestionKey } from "../pipeline/contribute.ts";
 import type { Store, SuggestionRow } from "../store/db.ts";
 import { bearer, tokenMatches } from "./quality.ts";
 
 // How many sample pages and reasons each group carries.
 const SAMPLES = 10;
 
-// The grouping key for a suggested agent name: lower case, letters and digits only,
-// with a trailing "agent" or "specialist" dropped. `scientificFigureAgent` and
-// `scientific-figure` share one key. The workflow merges keys that mean the same thing.
-export function suggestionKey(name: string): string {
-  let k = name.toLowerCase().replace(/[^a-z0-9]/g, "");
-  for (;;) {
-    const next = k.replace(/(agent|specialist)$/, "");
-    if (next === k || !next) return k;
-    k = next;
-  }
-}
+// The grouping key. It lives in pipeline/contribute.ts because dispatch matches names by it
+// too. The workflow merges keys that mean the same thing.
+export { suggestionKey };
 
 interface NewAgentGroup {
   key: string;
