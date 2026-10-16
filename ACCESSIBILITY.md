@@ -11,15 +11,15 @@ Equalify Iris helps people improve document accessibility. Accessibility is part
 
 ## Report an accessibility barrier
 
-[Open an accessibility issue](https://github.com/EqualifyEverything/equalify-iris/issues/new/choose). Describe the task you were trying to complete, what happened, what you expected, and steps to reproduce. Include browser, operating system, assistive technology, and screenshots or examples only if you are comfortable sharing them. Do not publish sensitive documents or personal information. If GitHub itself is inaccessible, contact a project maintainer through an alternative channel listed in the project README, if available.
+[Open an accessibility issue](https://github.com/EqualifyEverything/equalify-iris/issues/new/choose). Describe the task you were trying to complete, what happened, what you expected, and steps to reproduce. Include browser, operating system, assistive technology, and screenshots or examples only if you are comfortable sharing them. Do not publish sensitive documents or personal information. An alternative reporting channel for people who cannot use GitHub has not yet been established.
 
-Maintainers should acknowledge reports respectfully, apply the `accessibility` label, assess impact, and keep the issue updated. A **critical** barrier prevents a core task with no reasonable workaround; **serious** barriers substantially hinder it; **moderate** barriers make it difficult; **minor** barriers cause limited friction. Prioritize by user impact and available workarounds. Explain fixes and invite the reporter to verify them when practical. No response-time guarantee is currently established.
+Maintainers should acknowledge reports respectfully, apply the `accessibility` label, assess impact, and keep the issue updated. Use the issue form's severity scale: **Critical** blocks a core task entirely; **High** causes significant difficulty but has a workaround; **Medium** causes annoyance or an inconsistent experience; **Low** has minimal impact. Prioritize by user impact and available workarounds. Explain fixes and invite the reporter to verify them when practical. No response-time guarantee is currently established.
 
 ## Contributor expectations
 
 - For changes to interfaces, check keyboard operation, visible focus, accessible names, logical reading order, errors, and screen reader output.
 - For changes to generated HTML, verify headings, tables, images, links, language, and reading order with representative documents.
-- Run `npm run typecheck`, `npm test`, and relevant accessibility checks. The demo's existing axe-core lint should report zero violations.
+- Run the [pre-PR checks in CONTRIBUTING.md](CONTRIBUTING.md#development), including `npm run typecheck`, `npm test`, and `./test/e2e.sh`, plus relevant accessibility checks. The demo's existing axe-core lint should report zero violations.
 - For documentation, use descriptive links, meaningful headings, text alternatives, and plain language.
 - Describe testing and any untested areas in pull requests. Track unresolved barriers in issues.
 
