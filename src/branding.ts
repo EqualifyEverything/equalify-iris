@@ -1,10 +1,10 @@
-// The demo page's name and logo (#542). Default: "Equalify Iris - Uploader Demo", no logo.
+// The demo page's name and logo (#542). Default: "Equalify Iris - Uploader", no logo.
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { extname } from "node:path";
 import type { IrisConfig } from "./config.ts";
 
-export const DEFAULT_NAME = "Equalify Iris - Uploader Demo";
+export const DEFAULT_NAME = "Equalify Iris - Uploader";
 
 // No SVG: an SVG served from this origin can run script.
 const LOGO_TYPES: Record<string, string> = {

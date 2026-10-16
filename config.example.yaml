@@ -38,7 +38,7 @@ tagged_pdf:
   command: ${IRIS_PDF_COMMAND}
   timeout_seconds: 300
 
-# Optional: the demo page's name and logo. Blank shows "Equalify Iris - Uploader Demo" with no logo.
+# Optional: the demo page's name and logo. Blank shows "Equalify Iris - Uploader" with no logo.
 # The logo is a .png, .jpg or .webp file, shown left of the name.
 branding:
   name: ${IRIS_BRAND_NAME}
