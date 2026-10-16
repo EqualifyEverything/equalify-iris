@@ -143,6 +143,8 @@ export interface IrisConfig {
   // Optional. The `iris-pdf` command that tags an uploaded PDF (util/taggedPdf.ts).
   // Blank or absent means the feature is off.
   tagged_pdf?: { command?: string; timeout_seconds?: number };
+  // Optional. The demo page's name and logo (src/branding.ts).
+  branding?: { name?: string; logo_file?: string };
   github: {
     upstream_repo: string;
     // Overridable for GitHub Enterprise (and for testing). Defaults below.

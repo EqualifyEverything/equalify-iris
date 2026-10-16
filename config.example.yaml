@@ -38,6 +38,12 @@ tagged_pdf:
   command: ${IRIS_PDF_COMMAND}
   timeout_seconds: 300
 
+# Optional: the demo page's name and logo. Blank shows "Equalify Iris" with no logo.
+# The logo is a .png, .jpg, .webp or .svg file, shown left of the name.
+branding:
+  name: ${IRIS_BRAND_NAME}
+  logo_file: ${IRIS_BRAND_LOGO}
+
 # Iris's one GitHub identity. Every session is owned by it and every issue is filed as it.
 # See docs/github-auth.md.
 github:
