@@ -91,16 +91,17 @@ test("every other place that states the Node version agrees with that floor", ()
   // action depends on their number.
   const pkg = JSON.parse(read("package.json")) as { engines: { node: string } };
   const floor = majorOf(pkg.engines.node.replace(/^\D+/, ""), "engines.node");
+  const stated = pkg.engines.node.replace(/^\D+/, "").trim();
 
   // A member yields either a major to compare or a `problem` saying why it cannot — its file is
   // gone, its line is gone, or the version it states names no major. Nothing here asserts:
   // rewording README.md's requirement must not stop the test before it has looked at
   // CONTRIBUTING.md, and each of the three faults has a different fix, so each says which it is.
-  type Member = { label: string; major: number | null; problem: string | null };
+  type Member = { label: string; major: number | null; problem: string | null; raw?: string };
 
   const fromText = (label: string, raw: string): Member => {
     const major = readMajor(raw);
-    return { label, major, problem: major === null ? unreadable(raw, label) : null };
+    return { label, major, problem: major === null ? unreadable(raw, label) : null, raw: raw.trim() };
   };
 
   const at = (label: string, rel: string, re: RegExp): Member => {
@@ -141,10 +142,11 @@ test("every other place that states the Node version agrees with that floor", ()
           },
         ]),
   ];
-  // "Node 24+" IS the floor claim, so here the numbers have to be equal, not merely clear it.
+  // "Node 24.15+" IS the floor claim, so here the whole version has to be equal, minor included:
+  // "24+" against `>=24.15` is the drift a reader installs.
   const exactly: Member[] = [
-    at("README.md's install requirement", "README.md", /Requires \*\*Node\.js (\d+)(?:\.\d+)?\+\*\*/),
-    at("CONTRIBUTING.md's install requirement", "CONTRIBUTING.md", /Requires \*\*Node (\d+)\+\*\*/),
+    at("README.md's install requirement", "README.md", /Requires \*\*Node\.js (\d+(?:\.\d+)*)\+\*\*/),
+    at("CONTRIBUTING.md's install requirement", "CONTRIBUTING.md", /Requires \*\*Node (\d+(?:\.\d+)*)\+\*\*/),
   ];
 
   // Collected rather than asserted one at a time: `assert` throws at the first failure, so
@@ -159,8 +161,8 @@ test("every other place that states the Node version agrees with that floor", ()
       .filter((m) => m.major !== null && m.major < floor)
       .map((m) => `${m.label} is ${m.major}, below ${floor}`),
     ...exactly
-      .filter((m) => m.major !== null && m.major !== floor)
-      .map((m) => `${m.label} says ${m.major}, not ${floor}`),
+      .filter((m) => m.major !== null && m.raw !== stated)
+      .map((m) => `${m.label} says ${m.raw}, not ${stated}`),
   ];
   assert.deepEqual(wrong, [], `engines.node's floor is ${floor}: ${wrong.join("; ")}`);
 });

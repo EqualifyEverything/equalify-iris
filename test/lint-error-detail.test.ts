@@ -66,7 +66,13 @@ test("a lint that could not run says which step threw, and what threw", async ()
   // The part that answers the question — which library threw — is what has to survive.
   assert.doesNotMatch(lint.errorStack!, /\s\/[A-Za-z]|\(\/|file:\/\//, `an absolute path was logged: ${lint.errorStack}`);
   assert.ok(!lint.errorStack!.includes(process.cwd()), "the frames name the install directory");
-  assert.match(lint.errorStack!, /node_modules\/(jsdom|axe-core)\//, "the trim took the library name with it");
+  // Where the stack runs out varies: in jsdom, or wholly inside axe's source, which runs
+  // through `eval` in runAxe and so has no file path. Either one names what threw.
+  assert.match(
+    lint.errorStack!,
+    /node_modules\/(jsdom|axe-core)\/|eval at runAxe/,
+    `the trim took the library name with it: ${lint.errorStack}`,
+  );
 });
 
 test("an error thrown from another realm still reports its class and stack (#549 review)", () => {

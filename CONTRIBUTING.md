@@ -44,7 +44,7 @@ something, say `Closes #<n>` and the robot will stay out of your way.
 
 ## Development
 
-Requires **Node 24+** (runs TypeScript directly; uses built-in `node:sqlite`), **git**, and —
+Requires **Node 24.15+** (runs TypeScript directly; uses built-in `node:sqlite`), **git**, and —
 for PDF uploads — **poppler-utils** (`brew install poppler` / `apt-get install poppler-utils`).
 
 ```bash

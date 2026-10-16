@@ -15,7 +15,8 @@
 //
 // The count is an estimate, and it leans low on purpose. An end tag closes back to its matching
 // open element, which models the parser's most common recovery. `</li>`, `</td>` and the like
-// also close what was left open inside them, and a new `<a>` closes an open one. Void elements, and elements whose
+// also close what was left open inside them, as does the next `<li>` or `<td>`. A new `<a>`,
+// `<button>` or `<nobr>` closes an open one, and a heading closes a heading still open. Void elements, and elements whose
 // end tag may be left out (`<p>`, `<li>`, `<td>` and the like), are not counted, because a table
 // written `<td>a<td>b` is ordinary output and must not look deep. Each of those needs a counted
 // element to nest inside, so a page built to beat the count can reach about four times the limit.
@@ -39,16 +40,23 @@ const TOKEN =
 // closes an `<em>` left open in the item. `<p>` and the table parts do the same.
 const CLOSES_CONTENTS = new Set(["p", "li", "dt", "dd", "td", "th", "tr", "thead", "tbody", "tfoot", "caption", "option", "optgroup"]);
 
+const CONTAINERS = new Set(["ul", "ol", "dl", "menu", "table", "select", "datalist"]);
+const CLOSES_OWN_KIND = new Set(["a", "button", "nobr"]);
+const HEADINGS = new Set(["h1", "h2", "h3", "h4", "h5", "h6"]);
+
 // The estimated nesting depth of `html`. Stops counting once past `limit`.
 export function sourceDepth(html: string, limit = Infinity): number {
   const stack: string[] = [];
   const open = new Map<string, number>();
-  // For each CLOSES_CONTENTS element still open, the stack height when it opened.
-  const marks = new Map<string, number[]>();
+  // For each CLOSES_CONTENTS element still open, the stack height and the number of open
+  // CONTAINERS when it opened. A count, not a scan of the stack, keeps this one pass.
+  const marks = new Map<string, [number, number][]>();
+  let containers = 0;
   const closeTo = (height: number) => {
     while (stack.length > height) {
       const top = stack.pop()!;
       open.set(top, open.get(top)! - 1);
+      if (CONTAINERS.has(top)) containers--;
     }
   };
   let max = 0;
@@ -59,9 +67,12 @@ export function sourceDepth(html: string, limit = Infinity): number {
     if (CLOSES_CONTENTS.has(name)) {
       const heights = marks.get(name) ?? [];
       // A mark above the current stack belongs to an element its parent already closed.
-      while (heights.length && heights.at(-1)! > stack.length) heights.pop();
-      if (!end) heights.push(stack.length);
-      else if (heights.length) closeTo(heights.pop()!);
+      while (heights.length && heights.at(-1)![0] > stack.length) heights.pop();
+      // A new `<li>` closes the open one, and what was left open in it, unless a list or
+      // table was opened inside it since.
+      if (!end && heights.length && containers <= heights.at(-1)![1]) closeTo(heights.pop()![0]);
+      if (!end) heights.push([stack.length, containers]);
+      else if (heights.length) closeTo(heights.pop()![0]);
       marks.set(name, heights);
       continue;
     }
@@ -69,10 +80,13 @@ export function sourceDepth(html: string, limit = Infinity): number {
     // can only count low.
     if (UNCOUNTED.has(name) || (!end && m[0].endsWith("/>"))) continue;
     if (!end) {
-      // A new `<a>` closes the one still open, so `<a>x<a>y` is not nested.
-      if (name === "a" && open.get("a")) closeTo(stack.lastIndexOf("a"));
+      // A new `<a>`, `<button>` or `<nobr>` closes the one still open, and a heading closes a
+      // heading left open directly above it, so `<a>x<a>y` and `<h2>x<h2>y` are not nested.
+      if (CLOSES_OWN_KIND.has(name) && open.get(name)) closeTo(stack.lastIndexOf(name));
+      else if (HEADINGS.has(name) && HEADINGS.has(stack.at(-1) ?? "")) closeTo(stack.length - 1);
       stack.push(name);
       open.set(name, (open.get(name) ?? 0) + 1);
+      if (CONTAINERS.has(name)) containers++;
       if (stack.length > max) max = stack.length;
       if (max > limit) return max;
     } else if (open.get(name)) {
