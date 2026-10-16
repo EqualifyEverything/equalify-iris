@@ -38,4 +38,4 @@ A verified support matrix has not yet been published. Record tested environments
 
 ## Ownership and progress
 
-Repository maintainers triage accessibility reports and review related changes. A named accessibility owner and review cadence remain to be assigned. Follow progress through [accessibility issues](https://github.com/EqualifyEverything/equalify-iris/issues?q=label%3Aaccessibility) and project pull requests. This document should be updated as testing and support information become available.
+**Accessibility owner:** [@bbertucc](https://github.com/bbertucc). The accessibility owner coordinates triage of accessibility reports, prioritizes barriers, reviews accessibility-related changes, and maintains this document and the project's accessibility progress tracking. Repository maintainers collaborate on fixes and reviews. A regular review cadence remains to be established. Follow progress through [accessibility issues](https://github.com/EqualifyEverything/equalify-iris/issues?q=label%3Aaccessibility) and project pull requests. This document should be updated as testing and support information become available.
