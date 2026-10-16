@@ -102,8 +102,8 @@ validation. A deployment that booted has the key.
   column no current build writes. The file also still holds live plaintext tokens, so delete it rather
   than archiving it. You lose session history and nothing else.
 - **Delete these keys.** `github.client_id`, `github.client_secret`, `github.oauth_scope`,
-  `github.oauth_base_url`, `github.anonymous_token`, `github.issue_token`, and
-  `server.rate_limits.auth_per_minute`, and `github.upstream_repo`. They are ignored, not errors — but leaving them in a config
+  `github.oauth_base_url`, `github.anonymous_token`, `github.issue_token`,
+  `server.rate_limits.auth_per_minute` and `github.upstream_repo`. They are ignored, not errors — but leaving them in a config
   file describes a deployment you do not have.
 - **`POST /v1/auth/github/device` and its poll endpoint are gone** (404). Any client running the
   device flow needs updating: it now sends either nothing or `server.api_token`.

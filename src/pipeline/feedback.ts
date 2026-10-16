@@ -1064,6 +1064,7 @@ export async function proposeAgentUpdatesFromFeedback(
       kind: "agent_update",
       agent: proposal.agent_name,
       session_id: ctx.sessionId,
+      lesson: slug,
       detail: {
         lesson_slug: slug || null,
         summary: proposal.summary,

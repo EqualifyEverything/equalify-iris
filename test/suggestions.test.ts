@@ -40,18 +40,22 @@ test("the store keeps one row per suggestion and page, and groups them", () =>
     // The same session, agent and page again replaces rather than adds.
     store.addSuggestions([row("barChartAgent", "s1", "p1.png", "bars, again")]);
     store.addSuggestions([
-      { kind: "agent_update", agent: "page.md", session_id: "s1", detail: { lesson_slug: "keep-footnotes", summary: "a" } },
-      { kind: "agent_update", agent: "page.md", session_id: "s2", detail: { lesson_slug: "keep-footnotes", summary: "b" } },
+      { kind: "agent_update", agent: "page.md", session_id: "s1", lesson: "keep-footnotes", detail: { lesson_slug: "keep-footnotes", summary: "a" } },
+      { kind: "agent_update", agent: "page.md", session_id: "s2", lesson: "keep-footnotes", detail: { lesson_slug: "keep-footnotes", summary: "b" } },
+    ]);
+    // One session's second lesson is a second row, not a replacement.
+    store.addSuggestions([
+      { kind: "agent_update", agent: "page.md", session_id: "s1", lesson: "keep-headings", detail: { lesson_slug: "keep-headings", summary: "c" } },
     ]);
     const rows = store.listSuggestions();
-    assert.equal(rows.length, 4);
+    assert.equal(rows.length, 5);
     const g = groupSuggestions(rows);
     assert.equal(g.new_agents.length, 1);
     assert.equal(g.new_agents[0].key, "barchart");
     assert.equal(g.new_agents[0].count, 2);
     assert.equal(g.new_agents[0].sessions, 2);
     assert.deepEqual(g.new_agents[0].reasons.sort(), ["bars, again", "more bars"]);
-    assert.equal(g.agent_updates.length, 1);
+    assert.equal(g.agent_updates.length, 2);
     assert.equal(g.agent_updates[0].count, 2);
     assert.equal((g.agent_updates[0].latest as { summary: string }).summary, "b");
   }));
@@ -119,4 +123,19 @@ test("the model's grouping reply is checked against the keys it was given", () =
 test("an update's title matches the one Iris used to file, so old issues are found", () => {
   assert.equal(script.updateTitle({ agent: "page.md", lesson_slug: "keep-footnotes" }), "Agent update proposal: page.md — keep-footnotes");
   assert.equal(script.updateTitle({ agent: "page.md", lesson_slug: null }), "Agent update proposal: page.md");
+});
+
+test("no session id reaches a public issue, and a name cannot break the section", () => {
+  const groups = groupSuggestions([
+    row("map|Agent\n<!-- iris-suggestions:end -->", "ses_secret1", "p1.png", "why"),
+  ]).new_agents;
+  const section = script.newAgentSection([groups[0].key], groups);
+  assert.doesNotMatch(section, /ses_secret1/);
+  assert.doesNotMatch(section, /<!-- iris-suggestions:end -->/);
+  assert.equal(section.split("\n").filter((l: string) => l.startsWith("| map")).length, 1, "the name stays on one table row");
+  const update = script.updateSection({
+    agent: "page.md", lesson_slug: "x", count: 1, sessions: 1, first_seen: "", last_seen: "",
+    latest: { session_id: "ses_secret2", summary: "s", diff_preview: "+ a" },
+  });
+  assert.doesNotMatch(update, /ses_secret2/);
 });

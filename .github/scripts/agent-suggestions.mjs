@@ -8,8 +8,10 @@
 //   2. gives each agent update proposal its own issue, by agent and lesson.
 //   3. rewrites the counts on every issue it touches, open or closed.
 //
-// Iris owns only the part of a body between the two STATS markers, so people can edit
-// the rest.
+// Iris owns only the part of a body between the two markers, so people can edit the rest.
+//
+// Nothing here publishes a session id. An id is all it takes to read or change a session
+// on an open deployment, and these issues are public.
 //
 // Env: QUALITY_URL, QUALITY_TOKEN, GITHUB_TOKEN, GITHUB_REPOSITORY, BEDROCK_MODEL,
 // AWS_REGION, DRY_RUN ("true" files nothing).
@@ -51,6 +53,8 @@ export function withSection(body, section) {
   return s ? `${s}\n\n${block}` : block;
 }
 
+// A table cell: one line, no pipes or backticks to break the table.
+const cell = (s) => quote(s).replace(/[|`]/g, "");
 const day = (iso) => (iso || "").slice(0, 10);
 // Model text, one line, and unable to close the section Iris owns.
 const quote = (s) => s.replace(/<!--|-->/g, "").replace(/\s+/g, " ").trim();
@@ -71,11 +75,9 @@ export function newAgentSection(keys, groups) {
   if (mine.length) {
     lines.push("", "| Name Iris used | Times | Sessions |", "| --- | --- | --- |");
     for (const g of mine)
-      for (const n of g.names) lines.push(`| \`${n.name}\` | ${n.count} | ${n === g.names[0] ? g.sessions : ""} |`);
+      for (const n of g.names) lines.push(`| ${cell(n.name)} | ${n.count} | ${n === g.names[0] ? g.sessions : ""} |`);
     const reasons = mine.flatMap((g) => g.reasons).slice(-10);
     if (reasons.length) lines.push("", "Recent reasons:", "", ...reasons.map((r) => `- ${quote(r)}`));
-    const pages = mine.flatMap((g) => g.pages).slice(-10);
-    if (pages.length) lines.push("", "Recent pages:", "", ...pages.map((p) => `- \`${p.session_id}\` ${p.page}`));
   }
   lines.push("", "_Iris updates this section daily. Edit anything outside it._");
   return lines.join("\n");
@@ -94,7 +96,7 @@ export function updateSection(g) {
     "",
     "## Latest proposal",
     "",
-    `Session \`${p.session_id ?? ""}\`. ${quote(p.summary ?? "")}`,
+    quote(p.summary ?? ""),
   ];
   if (p.lesson) {
     lines.push("", `Lesson: ${quote(p.lesson.instruction ?? "")}`, "", `Feedback: ${quote(p.lesson.feedback ?? "")}`);
@@ -218,15 +220,21 @@ async function main() {
       if (target) {
         touched.set(target.number, [...(touched.get(target.number) ?? issueKeys(target)), g.key]);
       } else {
-        const name = a?.concept ?? g.names[0].name;
+        const name = quote(a?.concept ?? g.names[0].name);
         fresh.set(name, [...(fresh.get(name) ?? []), g]);
       }
     }
     const { readFileSync } = await import("node:fs");
     const example = readFileSync("agents/chartDataAgent.md", "utf8");
     for (const [concept, groups] of fresh) {
-      const draft = await ask(draftPrompt(concept, groups, example));
       const keys = groups.map((g) => g.key);
+      // A concept the model named again, rather than assigning to its issue.
+      const same = concepts.find((i) => i.title.slice(NEW_PREFIX.length).toLowerCase() === concept.toLowerCase());
+      if (same) {
+        touched.set(same.number, [...(touched.get(same.number) ?? issueKeys(same)), ...keys]);
+        continue;
+      }
+      const draft = await ask(draftPrompt(concept, groups, example));
       const body = withSection(
         [
           "Iris asked for an agent for this content. Below is a draft for a maintainer to review.",

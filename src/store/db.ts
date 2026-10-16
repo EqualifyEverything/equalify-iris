@@ -36,6 +36,8 @@ export interface SuggestionRow {
   agent: string;
   session_id: string;
   page?: string;
+  // An update's lesson slug, so one session's two lessons are two rows. '' for new agents.
+  lesson?: string;
   reason?: string | null;
   detail?: unknown;
   recorded_at?: string;
@@ -899,16 +901,17 @@ export class Store {
       -- .github/workflows/agent-suggestions.yml (#539). One row per suggestion: a
       -- new agent asked for on a page, or a gated update to an existing agent.
       -- UNIQUE so recording the same one twice (a feedback re-run, a backfill) keeps
-      -- one row. page is '' for updates.
+      -- one row. page is '' for updates; lesson is '' for new agents.
       CREATE TABLE IF NOT EXISTS suggestions (
         kind TEXT NOT NULL,
         agent TEXT NOT NULL,
         session_id TEXT NOT NULL,
         page TEXT NOT NULL DEFAULT '',
+        lesson TEXT NOT NULL DEFAULT '',
         reason TEXT,
         detail TEXT,
         recorded_at TEXT NOT NULL,
-        UNIQUE (kind, session_id, agent, page)
+        UNIQUE (kind, session_id, agent, page, lesson)
       );
     `);
     // ...and the column the CREATE TABLE above cannot add to a database that
@@ -1422,8 +1425,8 @@ export class Store {
   addSuggestions(rows: SuggestionRow[]): void {
     if (rows.length === 0) return;
     const insert = this.db.prepare(
-      `INSERT OR REPLACE INTO suggestions (kind, agent, session_id, page, reason, detail, recorded_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT OR REPLACE INTO suggestions (kind, agent, session_id, page, lesson, reason, detail, recorded_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     );
     this.db.exec("BEGIN IMMEDIATE");
     try {
@@ -1433,6 +1436,7 @@ export class Store {
           r.agent,
           r.session_id,
           r.page ?? "",
+          r.lesson ?? "",
           r.reason ?? null,
           r.detail === undefined ? null : JSON.stringify(r.detail),
           r.recorded_at ?? new Date().toISOString(),
