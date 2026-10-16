@@ -361,7 +361,7 @@ two diffs, not something to decide by timestamp.
 
 ## Agent suggestions
 
-`agent-suggestions.yml` runs daily. It reads a deployment's saved suggestions from
+`agent-suggestions.yml` runs Sunday to Thursday at 14:00 UTC. It reads a deployment's saved suggestions from
 `GET /v1/suggestions` and turns them into issues:
 
 - **New agent suggestions.** Each issue lists the name keys it covers, in a comment in its body. A key

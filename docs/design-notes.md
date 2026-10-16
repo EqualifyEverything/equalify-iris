@@ -111,7 +111,7 @@ Each decision below is one bullet, and the headings only group them:
   decline and the contribution filter. A suggestion's name is prose a model wrote, not a filename
   (`STANDARD` itself spells one entry `formField`), so `"Table"` is ordinary output. While the nine
   files existed, `agents/Table.md` resolved on a case-insensitive volume and absorbed it. With them
-  gone, an exact-match filter would save a suggestion for a type the page pass covers, and the daily
+  gone, an exact-match filter would save a suggestion for a type the page pass covers, and the scheduled
   workflow would file it as a public issue.
 - **No provenance comments in the output.** `@source` / `@agent` / `@fragment` wrappers travel with
   a fragment through the pipeline, and an early design kept them in the final HTML. Iris delivers
@@ -137,7 +137,7 @@ Each decision below is one bullet, and the headings only group them:
   fidelity check. `@review-unread` gives how many of the windows the document was read in came back
   with no usable answer — `@lint-unavailable`'s warning, about a different gate.
 - **Contributions are issues, filed by a workflow, not by Iris (#539).** Iris saves each new-agent
-  suggestion and each agent update proposal on the deployment. A daily workflow,
+  suggestion and each agent update proposal on the deployment. A scheduled workflow,
   `.github/workflows/agent-suggestions.yml`, reads them from `/v1/suggestions`, groups the ones that
   mean the same thing, and opens or updates one issue per idea. Iris used to file an issue per
   suggestion itself, which gave a page of near-duplicates (`scientificFigureAgent`,

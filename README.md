@@ -45,7 +45,7 @@ The pipeline as **implemented today** runs in three phases:
 
 When Iris meets content a specialist agent would handle better than the general pass, it saves a
 suggestion: the agent's name, the page, and why. Feedback that improves an agent is saved the same
-way. A daily workflow groups these and files one GitHub issue per idea
+way. A workflow (Sunday to Thursday) groups these and files one GitHub issue per idea
 ([Contributions](docs/API.md#contributions-automatic)). Maintainers triage those issues; merged agents
 become part of the shared `agents/` library.
 

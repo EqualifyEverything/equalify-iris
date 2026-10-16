@@ -81,7 +81,7 @@ export function newAgentSection(keys, groups) {
     const reasons = mine.flatMap((g) => g.reasons).slice(-10);
     if (reasons.length) lines.push("", "Recent reasons:", "", ...reasons.map((r) => `- ${quote(r)}`));
   }
-  lines.push("", "_Iris updates this section daily. Edit anything outside it._");
+  lines.push("", "_Iris updates this section on each run. Edit anything outside it._");
   return lines.join("\n");
 }
 
@@ -107,7 +107,7 @@ export function updateSection(g) {
   // The full prompt (page.md is ~85 KB) does not fit in an issue body, which GitHub caps
   // at 65,536 characters. It is `latest.content` at /v1/suggestions.
   if (p.content) lines.push("", "The full proposed prompt is `latest.content` at the deployment's `/v1/suggestions`.");
-  lines.push("", "_Iris updates this section daily. Edit anything outside it._");
+  lines.push("", "_Iris updates this section on each run. Edit anything outside it._");
   return lines.join("\n");
 }
 
