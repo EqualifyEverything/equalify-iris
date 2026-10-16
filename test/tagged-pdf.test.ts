@@ -25,7 +25,7 @@ function cfg(dir: string, command?: string, timeout_seconds?: number): IrisConfi
     server: { port: 3000, base_url: "http://localhost:3000" },
     storage: { data_dir: dir, agents_dir: "agents", database: join(dir, "iris.sqlite") },
     tagged_pdf: { command, timeout_seconds },
-    github: { token: "ghp_test", upstream_repo: "https://github.com/o/r", api_base_url: "https://api.github.com" },
+    github: { token: "ghp_test", api_base_url: "https://api.github.com" },
     providers: { default: "openrouter", openrouter: { api_key: "k", default_model: "anthropic/claude-sonnet-4.6" } },
     defaults: { max_review_iterations: 1, extraction_concurrency: 2, max_concurrent_runs: 1, recheck_sample_size: 1 },
   };

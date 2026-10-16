@@ -35,7 +35,7 @@ import { stripNestedMain } from "./landmarks.ts";
 import { markerCounts, MARKER_PAGE_INCOMPLETE, runReview, type ReviewResult } from "./review.ts";
 import { runAxe, lintErrorFields, lintDebrisFields } from "./lint.ts";
 import { learnFromFeedback, proposeAgentUpdatesFromFeedback, scopeFeedback } from "./feedback.ts";
-import { runContribution } from "./contribute.ts";
+import { recordSuggestions } from "./contribute.ts";
 import { unresolvedRefs } from "./links.ts";
 import { altTexts, genericAlts } from "./alt.ts";
 import { markupReport } from "./markup.ts";
@@ -91,7 +91,6 @@ export async function runPipeline(args: {
   sessionId: string;
   maxReviewIterations: number;
   feedback?: string;
-  githubToken?: string;
 }): Promise<void> {
   const { cfg, store, sessionId } = args;
   const paths = new Paths(cfg);
@@ -117,7 +116,7 @@ export async function runPipeline(args: {
     maxReviewIterations: args.maxReviewIterations,
     extractionConcurrency: cfg.defaults.extraction_concurrency,
     recheckSampleSize: cfg.defaults.recheck_sample_size,
-    githubToken: args.githubToken,
+    recordSuggestions: (rows) => store.addSuggestions(rows),
   };
 
   try {
@@ -664,7 +663,7 @@ export async function runPipeline(args: {
     // still here. `POST /close` deletes the session's tmp tree, and `POST /feedback`
     // claims the session and starts a second run — neither waits for this one, because
     // the run queue's cap is global rather than per session. Both windows existed already
-    // (`runContribution` below has always run past the status), and this widens them from
+    // (`recordSuggestions` below has always run past the status), and this widens them from
     // a moment to a training round. What is in them:
     //
     //   - A close can pull `tmp/<id>/agents` out from under a session-built agent's
@@ -675,7 +674,7 @@ export async function runPipeline(args: {
     //     is keyed by agent rather than by session, so any two concurrent runs already
     //     could — and it is why writing it is atomic (pipeline/memory.ts).
     //   - A throw after the status is set must not re-fail a delivered session, which is
-    //     what the containment here and around `runContribution` below is for.
+    //     what the containment here and around `recordSuggestions` below is for.
     //
     // The alternative is making every feedback round wait minutes for work about a future
     // document, which is what this is fixing.
@@ -717,16 +716,11 @@ export async function runPipeline(args: {
       ...(uncorrectedPages.length ? { uncorrected_pages: uncorrectedPages } : {}),
     });
 
-    // After the user has their output, auto-file agent-suggestion issues
-    // (no-op unless a token is available). Never blocks the result — and now cannot fail
-    // it either. Both of its own failure paths are already contained (contribute.ts
-    // catches the draft call and the filing separately), but what is left outside them is
-    // still an fs read, and the outer catch below would answer it by writing `failed`
-    // over a session whose document was delivered — the same wrong answer the training
-    // above used to give. A second feedback round can even have started by then, since
-    // the status has been `ready_for_review` since well before this line.
+    // After the user has their output, record the run's agent suggestions (#539). Never
+    // fails the run: the outer catch below would write `failed` over a session whose
+    // document was delivered.
     try {
-      await runContribution(ctx, suggestions);
+      recordSuggestions(ctx, suggestions);
     } catch (e) {
       log.event("contribution_failed", { error: e instanceof Error ? e.message : String(e) });
     }

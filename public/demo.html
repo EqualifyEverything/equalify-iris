@@ -422,11 +422,10 @@
       // `d.pending_prs.new_agents`. Removed because it was dead twice over: no
       // endpoint has ever returned `pending_prs` (see #30 Tier 4), so `built` was
       // always `[]` and the branch never ran — and the sentence it would have
-      // shown is no longer true. Agents suggested during a run are drafted and
-      // filed as GitHub issues for a maintainer (pipeline/contribute.ts); nothing
-      // is built into the session and used, so there is no "taught itself" to
-      // report to the person converting a document. The run log's `agent_issue`
-      // events are where that information actually lives if it is wanted back.
+      // shown is no longer true. Agents suggested during a run are saved for a
+      // maintainer (pipeline/contribute.ts); nothing is built into the session and
+      // used, so there is no "taught itself" to report. The run log's
+      // `suggestions_recorded` events say what was saved.
       hide('status-section'); show('result-section'); focusHeading('result-h');
       // Best-effort, and not awaited: the HTML is the result, and the PDF offer is extra.
       // A busy tagger makes showPdfPart wait, and the result must not wait with it.

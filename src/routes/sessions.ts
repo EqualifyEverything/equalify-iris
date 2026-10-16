@@ -512,7 +512,6 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
       store,
       sessionId,
       maxReviewIterations: maxIter,
-      githubToken: req.token,
     });
 
     res.status(201).json({
@@ -818,7 +817,6 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
       sessionId: s.session_id,
       maxReviewIterations: s.iterations_max,
       feedback,
-      githubToken: req.token,
     });
     // Report what actually happened. Under the run cap a re-run waits, and
     // saying "running" then would make a queued session look hung. Both report

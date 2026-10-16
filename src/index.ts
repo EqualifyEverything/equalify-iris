@@ -20,6 +20,7 @@ import { statsRouter } from "./routes/stats.ts";
 import { limitsRouter } from "./routes/limits.ts";
 import { clearPdfScratch, taggedPdfStatus } from "./util/taggedPdf.ts";
 import { qualityRouter } from "./routes/quality.ts";
+import { suggestionsRouter } from "./routes/suggestions.ts";
 import { errorHandler, notFound } from "./routes/errors.ts";
 import { visionModelWarning } from "./providers/imageLimits.ts";
 import { generalRateLimit } from "./util/requestLimits.ts";
@@ -305,6 +306,10 @@ app.use("/v1/limits", limitsRouter(cfg));
 // argues why they are separate).
 app.use("/v1/quality", qualityRouter(store, cfg.server));
 
+// Every recorded agent suggestion, read by the agent-suggestions workflow (#539). Same
+// guard as /v1/quality.
+app.use("/v1/suggestions", suggestionsRouter(store, cfg.server));
+
 // The browser app is the front door, served at the root (unauthenticated; it
 // drives the /v1 API itself). no-store so a deploy never serves a stale page.
 const brand = loadBrand(cfg);
@@ -342,7 +347,7 @@ app.get("/demo", (_req, res) => res.redirect(302, "/"));
 // limiter above is mounted on the whole of `/v1`. So /v1/health being registered above THAT
 // is a real decision (see its own comment) and the four mounts sitting above `auth` is not.
 const auth = makeAuthMiddleware(store, cfg);
-app.use("/v1/me", auth, meRouter(cfg));
+app.use("/v1/me", auth, meRouter());
 app.use("/v1/sessions", auth, sessionsRouter(cfg, store));
 app.use(notFound);
 app.use(errorHandler);

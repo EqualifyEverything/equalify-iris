@@ -505,8 +505,8 @@ jobs:
           # `users.noreply`, deliberately. A reporter's real email address is not this
           # workflow's to publish into a permanent commit, and it does not need it.
           #
-          # Bots are skipped: Iris files its own `New agent suggestion:` and `Agent
-          # update proposal:` issues (`src/github/issue.ts`), and crediting a bot as
+          # Bots are skipped: a workflow files Iris's `New agent suggestion:` and `Agent
+          # update proposal:` issues (`agent-suggestions.yml`), and crediting a bot as
           # co-author of the fix to its own report says nothing.
           jq -r '[ .[] | select((.author.is_bot // false) | not)
                        | (.author.login // "") | select(. != "") ] | unique | .[]' \
@@ -784,9 +784,9 @@ jobs:
                action, a control wired to the thing it claims to control. These are cheap,
                they are user-visible, and they are exactly the shape that reviews well.
             6. **Agent-library work** (`New agent suggestion:` / `Agent update proposal:`
-               issues, filed by Iris itself). Real product value, but rank below a
-               human-reported barrier: the agent files these speculatively from content it
-               met once, so check the suggestion is actually general before building it.
+               issues, filed from Iris's saved suggestions). Real product value, but rank below a
+               human-reported barrier. Each says how often Iris asked; check the suggestion
+               is actually general before building it.
             7. **Docs that contradict the code.** Worth doing, but only if nothing above it is
                available — do not spend a review slot on prose when a bug is open.
 

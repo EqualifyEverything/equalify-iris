@@ -136,8 +136,7 @@ export const IMAGE_MEDIA_TYPES: Record<string, string> = {
 
 // The agents that are handed a page image, and whose model therefore has to be able
 // to accept it: the page agent (extraction), the Feedback Agent (fidelity verify),
-// the Copy Editor (review, when the pages are attached) and the builder (drafting a
-// suggested agent). The published limit is the STRICTEST across them, so a deployment
+// and the Copy Editor (review, when the pages are attached). The published limit is the STRICTEST across them, so a deployment
 // that runs verification on a different model than extraction — which the config
 // example recommends — gets a number that is true of every call an upload makes,
 // not just the first.
@@ -147,7 +146,7 @@ export const IMAGE_MEDIA_TYPES: Record<string, string> = {
 // tighter-limited model would not be reflected here; that is the one direction this
 // can be too generous, and it is a deliberate trade against enumerating a directory
 // at upload time.
-const IMAGE_AGENTS = ["page", "feedback", "copy_editor", "builder"] as const;
+const IMAGE_AGENTS = ["page", "feedback", "copy_editor"] as const;
 
 // Whether the PIXEL limits and the format list are documented facts about the model
 // this deployment is actually running, or Iris's conservative stand-ins for one it

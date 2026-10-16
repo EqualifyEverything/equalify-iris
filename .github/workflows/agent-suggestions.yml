@@ -1,0 +1,86 @@
+name: Agent Suggestions
+
+# Files a deployment's agent suggestions as issues (#539).
+#
+# Iris saves two kinds of suggestion during a run: an agent it wished it had, and a
+# change to an agent that a user's feedback produced. It files nothing itself. This job
+# reads them from `GET /v1/suggestions`, groups the ones that mean the same thing, and
+# opens or updates one issue per idea. `.github/scripts/agent-suggestions.mjs` does the
+# work and explains how grouping is decided.
+#
+# Setup: the same QUALITY_URL variable and QUALITY_TOKEN secret as quality-report.yml,
+# and the AWS_BEDROCK_ROLE_ARN secret the triage workflow uses. Without the first two
+# the job declines rather than fails.
+#
+# Model use: one call to group new names, only when some name is not yet on an issue,
+# and one call per new issue to draft its agent. A day with no new names makes no calls.
+#
+# Try it with `gh workflow run agent-suggestions.yml -f dry_run=true`: it prints what
+# it would file and files nothing. The model calls still run.
+
+on:
+  schedule:
+    - cron: '0 14 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Print what would be filed, file nothing'
+        type: boolean
+        default: false
+
+# One at a time: two runs would both create an issue for the same new name.
+concurrency:
+  group: agent-suggestions
+  cancel-in-progress: false
+
+jobs:
+  file:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      issues: write
+      id-token: write
+    steps:
+      - name: Check setup
+        id: setup
+        env:
+          QUALITY_URL: ${{ vars.QUALITY_URL }}
+          QUALITY_TOKEN: ${{ secrets.QUALITY_TOKEN }}
+        run: |
+          if [ -z "$QUALITY_URL" ] || [ -z "$QUALITY_TOKEN" ]; then
+            echo "::notice::QUALITY_URL or QUALITY_TOKEN is not set; nothing to read."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v7
+        if: steps.setup.outputs.ready == 'true'
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        if: steps.setup.outputs.ready == 'true'
+        with:
+          node-version-file: .nvmrc
+
+      - if: steps.setup.outputs.ready == 'true'
+        run: npm ci --ignore-scripts
+
+      - name: Configure AWS credentials (OIDC)
+        if: steps.setup.outputs.ready == 'true'
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.AWS_BEDROCK_ROLE_ARN }}
+          aws-region: us-east-2
+
+      - name: File suggestions
+        if: steps.setup.outputs.ready == 'true'
+        env:
+          QUALITY_URL: ${{ vars.QUALITY_URL }}
+          QUALITY_TOKEN: ${{ secrets.QUALITY_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BEDROCK_MODEL: ${{ vars.BEDROCK_TRIAGE_MODEL || vars.BEDROCK_REVIEW_MODEL || 'us.anthropic.claude-opus-5' }}
+          DRY_RUN: ${{ inputs.dry_run && 'true' || 'false' }}
+        run: node .github/scripts/agent-suggestions.mjs

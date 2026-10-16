@@ -56,7 +56,7 @@ async function mockGitHub(): Promise<{ base: string; close: () => void; calls: n
 
 function cfgFor(apiBase: string): IrisConfig {
   return {
-    github: { api_base_url: apiBase, upstream_repo: "https://github.com/example/iris", token: TOKEN },
+    github: { api_base_url: apiBase, token: TOKEN },
     server: {},
     defaults: { max_review_iterations: 3 },
   } as unknown as IrisConfig;
@@ -75,7 +75,7 @@ async function authenticatedRequest(): Promise<{ body: Record<string, unknown>; 
 
   const app = express();
   app.use(makeAuthMiddleware(store, cfg));
-  app.use("/v1/me", meRouter(cfg));
+  app.use("/v1/me", meRouter());
   const server = app.listen(0);
   await new Promise((r) => server.once("listening", r));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -148,7 +148,6 @@ test("GET /v1/me returns no fork_repo", async () => {
     "defaults",
     "github_login",
     "github_user_id",
-    "upstream_repo",
   ]);
   assert.equal(body.github_login, GH_USER.login);
 });

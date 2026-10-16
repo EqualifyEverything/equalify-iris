@@ -1,0 +1,122 @@
+// Agent suggestions (#539): the store, the route, and the workflow script's pure parts.
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import express from "express";
+import { mkdtempSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import type { AddressInfo } from "node:net";
+import { Store, type SuggestionRow } from "../src/store/db.ts";
+import { groupSuggestions, suggestionKey, suggestionsRouter } from "../src/routes/suggestions.ts";
+// @ts-expect-error — a plain .mjs script with no types.
+import * as script from "../.github/scripts/agent-suggestions.mjs";
+
+const TOKEN = "fake-quality-token";
+
+function withStore(fn: (store: Store) => Promise<void> | void) {
+  const dir = mkdtempSync(join(tmpdir(), "iris-sugg-"));
+  return Promise.resolve(fn(new Store(join(dir, "iris.sqlite")))).finally(() =>
+    rmSync(dir, { recursive: true, force: true }),
+  );
+}
+
+const row = (agent: string, session_id: string, page: string, reason?: string): SuggestionRow => ({
+  kind: "new_agent", agent, session_id, page, reason,
+});
+
+test("suggestionKey merges spellings of one name", () => {
+  assert.equal(suggestionKey("scientificFigureAgent"), "scientificfigure");
+  assert.equal(suggestionKey("scientific-figure"), "scientificfigure");
+  assert.equal(suggestionKey("Map Specialist"), "map");
+  assert.equal(suggestionKey("agent"), "agent");
+  // The script must agree, or an old issue's title maps to a different key.
+  for (const n of ["scientificFigureAgent", "Map Specialist", "agent", "bar_chart"])
+    assert.equal(script.suggestionKey(n), suggestionKey(n));
+});
+
+test("the store keeps one row per suggestion and page, and groups them", () =>
+  withStore((store) => {
+    store.addSuggestions([row("barChartAgent", "s1", "p1.png", "bars"), row("bar-chart", "s2", "p3.png", "more bars")]);
+    // The same session, agent and page again replaces rather than adds.
+    store.addSuggestions([row("barChartAgent", "s1", "p1.png", "bars, again")]);
+    store.addSuggestions([
+      { kind: "agent_update", agent: "page.md", session_id: "s1", detail: { lesson_slug: "keep-footnotes", summary: "a" } },
+      { kind: "agent_update", agent: "page.md", session_id: "s2", detail: { lesson_slug: "keep-footnotes", summary: "b" } },
+    ]);
+    const rows = store.listSuggestions();
+    assert.equal(rows.length, 4);
+    const g = groupSuggestions(rows);
+    assert.equal(g.new_agents.length, 1);
+    assert.equal(g.new_agents[0].key, "barchart");
+    assert.equal(g.new_agents[0].count, 2);
+    assert.equal(g.new_agents[0].sessions, 2);
+    assert.deepEqual(g.new_agents[0].reasons.sort(), ["bars, again", "more bars"]);
+    assert.equal(g.agent_updates.length, 1);
+    assert.equal(g.agent_updates[0].count, 2);
+    assert.equal((g.agent_updates[0].latest as { summary: string }).summary, "b");
+  }));
+
+test("the route is 404 without a quality token and 401 without the right one", () =>
+  withStore(async (store) => {
+    store.addSuggestions([row("mapAgent", "s1", "p1.png")]);
+    for (const [cfg, header, status] of [
+      [{}, `Bearer ${TOKEN}`, 404],
+      [{ quality_token: TOKEN }, undefined, 401],
+      [{ quality_token: TOKEN }, "Bearer wrong", 401],
+      [{ quality_token: TOKEN }, `Bearer ${TOKEN}`, 200],
+    ] as const) {
+      const app = express();
+      app.use("/v1/suggestions", suggestionsRouter(store, cfg));
+      const server = app.listen(0);
+      await new Promise((r) => server.once("listening", r));
+      try {
+        const res = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/v1/suggestions`, {
+          headers: header ? { authorization: header } : {},
+        });
+        assert.equal(res.status, status);
+        if (status === 200) {
+          assert.equal(res.headers.get("cache-control"), "no-store");
+          assert.equal((await res.json()).new_agents[0].key, "map");
+        }
+      } finally {
+        server.close();
+      }
+    }
+  }));
+
+test("the script owns only its section of an issue body", () => {
+  const once = script.withSection("Written by a person.", "counts v1");
+  assert.match(once, /^Written by a person\.\n\n<!-- iris-suggestions:start -->\ncounts v1\n/);
+  const twice = script.withSection(once + "\n\nAdded later.", "counts v2");
+  assert.match(twice, /counts v2/);
+  assert.doesNotMatch(twice, /counts v1/);
+  assert.match(twice, /^Written by a person\.[\s\S]*Added later\.$/);
+});
+
+test("an issue's keys come from its list, or from an old title", () => {
+  const listed = { title: "New agent suggestion: Charts", body: "x <!-- iris-suggestion-keys: barchart, linechart -->" };
+  assert.deepEqual(script.issueKeys(listed), ["barchart", "linechart"]);
+  assert.deepEqual(script.issueKeys({ title: "New agent suggestion: scientificFigureAgent", body: "old" }), ["scientificfigure"]);
+});
+
+test("a section records its keys and a reason cannot close it", () => {
+  const groups = groupSuggestions([row("mapAgent", "s1", "p1.png", "a map --> <!-- trick")]).new_agents;
+  const section = script.newAgentSection(["map"], groups);
+  assert.match(section, /<!-- iris-suggestion-keys: map -->/);
+  assert.match(section, /Asked for 1 time,/);
+  assert.equal(section.match(/-->/g)?.length, 1, "only the keys marker closes a comment");
+});
+
+test("the model's grouping reply is checked against the keys it was given", () => {
+  const out = script.parseAssignments(
+    'Here: {"assign":[{"key":"map","issue":12},{"key":"globe","concept":"Maps"},{"key":"invented","concept":"X"},{"key":"bar","issue":"12"}]}',
+    ["map", "globe", "bar"],
+  );
+  assert.deepEqual([...out], [["map", { issue: 12 }], ["globe", { concept: "Maps" }]]);
+  assert.throws(() => script.parseAssignments("no json here", ["map"]), /no JSON/);
+});
+
+test("an update's title matches the one Iris used to file, so old issues are found", () => {
+  assert.equal(script.updateTitle({ agent: "page.md", lesson_slug: "keep-footnotes" }), "Agent update proposal: page.md — keep-footnotes");
+  assert.equal(script.updateTitle({ agent: "page.md", lesson_slug: null }), "Agent update proposal: page.md");
+});

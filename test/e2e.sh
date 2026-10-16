@@ -95,7 +95,6 @@ storage:
   database: $DATA/iris.sqlite
 github:
   token: $GITHUB_TOKEN
-  upstream_repo: https://github.com/example/iris
   api_base_url: http://localhost:$GH_PORT
 providers:
   default: openrouter
@@ -358,8 +357,8 @@ echo "$me" | jq -e '.defaults.max_review_iterations==1' >/dev/null \
   && pass "defaults published" || fail "me" "$me"
 # It is also the capability probe the demo page uses, so its answer must come from the same
 # middleware a real upload runs — which is what the identity assertion above just exercised.
-echo "$me" | jq -e '.upstream_repo=="https://github.com/example/iris"' >/dev/null \
-  && pass "upstream repo published" || fail "me shape" "$me"
+echo "$me" | jq -e 'has("upstream_repo")|not' >/dev/null \
+  && pass "no upstream repo: Iris files no issues" || fail "me shape" "$me"
 # The response shape over the wire, not just in a unit test: `fork_repo` is gone
 # rather than permanently null, since nothing forks.
 echo "$me" | jq -e 'has("fork_repo")|not' >/dev/null \
@@ -922,6 +921,19 @@ echo "$misslog" | jq -e -s 'map(select(.type=="specialist_dispatched")) | length
   && pass "a miss is not logged as a dispatch" \
   || fail "specialist dispatch" "miss logged specialist_dispatched"
 curl -s -X POST -H 'content-type: application/json' -d '{}' "http://localhost:$OR_PORT/__suggest" >/dev/null  # disarm
+# The miss is saved as a suggestion (#539), after run_complete, and served grouped to the
+# workflow that files it. Iris itself makes no GitHub call for it.
+for i in $(seq 1 30); do
+  echo "$(curl -s "${AUTH[@]}" "$BASE/sessions/$MISS/logs")" | jq -e -s 'any(.type=="suggestions_recorded")' >/dev/null && break
+  sleep 0.5
+done
+sugg=$(curl -s -H "Authorization: Bearer $QUALITY_TOKEN" "$BASE/suggestions")
+echo "$sugg" | jq -e --arg sid "$MISS" '.new_agents | any(.key=="chart" and any(.pages[]; .session_id==$sid))' >/dev/null \
+  && pass "the missed specialist is saved and served by /v1/suggestions" \
+  || fail "suggestions" "no chart suggestion for $MISS: $(echo "$sugg" | jq -c '.new_agents | map(.key)')"
+code=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/suggestions")
+[ "$code" = "401" ] && pass "/v1/suggestions refuses a caller without the quality token" \
+  || fail "suggestions" "expected 401 without a token, got $code"
 
 echo "==> 9h. training that dies does not take a delivered document with it"
 # The training a feedback round triggers — classify the correction, propose a prompt
@@ -1461,8 +1473,7 @@ echo "$q" | jq -e '.since != null' >/dev/null && pass "since is set" \
 # the constraint that matters most, because the consumer copies these values into a PUBLIC
 # issue and the documents are user uploads. Checked against the real session id and the real
 # tokens this run used, not placeholders — and both tokens are checked because one deployment
-# now holds one PAT that every session belongs to, so a copy in a public issue is
-# `issues: write` on the upstream repo for whoever reads it.
+# now holds one PAT that every session belongs to, and a public copy is a leaked credential.
 # (`if`, not `grep … && fail`: under `set -e` a grep that finds nothing would fail
 # the AND-list and kill the script, turning "no leak" into a broken run.)
 for secret in "$SID" "$GITHUB_TOKEN" "$API_TOKEN"; do

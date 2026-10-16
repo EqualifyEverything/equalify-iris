@@ -115,13 +115,8 @@ with a comment naming the survivor. Anything short of that is commented and repo
 An issue it leaves open, with no skip label, gets one comment tagging the owners in
 `.github/owners`, asking for the `maintainer` label.
 
-It exists because the dedupe already in the app cannot do this, and was never trying to.
-`src/github/issue.ts` refuses to file an `Agent update proposal:` whose title exactly matches an
-open one, which is the right check to have there: cheap, deterministic, no model. What it cannot see
-is that "procedure steps must be marked up at heading" and "when steps are nested inside a named
-section" are one rule described twice. Iris files these speculatively from content it met once,
-so semantic overlap between them is the normal case rather than the exception, and it
-accumulates faster than anyone reads it.
+It catches what the [agent suggestions](#agent-suggestions) workflow's grouping misses: two
+issues that describe one rule in different words.
 
 **Two sessions, and the second one is not shown the first one's argument.** The whole risk of
 automatic closing is a plausible-but-wrong duplicate call, and a session asked to check its own
@@ -363,6 +358,23 @@ during the 45 minutes the job is working. The verify step catches that afterward
 PR's own target issues against every other open PR, and comments on the PR asking for the two to be
 compared. It warns rather than drafting one of them — which of the pair to keep is a judgement about
 two diffs, not something to decide by timestamp.
+
+## Agent suggestions
+
+`agent-suggestions.yml` runs daily. It reads a deployment's saved suggestions from
+`GET /v1/suggestions` and turns them into issues:
+
+- **New agent suggestions.** Each issue lists the name keys it covers, in a comment in its body. A key
+  no issue covers goes to one model call, which puts it under an existing issue or a new concept. A
+  new concept gets an issue with a drafted agent.
+- **Agent update proposals.** One issue per agent and lesson, with the latest proposal's diff.
+
+Every run rewrites the counts on the issues it touches, open or closed. It owns only the part of a
+body between its two markers, so edit the rest freely.
+
+It uses the same `QUALITY_URL` and `QUALITY_TOKEN` as the weekly quality report, plus
+`AWS_BEDROCK_ROLE_ARN`. A day with no new names makes no model calls. Try it with
+`gh workflow run agent-suggestions.yml -f dry_run=true`, which files nothing.
 
 ## Telling a deployment that main moved
 

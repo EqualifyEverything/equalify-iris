@@ -50,7 +50,6 @@ function cfg(providers: IrisConfig["providers"]): IrisConfig {
     storage: { data_dir: "/tmp/iris-test", agents_dir: "agents", database: ":memory:" },
     github: {
       token: "ghp_test",
-      upstream_repo: "o/r",
       api_base_url: "https://api.github.com",
     },
     providers,

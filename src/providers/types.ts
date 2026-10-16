@@ -74,8 +74,7 @@ export type PipelineStep =
   // Maintenance paths, which a delivered document does not pay for
   | "agent_update" // drafting a proposed change to an agent file
   | "agent_regression" // re-running an agent on a fixture to gate that change
-  | "agent_calibrate" // the calibration harness judging a seeded defect
-  | "contribute"; // drafting a brand-new specialist agent
+  | "agent_calibrate"; // the calibration harness judging a seeded defect
 
 // What a call actually consumed. Named after Anthropic's fields because that is the
 // vocabulary the models themselves report in; other adapters normalize onto it.

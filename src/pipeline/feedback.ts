@@ -7,7 +7,6 @@ import { ACCESSIBILITY_REQUIREMENTS } from "./accessibility.ts";
 import { loadImage, type InputImage, type PipelineContext } from "./context.ts";
 import { flatten } from "./flatten.ts";
 import { knownPages, pageIndex } from "./pageindex.ts";
-import { createAgentUpdateIssue, installHintFor } from "../github/issue.ts";
 import { lessonSlug, recordExample, type CorrectionExample, type LessonKind } from "./memory.ts";
 import type { FixtureCase } from "./regression.ts";
 import type { PipelineStep } from "../providers/index.ts";
@@ -916,13 +915,11 @@ export async function evalAgent(ctx: PipelineContext, agentFile: string, content
 // On a feedback re-run, turn the document-level correction (the prior reviewed
 // body vs. this run's reviewed body) into an improved version of the agent that
 // produced the document — the page agent in the single-pass pipeline. For a
-// library agent the proposal is gated on its regression fixtures and then filed
-// as a GitHub issue (the contribution model uses issues, not close-time PRs),
-// while also being recorded in agent-updates.md; a session-built agent is trained
-// in place so its new-agent contribution carries the fix.
+// library agent the proposal is gated on its regression fixtures, then recorded as a
+// suggestion (#539) and in agent-updates.md; a session-built agent is trained in place.
 //
 // `lesson` is what `learnFromFeedback` recorded for this same correction, when it
-// recorded anything. It is what the filed issue is titled and deduped by (see
+// recorded anything. It is what the workflow's issue is titled and deduped by (see
 // `lessonSlug`), so passing it is what keeps one open issue from swallowing every later
 // proposal — pass it whenever the caller has it.
 export async function proposeAgentUpdatesFromFeedback(
@@ -1057,59 +1054,27 @@ export async function proposeAgentUpdatesFromFeedback(
 
   ctx.log.event("agent_updates_proposed", { agents: [proposal.agent_name], count: 1 });
 
-  // Surface the proposal where maintainers act on it: file a GitHub issue (the
-  // contribution model uses issues, not close-time PRs). This is the path that makes a
-  // user's feedback give back to the shared library. Filed as the deployment's own account
-  // (`github.token`) — the only identity this service has — and a no-op without it, so
-  // local runs still keep the proposal in agent-updates.md.
-  const token = ctx.githubToken;
-  if (token) {
-    // What the issue is titled and therefore deduped by. Prefer the recorded lesson's
-    // instruction: it is the string the memory bank corroborates across sessions, so it
-    // is stable, and the same lesson reported twice reaches the same issue. The summary
-    // is the fallback for a proposal with no recorded lesson (the correction classified
-    // as a one-off but still trained the prompt) — the model re-words it every run, so
-    // it discriminates between lessons without reliably matching itself. Both beat the
-    // bare title, which could only ever match the one issue already open.
-    const slug = lessonSlug(args.lesson?.instruction || proposal.summary);
-    try {
-      const filed = await createAgentUpdateIssue(token, ctx.cfg.github.upstream_repo, ctx.cfg.github.api_base_url, {
-        agentName: proposal.agent_name,
-        agentMarkdown: proposal.content,
-        summary: proposal.summary,
-        diffPreview: proposal.diff_preview,
-        sessionId: ctx.sessionId,
-        lessonSlug: slug || undefined,
-        lesson: args.lesson
-          ? {
-              instruction: args.lesson.instruction,
-              feedback: args.lesson.feedback,
-              count: args.lesson.count,
-            }
-          : undefined,
-      });
-      // `action` distinguishes a new issue from a comment on the one that already tracks
-      // this lesson. Both are successes; the log line said "(duplicate — skipped)" for
-      // the second case, which was the only trace of a lesson that went nowhere.
-      ctx.log.event("agent_update_issue", {
-        agent: proposal.agent_name,
-        action: filed.action,
-        url: filed.url,
+  // Record it for the agent-suggestions workflow, which files or updates the issue
+  // (#539). The title is keyed on the lesson: the recorded lesson's instruction is stable
+  // across sessions, so the same lesson reported twice reaches the same issue. The summary
+  // is the fallback for a proposal with no recorded lesson.
+  const slug = lessonSlug(args.lesson?.instruction || proposal.summary);
+  ctx.recordSuggestions?.([
+    {
+      kind: "agent_update",
+      agent: proposal.agent_name,
+      session_id: ctx.sessionId,
+      detail: {
         lesson_slug: slug || null,
-      });
-    } catch (e) {
-      // Same soft failure and the same likely cause as runContribution's filing
-      // path, so the same diagnosis — an operator debugging a dead update-proposal
-      // path needs it as much as the suggestion one.
-      ctx.log.event("agent_update_issue_failed", {
-        agent: proposal.agent_name,
-        error: (e as Error)?.message ?? String(e),
-        ...installHintFor(e),
-      });
-    }
-  } else {
-    ctx.log.event("agent_update_issue_skipped", { agent: proposal.agent_name, reason: "no github token" });
-  }
+        summary: proposal.summary,
+        diff_preview: proposal.diff_preview,
+        content: proposal.content,
+        lesson: args.lesson
+          ? { instruction: args.lesson.instruction, feedback: args.lesson.feedback, count: args.lesson.count }
+          : null,
+      },
+    },
+  ]);
 
   return [proposal];
 }
