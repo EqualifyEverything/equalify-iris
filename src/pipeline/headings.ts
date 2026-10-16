@@ -1,4 +1,5 @@
 import { JSDOM } from "jsdom";
+import { assertParseable } from "./parse-depth.ts";
 import { SILENT } from "./flatten.ts";
 
 // Two headings at the same level with the same words are ambiguous to anyone
@@ -215,6 +216,7 @@ function openingAfter(el: Element): string {
 export function sameWordedHeadingRuns(body: string): HeadingRun[] {
   let headings: { level: number; text: string; opening: string }[];
   try {
+    assertParseable(body);
     const doc = new JSDOM(`<body>${body}</body>`).window.document;
     headings = [...doc.querySelectorAll(HEADINGS)].map((el) => ({
       level: Number(el.tagName[1]),

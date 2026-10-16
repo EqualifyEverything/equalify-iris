@@ -1,4 +1,5 @@
 import { JSDOM } from "jsdom";
+import { assertParseable } from "./parse-depth.ts";
 
 // Produce a flattened, text-only view of an HTML chunk that approximates what a
 // screen reader announces, in order. The Reader cross-checks this
@@ -227,6 +228,7 @@ function renderMarker(n: number, style: MarkerStyle): string {
 }
 
 export function flatten(html: string): string {
+  assertParseable(html);
   const dom = new JSDOM(`<!DOCTYPE html><body>${html}</body>`);
   const doc = dom.window.document;
   const out: string[] = [];
