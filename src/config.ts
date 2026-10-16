@@ -139,7 +139,7 @@ export interface IrisConfig {
   // Blank or absent means the feature is off.
   tagged_pdf?: { command?: string; timeout_seconds?: number };
   // Optional. The demo page's name and logo (src/branding.ts).
-  branding?: { name?: string; logo_file?: string };
+  branding?: { name?: string; logo_file?: string; logo_alt?: string };
   providers: {
     default: string;
     // Per-agent override. A string is shorthand for a provider name (model then

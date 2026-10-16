@@ -30,18 +30,33 @@ test("a name replaces the title and heading, escaped", () => {
   assert.equal(dollars.match(/<h1>/g)?.length, 1);
 });
 
-test("a logo goes left of the name, as a decorative image", async () => {
+test("a logo goes left of the name, with its alt text", async () => {
   const dir = mkdtempSync(join(tmpdir(), "iris-brand-"));
   const file = join(dir, "logo.png");
   writeFileSync(file, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
-  const brand = loadBrand(cfg({ name: "UIC Equalify Iris", logo_file: file }));
+  const brand = loadBrand(cfg({ name: "Equalify Iris", logo_file: file, logo_alt: 'U"I"C' }));
   assert.equal(brand.logo?.type, "image/png");
   assert.equal(brand.logo?.bytes.length, 4);
+  assert.equal(brand.warning, undefined);
   const out = brandDemo(demoHtml, brand);
-  assert.match(out, /<h1><img class="brand-logo" src="\/brand-logo\?v=[0-9a-f]{12}" alt="">UIC Equalify Iris<\/h1>/);
+  assert.match(out, /<h1><img class="brand-logo" src="\/brand-logo\?v=[0-9a-f]{12}" alt="U&quot;I&quot;C">Equalify Iris<\/h1>/);
   const lint = await runAxe(out);
   assert.equal(lint.error, undefined, `axe-core did not run: ${lint.error}`);
   assert.deepEqual(lint.violations, [], "the branded demo page has axe-core violations");
+});
+
+test("a logo with no alt text is shown, and startup says it has none (#553)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "iris-brand-"));
+  const file = join(dir, "logo.png");
+  writeFileSync(file, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+  const brand = loadBrand(cfg({ logo_file: file, logo_alt: "" }));
+  assert.equal(brand.logo?.alt, "");
+  assert.match(brand.warning ?? "", /logo_alt is not set/);
+  assert.match(brandDemo(demoHtml, brand), /<img class="brand-logo" [^>]*alt="">/);
+  // Alt text with no logo is a mistake too.
+  const altOnly = loadBrand(cfg({ logo_alt: "UIC" }));
+  assert.equal(altOnly.logo, undefined);
+  assert.match(altOnly.warning ?? "", /logo_file is not/);
 });
 
 test("a logo that cannot be used is dropped with a warning", () => {
