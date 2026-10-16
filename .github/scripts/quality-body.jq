@@ -180,6 +180,12 @@
     }[.key] // "No description available for finding key `\(.key)`."
   end) as $detail
 | "**Measured:** `\(.metric)` = \(.value) (threshold \(.threshold))\n\n"
+  # `files` is absent on a deployment older than #509, so the line is skipped there.
+  + (if $tally.files then
+       "The \($tally.documents) documents came from \($tally.files) distinct uploaded files"
+       + (if ($tally.documents_unhashed // 0) > 0 then " (\($tally.documents_unhashed) documents predate file hashing and are not in that count)" else "" end)
+       + ".\n\n"
+     else "" end)
   + $detail
   + "\n\n---\n\n### How this was filed\n\n"
   + "Opened automatically by `.github/workflows/quality-report.yml`, which reads `GET /v1/quality` on \($url) once a week and compares a few rates against thresholds held in that workflow file. No model was involved in writing this issue — it is arithmetic on the numbers below.\n\n"

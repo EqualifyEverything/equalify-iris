@@ -160,6 +160,8 @@ curl -s -H "Authorization: Bearer $IRIS_QUALITY_TOKEN" "$BASE/quality?days=30"
 {
   "window_days": 30,
   "documents": 212,
+  "files": 180,
+  "documents_unhashed": 0,
   "since": "2026-07-14T00:00:00.000Z",
   "mean_rounds": 1.8,
   "unresolved_rate": 0.061,
@@ -205,6 +207,11 @@ curl -s -H "Authorization: Bearer $IRIS_QUALITY_TOKEN" "$BASE/quality?days=30"
   reason given there), and it is the whole reason the tally is stored the way it is: a
   clean run produces no violation rows, so counting "documents that had a problem" would divide by
   the bad documents alone and report every rate near 100%.
+* `files` — how many distinct files those documents came from. Each upload's sha256 is stored, so
+  one file uploaded three times is 3 documents and 1 file. For one file, the hash is the file's own
+  sha256. For several, it is the sha256 of their hex hashes joined by newlines, in upload order.
+* `documents_unhashed` — documents whose session predates the hash, so they are in `documents` but
+  not in `files`.
 * `mean_rounds` — mean **editor** passes per document, against `defaults.max_review_iterations`. The
   loop stops as soon as the Reader finds nothing, so a document that reads clean on the first look
   contributes `0`: low is good, and `0.0` across the window means nothing needed fixing. `null`,

@@ -278,6 +278,14 @@ test("a deployment that records no step gets no breakdown sentence, not three ze
   assert.match(body, /Start with `src\/pipeline\/lint\.ts`/);
 });
 
+test("the body says how many distinct files the documents came from (#509)", { skip }, () => {
+  const body = renderBody("lint-error", { ...TALLY, files: 41, documents_unhashed: 3 });
+  assert.match(body, /The 70 documents came from 41 distinct uploaded files \(3 documents predate file hashing/);
+  assert.ok(!renderBody("lint-error", { ...TALLY, files: 41, documents_unhashed: 0 }).includes("predate"));
+  // A deployment older than the field gets no sentence.
+  assert.ok(!renderBody("lint-error").includes("distinct uploaded files"));
+});
+
 // The state the test above cannot reach, and the one the reference deployment was
 // actually in (#407). Deleting the key is a shape `qualityStats` never emits: it builds
 // the field from the closed vocabulary, so all three entries are ALWAYS present and the

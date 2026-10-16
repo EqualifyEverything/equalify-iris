@@ -1471,11 +1471,17 @@ done
 # rates around it and carries no magnitude: how many headings a gated round would have taken
 # is on that session's run log, deliberately, because a count of a document's own structure is
 # a description of the document.
-allowed='["window_days","documents","since","mean_rounds","unresolved_rate","mean_issues","unread_documents","severity","review_unread_rate","links_dropped_rate","links_unresolved_rate","markup_unbalanced_rate","table_no_body_rate","structural_defect_rate","lint_error_rate","where","documents_linted","editor_truncated_rate","editor_truncated_lost_rate","editor_headings_gated_rate","unfinished_page_rate","id","impact","share","nodes"]'
+allowed='["window_days","documents","files","documents_unhashed","since","mean_rounds","unresolved_rate","mean_issues","unread_documents","severity","review_unread_rate","links_dropped_rate","links_unresolved_rate","markup_unbalanced_rate","table_no_body_rate","structural_defect_rate","lint_error_rate","where","documents_linted","editor_truncated_rate","editor_truncated_lost_rate","editor_headings_gated_rate","unfinished_page_rate","id","impact","share","nodes"]'
 extra=$(echo "$q" | jq -c --argjson allowed "$allowed" '([paths(scalars) | last] | unique) - $allowed')
 [ "$extra" = "[]" ] \
   && pass "the payload's key set is exactly the documented one (no session id, login or document content)" \
   || fail "quality" "unexpected field(s) in the tally: $extra"
+
+# Every upload here went through POST /v1/sessions, so each has a hash, and the tests
+# re-upload the same images, so there are fewer files than documents (#509).
+echo "$q" | jq -e '.documents_unhashed == 0 and .files >= 1 and .files < .documents' >/dev/null \
+  && pass "the documents are $(echo "$q" | jq -r '.files') distinct file(s), all hashed" \
+  || fail "quality" "files=$(echo "$q" | jq -r '.files') unhashed=$(echo "$q" | jq -r '.documents_unhashed') documents=$(echo "$q" | jq -r '.documents')"
 
 # The window is echoed back clamped, so a caller reads what it got rather than what
 # it asked for — the workflow prints this number in a public issue.
