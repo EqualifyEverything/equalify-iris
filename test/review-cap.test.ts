@@ -62,24 +62,16 @@ test("review cap: no ceiling — a deliberately high cap is not silently reduced
   assert.equal(normalizeReviewIterations(50), 50);
 });
 
-test("review cap: the normalized value is what makes the first request survive", () => {
+test("review cap: the normalized value is what makes an upload survive", () => {
   withStore((store) => {
-    // The failure this prevents, spelled out: null straight from YAML reaches the
-    // NOT NULL column, and makeAuthMiddleware answers the throw as a 500 saying the
-    // deployment could not record its own identity. Asserted rather than described, so
-    // a future change that drops the guard in loadConfig fails here instead of on the
-    // first request a deployment gets on `/v1/me` or `/v1/sessions`.
+    // The failure this prevents: null straight from YAML reaches the NOT NULL
+    // `iterations_max` column, and every upload throws.
     assert.throws(
-      () =>
-        store.upsertUser({ github_user_id: 1, github_login: "raw" }, null as unknown as number),
+      () => store.createSession({ session_id: "ses_raw", image_count: 1, iterations_max: null as unknown as number }),
       /NOT NULL/,
       "an unnormalized null must still be rejected by the column — that is the trap",
     );
-
-    const user = store.upsertUser(
-      { github_user_id: 2, github_login: "normalized" },
-      normalizeReviewIterations(null),
-    );
-    assert.equal(user.max_review_iterations, DEFAULT_MAX_REVIEW_ITERATIONS);
+    store.createSession({ session_id: "ses_ok", image_count: 1, iterations_max: normalizeReviewIterations(null) });
+    assert.equal(store.getSession("ses_ok")!.iterations_max, DEFAULT_MAX_REVIEW_ITERATIONS);
   });
 });

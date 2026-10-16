@@ -6,8 +6,7 @@ import {
   apiToken,
   applyTrustProxy,
   bedrockApiWarning,
-  githubToken,
-  identityWarning,
+  accessWarning,
   loadConfig,
   perAgentKeyWarning,
   promptCacheTtlWarning,
@@ -29,12 +28,9 @@ import { brandDemo, loadBrand } from "./branding.ts";
 
 const cfg = loadConfig();
 
-// Not a mistake, but a deployment-wide policy whose every consequence is invisible from
-// outside: this service has ONE GitHub identity, and whether a stranger may spend it
-// depends on a second, unrelated key (see identityWarning). Printed at boot because boot
-// is the only place both keys are read together.
-const idWarning = identityWarning(githubToken(cfg), apiToken(cfg) !== undefined);
-if (idWarning) console.warn(`WARNING: ${idWarning}`);
+// Not a mistake, but a deployment-wide policy whose consequences are invisible from
+// outside (see accessWarning).
+console.warn(`WARNING: ${accessWarning(apiToken(cfg) !== undefined)}`);
 
 // A cache TTL nobody can spell is worth saying here, because boot is the only place it
 // is observable at all — the two TTLs differ in price, not in reported tokens.
@@ -334,9 +330,7 @@ if (brand.logo) {
 // Keep the old /demo path working for any shared links.
 app.get("/demo", (_req, res) => res.redirect(302, "/"));
 
-// Everything else runs as this deployment's GitHub account, and is refused if that
-// account cannot be resolved. If `server.api_token` is set, the caller must also present
-// it — see auth/middleware.ts, which asks those two questions separately.
+// Everything else needs `server.api_token`, when it is set (auth/middleware.ts).
 //
 // `auth` is attached PER ROUTE, on the two mounts below and nowhere else. That, and not its
 // position in this file, is what leaves /v1/health, /v1/stats, /v1/limits and /v1/quality
@@ -346,8 +340,8 @@ app.get("/demo", (_req, res) => res.redirect(302, "/"));
 // Read top to bottom the order looks load-bearing, and for one middleware it is — the rate
 // limiter above is mounted on the whole of `/v1`. So /v1/health being registered above THAT
 // is a real decision (see its own comment) and the four mounts sitting above `auth` is not.
-const auth = makeAuthMiddleware(store, cfg);
-app.use("/v1/me", auth, meRouter());
+const auth = makeAuthMiddleware(cfg);
+app.use("/v1/me", auth, meRouter(cfg));
 app.use("/v1/sessions", auth, sessionsRouter(cfg, store));
 app.use(notFound);
 app.use(errorHandler);

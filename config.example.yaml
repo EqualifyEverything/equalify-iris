@@ -44,14 +44,6 @@ branding:
   name: ${IRIS_BRAND_NAME}
   logo_file: ${IRIS_BRAND_LOGO}
 
-# Iris's one GitHub identity. Every session is owned by it. See docs/github-auth.md.
-github:
-  # REQUIRED. A fine-grained token; it needs no permissions. When it expires, every
-  # request answers 401 until it is replaced.
-  token: ${IRIS_GITHUB_TOKEN}
-  # Only for GitHub Enterprise, e.g. https://github.example.com/api/v3.
-  api_base_url: ${GITHUB_API_BASE_URL}
-
 # Which model serves each agent. docs/models.md says what to pick and what each costs.
 providers:
   default: openrouter

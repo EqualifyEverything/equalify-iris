@@ -16,7 +16,6 @@ import { Store } from "../src/store/db.ts";
 // is what lets a handler treat "claim returned true" as permission to do
 // non-idempotent work.
 
-const USER = 4242;
 
 function withStore(fn: (store: Store) => void): void {
   const dir = mkdtempSync(join(tmpdir(), "iris-claim-"));
@@ -29,7 +28,7 @@ function withStore(fn: (store: Store) => void): void {
 
 // A session parked in `ready_for_review` — the state both endpoints claim from.
 function ready(store: Store, id = "ses_1"): string {
-  store.createSession({ session_id: id, github_user_id: USER, image_count: 1, iterations_max: 3 });
+  store.createSession({ session_id: id, image_count: 1, iterations_max: 3 });
   store.updateSession(id, { status: "ready_for_review" });
   return id;
 }
@@ -78,7 +77,7 @@ test("a losing claim leaves the winner's state untouched", () => {
 test("a claim from the wrong status changes nothing", () => {
   withStore((store) => {
     const id = "ses_running";
-    store.createSession({ session_id: id, github_user_id: USER, image_count: 1, iterations_max: 3 });
+    store.createSession({ session_id: id, image_count: 1, iterations_max: 3 });
     store.updateSession(id, { status: "running", phase: "extraction" });
     assert.equal(store.claimSession(id, "ready_for_review", { status: "queued", phase: "extraction" }), false);
     const s = store.getSession(id)!;

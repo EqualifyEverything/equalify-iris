@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { readFileSync, writeFileSync, mkdtempSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { apiToken, githubToken, loadConfig, type Capability } from "../src/config.ts";
+import { apiToken, loadConfig, type Capability } from "../src/config.ts";
 import { resolveAgentModel } from "../src/providers/index.ts";
 import { modelGeneration, resolveImageLimits } from "../src/providers/imageLimits.ts";
 import { claudeFamily, cacheableSystemPrompt } from "../src/providers/promptCache.ts";
@@ -31,34 +31,27 @@ const EXAMPLE = fileURLToPath(new URL("../config.example.yaml", import.meta.url)
 const AGENTS = ["page", "reader", "copy_editor", "feedback"];
 const CAPABILITIES: Capability[] = ["text", "vision", "structured_output"];
 
-// The two variables the file expands and cannot start without: a model provider and the
-// deployment's one GitHub identity. Set together, because a test about anything else must
-// not fail for a missing credential.
+// The one variable the file expands and cannot start without: a model provider's key.
 function credentials(): void {
   process.env.OPENROUTER_API_KEY = "test-key";
-  process.env.IRIS_GITHUB_TOKEN = "ghp_example_test";
 }
 
-test("the example config an operator copies loads, and needs exactly the two credentials it names", () => {
+test("the example config an operator copies loads, and needs exactly the one credential it names", () => {
   // The unset cases FIRST, and this ordering is load-bearing: `loadConfig` memoizes by
   // resolved path, so a successful load below would be handed back here and the check
   // would pass without validating anything.
   delete process.env.OPENROUTER_API_KEY;
+  // No GitHub token (#540). An old .env that still sets one changes nothing.
   delete process.env.IRIS_GITHUB_TOKEN;
   assert.throws(
     () => loadConfig(EXAMPLE),
-    (e: Error) =>
-      /OPENROUTER_API_KEY/.test(e.message) &&
-      // Both, in one failure. An operator who fixes the first and restarts to find a second
-      // is an operator who restarts a third time; the message lists every unexpanded
-      // variable it found.
-      /IRIS_GITHUB_TOKEN/.test(e.message),
+    (e: Error) => /OPENROUTER_API_KEY/.test(e.message) && !/GITHUB/.test(e.message),
     "an unexpanded credential must fail at startup, by name, rather than reappear mid-run as a 401",
   );
 
-  // And with those two set it loads. No cloud account and no OAuth app: one API key, one
-  // PAT. The bedrock block is present and unreferenced, and must not be validated for
-  // credentials it does not need.
+  // And with that set it loads. No cloud account and no GitHub token: one API key. The
+  // bedrock block is present and unreferenced, and must not be validated for credentials
+  // it does not need.
   credentials();
   const cfg = loadConfig(EXAMPLE);
   assert.equal(cfg.providers.default, "openrouter");
@@ -67,7 +60,6 @@ test("the example config an operator copies loads, and needs exactly the two cre
   // one credential in this file that is optional, and unset it must leave the deployment
   // open rather than unusable — that is what makes the bundled demo page work.
   assert.equal(apiToken(cfg), undefined, "the example config ships gated, so the demo page cannot reach it");
-  assert.equal(githubToken(cfg), "ghp_example_test");
 });
 
 test("every agent the example dispatches resolves to a model, on the provider it names", () => {

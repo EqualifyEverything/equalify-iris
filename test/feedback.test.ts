@@ -134,9 +134,6 @@ function gateCtx(
     sessionId: "ses_test",
     recordSuggestions: opts.recordSuggestions,
     cfg: {
-      github: {
-        api_base_url: "https://api.github.test",
-      },
     },
     paths: {
       agentsDir,

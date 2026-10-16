@@ -18,9 +18,8 @@ Design constraints:
   [Drupal module](https://github.com/oshrizak/equalify-iris-drupal).
 - **Runs on one machine.** A laptop or a self-hosted box is enough, with no cloud account. The model
   provider, database and file store can each be swapped in the config.
-- **One GitHub identity, and no sign-in.** Iris files every session's contributions with one token
-  you set. That's simple, but it means no per-user credit or session isolation:
-  [what that means](#one-github-identity-and-no-sign-in).
+- **No sign-in.** Every session belongs to the deployment, so sessions are not isolated from each
+  other: [what that means](#no-sign-in).
 
 ---
 
@@ -96,7 +95,7 @@ git clone https://github.com/EqualifyEverything/equalify-iris
 cd equalify-iris
 npm install
 
-cp .env.example .env          # a model provider key, and your GitHub token
+cp .env.example .env          # a model provider key
 cp config.example.yaml config.yaml
 
 # load env and run
@@ -136,9 +135,6 @@ Deployment is configured in `config.yaml`. `${ENV_VAR}` references are expanded 
 at startup; changes require a restart. **[`config.example.yaml`](config.example.yaml) documents every
 key inline** — this section is the decisions an operator has to make, not the key list.
 
-- **GitHub — required.** `github.token` is a fine-grained PAT with no permissions; Iris uses it only
-  to name its account, and will not start without it. There is no app to register and no OAuth app:
-  nothing here runs a login flow. See [One GitHub identity](#one-github-identity-and-no-sign-in).
 - **Who may call the API.** `server.api_token` is a shared secret, blank by default. Blank means
   **open** — anyone who can reach the port can convert documents and spend your model budget. Set it
   on a public deployment.
@@ -166,8 +162,8 @@ key inline** — this section is the decisions an operator has to make, not the 
 - **Request limits.** `server.rate_limits` bounds what can be **asked** of the deployment, which is a
   different problem from the run cap — the cheap endpoints never reach the queue and each queries
   SQLite synchronously on the one event loop. These gates **refuse** (429 with `Retry-After`) rather
-  than wait, since nothing has been received yet. Every request counts against its **address**, there
-  being one identity here, so callers behind one NAT share a bucket. `GET /v1/limits` publishes
+  than wait, since nothing has been received yet. Every request counts against its **address**, since
+  there is no sign-in, so callers behind one NAT share a bucket. `GET /v1/limits` publishes
   whatever is in effect; `enabled: false` turns it off where a proxy already does the job.
 - **Behind a reverse proxy.** Set `server.trust_proxy` to the number of proxies in front of Iris (1
   for a single Caddy/nginx). Without it every caller presents as the proxy's address and shares one
@@ -178,41 +174,32 @@ key inline** — this section is the decisions an operator has to make, not the 
   one PDF can return that PDF tagged, with its form filled in. The demo page shows this only when it is
   on. Iris runs without it.
 
-### One GitHub identity, and no sign-in
+### No sign-in
 
-Iris holds **one** GitHub token, server-side, and callers never present a GitHub credential. That
-token only names the deployment's account. Each session's suggestions are saved on the deployment and
-filed upstream by a maintainer workflow ([Contributions](docs/API.md#contributions-automatic)).
+Callers don't sign in, and Iris holds no GitHub credential. Every session belongs to the
+deployment. Suggestions are saved on the deployment and filed upstream by a maintainer workflow
+([Contributions](docs/API.md#contributions-automatic)).
 **Contributing back is the sustainability model, not an implementation detail:** the
 agents in `agents/` get better because sessions run against real documents and real corrections, and a
 deployment that consumed the service without contributing would be taking from a library nobody was
 refilling.
 
-What the single identity costs, all of which Iris warns about at boot:
+What that costs, which Iris warns about at boot:
 
-- **No attribution.** A suggestion says what a session found, not who found it.
-- **No session isolation.** `GET /v1/sessions` lists *the deployment's* sessions, and a session id is
-  all it takes to read that document. Visitors are not walled off from each other, because there is
-  nobody to wall off.
+- **No session isolation.** `GET /v1/sessions` lists every session, so anyone who can call it can
+  read any document.
 - **Limits per address**, since the only credential a caller can present is shared.
 
 **So decide who may call it.** `server.api_token` gates `/v1/me` and `/v1/sessions` behind a shared
-secret you hand out; blank leaves them open. Health, limits, stats and quality stay reachable either
-way — none of them touches a document. Gating also turns off the bundled browser app, which holds no
-credential: that is the trade.
+secret you hand out; blank leaves them open. Gating also turns off the bundled demo page, which holds
+no credential. Nothing about a caller is stored.
 
-**Nothing about a caller is stored.** Callers do not authenticate, so there is nothing to store about
-them. There is no `github_token` column in `data/iris.sqlite` and no token file: a stolen copy of the
-database holds your deployment's own GitHub user ID and login plus session history, not GitHub access.
-Your token lives in your environment, like any other server secret.
-
-Everything an operator needs — making the token, what an expired one breaks (filing, and nothing
-else), the two 401s, and why a `data/iris.sqlite` from an earlier build has to go — is in
-**[docs/github-auth.md](docs/github-auth.md)**.
+The details, including what to do with a database from an earlier build, are in
+**[docs/access.md](docs/access.md)**.
 
 ## API
 
-All endpoints are under `/v1`. **No endpoint takes a GitHub token.** Where `server.api_token` is set,
+All endpoints are under `/v1`. Where `server.api_token` is set,
 `/v1/me` and everything under `/v1/sessions` need `Authorization: Bearer <server.api_token>`; where it
 is blank they need no header at all. Health, limits and stats never do. `/v1/quality` is the exception
 in the other direction: it has its own shared secret and 404s unless you set it.
@@ -224,8 +211,8 @@ in the other direction: it has its own shared secret and 404s unless you set it.
 | `GET  /v1/quality` | Deployment-wide tally of output *quality* (own shared secret, off by default; aggregate only) |
 | `GET  /v1/suggestions` | Saved agent suggestions, grouped, for the filing workflow (quality token, off by default) |
 | `GET  /v1/limits` | What an upload may be — formats, per-image size, page cap (never gated) |
-| `GET  /v1/me` | What this deployment is: its GitHub account and defaults. Also the probe for whether it is gated |
-| `GET  /v1/sessions` | List **the deployment's** sessions — see the note above on isolation |
+| `GET  /v1/me` | This deployment's defaults. Also the probe for whether it is gated |
+| `GET  /v1/sessions` | List every session — see the note above on isolation |
 | `POST /v1/sessions` | Create a session, upload images and/or PDFs (`multipart/form-data`) |
 | `GET  /v1/sessions/{id}` | Poll status |
 | `GET  /v1/sessions/{id}/output` | Fetch the HTML when ready |
@@ -282,7 +269,7 @@ src/
     calibration.ts       # does the fidelity verifier discriminate? (docs/verifier-calibration.md)
   tools/calibrate.ts     # CLI for that measurement; nothing in a run imports it
   util/queue.ts          # bounded FIFO run queue (cross-session concurrency cap)
-  auth/                  # resolves the deployment's one GitHub identity; gate middleware
+  auth/                  # the optional API gate
   github/                # files agent-suggestion issues, identified by title prefix
   store/                 # node:sqlite metadata store + on-disk session layout
   routes/                # /v1 endpoints
@@ -308,7 +295,7 @@ change:
 | which model runs an agent | [docs/models.md](docs/models.md) | **suggested** models. Every model is declared in config, never in the code, so no doc may say Iris "uses" one |
 | the price of a step | [docs/cost.md](docs/cost.md) | prices with the round each came from. Iris costs nothing per token on self-hosted open-weight models; only a suggested config has a price |
 | a workflow in `.github/` | [docs/ci.md](docs/ci.md) | the five workflows, including the bot that reviews your PR |
-| the token, the gate, or what a 401 means | [docs/github-auth.md](docs/github-auth.md) | the operator's side of the one identity |
+| the gate, or what a 401 means | [docs/access.md](docs/access.md) | who may call the API, and an older database |
 | a config key | [`config.example.yaml`](config.example.yaml) | the key list, documented inline. This README states decisions, not keys |
 | one of the five words in [Terms](#terms) | every doc that uses it | each is narrower here than in English and each has an unrelated sense |
 
@@ -337,7 +324,7 @@ credentials.
 | [docs/API.md](docs/API.md) | Every endpoint, with copy-pasteable `curl`. The run log's fields. |
 | [docs/design-notes.md](docs/design-notes.md) | Why the code is the way it is. Read this before changing it. |
 | [docs/models.md](docs/models.md) | Which model to run on which agent, what each was measured at, and how a swap fails quietly. |
-| [docs/github-auth.md](docs/github-auth.md) | The GitHub token: making it, what one identity costs, gating the API, an older database. |
+| [docs/access.md](docs/access.md) | Gating the API, what a shared deployment means, an older database. |
 | [docs/cost.md](docs/cost.md) | What a page costs, measured, and why that number hides more than it says. |
 | [docs/ci.md](docs/ci.md) | The five workflows that run this repo, including the bot that will review your PR. |
 | [docs/verifier-calibration.md](docs/verifier-calibration.md) | How to re-measure whether the page verifier catches damage. |

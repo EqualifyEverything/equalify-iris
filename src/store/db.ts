@@ -13,20 +13,6 @@ export type SessionStatus = "queued" | "running" | "ready_for_review" | "closed"
 // each phase; this only stops the enum from claiming they exist today.
 export type Phase = "extraction" | "assembly" | "review" | "done";
 
-// No `github_token` field, deliberately, and there is now nothing it could hold: this
-// deployment has ONE GitHub credential, it lives in `github.token`, and no caller ever
-// presents one (see auth/middleware.ts). A column per user was a copy of a live
-// credential — an early build wrote one, which made a copy of `data/iris.sqlite`
-// equivalent to GitHub API access as every user who had ever logged in, in exchange for
-// nothing the service read back. `rejectLegacyUsersTable` below refuses such a file
-// rather than adopting it.
-export interface UserRecord {
-  github_user_id: number;
-  github_login: string;
-  max_review_iterations: number;
-  created_at: string;
-}
-
 export type SuggestionKind = "new_agent" | "agent_update";
 
 // One agent suggestion (#539). `reason` is the page agent's own words for why a new
@@ -45,7 +31,6 @@ export interface SuggestionRow {
 
 export interface SessionRecord {
   session_id: string;
-  github_user_id: number;
   status: SessionStatus;
   phase: Phase;
   iterations_completed: number;
@@ -68,7 +53,7 @@ export interface SessionRecord {
 // alongside the immutable identity/creation fields: it is derived from the
 // status transition itself, so no handler needs to (or gets to) set it by hand.
 export type SessionPatch = Partial<
-  Omit<SessionRecord, "session_id" | "github_user_id" | "created_at" | "first_completed_at">
+  Omit<SessionRecord, "session_id" | "created_at" | "first_completed_at">
 >;
 
 // The sort key `GET /v1/sessions` pages on. Both halves are required: session
@@ -808,13 +793,15 @@ export class Store {
     mkdirSync(dirname(path), { recursive: true });
     this.db = new DatabaseSync(path);
     // BEFORE any DDL or PRAGMA below. Refusing to adopt a file and then writing to
-    // it anyway is a contradiction, and the writes are not harmless: the `exec`
-    // block drops `idx_sessions_user`, creates its compound replacement, and
-    // switches the file to WAL. All three land on a database this then declines,
+    // it anyway is a contradiction, and the writes are not harmless: the steps below
+    // drop the old session indexes and a column, create a new index, and switch the
+    // file to WAL. All of that would land on a database this then declines,
     // which breaks the one recovery path the error message implies — rolling back to
     // the previous build to export session history before deleting the file, whose
     // `listSessions` pages on the index that is now gone.
     this.rejectLegacyUsersTable(path);
+    // Also before the schema block: its index no longer names github_user_id.
+    this.dropGitHubIdentity();
     // busy_timeout is 0 on a fresh node:sqlite connection — "fail immediately",
     // not "wait for the lock". WAL still allows only one writer, so without a
     // timeout a second process's UPDATE against a held write lock throws
@@ -827,20 +814,9 @@ export class Store {
     this.db.exec(`
       PRAGMA journal_mode = WAL;
       PRAGMA busy_timeout = 5000;
-      -- No github_token column, and no fork_repo column. The token is never
-      -- persisted (see UserRecord above); fork_repo belonged to an earlier
-      -- fork-and-PR design, which was never built and is not going to be --
-      -- contributions are saved as suggestions and filed by a workflow, and
-      -- nobody is credited: a suggestion names a session, not a person.
-      CREATE TABLE IF NOT EXISTS users (
-        github_user_id INTEGER PRIMARY KEY,
-        github_login TEXT NOT NULL,
-        max_review_iterations INTEGER NOT NULL DEFAULT 3,
-        created_at TEXT NOT NULL
-      );
+      -- No owner column: every session belongs to the deployment (#540).
       CREATE TABLE IF NOT EXISTS sessions (
         session_id TEXT PRIMARY KEY,
-        github_user_id INTEGER NOT NULL,
         status TEXT NOT NULL,
         phase TEXT NOT NULL,
         iterations_completed INTEGER NOT NULL DEFAULT 0,
@@ -853,18 +829,11 @@ export class Store {
         first_completed_at TEXT
       );
       -- Matches the compound keyset order listSessions pages on, exactly. A new
-      -- NAME rather than a redefinition of idx_sessions_user: CREATE INDEX IF NOT
-      -- EXISTS is a no-op when the name already exists, so editing the old
-      -- statement's columns in place would silently leave every already-deployed
-      -- database on the two-column version.
-      CREATE INDEX IF NOT EXISTS idx_sessions_user_page
-        ON sessions(github_user_id, created_at DESC, session_id DESC);
-      -- ...and then drop the two-column index it supersedes. It was a strict
-      -- PREFIX of the above, and no query orders on (github_user_id, created_at)
-      -- alone any more, so keeping it bought nothing and cost an extra b-tree
-      -- write on every session insert. Unconditional and idempotent: this is the
-      -- migration step for databases created before the compound cursor.
-      DROP INDEX IF EXISTS idx_sessions_user;
+      -- NAME, because CREATE INDEX IF NOT EXISTS is a no-op when the name already
+      -- exists, so editing an old statement's columns would leave every deployed
+      -- database on the old index. dropGitHubIdentity drops the old ones.
+      CREATE INDEX IF NOT EXISTS idx_sessions_page
+        ON sessions(created_at DESC, session_id DESC);
       -- What each delivered document cost us in quality terms, one row per signal.
       -- See recordRunSignals for what a row means and qualityStats for
       -- what is counted over them.
@@ -1004,48 +973,16 @@ export class Store {
   }
 
   /**
-   * Refuse to open a database whose `users` table predates the removal of
-   * `github_token` / `fork_repo`.
+   * Refuse to open a database whose `users` table still has `github_token` or `fork_repo`,
+   * from a build that stored a GitHub token per user.
    *
-   * There is deliberately **no migration**: the only thing in here worth carrying
-   * forward is session history, and nothing else in the file is a credential Iris
-   * still uses — so a pre-existing database is not a deployment to be upgraded, it is
-   * a leftover, and the honest response is to say so rather than to quietly adopt it.
+   * Not migrated, because the file holds plaintext tokens. `dropGitHubIdentity` would drop
+   * the table, but a dropped table's pages stay in the file, so a copy of it would still be
+   * GitHub access. Deleting the file is the operator's call.
    *
-   * A check is still needed, because `CREATE TABLE IF NOT EXISTS` in the constructor
-   * is a no-op when the table already exists. Without this, a stray `data/` directory (a
-   * development leftover, a restored backup, a volume mounted from an older image)
-   * keeps the old table — `github_token TEXT NOT NULL` — while `upsertUser` no longer
-   * supplies that column, and the two symptoms both point away from the cause:
-   *
-   *   * The first request to `/v1/me` or `/v1/sessions` after every boot throws
-   *     `NOT NULL constraint failed: users.github_token` where the auth middleware
-   *     records this deployment's identity, so every request to either 500s until the
-   *     file is dealt with — the deployment cannot provision the one row it owns. The
-   *     four ungated routes keep answering, so a load balancer's probe and the public
-   *     tally look healthy while nothing can convert. The middleware reports that as a server
-   *     fault with the driver's message in the log rather than as GitHub refusing the
-   *     token (auth/middleware.ts keeps the write outside the GitHub try for exactly
-   *     this reason), which is what leaves "the store cannot be written" as the
-   *     visible symptom instead of a 401 pointing at a credential that is fine.
-   *   * The plaintext tokens in that file stay there, now never refreshed and never
-   *     cleared, while `getUser`'s `SELECT *` still returns them — so
-   *     `req.user.github_token` exists at runtime although `UserRecord` says it
-   *     cannot. The claim that a stolen copy of `data/iris.sqlite` is not GitHub
-   *     access would be false for exactly that file.
-   *
-   * Failing at startup is what makes "starting from scratch" a checked precondition
-   * instead of an assumption. It also keeps the fix in the operator's hands: deleting
-   * the file is a decision about live credentials, and a silent rebuild-and-VACUUM
-   * would be this service erasing data nobody asked it to touch.
-   *
-   * Which is why this runs FIRST, before the schema block and before `journal_mode`.
-   * "We will not adopt this file" and "we already modified this file" cannot both be
-   * true, and the modifications are the kind an operator would need undone: the DDL
-   * drops the index the older build's `listSessions` pages on, so a rollback to that
-   * build in order to export session history before deleting the file would meet a
-   * schema its queries no longer match. `PRAGMA table_info` on a table that does not
-   * exist returns no rows, so a fresh or current database falls straight through.
+   * Runs FIRST, before any DDL or PRAGMA, so a file this declines is not also modified.
+   * `PRAGMA table_info` on a missing table returns no rows, so a fresh or current database
+   * falls straight through.
    */
   private rejectLegacyUsersTable(path: string): void {
     const cols = this.db.prepare(`PRAGMA table_info(users)`).all() as { name: string }[];
@@ -1055,51 +992,44 @@ export class Store {
     throw new Error(
       `${path} was created by an older version of Iris: its users table still has ` +
         `${legacy.join(" and ")}. There is no migration — GitHub tokens are no longer stored at ` +
-        `all, and nobody logs in: this deployment has one identity, the token in github.token. ` +
-        `Delete the database (and its -wal/-shm files) and restart; Iris recreates its own row ` +
-        `on the first request, and the only thing lost is session history. Note that the old ` +
+        `all, and nobody logs in. ` +
+        `Delete the database (and its -wal/-shm files) and restart. The only thing lost is ` +
+        `session history. Note that the old ` +
         `file still contains plaintext GitHub tokens for every user who logged in to the older ` +
         `build, so delete it rather than archiving it.`,
     );
   }
 
-  // --- users ---
-
-  // On first auth a user account is provisioned with the deployment's default
-  // max_review_iterations. Existing users keep their stored default; the
-  // login is the only field an existing row refreshes, since it is the only one that
-  // can change upstream and the token is not stored at all (see UserRecord).
-  upsertUser(
-    u: { github_user_id: number; github_login: string },
-    defaultMaxIter = 3,
-  ): UserRecord {
-    const existing = this.getUser(u.github_user_id);
-    if (existing) {
-      // Only the login can change (GitHub renames); the numeric id is stable and
-      // is what everything else keys on.
-      this.db
-        .prepare(`UPDATE users SET github_login = ? WHERE github_user_id = ?`)
-        .run(u.github_login, u.github_user_id);
-      return this.getUser(u.github_user_id)!;
+  /**
+   * Sessions used to belong to the GitHub account behind `github.token` (#459). They now
+   * belong to the deployment (#540), so the owner column and the `users` table go. Every
+   * session is kept. Idempotent: a database without the column falls straight through.
+   *
+   * The indexes go first, because SQLite will not drop a column an index names.
+   */
+  private dropGitHubIdentity(): void {
+    const cols = this.db.prepare(`PRAGMA table_info(sessions)`).all() as { name: string }[];
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      if (cols.some((c) => c.name === "github_user_id")) {
+        this.db.exec(`
+          DROP INDEX IF EXISTS idx_sessions_user;
+          DROP INDEX IF EXISTS idx_sessions_user_page;
+          ALTER TABLE sessions DROP COLUMN github_user_id;
+        `);
+      }
+      this.db.exec(`DROP TABLE IF EXISTS users`);
+      this.db.exec("COMMIT");
+    } catch (e) {
+      this.db.exec("ROLLBACK");
+      throw e;
     }
-    this.db
-      .prepare(
-        `INSERT INTO users (github_user_id, github_login, max_review_iterations, created_at)
-         VALUES (?, ?, ?, ?)`,
-      )
-      .run(u.github_user_id, u.github_login, defaultMaxIter, new Date().toISOString());
-    return this.getUser(u.github_user_id)!;
-  }
-
-  getUser(id: number): UserRecord | undefined {
-    return this.db.prepare(`SELECT * FROM users WHERE github_user_id = ?`).get(id) as UserRecord | undefined;
   }
 
   // --- sessions ---
 
   createSession(s: {
     session_id: string;
-    github_user_id: number;
     image_count: number;
     iterations_max: number;
   }): SessionRecord {
@@ -1107,10 +1037,10 @@ export class Store {
     this.db
       .prepare(
         `INSERT INTO sessions
-         (session_id, github_user_id, status, phase, iterations_completed, iterations_max, image_count, error, created_at, updated_at)
-         VALUES (?, ?, 'queued', 'extraction', 0, ?, ?, NULL, ?, ?)`,
+         (session_id, status, phase, iterations_completed, iterations_max, image_count, error, created_at, updated_at)
+         VALUES (?, 'queued', 'extraction', 0, ?, ?, NULL, ?, ?)`,
       )
-      .run(s.session_id, s.github_user_id, s.iterations_max, s.image_count, now, now);
+      .run(s.session_id, s.iterations_max, s.image_count, now, now);
     return this.getSession(s.session_id)!;
   }
 
@@ -1194,17 +1124,13 @@ export class Store {
   // rather than the equivalent `created_at < ? OR (created_at = ? AND ...)`
   // expansion. Only the row-value form is visible to SQLite's planner as an
   // index bound: it seeks
-  // (`SEARCH ... USING INDEX ... (u=? AND (created_at,session_id)<(?,?))`)
-  // where the OR-expansion degrades to scanning every one of the user's rows
-  // (`SEARCH ... (u=?)`). Not a COVERING index seek — this is `SELECT *`, so the
+  // (`SEARCH ... USING INDEX ... ((created_at,session_id)<(?,?))`)
+  // where the OR-expansion degrades to scanning every row. Not a COVERING index seek — this is `SELECT *`, so the
   // row has to be fetched from the table either way; the index earns its keep by
   // bounding which rows are visited, not by answering the query alone.
-  listSessions(
-    userId: number,
-    opts: { status?: string; limit: number; cursor?: SessionCursor },
-  ): SessionRecord[] {
-    const params: unknown[] = [userId];
-    let where = `github_user_id = ?`;
+  listSessions(opts: { status?: string; limit: number; cursor?: SessionCursor }): SessionRecord[] {
+    const params: unknown[] = [];
+    let where = `1`;
     if (opts.status) {
       where += ` AND status = ?`;
       params.push(opts.status);

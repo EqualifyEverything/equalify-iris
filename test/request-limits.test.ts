@@ -25,7 +25,6 @@ import {
   uploadGate,
   uploadRateLimit,
 } from "../src/util/requestLimits.ts";
-import type { AuthedRequest } from "../src/auth/middleware.ts";
 import { limitsRouter } from "../src/routes/limits.ts";
 import { sessionsRouter } from "../src/routes/sessions.ts";
 import { Store } from "../src/store/db.ts";
@@ -44,7 +43,7 @@ import { join } from "node:path";
 //     unset, `X-Forwarded-For` is a claim, and a limiter that believed it would bound
 //     nothing while still answering 200 to everything.
 //   * Every request counts against its ADDRESS, and nothing a caller sends can change that.
-//     There is one identity now, so the only presentable credential is `server.api_token`,
+//     There is no sign-in, so the only presentable credential is `server.api_token`,
 //     which is shared: keying on it would put every visitor in one bucket, and keying on a
 //     bearer as PRESENTED would hand a caller a fresh budget per random string. What that
 //     costs is real and is the reason the defaults are generous — a campus NAT is one
@@ -65,10 +64,6 @@ function cfg(rate_limits?: Partial<RateLimitConfig>): IrisConfig {
   return {
     server: { port: 3000, base_url: "http://localhost:3000", rate_limits },
     storage: { data_dir: "/tmp/iris-test", agents_dir: "agents", database: ":memory:" },
-    github: {
-      token: "ghp_test",
-      api_base_url: "https://api.github.com",
-    },
     providers: { default: "openrouter", openrouter: { api_key: "k", default_model: "anthropic/claude-sonnet-4.6" } },
     defaults: { max_review_iterations: 3, extraction_concurrency: 5, max_concurrent_runs: 2, recheck_sample_size: 1 },
   };
@@ -143,7 +138,7 @@ test("no bearer buys a fresh bucket: the budget is the address's", async () => {
     assert.equal(await srv.get().then((r) => r.status), 429);
 
     // Rotating the bearer is the cheapest attack available against per-credential keying,
-    // and under one identity there is no credential that could be keyed on anyway: the
+    // and with no sign-in there is no credential that could be keyed on anyway: the
     // gate token is shared by everyone who has it, so a caller presenting it is not a
     // distinguishable client. Every one of these counts against the spent address.
     for (const token of ["s3cret", "made-up-1", "made-up-2", ""]) {
@@ -162,10 +157,8 @@ test("the upload budget is per address too, and says what it is", async () => {
   const srv = await serve(uploadRateLimit(cfg({ upload_per_minute: 1 })));
   try {
     assert.equal(await srv.post().then((r) => r.status), 200);
-    // This limiter sits BEHIND the auth middleware, so `req.user` is resolved by the time
-    // it runs — and it is the deployment's own account for every caller, which is why it
-    // keys on the address like the others. Keying on `req.user` here would look correct in
-    // review and put the whole internet in one bucket of `upload_per_minute`.
+    // Keyed on the address like the others. The token is shared, so keying on it would put
+    // the whole internet in one bucket of `upload_per_minute`.
     const over = await srv.post(bearer("s3cret"));
     assert.equal(over.status, 429);
     const { message } = ((await over.json()) as { error: { message: string } }).error;
@@ -484,10 +477,6 @@ async function serveUploadRoute() {
   const config = cfg();
   config.storage = { data_dir: dir, agents_dir: "agents", database: join(dir, "iris.sqlite") };
   const app = express();
-  app.use((req, _res, next) => {
-    (req as AuthedRequest).user = { github_user_id: 1, github_login: "tester", max_review_iterations: 1 } as AuthedRequest["user"];
-    next();
-  });
   app.use("/v1/sessions", sessionsRouter(config, new Store(config.storage.database)));
   const server = app.listen(0);
   await new Promise((r) => server.once("listening", r));

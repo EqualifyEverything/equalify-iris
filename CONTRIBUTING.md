@@ -172,6 +172,6 @@ Your PR gets a review from Claude in CI before a maintainer reads it
 ## Architecture (orientation)
 
 `src/pipeline` (extraction → assembly → review), `src/providers` (LLM provider abstraction),
-`src/routes` (the `/v1` API), `src/auth` (the deployment's one GitHub identity, and the API gate),
+`src/routes` (the `/v1` API), `src/auth` (the optional API gate),
 `agents/` (the agent prompt files).
 See [README.md](README.md) and [docs/API.md](docs/API.md).
