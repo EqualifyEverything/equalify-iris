@@ -20,6 +20,12 @@ test("plain nesting is counted exactly, and ordinary markup does not look deep",
   // Markup inside comments and raw-text elements is not markup.
   assert.equal(sourceDepth(`<!-- ${"<div>".repeat(100)} -->`), 0);
   assert.equal(sourceDepth(`<script>${"<div>".repeat(100)}</script><style>${"<b>".repeat(9)}</style>`), 0);
+  // The parser's other recoveries do not pile up either (review of #549).
+  assert.equal(sourceDepth(`<ul>${"<li><em>a</li>".repeat(5000)}</ul>`), 2);
+  assert.equal(sourceDepth(`<table><tr>${"<td><b>a</td>".repeat(5000)}</table>`), 2);
+  assert.equal(sourceDepth(`<div>${"<p><span>a</p>".repeat(5000)}</div>`), 2);
+  assert.equal(sourceDepth("<a href=#>x".repeat(5000)), 1);
+  assert.equal(sourceDepth(`<svg>${"<path/>".repeat(5000)}</svg>`), 1);
   // Tag names are case-insensitive, so `</DIV>` closes `<div>`.
   assert.equal(sourceDepth("<DIV>x</div>".repeat(50)), 1);
 });

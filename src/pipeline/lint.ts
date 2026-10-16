@@ -145,8 +145,16 @@ export function trimStackPaths(stack: string): string {
   );
 }
 
-function failure(where: "parse" | "inject" | "run", message: string, e: unknown): LintResult {
-  const err = e instanceof Error ? e : undefined;
+export function failure(where: "parse" | "inject" | "run", message: string, e: unknown): LintResult {
+  // Read `name` and `stack` by shape, not `instanceof Error`: a stack overflow inside axe can
+  // throw a RangeError from the jsdom window's realm, which is not this realm's Error.
+  const err =
+    typeof e === "object" && e !== null
+      ? {
+          name: typeof (e as Error).name === "string" ? (e as Error).name : undefined,
+          stack: typeof (e as Error).stack === "string" ? (e as Error).stack : undefined,
+        }
+      : undefined;
   const raw = err?.stack?.split("\n").slice(0, STACK_FRAMES + 1).join("\n");
   const stack = raw === undefined ? undefined : trimStackPaths(raw);
   return {

@@ -143,7 +143,7 @@ test("every other place that states the Node version agrees with that floor", ()
   ];
   // "Node 24+" IS the floor claim, so here the numbers have to be equal, not merely clear it.
   const exactly: Member[] = [
-    at("README.md's install requirement", "README.md", /Requires \*\*Node\.js (\d+)\+\*\*/),
+    at("README.md's install requirement", "README.md", /Requires \*\*Node\.js (\d+)(?:\.\d+)?\+\*\*/),
     at("CONTRIBUTING.md's install requirement", "CONTRIBUTING.md", /Requires \*\*Node (\d+)\+\*\*/),
   ];
 

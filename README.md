@@ -82,7 +82,7 @@ which it means.
 
 ## Quick start
 
-Requires **Node.js 24+** (the service runs TypeScript directly via Node's built-in type stripping and
+Requires **Node.js 24.15+** (the service runs TypeScript directly via Node's built-in type stripping and
 uses the built-in `node:sqlite`), and a **git** checkout of the agent library (this repo's `agents/`
 directory works). For **PDF uploads**, install **poppler-utils** (`pdftoppm`/`pdfinfo`, plus
 `pdftohtml` to carry the PDF's links into the output) — `brew install poppler` on macOS,

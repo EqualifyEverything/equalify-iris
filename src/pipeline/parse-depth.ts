@@ -14,7 +14,8 @@
 // page rather than dropping it.
 //
 // The count is an estimate, and it leans low on purpose. An end tag closes back to its matching
-// open element, which models the parser's most common recovery. Void elements, and elements whose
+// open element, which models the parser's most common recovery. `</li>`, `</td>` and the like
+// also close what was left open inside them, and a new `<a>` closes an open one. Void elements, and elements whose
 // end tag may be left out (`<p>`, `<li>`, `<td>` and the like), are not counted, because a table
 // written `<td>a<td>b` is ordinary output and must not look deep. Each of those needs a counted
 // element to nest inside, so a page built to beat the count can reach about four times the limit.
@@ -34,25 +35,49 @@ const UNCOUNTED = new Set([
 const TOKEN =
   /<!--[\s\S]*?(?:-->|$)|<(script|style|textarea|title|xmp|iframe|noembed|noframes)\b[\s\S]*?(?:<\/\1\s*>|$)|<(\/?)([a-zA-Z][^\s/>]*)[^>]*>/gi;
 
+// Elements in UNCOUNTED whose end tag still closes what was opened inside them: `</li>`
+// closes an `<em>` left open in the item. `<p>` and the table parts do the same.
+const CLOSES_CONTENTS = new Set(["p", "li", "dt", "dd", "td", "th", "tr", "thead", "tbody", "tfoot", "caption", "option", "optgroup"]);
+
 // The estimated nesting depth of `html`. Stops counting once past `limit`.
 export function sourceDepth(html: string, limit = Infinity): number {
   const stack: string[] = [];
   const open = new Map<string, number>();
+  // For each CLOSES_CONTENTS element still open, the stack height when it opened.
+  const marks = new Map<string, number[]>();
+  const closeTo = (height: number) => {
+    while (stack.length > height) {
+      const top = stack.pop()!;
+      open.set(top, open.get(top)! - 1);
+    }
+  };
   let max = 0;
   for (const m of html.matchAll(TOKEN)) {
     const name = m[3]?.toLowerCase();
-    if (!name || UNCOUNTED.has(name)) continue;
-    if (m[2] !== "/") {
+    if (!name) continue;
+    const end = m[2] === "/";
+    if (CLOSES_CONTENTS.has(name)) {
+      const heights = marks.get(name) ?? [];
+      // A mark above the current stack belongs to an element its parent already closed.
+      while (heights.length && heights.at(-1)! > stack.length) heights.pop();
+      if (!end) heights.push(stack.length);
+      else if (heights.length) closeTo(heights.pop()!);
+      marks.set(name, heights);
+      continue;
+    }
+    // `<x/>` is not counted. It is self-closing in SVG and MathML, and in HTML treating it so
+    // can only count low.
+    if (UNCOUNTED.has(name) || (!end && m[0].endsWith("/>"))) continue;
+    if (!end) {
+      // A new `<a>` closes the one still open, so `<a>x<a>y` is not nested.
+      if (name === "a" && open.get("a")) closeTo(stack.lastIndexOf("a"));
       stack.push(name);
       open.set(name, (open.get(name) ?? 0) + 1);
       if (stack.length > max) max = stack.length;
       if (max > limit) return max;
     } else if (open.get(name)) {
       // Close back to the matching element; a stray end tag closes nothing.
-      for (let top = stack.pop(); ; top = stack.pop()) {
-        open.set(top!, open.get(top!)! - 1);
-        if (top === name) break;
-      }
+      closeTo(stack.lastIndexOf(name));
     }
   }
   return max;
