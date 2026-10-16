@@ -48,7 +48,8 @@ function escapeHtml(s: string): string {
 export function brandDemo(html: string, brand: Brand): string {
   const name = escapeHtml(brand.name);
   const logo = brand.logo ? `<img class="brand-logo" src="/brand-logo?v=${brand.logo.hash}" alt="">` : "";
+  // Functions, not strings: a string replacement treats `$'` and `$&` in the name as patterns.
   return html
-    .replace(`<title>${DEFAULT_NAME}</title>`, `<title>${name}</title>`)
-    .replace(`<h1>${DEFAULT_NAME}</h1>`, `<h1>${logo}${name}</h1>`);
+    .replace(`<title>${DEFAULT_NAME}</title>`, () => `<title>${name}</title>`)
+    .replace(`<h1>${DEFAULT_NAME}</h1>`, () => `<h1>${logo}${name}</h1>`);
 }

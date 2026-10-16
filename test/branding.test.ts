@@ -24,6 +24,10 @@ test("a name replaces the title and heading, escaped", () => {
   assert.match(out, /<title>UIC &lt;Equalify&gt; Iris<\/title>/);
   assert.match(out, /<h1>UIC &lt;Equalify&gt; Iris<\/h1>/);
   assert.doesNotMatch(out, /<h1>Equalify Iris - Uploader<\/h1>/);
+  // `$'` is a replacement pattern in a string; the name must arrive as text.
+  const dollars = brandDemo(demoHtml, loadBrand(cfg({ name: "A $' $& B" })));
+  assert.match(dollars, /<h1>A \$' \$&amp; B<\/h1>/);
+  assert.equal(dollars.match(/<h1>/g)?.length, 1);
 });
 
 test("a logo goes left of the name, as a decorative image", async () => {
