@@ -206,6 +206,7 @@ export const SPECIALIST_CONTRACT = [
   "  the page image, with this file as the system prompt and Iris's accessibility requirements after it.",
   '- The agent must reply with only JSON: {"no_content": false, "html": "<accessible HTML fragment>"}, or',
   '  {"no_content": true} when the page has none of its content. The fragment has no HTML comments.',
+  '  A "log" field beside "html" is optional and is kept in the run log.',
   "- The fragment replaces the page agent's own rendering of that content. It holds only this content,",
   "  not the rest of the page.",
   "- The \"## Required capability\" section must list vision.",
