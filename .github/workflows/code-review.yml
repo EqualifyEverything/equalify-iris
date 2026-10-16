@@ -748,7 +748,7 @@ jobs:
             echo
             echo "Files changed by less than ${MIN_CHANGED_PCT}% of their lines are omitted here —"
             echo "their hunks are in the diff above, and the reviewer can Read them on demand."
-            echo "High-risk paths (auth, github, providers, pipeline, session routes, config)"
+            echo "High-risk paths (auth, providers, pipeline, session routes, config)"
             echo "are always included in full, however small the change."
           } >> "$OUT"
 
