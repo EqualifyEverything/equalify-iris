@@ -6,7 +6,6 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSy
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { IrisConfig } from "../src/config.ts";
-import type { AuthedRequest } from "../src/auth/middleware.ts";
 import { sessionsRouter } from "../src/routes/sessions.ts";
 import { Store } from "../src/store/db.ts";
 import { Paths } from "../src/store/paths.ts";
@@ -26,16 +25,11 @@ import type { FixtureCase } from "../src/pipeline/regression.ts";
 // back out of final.json — and calling the helper with a pre-filtered list would assert
 // nothing about whether anyone filters it.
 
-const USER = 4242;
 
 function cfg(dir: string): IrisConfig {
   return {
     server: { port: 3000, base_url: "http://localhost:3000" },
     storage: { data_dir: dir, agents_dir: "agents", database: join(dir, "iris.sqlite") },
-    github: {
-      token: "ghp_test",
-      api_base_url: "https://api.github.com",
-    },
     providers: { default: "openrouter", openrouter: { api_key: "k", default_model: "anthropic/claude-sonnet-4.6" } },
     defaults: { max_review_iterations: 1, extraction_concurrency: 2, max_concurrent_runs: 1, recheck_sample_size: 1 },
   };
@@ -65,7 +59,7 @@ async function closeWith(
   const store = new Store(config.storage.database);
   const paths = new Paths(config);
   const id = "ses_close_1";
-  store.createSession({ session_id: id, github_user_id: USER, image_count: pageCount, iterations_max: 1 });
+  store.createSession({ session_id: id, image_count: pageCount, iterations_max: 1 });
   store.updateSession(id, { status: "ready_for_review" });
   paths.initSession(id);
   // Inputs are stored "<0001>__<original-name>" (orchestrator.enumerateInputs), and
@@ -89,14 +83,6 @@ async function closeWith(
   );
 
   const app = express();
-  app.use((req, _res, next) => {
-    (req as AuthedRequest).user = {
-      github_user_id: USER,
-      github_login: "tester",
-      max_review_iterations: 1,
-    } as AuthedRequest["user"];
-    next();
-  });
   app.use("/v1/sessions", sessionsRouter(config, store));
   const server = app.listen(0);
   await new Promise((r) => server.once("listening", r));

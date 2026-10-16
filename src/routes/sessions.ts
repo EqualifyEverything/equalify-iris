@@ -9,7 +9,6 @@ import type { Store, SessionRecord } from "../store/db.ts";
 import { encodeCursor, pageSessions, parseCursor } from "../store/db.ts";
 import { Paths } from "../store/paths.ts";
 import { runPipeline } from "../pipeline/orchestrator.ts";
-import type { AuthedRequest } from "../auth/middleware.ts";
 import { sendError } from "./errors.ts";
 import { summarizeRun } from "../diagnostics.ts";
 import {
@@ -125,26 +124,6 @@ function sessionSummary(s: SessionRecord) {
   };
 }
 
-// Owned-by-this-deployment lookup. Returns undefined (caller sends 404) when the session is
-// missing or belongs to a different account.
-//
-// It is NOT a guard between callers any more, and reading it as one is the mistake: there is
-// one identity, no caller presents a credential, and every session this deployment created
-// belongs to it — so anyone holding a session id reaches that session, deliberately (see the
-// reachability note on `GET /v1/sessions` below). The id-mismatch branch has one live cause, an
-// operator repointing `github.token` at a different GitHub account: the old account's rows
-// stay in the database and stop being reachable, and pointing it back restores them. Pinned in
-// test/one-identity.test.ts and documented in docs/github-auth.md, because from outside it
-// looks like the sessions were destroyed.
-//
-// Every per-session route funnels through here, so this is the single place that decision is
-// made — do not re-derive it at a call site.
-function ownedSession(store: Store, id: string, userId: number): SessionRecord | undefined {
-  const s = store.getSession(id);
-  if (!s || s.github_user_id !== userId) return undefined;
-  return s;
-}
-
 // Set `key` as the newest entry, and drop the oldest past `max`. A Map keeps insertion order.
 export function remember<K, V>(map: Map<K, V>, key: K, value: V, max: number): void {
   map.delete(key);
@@ -258,19 +237,17 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
 
   // GET /v1/sessions — list THIS DEPLOYMENT's sessions, newest first.
   //
-  // Not one caller's: there is one identity, so every session belongs to it and this lists
-  // all of them. That is a real narrowing of what this route used to promise, and it is the
-  // cost the one-identity design pays — a visitor can page through the ids of documents other
-  // visitors uploaded. What is NOT weakened is a session's own reachability: `ses_` + a ULID
-  // is 80 random bits, so nothing is guessable, and a deployment that must not leak the list
-  // sets `server.api_token` so strangers cannot reach this route at all.
+  // Not one caller's: every session belongs to the deployment, so this lists all of them, and
+  // a visitor can page through the ids of documents other visitors uploaded. A single id is
+  // not guessable (`ses_` + a ULID is 80 random bits). A deployment that must not leak the
+  // list sets `server.api_token` so strangers cannot reach this route at all.
   //
   // Paged by keyset on (created_at, session_id), not by created_at alone: that is not unique
   // — a burst of uploads shares a millisecond — and paging on it drops and repeats rows at
   // tie boundaries (see store.listSessions). The cursor is therefore compound, and an
   // unparseable one is a 400 rather than being compared as a string, which used to silently
   // hand back page one forever.
-  r.get("/", (req: AuthedRequest, res) => {
+  r.get("/", (req, res) => {
     // One rule for every unusable value: fall back to the default. Written as
     // `Math.max(parseInt(x) || 20, 1)` it was two rules — `?limit=0` is falsy so
     // it became 20, while `?limit=-1` clamped to 1 — so two equally invalid
@@ -303,7 +280,7 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
       );
       return;
     }
-    const rows = store.listSessions(req.user!.github_user_id, {
+    const rows = store.listSessions({
       limit: limit + 1,
       status,
       cursor: cursor ?? undefined,
@@ -326,7 +303,7 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
   // for the request it was going to refuse. So the size the caller declares is checked
   // first (free), then how many bytes of upload are already arriving, then the caller's
   // upload budget for the minute — and only then is a byte of this body read.
-  r.post("/", requestSizeGate(), inFlightUploads, uploadBudget, uploadImages, async (req: AuthedRequest, res) => {
+  r.post("/", requestSizeGate(), inFlightUploads, uploadBudget, uploadImages, async (req, res) => {
     const files = Array.isArray(req.files) ? req.files : [];
     if (files.length === 0) {
       sendError(res, 400, "invalid_request", "At least one file part named 'images' is required (image or PDF)");
@@ -365,8 +342,7 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
       }
     }
 
-    // The review cap is the caller's account default (seeded from the
-    // deployment's `defaults.max_review_iterations`). A per-request `config`
+    // The review cap is the deployment's `defaults.max_review_iterations`. A per-request `config`
     // JSON part used to override it; it was removed because it asked the caller
     // for a number they are not positioned to choose — how many rounds a
     // document needs is a property of the document, discovered by the loop, and
@@ -376,7 +352,7 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
     // fix ever applied) and negatives (review skipped outright). A `config` part
     // on the request is now ignored rather than rejected, so an older client
     // still sending one keeps working, at the deployment's cap.
-    const maxIter = req.user!.max_review_iterations;
+    const maxIter = cfg.defaults.max_review_iterations;
 
     // Expand uploads into ordered page images (PDF -> one PNG per page), each
     // carrying the link annotations on that page — the one part of a PDF that
@@ -499,7 +475,6 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
 
     const record = store.createSession({
       session_id: sessionId,
-      github_user_id: req.user!.github_user_id,
       image_count: pages.length,
       iterations_max: maxIter,
     });
@@ -523,8 +498,8 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
   });
 
   // GET /v1/sessions/{id} — status.
-  r.get("/:id", (req: AuthedRequest, res) => {
-    const s = ownedSession(store, req.params.id, req.user!.github_user_id);
+  r.get("/:id", (req, res) => {
+    const s = store.getSession(req.params.id);
     if (!s) {
       sendError(res, 404, "session_not_found", "No such session");
       return;
@@ -544,8 +519,8 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
   });
 
   // GET /v1/sessions/{id}/output — the HTML document.
-  r.get("/:id/output", (req: AuthedRequest, res) => {
-    const s = ownedSession(store, req.params.id, req.user!.github_user_id);
+  r.get("/:id/output", (req, res) => {
+    const s = store.getSession(req.params.id);
     if (!s) {
       sendError(res, 404, "session_not_found", "No such session");
       return;
@@ -570,8 +545,8 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
 
   // ----- Tagged PDF (optional; util/taggedPdf.ts) -----
   // The session's source PDF, or the reason it has none. Sends that error itself.
-  function sourcePdf(req: AuthedRequest, res: Response): { s: SessionRecord; command: string; pdf: string } | null {
-    const s = ownedSession(store, req.params.id, req.user!.github_user_id);
+  function sourcePdf(req: Request<Record<string, string>>, res: Response): { s: SessionRecord; command: string; pdf: string } | null {
+    const s = store.getSession(req.params.id);
     if (!s) {
       sendError(res, 404, "session_not_found", "No such session");
       return null;
@@ -674,7 +649,7 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
   }
 
   // GET /v1/sessions/{id}/fields — the source PDF's form fields, for a fill-in form.
-  r.get("/:id/fields", async (req: AuthedRequest, res) => {
+  r.get("/:id/fields", async (req, res) => {
     const src = sourcePdf(req, res);
     if (!src) return;
     if (tooBusy(res)) return;
@@ -710,7 +685,7 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
   // POST /v1/sessions/{id}/pdf — the source PDF, tagged from the extracted pages, with
   // `values` filled in. The PDF is the answer and nothing is kept, so neither the values
   // nor the filled PDF is ever stored.
-  r.post("/:id/pdf", async (req: AuthedRequest, res) => {
+  r.post("/:id/pdf", async (req, res) => {
     const src = sourcePdf(req, res);
     if (!src) return;
     const { s } = src;
@@ -756,8 +731,8 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
   });
 
   // GET /v1/sessions/{id}/logs — the run log as ndjson.
-  r.get("/:id/logs", (req: AuthedRequest, res) => {
-    const s = ownedSession(store, req.params.id, req.user!.github_user_id);
+  r.get("/:id/logs", (req, res) => {
+    const s = store.getSession(req.params.id);
     if (!s) {
       sendError(res, 404, "session_not_found", "No such session");
       return;
@@ -769,8 +744,8 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
   // GET /v1/sessions/{id}/diagnostics — machine-readable timing/health summary
   // for maintainers (human or AI): phase + per-call durations, the slowest
   // calls, and any in-flight call (the likely culprit when a run seems hung).
-  r.get("/:id/diagnostics", (req: AuthedRequest, res) => {
-    const s = ownedSession(store, req.params.id, req.user!.github_user_id);
+  r.get("/:id/diagnostics", (req, res) => {
+    const s = store.getSession(req.params.id);
     if (!s) {
       sendError(res, 404, "session_not_found", "No such session");
       return;
@@ -781,8 +756,8 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
   });
 
   // POST /v1/sessions/{id}/feedback — re-run within the same session.
-  r.post("/:id/feedback", (req: AuthedRequest, res) => {
-    const s = ownedSession(store, req.params.id, req.user!.github_user_id);
+  r.post("/:id/feedback", (req, res) => {
+    const s = store.getSession(req.params.id);
     if (!s) {
       sendError(res, 404, "session_not_found", "No such session");
       return;
@@ -831,10 +806,8 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
   });
 
   // POST /v1/sessions/{id}/close — finalize the session and clean tmp.
-  // Agent contributions are auto-filed as GitHub issues during the run (see
-  // pipeline/contribute.ts), so close no longer opens PRs.
-  r.post("/:id/close", (req: AuthedRequest, res) => {
-    const s = ownedSession(store, req.params.id, req.user!.github_user_id);
+  r.post("/:id/close", (req, res) => {
+    const s = store.getSession(req.params.id);
     if (!s) {
       sendError(res, 404, "session_not_found", "No such session");
       return;

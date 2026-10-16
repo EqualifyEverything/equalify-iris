@@ -16,8 +16,6 @@ import { Store } from "../src/store/db.ts";
 // drops every time someone asks Iris to try again, and drops permanently if the
 // re-run fails. Hence the write-once `first_completed_at` stamp.
 
-const USER = 4242;
-const OTHER = 99;
 
 function withStore(fn: (store: Store) => void): void {
   const dir = mkdtempSync(join(tmpdir(), "iris-stats-"));
@@ -29,8 +27,8 @@ function withStore(fn: (store: Store) => void): void {
 }
 
 // A session that ran to completion, the way the pipeline finishes one.
-function complete(store: Store, id: string, pages: number, user = USER): void {
-  store.createSession({ session_id: id, github_user_id: user, image_count: pages, iterations_max: 1 });
+function complete(store: Store, id: string, pages: number): void {
+  store.createSession({ session_id: id, image_count: pages, iterations_max: 1 });
   store.updateSession(id, { status: "ready_for_review", phase: "done", iterations_completed: 1 });
 }
 
@@ -39,7 +37,7 @@ test("nothing is counted before anything has been converted", () => {
     assert.deepEqual(store.publicStats(), { pages: 0, documents: 0, since: null });
     // An upload alone is not an accomplishment: the pages exist, the accessible
     // HTML does not.
-    store.createSession({ session_id: "ses_a", github_user_id: USER, image_count: 12, iterations_max: 1 });
+    store.createSession({ session_id: "ses_a", image_count: 12, iterations_max: 1 });
     assert.deepEqual(store.publicStats(), { pages: 0, documents: 0, since: null });
     // Nor is being mid-run.
     store.updateSession("ses_a", { status: "running", phase: "extraction" });
@@ -47,10 +45,10 @@ test("nothing is counted before anything has been converted", () => {
   });
 });
 
-test("pages and documents are summed across users once a run completes", () => {
+test("pages and documents are summed across sessions once a run completes", () => {
   withStore((store) => {
     complete(store, "ses_a", 3);
-    complete(store, "ses_b", 10, OTHER);
+    complete(store, "ses_b", 10);
     const s = store.publicStats();
     assert.equal(s.pages, 13, "pages is the sum of image_count over completed sessions");
     assert.equal(s.documents, 2);
@@ -61,7 +59,7 @@ test("pages and documents are summed across users once a run completes", () => {
 test("a failed run contributes nothing", () => {
   withStore((store) => {
     complete(store, "ses_ok", 4);
-    store.createSession({ session_id: "ses_bad", github_user_id: USER, image_count: 50, iterations_max: 1 });
+    store.createSession({ session_id: "ses_bad", image_count: 50, iterations_max: 1 });
     store.updateSession("ses_bad", { status: "failed", error: "provider exploded" });
     assert.equal(store.publicStats().pages, 4, "a failed session delivered nothing to count");
     assert.equal(store.publicStats().documents, 1);
@@ -151,17 +149,17 @@ test("an already-deployed database gains the column and backfills it", () => {
     // Rebuild the pre-change sessions table, rows and all, then reopen it.
     raw.exec(`
       CREATE TABLE sessions_old AS SELECT
-        session_id, github_user_id, status, phase, iterations_completed,
+        session_id, status, phase, iterations_completed,
         iterations_max, image_count, error, created_at, updated_at FROM sessions;
       DROP TABLE sessions;
       ALTER TABLE sessions_old RENAME TO sessions;
-      INSERT INTO sessions (session_id, github_user_id, status, phase, iterations_completed,
+      INSERT INTO sessions (session_id, status, phase, iterations_completed,
         iterations_max, image_count, error, created_at, updated_at) VALUES
-        ('ses_ready', ${USER}, 'ready_for_review', 'done', 1, 1, 7, NULL,
+        ('ses_ready', 'ready_for_review', 'done', 1, 1, 7, NULL,
          '2026-01-01T00:00:00.000Z', '2026-01-01T00:05:00.000Z'),
-        ('ses_closed', ${USER}, 'closed', 'done', 1, 1, 2, NULL,
+        ('ses_closed', 'closed', 'done', 1, 1, 2, NULL,
          '2026-01-02T00:00:00.000Z', '2026-01-02T00:05:00.000Z'),
-        ('ses_failed', ${USER}, 'failed', 'extraction', 0, 1, 99, 'boom',
+        ('ses_failed', 'failed', 'extraction', 0, 1, 99, 'boom',
          '2026-01-03T00:00:00.000Z', '2026-01-03T00:05:00.000Z');
     `);
     const cols = () =>
@@ -195,7 +193,7 @@ test("stats carry no per-session or per-user detail", () => {
     // boundary. If a field is added here, this assertion is what makes that a
     // deliberate decision rather than an accident.
     complete(store, "ses_a", 3);
-    complete(store, "ses_b", 4, OTHER);
+    complete(store, "ses_b", 4);
     assert.deepEqual(Object.keys(store.publicStats()).sort(), ["documents", "pages", "since"]);
   });
 });

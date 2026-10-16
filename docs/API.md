@@ -1,8 +1,7 @@
 # Equalify Iris — API Guide (bash / curl)
 
-Every endpoint is under `/v1`. All responses are JSON unless noted. **No endpoint takes a GitHub
-token** — Iris holds its own and you never see it ([Authenticate](#authenticate)). Whether you send
-anything at all depends on the deployment: where the operator set `server.api_token`, `/v1/me` and
+Every endpoint is under `/v1`. All responses are JSON unless noted. There is no sign-in
+([Authenticate](#authenticate)). Whether you send anything at all depends on the deployment: where the operator set `server.api_token`, `/v1/me` and
 `/v1/sessions` need `Authorization: Bearer <that shared secret>`; where they did not, send no header.
 `/v1/health`, `/v1/stats` and `/v1/limits` never need one. `/v1/quality` is the exception in the other
 direction: it has its own separate secret
@@ -583,9 +582,8 @@ the full proposed prompt in `content`.
 
 ## Authenticate
 
-**There is no sign-in.** You do not create an account, run an OAuth flow, or hand Iris a GitHub
-token. The deployment holds one GitHub credential of its own (`github.token`, server-side only),
-used only to name its account. Nothing you send is a GitHub credential.
+**There is no sign-in.** You do not create an account or run an OAuth flow, and Iris holds no
+GitHub credential.
 
 The operator chooses one of two modes.
 
@@ -600,9 +598,8 @@ export AUTH="Authorization: Bearer the-secret-the-operator-gave-you"
 curl -s -H "$AUTH" "$BASE/me"
 ```
 
-This secret is **not** a GitHub token. It answers one question — may this caller use the API? — and
-it makes you nobody in particular: every caller who presents it is the same deployment account, so
-it is a door key, not an identity. Where a deployment is open, drop `-H "$AUTH"` from every example
+This secret answers one question: may this caller use the API? It is a door key, not an identity.
+Every session belongs to the deployment. Where a deployment is open, drop `-H "$AUTH"` from every example
 below.
 
 To find out which kind you are talking to, call `GET /v1/me` with no header: **200** means open,
@@ -612,8 +609,7 @@ To find out which kind you are talking to, call `GET /v1/me` with no header: **2
 
 `server.api_token` protects `/v1/me` and everything under `/v1/sessions`, and nothing else — the
 gate is attached to those two mounts rather than to `/v1` as a whole. Five endpoints are outside it
-and stay reachable on a gated deployment, on purpose. None of them touches a document or an
-identity:
+and stay reachable on a gated deployment, on purpose. None of them touches a document:
 
 | Endpoint | Why it is open |
 | --- | --- |
@@ -623,51 +619,36 @@ identity:
 | [`GET /v1/quality`](#quality-tally-shared-secret-off-by-default) | Has its own separate token, and is 404 unless the operator set it. |
 | [`GET /v1/suggestions`](#agent-suggestions-shared-secret-off-by-default) | Uses the quality token, and is 404 unless the operator set it. |
 
-*Operators:* an earlier build stored a token per user, in a `github_token` column. There is no
-migration — delete any `data/iris.sqlite` from before that change. The service refuses to start
-against such a file rather than adopting it, since it would still hold live plaintext tokens.
+*Operators:* [docs/access.md](access.md#coming-from-an-earlier-build) covers a database from an
+earlier build.
 
-## Current user
-
-Despite the name, this describes the **deployment**, not you. There is one identity here and every
-caller reaches it.
+## Deployment defaults
 
 ```bash
 curl -s -H "$AUTH" "$BASE/me"
 ```
 ```json
-{
-  "github_login": "iris-tester",
-  "github_user_id": 4242,
-  "defaults": { "max_review_iterations": 3 }
-}
+{ "defaults": { "max_review_iterations": 3 } }
 ```
 
-`github_login` is the deployment's GitHub account. `defaults.max_review_iterations` is the review
-cap every session gets.
-
-*Operators:* the cap is copied into this account when the deployment first authenticates, so raising
-it in config later does not change what this endpoint reports. It stands until `data/iris.sqlite` is
-recreated.
+`defaults.max_review_iterations` is the review cap every session gets, read from the operator's
+config.
 
 **Call this first.** It is the cheapest way to find out whether the deployment works at all, because
-it runs exactly what an upload runs:
+it runs the same check an upload runs:
 
 | Answer | What it means |
 | --- | --- |
 | **200** | Usable. If you sent no header, the deployment is open. |
 | **401** `This deployment requires a shared API token.` | Gated — you need `server.api_token` from the operator. |
-| **401** `This deployment could not authenticate to GitHub…` | The operator's `github.token` is wrong, revoked, or GitHub is down. Not your problem to fix; tell them. Iris retries GitHub 30 seconds after a failure, so a transient one clears itself. |
-| **500** `github.token is not configured…` | The operator never set it. |
 
 ## Create a session (upload images)
 
 `multipart/form-data`. Repeat `images` once per file; **the order of the parts is the
 processing order** (not the filename). `images` is the only part the endpoint reads — there are
 no per-session options. (A `config` part used to override `max_review_iterations` for one
-session; it was removed, and sending one now is ignored rather than an error. The cap comes from
-your account default, seeded from the deployment's `defaults.max_review_iterations` — see
-[`GET /v1/me`](#current-user).)
+session; it was removed, and sending one now is ignored rather than an error. The cap is the
+deployment's `defaults.max_review_iterations` — see [`GET /v1/me`](#deployment-defaults).)
 
 ```bash
 create=$(curl -s -X POST -H "$AUTH" "$BASE/sessions" \
@@ -5267,7 +5248,7 @@ curl -s -H "$AUTH" "$BASE/sessions?status=ready_for_review"
 `0`, negative, fractional, non-numeric — is the default, not an error: one rule, so two
 equally invalid values can't get page sizes differing by a factor of twenty.
 
-**This lists the deployment's sessions, not yours.** There is one identity here, so every caller
+**This lists every session, not just yours.** There is no sign-in, so every caller
 who can reach this endpoint sees every session anyone uploaded — including documents you did not
 upload, and yours to whoever asks next. That is the cost of having no sign-in, and it is why an
 operator handling anything private should gate the deployment with `server.api_token` and treat the
@@ -5348,7 +5329,7 @@ that mean the same thing, and opens or updates one issue per idea. Counts keep g
 after it is closed, so a maintainer can see demand return.
 
 Saving never fails your run. A failure is logged as [`contribution_failed`](#contribution_failed).
-The issues name no user, because the deployment has one identity for every caller.
+The issues name no user, because there is no sign-in.
 
 *Operators:* unlike [`/v1/quality`](#quality-tally-shared-secret-off-by-default), this carries
 model-written text about your documents — the reasons and the proposed prompts — into public issues.
@@ -5360,8 +5341,7 @@ All errors share one shape:
 ```json
 { "error": { "code": "invalid_state", "message": "Human-readable description", "details": {} } }
 ```
-Common codes: `unauthorized` (401 — see [Authenticate](#authenticate) for the three things it can
-mean), `session_not_found` (404), `invalid_state` (409), `invalid_request` (400), `rate_limited`
+Common codes: `unauthorized` (401 — see [Authenticate](#authenticate)), `session_not_found` (404), `invalid_state` (409), `invalid_request` (400), `rate_limited`
 (429, carries `Retry-After` — see [Rate limits](#rate-limits-how-often-you-may-ask)),
 `upload_too_large` (413), `body_too_large` (413, a JSON body over 2 MB), `not_found` (404, no such
 route), `server_error` (500). Another 4xx refused while reading the request is `invalid_request`.

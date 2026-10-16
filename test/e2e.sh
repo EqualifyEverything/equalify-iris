@@ -11,7 +11,6 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-GH_PORT=9301
 OR_PORT=9302
 PORT=8099
 DATA=/tmp/iris-e2e
@@ -35,10 +34,6 @@ QUALITY_TOKEN=e2e-quality-token
 # CLOSED deployment: the gate is optional, and a run with it unset would never check that
 # the refusal works or that the token is compared the way the docs say.
 API_TOKEN=e2e-api-token
-# The deployment's GitHub PAT (github.token) — the only GitHub credential in the system.
-# Must match DEPLOYMENT_TOKEN in test/mock-services.mjs, which refuses anything else, so
-# a config that never reaches the GitHub client fails here rather than passing quietly.
-GITHUB_TOKEN=ghp_e2e_deployment_token
 
 # Seconds to wait for Iris to answer /health. Generous because a cold CI runner
 # type-strips every .ts source with no warm cache; locally this takes ~1s.
@@ -93,9 +88,6 @@ storage:
   data_dir: $DATA
   agents_dir: ./agents
   database: $DATA/iris.sqlite
-github:
-  token: $GITHUB_TOKEN
-  api_base_url: http://localhost:$GH_PORT
 providers:
   default: openrouter
   openrouter:
@@ -127,7 +119,7 @@ defaults:
 YAML
 
 echo "==> starting mock services"
-MOCK_GH_PORT=$GH_PORT MOCK_OR_PORT=$OR_PORT node test/mock-services.mjs &
+MOCK_OR_PORT=$OR_PORT node test/mock-services.mjs &
 PIDS+=($!)
 
 echo "==> starting Iris"
@@ -267,23 +259,12 @@ echo "$body" | jq -e '.error.code=="unauthorized" and (.error.message|test("shar
   && pass "the refusal says the deployment is gated, and nothing else" || fail "auth gating shape" "$body"
 AUTH=(-H "Authorization: Bearer $API_TOKEN")
 
-echo "==> 3. the deployment has one GitHub identity, resolved once"
-# The gate is not an identity: presenting it makes a caller allowed, not somebody. Who the
-# deployment IS comes from github.token, and the mock refuses any other value — so a 200
-# here means the configured PAT reached the GitHub client.
+echo "==> 3. a caller who presents the token is served"
+# The gate is not an identity: presenting the token makes a caller allowed, not somebody
+# (#540). Iris makes no GitHub call to find out who.
 me=$(curl -s "${AUTH[@]}" "$BASE/me")
-echo "$me" | jq -e '.github_login=="iris-tester"' >/dev/null \
-  && pass "identity resolved ($(echo "$me" | jq -r .github_login))" || fail "identity" "$me"
-# Resolved ONCE for the process, not per request. Invisible from the client — every
-# response is a 200 either way — and the cost of getting it wrong is one outbound GitHub
-# call per request on a service whose demo page polls every 2.5s.
-for _ in 1 2 3; do curl -s -o /dev/null "${AUTH[@]}" "$BASE/me"; done
-lookups=$(curl -s "http://localhost:$GH_PORT/__user_lookups" | jq -r .count)
-[ "$lookups" = "1" ] && pass "GET /user was called once for the whole run" \
-  || fail "identity lookups" "expected 1 call to GitHub's /user, got $lookups"
-# Nothing signs in, so the endpoints that used to exist for it are gone rather than
-# answering something. A 404 here is the assertion: a route left mounted would be a
-# device flow nobody maintains.
+echo "$me" | jq -e 'has("github_login") or has("github_user_id") | not' >/dev/null \
+  && pass "/me names nobody" || fail "me shape" "$me"
 code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "${AUTH[@]}" "$BASE/auth/github/device")
 [ "$code" = "404" ] && pass "no device-flow endpoint" || fail "auth routes" "POST /v1/auth/github/device answered $code"
 
@@ -292,9 +273,7 @@ echo "==> 3a. an OPEN deployment serves a caller who presents nothing"
 # on — `api_token` unset, no credential anywhere in the browser — covered by unit tests and
 # never driven through the real stack. That is the half where a mistake ships: a gate that
 # refuses when it should be absent looks like a working deployment to every test above.
-#
-# It has to come after step 3, not with step 2: this boots a second deployment that resolves
-# its own identity, which adds a `GET /user` to the counter step 3 asserts is exactly 1.
+
 sed -e "s#^  port: $PORT\$#  port: $OPEN_PORT#" \
     -e "/^  api_token:/d" \
     -e "s#$DATA#$OPEN_DATA#g" \
@@ -325,27 +304,25 @@ open_me=$(curl -s -w '\n%{http_code}' "$OPEN_BASE/me")
 open_code=$(echo "$open_me" | tail -1)
 [ "$open_code" = "200" ] && pass "an unauthenticated caller is served (HTTP 200)" \
   || fail "open deployment" "GET /v1/me with no header answered $open_code: $(echo "$open_me" | head -1)"
-# Served AS the deployment, not as nobody: an open gate must not also mean an unresolved
-# identity, or every session would belong to a user row that does not exist.
-echo "$open_me" | head -1 | jq -e '.github_login=="iris-tester"' >/dev/null \
-  && pass "and served as the deployment's own identity" \
-  || fail "open deployment identity" "$(echo "$open_me" | head -1)"
+echo "$open_me" | head -1 | jq -e '.defaults.max_review_iterations==1' >/dev/null \
+  && pass "and gets the deployment's defaults" \
+  || fail "open deployment /me" "$(echo "$open_me" | head -1)"
 # A bearer token on an ungated deployment is ignored, not rejected. Worth one request: a
 # demo page that once set the header, or a proxy that adds one, must not start 401ing.
 open_code=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer anything-at-all" "$OPEN_BASE/me")
 [ "$open_code" = "200" ] && pass "an unexpected bearer token is ignored, not refused" \
   || fail "open deployment (bearer)" "got $open_code"
 # The boot line has to say what an OPEN deployment costs — it is the only warning an
-# operator who never reads the docs will see, and it is the branch of identityWarning that
+# operator who never reads the docs will see, and it is the branch of accessWarning that
 # a gated run (every other step here) never prints.
 grep -q 'server.api_token is unset' "$OPEN_LOG" \
   && pass "the boot log names the open deployment's exposure" \
   || fail "open boot warning" "nothing in $OPEN_LOG says server.api_token is unset"
-grep -q 'read any session whose id they have' "$OPEN_LOG" \
+grep -q 'list and read every session' "$OPEN_LOG" \
   && pass "and says what that exposes" \
-  || fail "open boot warning" "the warning does not say sessions are readable by id: $OPEN_LOG"
+  || fail "open boot warning" "the warning does not say every session is readable: $OPEN_LOG"
 # The other branch must not also be there. Without this the assertions above would pass on a
-# boot line that printed both, which is the shape a future edit to identityWarning produces.
+# boot line that printed both, which is the shape a future edit to accessWarning produces.
 grep -q 'the demo page cannot be used' "$OPEN_LOG" \
   && fail "open boot warning" "the GATED warning was printed by an ungated deployment" \
   || pass "and not the gated deployment's warning"
@@ -355,14 +332,9 @@ wait "$OPEN_PID" 2>/dev/null || true
 echo "==> 4. GET /v1/me describes the deployment"
 echo "$me" | jq -e '.defaults.max_review_iterations==1' >/dev/null \
   && pass "defaults published" || fail "me" "$me"
-# It is also the capability probe the demo page uses, so its answer must come from the same
-# middleware a real upload runs — which is what the identity assertion above just exercised.
-echo "$me" | jq -e 'has("upstream_repo")|not' >/dev/null \
-  && pass "no upstream repo: Iris files no issues" || fail "me shape" "$me"
-# The response shape over the wire, not just in a unit test: `fork_repo` is gone
-# rather than permanently null, since nothing forks.
-echo "$me" | jq -e 'has("fork_repo")|not' >/dev/null \
-  && pass "no fork_repo in /me" || fail "me shape" "$me"
+# The whole body, so a field added later has to be justified here.
+echo "$me" | jq -e 'keys==["defaults"]' >/dev/null \
+  && pass "/me carries only the defaults" || fail "me shape" "$me"
 
 echo "==> 5. POST /v1/sessions (upload 3 images)"
 # minimal valid 1x1 PNGs. Three pages, with extraction_concurrency=4 above, so
@@ -1165,7 +1137,7 @@ echo "$refit" | jq -e '.page==1 and .long_edge_px>0 and (.from|test("^8[0-9]{3}x
   && pass "the smaller render is recorded in the session's own log ($refit)" \
   || fail "page_refit" "expected a page_refit line naming the page and the size it was rendered at, got '$refit'"
 
-echo "==> 10. ownership isolation (other endpoints reject unknown id)"
+echo "==> 10. an unknown session id is a 404"
 code=$(curl -s -o /dev/null -w '%{http_code}' "${AUTH[@]}" "$BASE/sessions/ses_doesnotexist")
 [ "$code" = "404" ] && pass "unknown session => 404" || fail "isolation" "got $code"
 
@@ -1472,11 +1444,10 @@ echo "$q" | jq -e '.since != null' >/dev/null && pass "since is set" \
 # Nothing per-session, per-document, and neither of this deployment's credentials. This is
 # the constraint that matters most, because the consumer copies these values into a PUBLIC
 # issue and the documents are user uploads. Checked against the real session id and the real
-# tokens this run used, not placeholders — and both tokens are checked because one deployment
-# now holds one PAT that every session belongs to, and a public copy is a leaked credential.
+# token this run used, not placeholders.
 # (`if`, not `grep … && fail`: under `set -e` a grep that finds nothing would fail
 # the AND-list and kill the script, turning "no leak" into a broken run.)
-for secret in "$SID" "$GITHUB_TOKEN" "$API_TOKEN"; do
+for secret in "$SID" "$API_TOKEN"; do
   if echo "$q" | grep -qF "$secret"; then
     fail "quality" "the tally leaked '$secret' — see the constraint in src/routes/quality.ts"
   fi

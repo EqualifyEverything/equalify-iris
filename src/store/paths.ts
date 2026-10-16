@@ -80,7 +80,7 @@ export class Paths {
   }
   // `sessionNewAgents()` and `sessionPrs()` used to sit here with zero callers,
   // left over from an earlier fork-and-PR design. That flow has been dropped
-  // (contributions are issues, filed under the deployment's own GitHub account), so
+  // (contributions are saved suggestions, filed as issues by a workflow), so
   // they are gone rather than waiting for it.
   sessionAgentUpdates(id: string): string {
     return join(this.sessionDir(id), "agent-updates.md");

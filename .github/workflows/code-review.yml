@@ -970,7 +970,7 @@ jobs:
                Injected CSS/styling in agent output is also a defect — agents are required to
                emit unstyled semantic HTML.
 
-            2. **Upstream side effects.** Iris calls GitHub only for `GET /user`. It saves
+            2. **Upstream side effects.** Iris never calls GitHub. It saves
                agent suggestions, and `.github/scripts/agent-suggestions.mjs` files them as
                issues titled `New agent suggestion: <concept>` and `Agent update proposal:
                <agent> — <lesson slug>`. The title and the keys marker in the body are the only
@@ -982,15 +982,12 @@ jobs:
                beyond the saved reasons and proposals, or sends a caller-supplied credential to
                GitHub.
 
-            3. **Auth, tokens, and secrets.** `src/auth/` answers two separate questions: may this
-               caller use the API at all (`server.api_token`, optional, checked BEFORE GitHub is
-               consulted so a refused stranger cannot spend the deployment's GitHub rate limit),
-               and who is this deployment (`github.token`, resolved once per process). Flag
-               anything that conflates them — presenting the gate token must not make a caller
-               anybody — anything that lets a 401 name a credential, and anything that could log,
-               persist, or echo `github.token`, `server.api_token`, a model API key, or a user's
-               uploaded content. Sessions are NOT isolated from each other by design (one
-               identity owns them all), so an ownership check is not the defence here; a route
+            3. **Auth, tokens, and secrets.** `src/auth/` answers one question: may this caller use
+               the API at all (`server.api_token`, optional). There is no caller identity and no
+               GitHub credential (#540). Flag anything that lets a 401 name a credential, and
+               anything that could log, persist, or echo `server.api_token`, the quality token, a
+               model API key, or a user's uploaded content. Sessions are NOT isolated from each
+               other by design (the deployment owns them all), so an ownership check is not the defence here; a route
                that widens what a session id reaches still is.
 
             4. **Provider / model routing and cost.** Model resolution falls back per-agent →
@@ -1115,9 +1112,9 @@ jobs:
             - Agent markdown edits that loosen the output contract, drop the accessibility
               requirements, or change a pinned git SHA without explanation.
             - Docs (`README.md`, `docs/API.md`, `docs/models.md`, `docs/design-notes.md`,
-              `docs/ci.md`, `docs/github-auth.md`, `docs/verifier-calibration.md`) that now
+              `docs/ci.md`, `docs/access.md`, `docs/verifier-calibration.md`) that now
               contradict the code, and `config.example.yaml` missing a newly-required config key.
-              `docs/github-auth.md` states what `src/auth/` does with a token and
+              `docs/access.md` states what `src/auth/` does with a token and
               `docs/verifier-calibration.md` what `src/pipeline/calibration.ts` measures, so an
               edit to either is checked against that code and not only against itself.
             - Changes to the review context builder's thresholds (`MIN_CHANGED_PCT`,

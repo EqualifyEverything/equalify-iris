@@ -79,12 +79,10 @@ const WINDOW_MS = 60_000;
 /**
  * Who a request counts against: the source address, on every route.
  *
- * There is nothing better available, and that is a consequence of there being one
- * identity. A caller presents either no credential or `server.api_token`, which is
- * SHARED — so keying on the credential would put every visitor in one bucket and the
- * first of the minute would spend everyone's budget. `req.user` is no better: it is the
- * deployment's own account on every request. The address is the only thing left that
- * distinguishes callers at all.
+ * There is nothing better available. A caller presents either no credential or
+ * `server.api_token`, which is SHARED, so keying on the credential would put every visitor
+ * in one bucket and the first of the minute would spend everyone's budget. The address is
+ * the only thing that distinguishes callers at all.
  *
  * What that costs, and it is a real cost rather than a rounding error: a campus or office
  * NAT puts every user behind one address, so they share a bucket and the second person to
@@ -209,9 +207,7 @@ export function uploadRateLimit(cfg: IrisConfig): RequestHandler {
   if (!limits.enabled) return passThrough;
   return limiter({
     limit: limits.upload_per_minute,
-    // By address, like every other limiter. This one sits BEHIND the auth middleware, so
-    // `req.user` is resolved and available — and it is the same account for everybody,
-    // which would put the whole internet in one bucket of `upload_per_minute`.
+    // By address, like every other limiter (see clientKey).
     key: clientKey,
     message: (limit, retryAfter) =>
       `Too many uploads: this deployment accepts ${limit} per minute. A conversion takes minutes and ` +

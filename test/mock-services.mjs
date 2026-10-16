@@ -1,9 +1,7 @@
-// Mock GitHub + mock OpenRouter for the end-to-end curl test (test/e2e.sh).
-// These stand in for the only two external dependencies so the whole API can be
-// exercised offline. Not used in production.
+// Mock OpenRouter for the end-to-end curl test (test/e2e.sh). It stands in for the only
+// external dependency so the whole API can be exercised offline. Not used in production.
 import { createServer } from "node:http";
 
-const GH_PORT = Number(process.env.MOCK_GH_PORT ?? 9301);
 const OR_PORT = Number(process.env.MOCK_OR_PORT ?? 9302);
 
 function readBody(req) {
@@ -17,43 +15,6 @@ function json(res, status, obj) {
   res.writeHead(status, { "content-type": "application/json" });
   res.end(JSON.stringify(obj));
 }
-
-// ---- Mock GitHub (api.github.com) ----
-// `GET /user` is the only GitHub route, and everything else falls through to a 404 naming
-// the path. (`GET /__user_lookups` below is also served, but it is this mock's own
-// instrument — no such path exists on api.github.com and Iris never calls it.)
-// Iris's whole GitHub surface is that call (auth/github.ts). It files nothing: suggestions
-// are saved and filed by a workflow (#539). So this mock should answer nothing else, and a
-// service that started calling GitHub again would meet the fall-through 404.
-
-// The one credential this mock accepts, and it must be the value e2e.sh puts in
-// `github.token`. Checked rather than ignored: the deployment's PAT is now the only
-// credential in the system, so "the config reached the GitHub client" is worth one
-// comparison — a mock that answered anything would pass an Iris that sent nothing.
-const DEPLOYMENT_TOKEN = "ghp_e2e_deployment_token";
-
-// Every /user call the service made, readable via GET /__user_lookups so e2e.sh can
-// assert the identity is resolved ONCE for the whole run rather than per request. The
-// count is invisible from the client — every response is a 200 either way.
-let userLookups = 0;
-
-const gh = createServer((req, res) => {
-  const url = new URL(req.url, `http://localhost:${GH_PORT}`);
-  const p = url.pathname;
-  const m = req.method;
-
-  if (m === "GET" && p === "/__user_lookups") return json(res, 200, { count: userLookups });
-
-  // Who the deployment is. One call per process in a healthy run.
-  if (m === "GET" && p === "/user") {
-    userLookups += 1;
-    if (req.headers.authorization !== `Bearer ${DEPLOYMENT_TOKEN}`)
-      return json(res, 401, { message: "Bad credentials" });
-    return json(res, 200, { id: 4242, login: "iris-tester" });
-  }
-
-  json(res, 404, { message: `mock-github: unhandled ${m} ${p}` });
-});
 
 // ---- Mock OpenRouter (OpenAI-compatible chat completions) ----
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -330,5 +291,4 @@ const or = createServer(async (req, res) => {
   json(res, 200, { choices: [{ message: { content } }] });
 });
 
-gh.listen(GH_PORT, () => console.log(`mock-github on ${GH_PORT}`));
 or.listen(OR_PORT, () => console.log(`mock-openrouter on ${OR_PORT}`));

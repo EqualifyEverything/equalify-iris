@@ -9,7 +9,6 @@ import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { IrisConfig } from "../src/config.ts";
-import type { AuthedRequest } from "../src/auth/middleware.ts";
 import { keepPdfFields, keepSourcePdf, remember, sessionsRouter } from "../src/routes/sessions.ts";
 import { enumerateInputs } from "../src/pipeline/orchestrator.ts";
 import { limitsRouter } from "../src/routes/limits.ts";
@@ -18,14 +17,12 @@ import { Paths } from "../src/store/paths.ts";
 import { clearPdfScratch, taggedPdfCommand, taggedPdfStatus } from "../src/util/taggedPdf.ts";
 
 const FAKE = join(dirname(fileURLToPath(import.meta.url)), "fixtures", "fake-iris-pdf.mjs");
-const USER = 7;
 
 function cfg(dir: string, command?: string, timeout_seconds?: number): IrisConfig {
   return {
     server: { port: 3000, base_url: "http://localhost:3000" },
     storage: { data_dir: dir, agents_dir: "agents", database: join(dir, "iris.sqlite") },
     tagged_pdf: { command, timeout_seconds },
-    github: { token: "ghp_test", api_base_url: "https://api.github.com" },
     providers: { default: "openrouter", openrouter: { api_key: "k", default_model: "anthropic/claude-sonnet-4.6" } },
     defaults: { max_review_iterations: 1, extraction_concurrency: 2, max_concurrent_runs: 1, recheck_sample_size: 1 },
   };
@@ -38,7 +35,7 @@ async function serve(opts: { command?: string; source?: string | null; status?: 
   const store = new Store(config.storage.database);
   const paths = new Paths(config);
   const id = "ses_pdf_1";
-  store.createSession({ session_id: id, github_user_id: USER, image_count: 2, iterations_max: 1 });
+  store.createSession({ session_id: id, image_count: 2, iterations_max: 1 });
   store.updateSession(id, { status: (opts.status ?? "ready_for_review") as "ready_for_review" });
   paths.initSession(id);
   writeFileSync(paths.sessionSourceName(id), "permit");
@@ -52,10 +49,6 @@ async function serve(opts: { command?: string; source?: string | null; status?: 
 
   const app = express();
   app.use(express.json());
-  app.use((req, _res, next) => {
-    (req as AuthedRequest).user = { github_user_id: USER, github_login: "t", max_review_iterations: 1 } as AuthedRequest["user"];
-    next();
-  });
   app.use("/v1/sessions", sessionsRouter(config, store));
   app.use("/v1/limits", limitsRouter(config));
   const server = app.listen(0);

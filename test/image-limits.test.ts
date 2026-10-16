@@ -7,7 +7,6 @@ import { join } from "node:path";
 import type { AddressInfo } from "node:net";
 import type { IrisConfig } from "../src/config.ts";
 import { Store } from "../src/store/db.ts";
-import type { AuthedRequest } from "../src/auth/middleware.ts";
 import { sessionsRouter } from "../src/routes/sessions.ts";
 import {
   IMAGE_MEDIA_TYPES,
@@ -48,10 +47,6 @@ function cfg(providers: IrisConfig["providers"]): IrisConfig {
   return {
     server: { port: 3000, base_url: "http://localhost:3000" },
     storage: { data_dir: "/tmp/iris-test", agents_dir: "agents", database: ":memory:" },
-    github: {
-      token: "ghp_test",
-      api_base_url: "https://api.github.com",
-    },
     providers,
     defaults: { max_review_iterations: 3, extraction_concurrency: 5, max_concurrent_runs: 2, recheck_sample_size: 1 },
   };
@@ -1047,9 +1042,8 @@ test("and says no more about an unrecognized one than that it is unrecognized", 
 
 // ----- POST /v1/sessions: the check that makes the limits real -----
 
-// The upload route, mounted with the auth middleware stubbed out: what is under test
-// is the validation ahead of `req.user`, and standing up GitHub auth to reach it would
-// test something else. Only rejection paths are exercised on purpose — a file that
+// The upload route, mounted without the auth middleware: what is under test is the
+// validation. Only rejection paths are exercised on purpose — a file that
 // PASSES validation starts a real pipeline, i.e. real model calls.
 async function serveUploads() {
   const dir = mkdtempSync(join(tmpdir(), "iris-limits-"));
@@ -1060,14 +1054,6 @@ async function serveUploads() {
   config.storage = { data_dir: dir, agents_dir: "agents", database: join(dir, "iris.sqlite") };
   const store = new Store(config.storage.database);
   const app = express();
-  app.use((req, _res, next) => {
-    (req as AuthedRequest).user = {
-      github_user_id: 1,
-      github_login: "tester",
-      max_review_iterations: 3,
-    } as AuthedRequest["user"];
-    next();
-  });
   app.use("/v1/sessions", sessionsRouter(config, store));
   const server = app.listen(0);
   await new Promise((r) => server.once("listening", r));

@@ -105,17 +105,12 @@ export interface IrisConfig {
     // and to nothing else, so `/v1/health`, `/v1/stats`, `/v1/limits` and `/v1/quality` answer
     // whether this is set or not. Each of those says on its own mount why it may.
     //
-    // Set it and a call to either mount must send `Authorization: Bearer <it>`. Two things
-    // follow, and both are the point rather than a limitation:
+    // Set it and a call to either mount must send `Authorization: Bearer <it>`. The demo
+    // page cannot use a deployment that sets it: the page holds no credential by design,
+    // so a gated deployment is an API-only one.
     //
-    //   - It is NOT a GitHub token, so a copy that leaks costs a rate-limit bypass and
-    //     nothing on GitHub. Same reasoning as `quality_token` above, which is where this
-    //     pattern comes from.
-    //   - The demo page cannot use a deployment that sets it. The page holds no
-    //     credential by design, so a gated deployment is an API-only one.
-    //
-    // It answers "may this caller use the API", never "who is this caller" — that question
-    // has one answer now (`github.token`), and this key does not change it.
+    // It answers "may this caller use the API", never "who is this caller": every session
+    // belongs to the deployment.
     api_token?: string;
     // How many reverse proxies sit in front of this deployment, as a hop count (1 for a
     // single Caddy or nginx). Passed to Express's `trust proxy` setting, which is what
@@ -145,32 +140,6 @@ export interface IrisConfig {
   tagged_pdf?: { command?: string; timeout_seconds?: number };
   // Optional. The demo page's name and logo (src/branding.ts).
   branding?: { name?: string; logo_file?: string };
-  github: {
-    // Overridable for GitHub Enterprise (and for testing). Defaults below.
-    api_base_url: string; // e.g. https://api.github.com
-    // The deployment's ONE GitHub identity: a PAT the operator sets, held server-side,
-    // used for every call Iris makes to GitHub and resolved once per process to the
-    // account that owns every session.
-    //
-    // Iris used to authenticate each visitor separately, through a GitHub device flow,
-    // so an issue it opened was filed under the person who ran the session. That is
-    // gone. Three credential concepts (per-user tokens, a service PAT for filing, and
-    // an anonymous PAT for visitors who sent nothing) have collapsed into this one,
-    // because two of them existed only to bridge between the other two.
-    //
-    // What that costs, stated here because it is invisible from outside:
-    //
-    //   - Every session has the same owner, so `GET /v1/sessions` lists the
-    //     deployment's sessions rather than one visitor's, and one visitor can read
-    //     another's document by its id. A deployment where that matters wants
-    //     `server.api_token` set and no public page.
-    //   - Uploads are counted per ADDRESS, since a shared identity is one bucket for
-    //     everyone (util/requestLimits.ts).
-    //
-    // Never send this to a browser: a page that passed it to callers would be publishing
-    // it. The demo page sends no credential at all and the server supplies this one.
-    token?: string;
-  };
   providers: {
     default: string;
     // Per-agent override. A string is shorthand for a provider name (model then
@@ -183,9 +152,8 @@ export interface IrisConfig {
   };
   defaults: {
     // Reader/editor rounds a document gets before the review loop stops and lists
-    // what is left in `unresolved.md`. Read once, at first auth, to seed the
-    // account default every session inherits — a session cannot override it.
-    // Normalized by loadConfig, so it is always >= 1.
+    // what is left in `unresolved.md`. Every session gets this; a session cannot
+    // override it. Normalized by loadConfig, so it is always >= 1.
     max_review_iterations: number;
     // How many pages to extract in parallel within one run. Pages are
     // independent (one vision call each), so this is a pure speed knob; it is
@@ -328,7 +296,7 @@ export function normalizeTrustProxy(value: unknown): number | boolean | string {
 }
 
 // A boot-time warning for the one `trust_proxy` value that is accepted and unsafe.
-// Returned rather than logged, like the two GitHub warnings above, so it is testable and
+// Returned rather than logged, so it is testable and
 // the caller decides where it goes.
 export function trustProxyWarning(value: unknown): string | undefined {
   if (value !== true && String(value).trim().toLowerCase() !== "true") return undefined;
@@ -423,28 +391,6 @@ function expandEnv(value: unknown, unset: Set<string>): unknown {
 // provider block stays valid without its credentials.
 function validateConfig(cfg: IrisConfig, unset: Set<string>, path: string): void {
   const problems: string[] = [];
-
-  // The GitHub App validation this function used to do is gone with the device flow it
-  // guarded. It checked `client_id`'s prefix, because an OAuth App id there produced a
-  // deployment where every login worked and no issue could ever be filed — a failure
-  // invisible at boot and silent at runtime. There is no `client_id` now: Iris holds one
-  // PAT and authenticates as one account.
-  //
-  // What replaces it is a plain presence check. The whole design rests on this key, and
-  // an unset `${IRIS_GITHUB_TOKEN}` expands to `""` rather than disappearing (see
-  // `expandEnv`), so the shape to catch is a key that is present and empty — which is
-  // exactly what an operator who forgot the environment variable produces. Fatal rather
-  // than warned, unlike the old check: without it there is no account to own a session,
-  // so every request to `/v1/me` or `/v1/sessions` would answer `500 server_error:
-  // github.token is not configured` (auth/middleware.ts) — nothing could convert a
-  // document or read one, which is the whole service.
-  if (!githubToken(cfg)) {
-    problems.push(
-      `github.token is not set. Iris needs one GitHub PAT, held by the server, to own every session: ` +
-        `create a fine-grained token (it needs no permissions) and set it (the example config reads it ` +
-        `from IRIS_GITHUB_TOKEN). It is never sent to a browser.`,
-    );
-  }
 
   if (!cfg.providers?.default) problems.push("providers.default is not set");
 
@@ -640,56 +586,31 @@ export function perAgentKeyWarning(
 }
 
 /**
- * The deployment's one GitHub credential, or undefined when it is unset.
- *
- * One function because several callers have to agree on what "set" means, and an unset
- * `${IRIS_GITHUB_TOKEN}` expands to `""` rather than disappearing (see `expandEnv`), so
- * "present in the YAML" is not the test. Whitespace is trimmed for the same reason: the
- * auth middleware would reject `"  "` as a credential, and a config that looked set while
- * every request 401s sends an operator looking in the wrong half of the system.
- */
-export function githubToken(cfg: IrisConfig): string | undefined {
-  return cfg.github.token?.trim() || undefined;
-}
-
-/**
  * The shared secret gating `/v1`, or undefined when the deployment is open.
  *
- * Same trimming rule and the same reason as `githubToken` above: `"  "` would be a gate
- * no caller could satisfy, since the middleware compares against a trimmed header.
+ * Trimmed, and `""` is unset: an unset `${IRIS_API_TOKEN}` expands to `""` (see `expandEnv`),
+ * and `"  "` would be a gate no caller could satisfy, since the middleware compares
+ * against a trimmed header.
  */
 export function apiToken(cfg: IrisConfig): string | undefined {
   return cfg.server.api_token?.trim() || undefined;
 }
 
-// A boot-time line stating what this deployment's single identity means, or undefined
-// when `github.token` is unset (validateConfig refuses that, so this is only for a
-// hand-built config in a test).
+// A boot-time line stating who can use this deployment.
 //
-// Not a complaint: the operator set the key, and this is a statement of what it decided
-// for them. It exists because every consequence is invisible from outside — the service
-// answers 200 to callers with no credential at all, which is the intended behaviour and
-// is also indistinguishable from a private deployment right up to the point where a
-// stranger's document is involved.
-//
-// Printed at every boot rather than once at first use, because "who does this deployment
-// think its users are" is a property an operator reads in the log; the alternative place
-// to notice it is a visitor's document appearing in someone else's session list.
-//
-// Deliberately does NOT name the credential, not even truncated: it is a live GitHub token
-// for a real account, and a boot log gets copied into issues.
-export function identityWarning(token: string | undefined, gated: boolean): string | undefined {
-  if (!token) return undefined;
+// Not a complaint: the operator decided it with `server.api_token`, and this states what
+// that means. It exists because the consequences are invisible from outside: an open
+// deployment answers 200 to callers with no credential, which is intended and also looks
+// the same as a private one until a stranger's document is involved.
+export function accessWarning(gated: boolean): string {
   return (
-    `github.token is this deployment's only identity: every session is owned by that one account and every ` +
-    `issue Iris opens is filed under it, so contributors get no attribution and GET /v1/sessions lists the ` +
-    `deployment's sessions rather than one caller's. Uploads are therefore rate limited by address, not per ` +
-    `user. ` +
+    `Every session belongs to this deployment, so GET /v1/sessions lists all of them and uploads are ` +
+    `rate limited by address. ` +
     (gated
       ? `server.api_token is set, so callers must present it — the demo page cannot be used against this ` +
         `deployment, because it holds no credential.`
-      : `server.api_token is unset, so anyone who can reach this deployment can convert documents and read ` +
-        `any session whose id they have. Set server.api_token to require a shared secret.`)
+      : `server.api_token is unset, so anyone who can reach this deployment can convert documents and list ` +
+        `and read every session. Set server.api_token to require a shared secret.`)
   );
 }
 
@@ -744,19 +665,8 @@ export function normalizeConcurrency(value: unknown): number {
 export function normalizeReviewIterations(value: unknown): number {
   // The same "absent means the default, not zero" trap as the other normalizers —
   // YAML parses a valueless `max_review_iterations:` as null and Number(null) is 0
-  // — but here it has a second failure on top of a bad cap: null flows through
-  // makeAuthMiddleware to upsertUser, whose `= 3` parameter default only fires for
-  // `undefined`, so it reaches a NOT NULL column and the write throws.
-  //
-  // Today that is `500 server_error: This deployment could not record its own identity`,
-  // on the first request that reaches `/v1/me` or `/v1/sessions` — the only two mounts
-  // `auth` is attached to. `/v1/health`, `/v1/stats`, `/v1/limits` and `/v1/quality` keep
-  // answering, which is what makes the typo hard to see: the deployment looks up.
-  // Before #459 the same typo answered
-  // `401 unauthorized: Token validation failed`, because `upsertUser` sat inside the
-  // catch that reported a GitHub refusal — a config typo blamed on the caller's token.
-  // That is why the write has a catch of its own now (auth/middleware.ts). This guard is
-  // what keeps either report from being reached.
+  // — and a null cap reaches the NOT NULL `sessions.iterations_max` column, so every
+  // upload would fail.
   if (value === null || value === undefined) return DEFAULT_MAX_REVIEW_ITERATIONS;
   if (typeof value === "string" && value.trim() === "") return DEFAULT_MAX_REVIEW_ITERATIONS;
   const n = typeof value === "number" ? value : Number(value);
@@ -821,8 +731,6 @@ export function loadConfig(path = process.env.IRIS_CONFIG ?? "config.yaml"): Iri
   // can warn about afterwards).
   parsed.server = parsed.server ?? ({} as IrisConfig["server"]);
   parsed.server.rate_limits = resolveRateLimits(parsed.server.rate_limits);
-  // GitHub host defaults (overridable for GitHub Enterprise / testing).
-  parsed.github.api_base_url = parsed.github.api_base_url || "https://api.github.com";
   // Normalize the extraction concurrency knob once, here, so every consumer can
   // trust it: absent/garbage -> default, out-of-range -> clamped. A deployment
   // that sets 0 or a negative value means "don't parallelize" -> 1.

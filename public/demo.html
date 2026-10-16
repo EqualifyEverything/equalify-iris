@@ -108,8 +108,7 @@
     <div id="live" class="visually-hidden" role="status" aria-live="polite"></div>
 
     <!-- Step 1: upload.
-         There is no sign-in step. The deployment holds one GitHub credential of its own,
-         server-side, so a visitor needs none — see docs/github-auth.md. This section is
+         There is no sign-in step (see docs/access.md). This section is
          therefore visible from the start, and `init()` at the bottom of the script takes it
          away in the one case a browser cannot use this deployment at all: `server.api_token`
          is set, so /v1 needs a shared secret this page does not have. -->
@@ -206,9 +205,8 @@
 
   <script>
     const API = '/v1';
-    // No credential anywhere on this page, deliberately. The deployment authenticates to
-    // GitHub with a token it holds server-side, so there is nothing for a visitor to sign
-    // in with and nothing in localStorage to leak.
+    // No credential anywhere on this page, deliberately. There is no sign-in, so there is
+    // nothing in localStorage to leak.
     let sessionId = null;
     let sourceBase = 'document';
     let currentBlobUrl = null;
@@ -776,14 +774,9 @@
     // ----- Can this page use this deployment at all? -----
     // The upload form is already on screen, so this only ever takes it away. `GET /v1/me` is
     // the probe because it runs the same middleware a real upload does: 200 means the
-    // deployment resolved its GitHub account and accepted a request with no credential, 401
-    // means it did not, and the difference is not knowable from the markup.
-    //
-    // The two 401 causes are told apart by the server's own message rather than guessed at
-    // here — `server.api_token` is set (nothing a browser can supply), or the deployment's
-    // token is refused by GitHub. Both leave the visitor with nothing to do on this page, so
-    // both hide the form; what differs is who has to fix it, which is why the message is
-    // quoted rather than replaced.
+    // deployment accepted a request with no credential, 401 means `server.api_token` is set
+    // (nothing a browser can supply), and the difference is not knowable from the markup.
+    // The server's message is quoted rather than replaced.
     //
     // A thrown fetch (offline, server down) returns early and changes nothing. The form stays
     // usable and the upload reports the failure itself — a page that hid its only control

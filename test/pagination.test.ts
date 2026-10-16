@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import type { SessionCursor } from "../src/store/db.ts";
 import { Store, encodeCursor, pageSessions, parseCursor } from "../src/store/db.ts";
 
@@ -18,8 +19,6 @@ import { Store, encodeCursor, pageSessions, parseCursor } from "../src/store/db.
 // These tests write ties deliberately, because they are what the real workload
 // produces and what no incidental test would generate.
 
-const USER = 4242;
-const OTHER = 99;
 
 function withStore(fn: (store: Store) => void): void {
   const dir = mkdtempSync(join(tmpdir(), "iris-page-"));
@@ -33,11 +32,10 @@ function withStore(fn: (store: Store) => void): void {
 // createSession stamps created_at with Date.now(), so ties are a matter of luck.
 // Set the timestamps explicitly instead: `ts` is the millisecond bucket, and
 // several ids can share one.
-function seed(store: Store, rows: { id: string; ts: string; user?: number; status?: string }[]): void {
+function seed(store: Store, rows: { id: string; ts: string; status?: string }[]): void {
   for (const row of rows) {
     store.createSession({
       session_id: row.id,
-      github_user_id: row.user ?? USER,
       image_count: 1,
       iterations_max: 3,
     });
@@ -62,7 +60,7 @@ function walk(store: Store, limit: number, status?: string): { ids: string[]; pa
   let cursor: SessionCursor | undefined;
   let pages = 0;
   for (;;) {
-    const rows = store.listSessions(USER, { limit: limit + 1, status, cursor });
+    const rows = store.listSessions({ limit: limit + 1, status, cursor });
     const { page, next } = pageSessions(rows, limit);
     pages++;
     ids.push(...page.map((r) => r.session_id));
@@ -148,21 +146,6 @@ test("a status filter pages independently of the unfiltered list", () => {
   });
 });
 
-test("another user's sessions are never reachable by paging", () => {
-  withStore((store) => {
-    // Ownership is enforced in the WHERE clause, and the cursor adds a second
-    // predicate to it. A cursor is not a capability: sharing a millisecond with
-    // someone else's session must not expose it.
-    seed(store, [
-      { id: "ses_mine1", ts: T(0) },
-      { id: "ses_theirs", ts: T(0), user: OTHER },
-      { id: "ses_mine2", ts: T(0) },
-    ]);
-    const { ids } = walk(store, 1);
-    assert.deepEqual(ids, ["ses_mine2", "ses_mine1"]);
-  });
-});
-
 test("a full final page still ends pagination", () => {
   withStore((store) => {
     // 4 rows at limit 2: the second page is full, and the only thing that says
@@ -181,7 +164,7 @@ test("a full final page still ends pagination", () => {
     // came back. Asserting the cursor and not just the page count, because a
     // caller that re-derives this decision instead of using pageSessions is the
     // failure mode — and it is invisible from the row sequence alone.
-    const second = store.listSessions(USER, {
+    const second = store.listSessions({
       limit: 3,
       cursor: { created_at: T(2), session_id: "ses_c" },
     });
@@ -203,10 +186,10 @@ test("a session created mid-pagination does not shift the pages below it", () =>
       { id: "ses_b", ts: T(1) },
       { id: "ses_c", ts: T(2) },
     ]);
-    const first = store.listSessions(USER, { limit: 2, status: undefined, cursor: undefined });
+    const first = store.listSessions({ limit: 2, status: undefined, cursor: undefined });
     assert.deepEqual(first.map((r) => r.session_id), ["ses_c", "ses_b"]);
     seed(store, [{ id: "ses_new", ts: T(9) }]);
-    const rest = store.listSessions(USER, {
+    const rest = store.listSessions({
       limit: 2,
       cursor: { created_at: first[1].created_at, session_id: first[1].session_id },
     });
@@ -234,7 +217,7 @@ test("a legacy bare-timestamp cursor still pages, and does not skip rows", () =>
       { id: "ses_c", ts: T(3) },
       { id: "ses_d", ts: T(5) },
     ]);
-    const rows = store.listSessions(USER, { limit: 10, cursor: parsed! });
+    const rows = store.listSessions({ limit: 10, cursor: parsed! });
     // Strictly older than T(3): the tied rows themselves are excluded, exactly as
     // the old cursor did. Asserting the SKIP, not just that it returns something —
     // ses_b and ses_c are lost on this one request, which is the accepted cost of
@@ -298,9 +281,9 @@ test("every timestamp the store writes round-trips through parseCursor", () => {
   // than asserting against a hand-written pattern.
   withStore((store) => {
     for (let i = 0; i < 5; i++) {
-      store.createSession({ session_id: `ses_${i}`, github_user_id: USER, image_count: 1, iterations_max: 3 });
+      store.createSession({ session_id: `ses_${i}`, image_count: 1, iterations_max: 3 });
     }
-    const rows = store.listSessions(USER, { limit: 10 });
+    const rows = store.listSessions({ limit: 10 });
     assert.equal(rows.length, 5);
     for (const r of rows) {
       const c = { created_at: r.created_at, session_id: r.session_id };
@@ -317,7 +300,7 @@ test("a nonsense limit cannot produce a short page with a cursor", () => {
   // client was never shown.
   withStore((store) => {
     seed(store, Array.from({ length: 8 }, (_, i) => ({ id: `ses_${i}`, ts: T(i) })));
-    const rows = store.listSessions(USER, { limit: 100 });
+    const rows = store.listSessions({ limit: 100 });
     for (const bad of [-5, 0, NaN, 0.4]) {
       const { page, next } = pageSessions(rows, bad);
       assert.equal(page.length, 1, `limit ${bad} should floor to a 1-row page, got ${page.length}`);
@@ -336,10 +319,10 @@ test("a negative limit cannot make the query unbounded", () => {
   withStore((store) => {
     seed(store, Array.from({ length: 8 }, (_, i) => ({ id: `ses_${i}`, ts: T(i) })));
     for (const bad of [-4, -1, 0, NaN]) {
-      const rows = store.listSessions(USER, { limit: bad });
+      const rows = store.listSessions({ limit: bad });
       assert.equal(rows.length, 1, `limit ${bad} returned ${rows.length} rows (expected a floor of 1)`);
     }
-    assert.equal(store.listSessions(USER, { limit: 3 }).length, 3, "a sane limit is untouched");
+    assert.equal(store.listSessions({ limit: 3 }).length, 3, "a sane limit is untouched");
   });
 });
 
@@ -361,50 +344,61 @@ function indexes(store: Store): string[] {
     .map((r) => r.name);
 }
 
-test("the keyset index is created and the prefix index it supersedes is dropped", () => {
+test("the keyset index is the only session index", () => {
   withStore((store) => {
-    // The old (github_user_id, created_at DESC) index is a strict PREFIX of the
-    // keyset one, and nothing orders on that pair alone any more, so keeping it
-    // only costs a b-tree write per session insert.
-    assert.deepEqual(indexes(store), ["idx_sessions_user_page"]);
+    assert.deepEqual(indexes(store), ["idx_sessions_page"]);
   });
 });
 
-test("an existing database is migrated off the two-column index", () => {
-  // The half that matters. `CREATE INDEX IF NOT EXISTS` is a no-op when the name
-  // already exists, so an already-deployed database does not pick up a schema
-  // change by having the CREATE edited — it needs the explicit DROP. Build a
-  // database with the OLD schema, then open it with the current Store.
+test("a database from before #540 keeps every session and loses the GitHub owner", () => {
+  // `CREATE ... IF NOT EXISTS` is a no-op on a table that exists, so an
+  // already-deployed database only changes if the migration changes it. Build one
+  // with the OLD schema, rows and all, then open it with the current Store.
   const dir = mkdtempSync(join(tmpdir(), "iris-mig-"));
   try {
     const path = join(dir, "old.sqlite");
-    const seedStore = new Store(path);
-    (seedStore as unknown as { db: { exec(s: string): void } }).db.exec(
-      `CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(github_user_id, created_at DESC);`,
-    );
-    assert.deepEqual(indexes(seedStore), ["idx_sessions_user", "idx_sessions_user_page"], "precondition");
-    // Reopening runs the migration.
-    const reopened = new Store(path);
-    assert.deepEqual(indexes(reopened), ["idx_sessions_user_page"]);
+    const old = new DatabaseSync(path);
+    old.exec(`
+      CREATE TABLE users (github_user_id INTEGER PRIMARY KEY, github_login TEXT NOT NULL,
+        max_review_iterations INTEGER NOT NULL DEFAULT 3, created_at TEXT NOT NULL);
+      INSERT INTO users VALUES (4242, 'iris-bot', 3, '2026-01-01T00:00:00.000Z');
+      CREATE TABLE sessions (session_id TEXT PRIMARY KEY, github_user_id INTEGER NOT NULL,
+        status TEXT NOT NULL, phase TEXT NOT NULL, iterations_completed INTEGER NOT NULL DEFAULT 0,
+        iterations_max INTEGER NOT NULL DEFAULT 3, image_count INTEGER NOT NULL DEFAULT 0,
+        error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, first_completed_at TEXT);
+      CREATE INDEX idx_sessions_user ON sessions(github_user_id, created_at DESC);
+      CREATE INDEX idx_sessions_user_page ON sessions(github_user_id, created_at DESC, session_id DESC);
+      INSERT INTO sessions (session_id, github_user_id, status, phase, created_at, updated_at) VALUES
+        ('ses_a', 4242, 'closed', 'done', '${T(0)}', '${T(0)}'),
+        -- A second account's row, from an operator who repointed github.token. It is kept.
+        ('ses_b', 99, 'closed', 'done', '${T(1)}', '${T(1)}');
+    `);
+    old.close();
+
+    const store = new Store(path);
+    assert.deepEqual(walk(store, 1).ids, ["ses_b", "ses_a"], "every session is kept and listed");
+    assert.deepEqual(indexes(store), ["idx_sessions_page"]);
+    const db = (store as unknown as { db: DatabaseSync }).db;
+    const cols = (db.prepare(`PRAGMA table_info(sessions)`).all() as { name: string }[]).map((c) => c.name);
+    assert.ok(!cols.includes("github_user_id"), "the owner column is gone");
+    assert.equal(db.prepare(`SELECT name FROM sqlite_master WHERE name = 'users'`).all().length, 0, "the users table is gone");
+    // Opening it again is a no-op, not an error.
+    assert.deepEqual(walk(new Store(path), 1).ids, ["ses_b", "ses_a"]);
+
     // And the paging query still uses an index rather than scanning — dropping the
     // wrong one would be silent, since correctness is unaffected.
-    const plan = (
-      reopened as unknown as { db: { prepare(s: string): { all(...a: unknown[]): { detail: string }[] } } }
-    ).db
-      .prepare(
-        `EXPLAIN QUERY PLAN SELECT * FROM sessions WHERE github_user_id = ?
-         AND (created_at, session_id) < (?, ?) ORDER BY created_at DESC, session_id DESC LIMIT ?`,
-      )
-      .all(1, "x", "y", 2)
+    const plan = (db.prepare(
+      `EXPLAIN QUERY PLAN SELECT * FROM sessions WHERE 1
+       AND (created_at, session_id) < (?, ?) ORDER BY created_at DESC, session_id DESC LIMIT ?`,
+    ).all("x", "y", 2) as { detail: string }[])
       .map((r) => r.detail)
       .join(" ");
-    assert.match(plan, /SEARCH sessions USING INDEX idx_sessions_user_page/, `expected an index seek, got: ${plan}`);
+    assert.match(plan, /SEARCH sessions USING INDEX idx_sessions_page/, `expected an index seek, got: ${plan}`);
     assert.doesNotMatch(plan, /SCAN sessions/, `expected no table scan, got: ${plan}`);
     // And it is NOT a covering-index seek, because the real query is `SELECT *`:
     // the row is fetched from the table either way, and the index earns its keep
     // by bounding which rows are visited. Asserted because the comment in
-    // listSessions says so, and the plan for a projection over indexed columns
-    // alone DOES say COVERING — which is how that comment came to be wrong.
+    // listSessions says so.
     assert.doesNotMatch(plan, /COVERING/, `SELECT * cannot be covered by this index: ${plan}`);
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -416,4 +410,25 @@ test("a session_id containing the separator does not truncate the cursor", () =>
   // last keeps a weird id from silently becoming a different, valid cursor.
   const c = { created_at: T(0), session_id: "ses_a|b" };
   assert.deepEqual(parseCursor(encodeCursor(c)), c);
+});
+
+test("a current database opens while another process holds the write lock", () => {
+  // A normal boot has nothing to migrate, so it must take no lock. Before the fix it
+  // took one on every boot, before busy_timeout was set, and threw "database is locked".
+  const dir = mkdtempSync(join(tmpdir(), "iris-lock-"));
+  try {
+    const path = join(dir, "iris.sqlite");
+    new Store(path).createSession({ session_id: "ses_a", iterations_max: 3, image_count: 1 });
+    const other = new DatabaseSync(path);
+    other.exec("BEGIN IMMEDIATE");
+    other.exec(`UPDATE sessions SET updated_at = updated_at`);
+    try {
+      assert.deepEqual(walk(new Store(path), 1).ids, ["ses_a"]);
+    } finally {
+      other.exec("ROLLBACK");
+      other.close();
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

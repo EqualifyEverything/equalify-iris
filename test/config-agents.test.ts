@@ -520,7 +520,7 @@ function unclosedBoldRuns(doc: string): string[] {
 // Every measurement document, not just the one the defect happened in. They are all the same kind of
 // writing — bold lead-ins on nearly every paragraph, tables whose emphasis lands on whichever figure
 // moved — so they fail the same way. `docs/design-notes.md`, `docs/ci.md`,
-// `docs/verifier-calibration.md` and `docs/github-auth.md` are in the loop because they are ~1,950
+// `docs/verifier-calibration.md` and `docs/access.md` (then `github-auth.md`) are in the loop because they are ~1,950
 // lines lifted out of README.md, written in exactly this style, and a move is the commit where a `**`
 // run gets cut in half.
 //
@@ -896,7 +896,7 @@ test("no two headings in one doc slug the same", () => {
 // A cross-reference that does not resolve is the failure mode of moving prose between files, and it
 // is silent: GitHub renders a dead relative link as a link, and a dead `#anchor` scrolls nowhere.
 // The commit that split ~1,950 lines out of README.md into docs/design-notes.md, docs/ci.md,
-// docs/verifier-calibration.md and docs/github-auth.md rewrote 11 pointers and created 18 anchors,
+// docs/verifier-calibration.md and docs/github-auth.md (now docs/access.md) rewrote 11 pointers and created 18 anchors,
 // none of which any other gate reads.
 //
 // Anchors are checked as well as paths because the paths were the easy half. Two of the pointers
