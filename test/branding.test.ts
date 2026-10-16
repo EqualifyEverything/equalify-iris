@@ -53,6 +53,10 @@ test("a logo with no alt text is shown, and startup says it has none (#553)", ()
   assert.equal(brand.logo?.alt, "");
   assert.match(brand.warning ?? "", /logo_alt is not set/);
   assert.match(brandDemo(demoHtml, brand), /<img class="brand-logo" [^>]*alt="">/);
+  // Alt text with no logo is a mistake too.
+  const altOnly = loadBrand(cfg({ logo_alt: "UIC" }));
+  assert.equal(altOnly.logo, undefined);
+  assert.match(altOnly.warning ?? "", /logo_file is not/);
 });
 
 test("a logo that cannot be used is dropped with a warning", () => {

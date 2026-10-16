@@ -17,7 +17,8 @@ const LOGO_TYPES: Record<string, string> = {
 export interface Brand {
   name: string;
   logo?: { type: string; bytes: Buffer; hash: string; alt: string };
-  // Set when the logo is configured but cannot be used. Startup prints it.
+  // Set when a branding value is wrong or incomplete. Startup prints it. The logo may still
+  // be shown: `logo` says whether it is.
   warning?: string;
 }
 
@@ -26,8 +27,8 @@ export interface Brand {
 export function loadBrand(cfg: IrisConfig): Brand {
   const name = cfg.branding?.name?.trim() || DEFAULT_NAME;
   const file = cfg.branding?.logo_file?.trim();
-  if (!file) return { name };
   const alt = cfg.branding?.logo_alt?.trim() ?? "";
+  if (!file) return alt ? { name, warning: `WARNING: branding.logo_alt is set but logo_file is not; showing no logo.` } : { name };
   const type = LOGO_TYPES[extname(file).toLowerCase()];
   if (!type) return { name, warning: `WARNING: branding.logo_file must be .png, .jpg or .webp; showing no logo.` };
   try {
