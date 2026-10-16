@@ -454,7 +454,7 @@ jobs:
           #                        to read changed CI code in full, so it has to be
           #                        here or that instruction has nothing to read.
           # Matched as path prefixes against the changed-file list below.
-          ALWAYS_INCLUDE_PATHS="src/auth/ src/github/ src/providers/ src/store/paths.ts src/pipeline/ src/routes/sessions.ts src/config.ts .github/scripts/"
+          ALWAYS_INCLUDE_PATHS="src/auth/ src/providers/ src/store/paths.ts src/pipeline/ src/routes/sessions.ts src/config.ts .github/scripts/"
 
           {
             echo "# Review context"
