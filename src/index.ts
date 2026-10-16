@@ -1,5 +1,5 @@
 import express from "express";
-import { accessSync, constants, existsSync, mkdirSync, realpathSync } from "node:fs";
+import { accessSync, constants, existsSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -24,6 +24,7 @@ import { errorHandler, notFound } from "./routes/errors.ts";
 import { visionModelWarning } from "./providers/imageLimits.ts";
 import { generalRateLimit } from "./util/requestLimits.ts";
 import { VERSION } from "./version.ts";
+import { brandDemo, loadBrand } from "./branding.ts";
 
 const cfg = loadConfig();
 
@@ -306,11 +307,25 @@ app.use("/v1/quality", qualityRouter(store, cfg.server));
 
 // The browser app is the front door, served at the root (unauthenticated; it
 // drives the /v1 API itself). no-store so a deploy never serves a stale page.
-const demoFile = fileURLToPath(new URL("../public/demo.html", import.meta.url));
+const brand = loadBrand(cfg);
+if (brand.warning) console.warn(brand.warning);
+const demoHtml = brandDemo(
+  readFileSync(fileURLToPath(new URL("../public/demo.html", import.meta.url)), "utf8"),
+  brand,
+);
 app.get("/", (_req, res) => {
   res.set("Cache-Control", "no-store");
-  res.sendFile(demoFile);
+  res.type("html").send(demoHtml);
 });
+if (brand.logo) {
+  const logo = brand.logo;
+  app.get("/brand-logo", (_req, res) => {
+    // The page links it with ?v=<hash>, so a changed logo gets a new URL.
+    res.set("Cache-Control", "public, max-age=31536000, immutable");
+    res.set("X-Content-Type-Options", "nosniff");
+    res.type(logo.type).send(logo.bytes);
+  });
+}
 // Keep the old /demo path working for any shared links.
 app.get("/demo", (_req, res) => res.redirect(302, "/"));
 
