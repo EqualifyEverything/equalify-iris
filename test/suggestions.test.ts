@@ -140,3 +140,19 @@ test("no session id reaches a public issue, and a name cannot break the section"
   });
   assert.doesNotMatch(update, /ses_secret2/);
 });
+
+test("a diff that contains the end marker is still replaced whole", () => {
+  const g = { agent: "page.md", lesson_slug: "x", count: 1, sessions: 1, first_seen: "", last_seen: "" };
+  const v1 = script.withSection("Top.", script.updateSection({ ...g, latest: { summary: "v1", diff_preview: "+ <!-- iris-suggestions:end -->\n+ old tail" } }));
+  const v2 = script.withSection(v1 + "\n\nBelow.", script.updateSection({ ...g, latest: { summary: "v2" } }));
+  assert.doesNotMatch(v2, /old tail/);
+  assert.match(v2, /^Top\.[\s\S]*v2[\s\S]*Below\.$/);
+});
+
+test("a row read back keeps its lesson, so writing it again does not collapse two lessons", () =>
+  withStore((store) => {
+    const u = (lesson: string): SuggestionRow => ({ kind: "agent_update", agent: "page.md", session_id: "s1", lesson, detail: { lesson_slug: lesson } });
+    store.addSuggestions([u("a"), u("b")]);
+    store.addSuggestions(store.listSuggestions());
+    assert.deepEqual(store.listSuggestions().map((r) => r.lesson), ["a", "b"]);
+  }));

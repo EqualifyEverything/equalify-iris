@@ -43,12 +43,13 @@ export function issueKeys(issue) {
   return k ? [k] : [];
 }
 
-// Replace the section Iris owns, or add it at the end.
+// Replace the section Iris owns, or add it at the end. The last END closes it: a diff
+// preview is the model's text, verbatim, and may contain the marker.
 export function withSection(body, section) {
   const block = `${START}\n${section}\n${END}`;
   const s = body ?? "";
   const a = s.indexOf(START);
-  const b = s.indexOf(END);
+  const b = s.lastIndexOf(END);
   if (a >= 0 && b > a) return s.slice(0, a) + block + s.slice(b + END.length);
   return s ? `${s}\n\n${block}` : block;
 }

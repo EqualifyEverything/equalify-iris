@@ -1453,11 +1453,11 @@ export class Store {
   listSuggestions(): SuggestionRow[] {
     const rows = this.db
       .prepare(
-        `SELECT kind, agent, session_id, page, reason, detail, recorded_at
+        `SELECT kind, agent, session_id, page, lesson, reason, detail, recorded_at
          FROM suggestions ORDER BY recorded_at, rowid`,
       )
       .all() as {
-      kind: SuggestionKind; agent: string; session_id: string; page: string;
+      kind: SuggestionKind; agent: string; session_id: string; page: string; lesson: string;
       reason: string | null; detail: string | null; recorded_at: string;
     }[];
     return rows.map((r) => ({
@@ -1465,6 +1465,7 @@ export class Store {
       agent: r.agent,
       session_id: r.session_id,
       page: r.page,
+      lesson: r.lesson,
       reason: r.reason,
       detail: r.detail === null ? null : JSON.parse(r.detail),
       recorded_at: r.recorded_at,
