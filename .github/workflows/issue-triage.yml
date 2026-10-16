@@ -476,7 +476,6 @@ jobs:
             echo '```'
             echo "agents/        content-agent library — these markdown files ARE the prompts"
             echo "src/pipeline   extraction -> assembly -> review"
-            echo "src/github     upstream issue filing, including the exact-title dedupe"
             echo "docs/          API documentation"
             echo '```'
           } >> "$OUT"

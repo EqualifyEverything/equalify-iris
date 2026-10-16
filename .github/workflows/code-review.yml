@@ -454,7 +454,7 @@ jobs:
           #                        to read changed CI code in full, so it has to be
           #                        here or that instruction has nothing to read.
           # Matched as path prefixes against the changed-file list below.
-          ALWAYS_INCLUDE_PATHS="src/auth/ src/github/ src/providers/ src/store/paths.ts src/pipeline/ src/routes/sessions.ts src/config.ts .github/scripts/"
+          ALWAYS_INCLUDE_PATHS="src/auth/ src/providers/ src/store/paths.ts src/pipeline/ src/routes/sessions.ts src/config.ts .github/scripts/"
 
           {
             echo "# Review context"
@@ -748,7 +748,7 @@ jobs:
             echo
             echo "Files changed by less than ${MIN_CHANGED_PCT}% of their lines are omitted here —"
             echo "their hunks are in the diff above, and the reviewer can Read them on demand."
-            echo "High-risk paths (auth, github, providers, pipeline, session routes, config)"
+            echo "High-risk paths (auth, providers, pipeline, session routes, config)"
             echo "are always included in full, however small the change."
           } >> "$OUT"
 
