@@ -39,7 +39,7 @@ tagged_pdf:
   timeout_seconds: 300
 
 # Optional: the demo page's name and logo. Blank shows "Equalify Iris" with no logo.
-# The logo is a .png, .jpg, .webp or .svg file, shown left of the name.
+# The logo is a .png, .jpg or .webp file, shown left of the name.
 branding:
   name: ${IRIS_BRAND_NAME}
   logo_file: ${IRIS_BRAND_LOGO}

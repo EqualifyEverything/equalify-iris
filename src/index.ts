@@ -320,7 +320,8 @@ app.get("/", (_req, res) => {
 if (brand.logo) {
   const logo = brand.logo;
   app.get("/brand-logo", (_req, res) => {
-    res.set("Cache-Control", "public, max-age=3600");
+    // The page links it with ?v=<hash>, so a changed logo gets a new URL.
+    res.set("Cache-Control", "public, max-age=31536000, immutable");
     res.set("X-Content-Type-Options", "nosniff");
     res.type(logo.type).send(logo.bytes);
   });
