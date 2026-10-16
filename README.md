@@ -14,7 +14,8 @@ Design constraints:
 
 - **Content only.** No CSS and no visual layout: a two-column page becomes linear, semantic HTML.
   Styling is left to the tools that use Iris, such as the
-  [WordPress plugin](https://github.com/EqualifyEverything/equalify-iris-wp).
+  [WordPress plugin](https://github.com/EqualifyEverything/equalify-iris-wp) and the
+  [Drupal module](https://github.com/oshrizak/equalify-iris-drupal).
 - **Runs on one machine.** A laptop or a self-hosted box is enough, with no cloud account. The model
   provider, database and file store can each be swapped in the config.
 - **One GitHub identity, and no sign-in.** Iris files every session's contributions with one token
