@@ -41,7 +41,7 @@ const TOKEN =
 const CLOSES_CONTENTS = new Set(["p", "li", "dt", "dd", "td", "th", "tr", "thead", "tbody", "tfoot", "caption", "option", "optgroup"]);
 
 const CONTAINERS = new Set(["ul", "ol", "dl", "menu", "table", "select", "datalist"]);
-const CLOSES_OWN_KIND = new Set(["a", "button", "nobr"]);
+const CLOSES_OWN_KIND = new Set(["a", "button", "nobr", "form", "select"]);
 const HEADINGS = new Set(["h1", "h2", "h3", "h4", "h5", "h6"]);
 
 // The estimated nesting depth of `html`. Stops counting once past `limit`.
@@ -80,8 +80,8 @@ export function sourceDepth(html: string, limit = Infinity): number {
     // can only count low.
     if (UNCOUNTED.has(name) || (!end && m[0].endsWith("/>"))) continue;
     if (!end) {
-      // A new `<a>`, `<button>` or `<nobr>` closes the one still open, and a heading closes a
-      // heading left open directly above it, so `<a>x<a>y` and `<h2>x<h2>y` are not nested.
+      // A new element in CLOSES_OWN_KIND closes or replaces the open one, and a heading closes
+      // a heading left open directly above it, so `<a>x<a>y` and `<h2>x<h2>y` are not nested.
       if (CLOSES_OWN_KIND.has(name) && open.get(name)) closeTo(stack.lastIndexOf(name));
       else if (HEADINGS.has(name) && HEADINGS.has(stack.at(-1) ?? "")) closeTo(stack.length - 1);
       stack.push(name);

@@ -30,6 +30,8 @@ test("plain nesting is counted exactly, and ordinary markup does not look deep",
   assert.equal(sourceDepth("<h2>x".repeat(5000)), 1);
   assert.equal(sourceDepth("<button>x".repeat(5000)), 1);
   assert.equal(sourceDepth("<nobr>x".repeat(5000)), 1);
+  assert.equal(sourceDepth("<form>x".repeat(5000)), 1);
+  assert.equal(sourceDepth("<select>x".repeat(5000)), 1);
   // A nested list does not close the item it sits in.
   assert.equal(sourceDepth("<ul><li><ul><li><ul><li>x</ul></ul></ul>"), 3);
   // Tag names are case-insensitive, so `</DIV>` closes `<div>`.
