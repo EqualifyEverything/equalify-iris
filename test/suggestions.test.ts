@@ -104,11 +104,12 @@ test("an issue's keys come from its list, or from an old title", () => {
 });
 
 test("a section records its keys and a reason cannot close it", () => {
-  const groups = groupSuggestions([row("mapAgent", "s1", "p1.png", "a map --> <!-- trick")]).new_agents;
+  const groups = groupSuggestions([row("mapAgent", "s1", "p1.png", "a map --> --!> <!<!---->-- <b>trick")]).new_agents;
   const section = script.newAgentSection(["map"], groups);
   assert.match(section, /<!-- iris-suggestion-keys: map -->/);
   assert.match(section, /Asked for 1 time,/);
-  assert.equal(section.match(/-->/g)?.length, 1, "only the keys marker closes a comment");
+  const rest = section.replace("<!-- iris-suggestion-keys: map -->", "");
+  assert.doesNotMatch(rest, /[<>]/, "only the keys marker has an angle bracket");
 });
 
 test("the model's grouping reply is checked against the keys it was given", () => {

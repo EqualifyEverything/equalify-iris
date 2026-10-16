@@ -56,8 +56,9 @@ export function withSection(body, section) {
 // A table cell: one line, no pipes or backticks to break the table.
 const cell = (s) => quote(s).replace(/[|`]/g, "");
 const day = (iso) => (iso || "").slice(0, 10);
-// Model text, one line, and unable to close the section Iris owns.
-const quote = (s) => s.replace(/<!--|-->/g, "").replace(/\s+/g, " ").trim();
+// Model text, one line, with no angle brackets, so it can open no tag or comment and close
+// no section. Stripping only `<!--` once is not enough: `<!<!---->--` rebuilds it.
+const quote = (s) => s.replace(/[<>]/g, "").replace(/\s+/g, " ").trim();
 
 export function newAgentSection(keys, groups) {
   const mine = groups.filter((g) => keys.includes(g.key));
