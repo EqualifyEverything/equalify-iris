@@ -1,5 +1,7 @@
 import type { Capability, IrisConfig, ProviderBlock } from "../config.ts";
 import { BedrockProvider } from "./bedrock.ts";
+import { GeminiProvider } from "./gemini.ts";
+import { OllamaProvider } from "./ollama.ts";
 import { OpenRouterProvider } from "./openrouter.ts";
 import type {
   CompletionResult,
@@ -67,6 +69,12 @@ export class ProviderRouter {
     switch (name) {
       case "openrouter":
         provider = new OpenRouterProvider(block);
+        break;
+      case "gemini":
+        provider = new GeminiProvider(block);
+        break;
+      case "ollama":
+        provider = new OllamaProvider(block);
         break;
       case "bedrock":
         provider = new BedrockProvider(block);
@@ -205,6 +213,83 @@ export class ProviderRouter {
       });
       return result;
     } catch (e) {
+      const msg = (e instanceof Error ? e.message : String(e)).toLowerCase();
+      const isQuotaOrRateLimit =
+        msg.includes("429") ||
+        msg.includes("quota") ||
+        msg.includes("resource has been exhausted") ||
+        msg.includes("rate limit") ||
+        msg.includes("free tier");
+
+      const primaryBlock = this.cfg[providerName] as ProviderBlock | undefined;
+      const fallbackProviderName =
+        primaryBlock?.fallback ??
+        (this.cfg.fallback as string | undefined) ??
+        (providerName !== "ollama" && this.cfg.ollama ? "ollama" : undefined);
+
+      if (fallbackProviderName && fallbackProviderName !== providerName && isQuotaOrRateLimit) {
+        this.onEvent?.("provider_failover", {
+          agent: agentName,
+          step: opts.step,
+          capability,
+          from_provider: providerName,
+          from_model: model,
+          to_provider: fallbackProviderName,
+          reason: (e as Error).message,
+        });
+
+        const fallbackResolution = resolveAgentModel(
+          { ...this.cfg, default: fallbackProviderName, per_agent: {} },
+          agentName,
+          capability,
+        );
+        const fallbackProvider = this.build(fallbackResolution.provider);
+        const fallbackMeta = {
+          agent: agentName,
+          step: opts.step,
+          capability,
+          model: fallbackResolution.model,
+          provider: fallbackResolution.provider,
+          ...(fallbackProvider.dialect ? { api: fallbackProvider.dialect } : {}),
+          ...(opts.maxOutputTokens !== undefined ? { max_output_tokens: opts.maxOutputTokens } : {}),
+        };
+        this.onEvent?.("model_call_start", fallbackMeta);
+        const fallbackStartedAt = Date.now();
+        let fallbackUsage: Usage | undefined;
+        try {
+          const fallbackResult = await fallbackProvider.complete({
+            capability,
+            messages,
+            model: fallbackResolution.model,
+            images: opts.images,
+            schema: opts.schema,
+            maxOutputTokens: opts.maxOutputTokens,
+            onUsage: (u) => {
+              fallbackUsage = u;
+            },
+            onNote,
+          });
+          this.onEvent?.("model_call", {
+            ...fallbackMeta,
+            duration_ms: Date.now() - fallbackStartedAt,
+            ok: true,
+            ...(fallbackResult.usage ?? fallbackUsage ?? {}),
+            ...ceiling(),
+          });
+          return fallbackResult;
+        } catch (fbErr) {
+          this.onEvent?.("model_call", {
+            ...fallbackMeta,
+            duration_ms: Date.now() - fallbackStartedAt,
+            ok: false,
+            error: (fbErr as Error).message,
+            ...(fallbackUsage ?? {}),
+            ...ceiling(),
+          });
+          throw fbErr;
+        }
+      }
+
       this.onEvent?.("model_call", {
         ...meta,
         duration_ms: Date.now() - startedAt,

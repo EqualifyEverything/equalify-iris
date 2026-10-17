@@ -37,6 +37,10 @@ const BASE64_CAP_BY_PROVIDER: Record<string, number> = {
   // Amazon Bedrock and Google Cloud allow half of what the Claude API does (5 MB vs
   // 10 MB per image).
   bedrock: 5 * 1024 * 1024,
+  // Google Gemini allows up to 20 MB per image request.
+  gemini: 20 * 1024 * 1024,
+  // Ollama local inference supports large image payloads (up to 20 MB).
+  ollama: 20 * 1024 * 1024,
   // OpenRouter is a broker: it forwards Claude traffic to upstreams it chooses,
   // Bedrock and Vertex among them, and does not tell us which one served a request.
   // So the stricter of the two documented caps is the only one that can be relied on

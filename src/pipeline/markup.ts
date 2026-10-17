@@ -98,6 +98,7 @@ const BALANCED_ELEMENTS = [
   "div",
   "label",
   "a",
+  "math",
 ];
 
 export interface MarkupReport {

@@ -2194,7 +2194,7 @@ test("the no-invented-link rule holds on a page with no link annotations at all"
 // fifth bullet and leaving "Four" in place would have the prompt miscount itself.
 test("the explicit-structures list agrees with the count that introduces it", () => {
   const prompt = section("System prompt")!;
-  const NUMBERS: Record<string, number> = { Two: 2, Three: 3, Four: 4, Five: 5, Six: 6, Seven: 7, Eight: 8, Nine: 9, Ten: 10, Eleven: 11, Twelve: 12, Thirteen: 13, Fourteen: 14 };
+  const NUMBERS: Record<string, number> = { Two: 2, Three: 3, Four: 4, Five: 5, Six: 6, Seven: 7, Eight: 8, Nine: 9, Ten: 10, Eleven: 11, Twelve: 12, Thirteen: 13, Fourteen: 14, Fifteen: 15 };
   const intro = prompt.match(/(\w+) structures are easy to render/);
   assert.ok(intro, "page.md no longer introduces the list of explicit structures");
   const claimed = NUMBERS[intro![1]];

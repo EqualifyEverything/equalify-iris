@@ -7,6 +7,7 @@ import { joinContinuedTables } from "./tables.ts";
 import { joinPageBreakProse, type ProseJoinReport } from "./prose.ts";
 import { joinBrokenWords, type JoinedWord } from "./hyphens.ts";
 import { stripPositionalMarkers, type MarkerReport } from "./markers.ts";
+import { enrichMathNavigation } from "./mathNav.ts";
 import type { Fragment } from "./fragment.ts";
 import type { PipelineContext } from "./context.ts";
 
@@ -565,7 +566,7 @@ export function wrapDocument(
   // title's text with the uploaded file's name, whose language nobody here can vouch for, and drops
   // the attribute with it (`titledAs`, util/outputNames.ts).
   const titleLang = /^en(?:-|$)/i.test(lang) ? "" : ` lang="en"`;
-  return `<!DOCTYPE html>
+  const rawDoc = `<!DOCTYPE html>
 <html lang="${lang}">
 <head>
   <meta charset="utf-8">
@@ -578,6 +579,7 @@ ${body}
 </body>
 </html>
 `;
+  return enrichMathNavigation(rawDoc);
 }
 
 export async function runAssembly(
