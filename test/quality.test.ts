@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createHash } from "node:crypto";
+import { uploadSha256 } from "../src/routes/sessions.ts";
 import {
   LINT_ERROR_WHERE,
   lintErrorWhereSignal,
@@ -863,9 +865,11 @@ test("nothing per-session, per-user or per-document is exposed", () => {
       [
         "documents",
         "documents_linted",
+        "documents_unhashed",
         "editor_headings_gated_rate",
         "editor_truncated_lost_rate",
         "editor_truncated_rate",
+        "files",
         "first_read",
         "links_dropped_rate",
         "links_unresolved_rate",
@@ -1157,4 +1161,54 @@ test("a duplicated code within one call is merged rather than aborting the write
     assert.equal(q.rules[0].documents, 1, "still one document");
     assert.equal(q.rules[0].nodes, 5, "and the node counts are summed");
   });
+});
+
+test("documents are also counted as distinct uploaded files (#509)", () => {
+  withStore((store) => {
+    // Three uploads of one file and one of another: 4 documents, 2 files.
+    for (const [id, sha] of [["ses_a", "aa"], ["ses_b", "aa"], ["ses_c", "aa"], ["ses_d", "bb"]]) {
+      store.createSession({ session_id: id, image_count: 1, iterations_max: 1, source_sha256: sha });
+      delivered(store, id);
+    }
+    // A session from before the column has no hash. It is a document, but not a file we can count.
+    store.createSession({ session_id: "ses_old", image_count: 1, iterations_max: 1 });
+    delivered(store, "ses_old");
+    const q = store.qualityStats();
+    assert.equal(q.documents, 5);
+    assert.equal(q.files, 2);
+    assert.equal(q.documents_unhashed, 1);
+  });
+});
+
+test("an empty deployment counts no files", () => {
+  withStore((store) => {
+    const q = store.qualityStats();
+    assert.equal(q.files, 0);
+    assert.equal(q.documents_unhashed, 0);
+  });
+});
+
+test("one file's hash is its own sha256, so `shasum -a 256` finds it", () => {
+  const a = Buffer.from("first file");
+  const b = Buffer.from("second file");
+  const sha = (x: string | Buffer) => createHash("sha256").update(x).digest("hex");
+  assert.equal(uploadSha256([{ buffer: a }]), sha(a));
+  // Several files: the hash of their hashes, in upload order.
+  assert.equal(uploadSha256([{ buffer: a }, { buffer: b }]), sha(`${sha(a)}\n${sha(b)}`));
+  assert.notEqual(uploadSha256([{ buffer: a }, { buffer: b }]), uploadSha256([{ buffer: b }, { buffer: a }]));
+});
+
+test("an already-deployed database gains the hash column", () => {
+  const dir = mkdtempSync(join(tmpdir(), "iris-quality-mig-"));
+  try {
+    const path = join(dir, "old.sqlite");
+    const raw = (new Store(path) as unknown as { db: { exec(s: string): void } }).db;
+    raw.exec(`ALTER TABLE sessions DROP COLUMN source_sha256;`);
+    const reopened = new Store(path);
+    reopened.createSession({ session_id: "ses_new", image_count: 1, iterations_max: 1, source_sha256: "cc" });
+    delivered(reopened, "ses_new");
+    assert.equal(reopened.qualityStats().files, 1);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

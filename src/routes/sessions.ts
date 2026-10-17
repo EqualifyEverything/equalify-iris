@@ -3,6 +3,7 @@ import type { Request, Response, NextFunction } from "express";
 import multer from "multer";
 import { writeFileSync, readFileSync, existsSync, rmSync, statSync } from "node:fs";
 import { extname, join } from "node:path";
+import { createHash } from "node:crypto";
 import { ulid } from "ulid";
 import type { IrisConfig } from "../config.ts";
 import type { Store, SessionRecord } from "../store/db.ts";
@@ -142,6 +143,13 @@ export function keepSourcePdf(
   if (!taggedPdfCommand(cfg) || files.length !== 1 || !PDF_EXT.test(files[0].originalname)) return false;
   writeFileSync(paths.sessionSourcePdf(sessionId), files[0].buffer);
   return true;
+}
+
+// What `sessions.source_sha256` stores (#509). One file: its own sha256. Several: the sha256 of
+// their hex digests, one per line, in upload order.
+export function uploadSha256(files: { buffer: Buffer }[]): string {
+  const digests = files.map((f) => createHash("sha256").update(f.buffer).digest("hex"));
+  return digests.length === 1 ? digests[0] : createHash("sha256").update(digests.join("\n")).digest("hex");
 }
 
 // The kept PDF's form fields, by page, so the page agent can name each control after its
@@ -477,6 +485,7 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
       session_id: sessionId,
       image_count: pages.length,
       iterations_max: maxIter,
+      source_sha256: uploadSha256(files),
     });
 
     // Queue the pipeline; clients poll GET /v1/sessions/{id}. The session stays

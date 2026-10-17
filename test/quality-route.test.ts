@@ -32,6 +32,8 @@ function fakeStore(): { store: Store; state: { calls: number; days: number[] } }
       return {
         window_days: w,
         documents: 10,
+        files: 9,
+        documents_unhashed: 0,
         since: "2026-01-01T00:00:00.000Z",
         mean_rounds: 1.5,
         unresolved_rate: 0.1,

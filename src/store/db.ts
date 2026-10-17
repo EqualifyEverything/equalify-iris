@@ -47,13 +47,18 @@ export interface SessionRecord {
   // `queued` and then possibly to `failed`; counting on status alone would make
   // the public number dip every time someone asked Iris to try again.
   first_completed_at: string | null;
+  // sha256 of what was uploaded, so the quality tally can count distinct uploads, not just
+  // sessions (#509). One file: that file's own hash, which `shasum -a 256` reproduces. Several:
+  // the hash of their hashes, in upload order. Null on sessions from before the column. Never
+  // served: the session routes pick their fields.
+  source_sha256: string | null;
 }
 
 // What a caller may change about a session. `first_completed_at` is omitted
 // alongside the immutable identity/creation fields: it is derived from the
 // status transition itself, so no handler needs to (or gets to) set it by hand.
 export type SessionPatch = Partial<
-  Omit<SessionRecord, "session_id" | "created_at" | "first_completed_at">
+  Omit<SessionRecord, "session_id" | "created_at" | "first_completed_at" | "source_sha256">
 >;
 
 // The sort key `GET /v1/sessions` pages on. Both halves are required: session
@@ -499,7 +504,12 @@ export interface RunSignal {
 // prose about someone's document, which is why only its COUNT is here.
 export interface QualityStats {
   window_days: number;
+  // Every count and rate here is per SESSION. A file uploaded three times is three documents.
   documents: number;
+  // How many distinct uploads those documents came from, by `sessions.source_sha256` (#509).
+  // Sessions from before that column are not in it; `documents_unhashed` counts them.
+  files: number;
+  documents_unhashed: number;
   since: string | null;
   // Mean EDITOR passes per document — the loop returns as soon as the Reader finds
   // nothing, so a document that reads clean on the first look contributes 0, and 0 is
@@ -828,7 +838,9 @@ export class Store {
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         -- Nullable and write-once; see SessionRecord and addCompletionColumn.
-        first_completed_at TEXT
+        first_completed_at TEXT,
+        -- Set once, at upload; see SessionRecord.
+        source_sha256 TEXT
       );
       -- Matches the compound keyset order listSessions pages on, exactly. A new
       -- NAME, because CREATE INDEX IF NOT EXISTS is a no-op when the name already
@@ -885,9 +897,11 @@ export class Store {
         UNIQUE (kind, session_id, agent, page, lesson)
       );
     `);
-    // ...and the column the CREATE TABLE above cannot add to a database that
+    // ...and the columns the CREATE TABLE above cannot add to a database that
     // already has a sessions table.
     this.addCompletionColumn();
+    // No backfill: an old session keeps its page images, not the file that was uploaded.
+    this.addColumn("source_sha256", `ALTER TABLE sessions ADD COLUMN source_sha256 TEXT;`);
   }
 
   /**
@@ -934,17 +948,22 @@ export class Store {
    * statement on the same footing as the IF NOT EXISTS block above it.
    */
   private addCompletionColumn(): void {
+    this.addColumn(
+      "first_completed_at",
+      `ALTER TABLE sessions ADD COLUMN first_completed_at TEXT;
+       UPDATE sessions SET first_completed_at = updated_at
+        WHERE status IN ('ready_for_review', 'closed');`,
+    );
+  }
+
+  // Run `ddl` to add a sessions column unless it exists. Wrapped, for the reason given on
+  // addCompletionColumn: a second process can add it first.
+  private addColumn(name: string, ddl: string): void {
     const hasColumn = (): boolean =>
-      (this.db.prepare(`PRAGMA table_info(sessions)`).all() as { name: string }[]).some(
-        (c) => c.name === "first_completed_at",
-      );
+      (this.db.prepare(`PRAGMA table_info(sessions)`).all() as { name: string }[]).some((c) => c.name === name);
     if (hasColumn()) return;
     try {
-      this.db.exec(`
-        ALTER TABLE sessions ADD COLUMN first_completed_at TEXT;
-        UPDATE sessions SET first_completed_at = updated_at
-         WHERE status IN ('ready_for_review', 'closed');
-      `);
+      this.db.exec(ddl);
     } catch (e) {
       if (!hasColumn()) throw e;
     }
@@ -1042,15 +1061,16 @@ export class Store {
     session_id: string;
     image_count: number;
     iterations_max: number;
+    source_sha256?: string | null;
   }): SessionRecord {
     const now = new Date().toISOString();
     this.db
       .prepare(
         `INSERT INTO sessions
-         (session_id, status, phase, iterations_completed, iterations_max, image_count, error, created_at, updated_at)
-         VALUES (?, 'queued', 'extraction', 0, ?, ?, NULL, ?, ?)`,
+         (session_id, status, phase, iterations_completed, iterations_max, image_count, error, created_at, updated_at, source_sha256)
+         VALUES (?, 'queued', 'extraction', 0, ?, ?, NULL, ?, ?, ?)`,
       )
-      .run(s.session_id, s.iterations_max, s.image_count, now, now);
+      .run(s.session_id, s.iterations_max, s.image_count, now, now, s.source_sha256 ?? null);
     return this.getSession(s.session_id)!;
   }
 
@@ -1479,6 +1499,17 @@ export class Store {
       .get(SIGNAL_ROUNDS, cutoff) as { documents: number; rounds: number; since: string | null };
     const documents = Number(base.documents);
 
+    // The same documents, by the file that was uploaded. LEFT JOIN, so a signal whose session
+    // row is gone counts as unhashed rather than vanishing.
+    const uploads = this.db
+      .prepare(
+        `SELECT COUNT(DISTINCT s.source_sha256) AS files,
+                COALESCE(SUM(s.source_sha256 IS NULL), 0) AS unhashed
+           FROM run_signals r LEFT JOIN sessions s ON s.session_id = r.session_id
+          WHERE r.code = ? AND r.recorded_at >= ?`,
+      )
+      .get(SIGNAL_ROUNDS, cutoff) as { files: number; unhashed: number };
+
     // The Reader's yield, which needs a SUM and a COUNT of its own rather than the document
     // counts `ours` below holds: this is the only `iris:` row whose magnitude is averaged, and
     // its denominator is the documents that recorded it rather than the window's (see
@@ -1543,6 +1574,8 @@ export class Store {
     return {
       window_days: days,
       documents,
+      files: Number(uploads.files),
+      documents_unhashed: Number(uploads.unhashed),
       since: base.since ?? null,
       mean_rounds: documents ? Number(base.rounds) / documents : null,
       unresolved_rate: rate(SIGNAL_UNRESOLVED),
