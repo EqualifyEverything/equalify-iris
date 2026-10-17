@@ -1,9 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readdirSync, readFileSync, copyFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { runExtraction } from "../src/pipeline/extraction.ts";
+import { runExtraction, DEFAULT_PAGE_PROMPT } from "../src/pipeline/extraction.ts";
 import { STANDARD } from "../src/pipeline/contribute.ts";
 import type { PipelineContext } from "../src/pipeline/context.ts";
 import type { Paths } from "../src/store/paths.ts";
@@ -255,9 +255,34 @@ test("the page agent is told which specialists it can name", async () => {
     writeFileSync(join(dir, "agents", "feedback.md"), "# Feedback\n");
     await runExtraction(ctx);
     const page = rec.calls.find((c) => c.agent === "page")!.prompt;
-    assert.match(page, /## Specialists in this deployment\nchartDataAgent\.\n/);
+    assert.match(page, /## Specialists in this deployment\n- chartDataAgent\n/);
     assert.match(page, /exactly as written here/);
   });
+});
+
+test("each real specialist is listed with what its Purpose says it converts", async () => {
+  await withTemp(async (dir) => {
+    // With names alone, the page agent named a specialist on 4 of 111 pages and never
+    // infographicAgent, on 50 pages of infographics (#574).
+    const { ctx, rec } = makeCtx(dir, null);
+    const real = readdirSync("agents").filter((f) => f !== "page.md" && f !== "feedback.md");
+    for (const f of real) copyFileSync(join("agents", f), join(dir, "agents", f));
+    await runExtraction(ctx);
+    const page = rec.calls.find((c) => c.agent === "page")!.prompt;
+    for (const f of real) {
+      const line = page.split("\n").find((l) => l.startsWith(`- ${f.slice(0, -3)}`));
+      assert.ok(line && /^- \w+: \S/.test(line), `${f} listed without what it covers: ${line}`);
+      assert.ok(!/visible in source images|into accessible| —$/.test(line), `${f}: ${line}`);
+    }
+    assert.match(page, /- infographicAgent: process and pathway infographics/);
+  });
+});
+
+test("the page prompt says to name a listed specialist even for an image or table", () => {
+  // The old rule allowed a suggestion only beyond "table, image", which ruled out every chart.
+  for (const prompt of [DEFAULT_PAGE_PROMPT, readFileSync("agents/page.md", "utf8")]) {
+    assert.match(prompt, /covers content on this page[^.]*name it, even though that content is also an\s+image or a table/);
+  }
 });
 
 test("with no specialists on disk, the page prompt lists none", async () => {
