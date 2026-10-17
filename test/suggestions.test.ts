@@ -169,8 +169,10 @@ test("a drafted agent is named the way dispatch will look it up", () => {
 
 test("grouping is offered the library's agents, and can assign a key to one", () => {
   const agents = script.libraryAgents("agents", { readdirSync, readFileSync });
-  assert.deepEqual(agents.map((a: { name: string }) => a.name), ["chartDataAgent"]);
-  assert.equal(agents[0].key, "chartdata");
+  const names = agents.map((a: { name: string }) => a.name);
+  assert.ok(names.includes("chartDataAgent"));
+  assert.ok(!names.includes("page") && !names.includes("feedback"));
+  assert.equal(agents.find((a: { name: string }) => a.name === "chartDataAgent").key, "chartdata");
   const prompt = script.groupingPrompt(
     [
       { number: 5, title: "New agent suggestion: Maps", state: "open", body: "" },
@@ -179,7 +181,7 @@ test("grouping is offered the library's agents, and can assign a key to one", ()
     [{ key: "chart", names: [{ name: "chart" }], reasons: ["a bar chart"] }],
     agents,
   );
-  assert.match(prompt, /Existing agents:\n- chartDataAgent: Convert charts/);
+  assert.match(prompt, /Existing agents:\n(- .*\n)*- chartDataAgent: Convert charts/);
   assert.match(prompt, /#5 Maps \(keys/);
   assert.match(prompt, /#6 Music \(rejected\)/);
   const out = script.parseAssignments('{"assign":[{"key":"chart","agent":"chartDataAgent"}]}', ["chart"]);
