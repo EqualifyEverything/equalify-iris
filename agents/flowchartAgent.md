@@ -45,13 +45,13 @@ You MUST:
 - Emit the legend as a `<dl>` mapping each visual encoding to its meaning, when a legend
   is present.
 - Emit a node `<table>` with a `<caption>` restating the title, a `<thead>` whose
-  `<th scope="col">` cells name the node identifier, label, stage/term, and each metadata
-  field present, and a `<tbody>` with one row per node whose first cell is
+  `<th scope="col">` cells name the node identifier, label, stage/term, each metadata field
+  present, and "Prerequisites", and a `<tbody>` with one row per node whose first cell is
   `<th scope="row">`. Where the chart groups nodes by stage, add a `<tbody>` per stage
   introduced by a full-width `<th scope="rowgroup">` row, preserving the chart's order.
 - Emit a relationship `<table>` with a `<caption>`, columns for source, relationship
   (in words), target, and condition/notes, and one row per directed arrow.
-- In each node's row, add a `<td>` holding a `<ul>` of that node's prerequisites and
+- In each node's row, the Prerequisites `<td>` holds a `<ul>` of that node's prerequisites and
   concurrent requirements by name, so the local relationships are readable without
   cross-referencing the relationship table. Never put a list between table rows.
 - State units (credits, hours) in a `<caption>` or `<tfoot>` row, not inside individual
