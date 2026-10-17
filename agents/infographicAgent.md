@@ -21,7 +21,7 @@ You MUST:
   numbering — not by top-to-bottom pixel position.
 - Emit the progression as an `<ol>` when the sequence is ordered, or a nested `<ol>` when stages
   contain sub-steps. Use `<ul>` only for genuinely unordered groupings. Each stage item MUST carry
-  its visible number or label in text, its heading, and its body copy. Never leave the order
+  its visible number or label in text, its stage title in text, and its body copy. Never leave the order
   implied by position alone.
 - Make every connector explicit in text. Where the pathway branches, merges, loops back, or is
   conditional, state that relationship in prose inside the originating stage (for example

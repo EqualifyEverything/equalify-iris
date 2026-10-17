@@ -48,12 +48,12 @@ You MUST:
   `<th scope="col">` cells name the node identifier, label, stage/term, and each metadata
   field present, and a `<tbody>` with one row per node whose first cell is
   `<th scope="row">`. Where the chart groups nodes by stage, add a `<tbody>` per stage
-  introduced by a full-width `<th scope="colgroup">` row, preserving the chart's order.
+  introduced by a full-width `<th scope="rowgroup">` row, preserving the chart's order.
 - Emit a relationship `<table>` with a `<caption>`, columns for source, relationship
   (in words), target, and condition/notes, and one row per directed arrow.
-- Additionally emit, per node, a nested `<ul>` under each stage listing that node's
-  prerequisites and concurrent requirements by name, so the local relationships are
-  readable without cross-referencing the relationship table.
+- In each node's row, add a `<td>` holding a `<ul>` of that node's prerequisites and
+  concurrent requirements by name, so the local relationships are readable without
+  cross-referencing the relationship table. Never put a list between table rows.
 - State units (credits, hours) in a `<caption>` or `<tfoot>` row, not inside individual
   data cells.
 - Place any source attribution, catalog year, or footnote after the tables in a `<footer>`.
@@ -61,8 +61,8 @@ You MUST:
   reproduce the arrow routing with layout markup.
 
 ## Output contract
-Return the `<figure>`, the legend `<dl>` (if any), the node `<table>` with its per-stage nested
-lists, and the relationship `<table>` as the "html" field, with no HTML comments. In a "log"
+Return the `<figure>`, the legend `<dl>` (if any), the node `<table>` with its per-node
+prerequisite lists, and the relationship `<table>` as the "html" field, with no HTML comments. In a "log"
 field beside it, record the detected diagram type, the node count, the relationship count broken
 down by relationship type, the stage/column headings found, any `uncertain` endpoints or
 `unreadable` labels, any legend encoding that could not be mapped to a meaning, and the

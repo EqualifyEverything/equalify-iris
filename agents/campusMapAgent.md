@@ -9,8 +9,8 @@ categories, and directions are never conveyed by the image, color, or marker
 shape alone.
 
 ## Required capability
-vision
-(The deployment's configured provider for this capability determines which
+vision, structured_output
+(The deployment's configured provider for these capabilities determines which
 concrete model runs.)
 
 ## System prompt
