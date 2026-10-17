@@ -291,7 +291,7 @@ page number", "blank except for its printed folio" are each read as the blank pa
 and only because that number is the one thing on the paper this pipeline never delivers. Name
 anything else the page bears and the contradiction is what gets believed.
 
-Fourteen structures are easy to render as something that merely looks right, so be explicit:
+Fifteen structures are easy to render as something that merely looks right, so be explicit:
 - HEADING LEVELS: a heading's level comes from what its content belongs to, not from how large
   or bold the page sets it. Visual weight is evidence of hierarchy, never a substitute for it: a
   smaller bold line that introduces a subsection of the section above it is an <h3> under that
@@ -902,6 +902,27 @@ Fourteen structures are easy to render as something that merely looks right, so 
   URL the page labelled with nothing puts a word of your own in a <dt>. And the page's own printed
   number is never one of these values: it is carried by the page-break marker's label, by the rule
   above, so a row for it here hands the reader the folio twice.
+- MATH EQUATIONS AND FORMULAS: every mathematical equation, chemical formula, or formal calculation
+  the page prints must be transcribed as valid, accessible HTML5 MathML (<math>) elements, never as
+  raw LaTeX ($...$), plain-text approximations, or images. Inline expressions are written as inline
+  <math>...</math> within the surrounding <p>, <li> or <td>; standalone, centered or numbered equations
+  are written as display equations: <math display="block">...</math>. Where the page numbers or
+  captions an equation ("Eq. (1)", "Equation 4"), place the display equation inside a <figure> with
+  a <figcaption> carrying that printed label. Use the correct semantic MathML tags for mathematical
+  terms: <mi> for variables, identifiers and constants (<mi>x</mi>, <mi>&pi;</mi>, <mi>&theta;</mi>),
+  <mn> for numeric literals (<mn>0</mn>, <mn>42</mn>, <mn>3.14</mn>), <mo> for operators, relations
+  and delimiters (<mo>+</mo>, <mo>=</mo>, <mo>&le;</mo>, <mo>&int;</mo>, <mo>&sum;</mo>, <mo>(</mo>,
+  <mo>)</mo>), <mfrac> with two child elements for fractions (<mfrac><mi>a</mi><mi>b</mi></mfrac>),
+  <msup> for superscripts and powers (<msup><mi>x</mi><mn>2</mn></msup>), <msub> for subscripts
+  (<msub><mi>a</mi><mi>i</mi></msub>), <msubsup> for combined sub/superscripts (<msubsup><mi>x</mi><mi>i</mi><mn>2</mn></msubsup>),
+  <msqrt> and <mroot> for radicals and roots (<msqrt><mrow><msup><mi>b</mi><mn>2</mn></msup><mo>-</mo><mn>4</mn><mi>a</mi><mi>c</mi></mrow></msqrt>),
+  <mtable>/<mtr>/<mtd> for matrices and aligned multiline derivations, and <mtext> for words inside an
+  equation. Group sub-expressions with <mrow> so the operator precedence is preserved in the tree.
+  On complex display equations, add an aria-label attribute to the root <math display="block"> giving
+  a clear, spoken plain-English pronunciation of the formula so that screen readers without native
+  MathML speech engines can pronounce it unambiguously. Never emit raw LaTeX syntax ($...$, $$, \\\\(, \\\\),
+  \\\\[, \\\\]) as final text, and never transcribe equations as plain text ASCII strings like
+  "x = (-b +/- sqrt(b^2-4ac)) / 2a".
 
 A page that prints the same content in more than one language gets the same treatment in each.
 Every rule above applies to the second column exactly as it does to the first: where the English

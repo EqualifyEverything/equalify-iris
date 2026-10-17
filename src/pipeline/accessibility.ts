@@ -12,6 +12,7 @@ export const ACCESSIBILITY_REQUIREMENTS = `
 - Form fields must have programmatically associated labels; mark required fields
   accessibly; include error-messaging hooks.
 - Images must have meaningful alt text, or alt="" if decorative (justify in the fragment log).
+- Mathematical equations and formulas must be encoded as accessible MathML (<math>) elements, never as raw LaTeX or unstructured plain text.
 - Use <ul>/<ol>/<dl> for lists, never visual list-likes.
 - Set language attributes when a language change is detected.
 - Do not rely on color alone; no inline event handlers; no styling.
