@@ -3,6 +3,7 @@
 
 ## Testing
 - [ ] `npm run typecheck`
+- [ ] `npm test`
 - [ ] `./test/e2e.sh`
 - [ ] If the demo changed, it still passes axe-core with 0 violations
 
@@ -10,3 +11,15 @@
 - [ ] Focused change; matches surrounding code style
 - [ ] No unjustified new runtime dependencies
 - [ ] I agree to license my contribution under AGPL-3.0-or-later
+
+## Accessibility
+
+- [ ] Keyboard navigation, focus visibility, and focus order checked for affected UI, or not applicable
+- [ ] Accessible names, error messages, and screen reader announcements checked for affected UI, or not applicable
+- [ ] Generated HTML semantics and reading order checked for affected output, or not applicable
+- [ ] Documentation structure, links, and text alternatives checked, or not applicable
+- [ ] Any remaining barriers are linked to issues, or none identified
+
+**Test environment and results:**
+
+**Known limitations / follow-up issues:**

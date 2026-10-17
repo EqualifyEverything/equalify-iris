@@ -9,7 +9,8 @@ By participating you agree to our [Code of Conduct](CODE_OF_CONDUCT.md).
 ## Ways to contribute
 
 - **Report an accessibility barrier** — in the app/demo or in the HTML Iris produces. Use the
-  **Accessibility issue** template. These are our highest priority.
+  **Accessibility issue** template. These are our highest priority. See [ACCESSIBILITY.md](ACCESSIBILITY.md)
+  for reporting guidance and accessibility checks for contributions.
 - **Report a bug / request a feature** — use the matching issue template.
 - **Improve a prompt** — the agent files are in [`agents/`](agents/), and `agents/page.md`
   renders every page, so a PR that sharpens it changes the product. (The Reader and Copy Editor
