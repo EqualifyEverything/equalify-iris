@@ -1,4 +1,4 @@
-import { readdirSync, writeFileSync } from "node:fs";
+import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { extractJson } from "../util/json.ts";
 import { stripSoftHyphens, stripStyleAttributes, tightenDigitGroups } from "../util/html.ts";
@@ -939,10 +939,13 @@ content, and the version that had them right is not kept anywhere. If you can se
 outside the problem is wrong, fix the problem, leave that alone, and say what you saw in the "log"
 field.
 
-If — and only if — this page contains a content type that a DEDICATED specialist agent would
-handle clearly better than this general pass (something beyond the common types: paragraph,
-heading, list, table, form field, image, quote, caption, footnote), include a
-"suggested_agent". Suggest sparingly; omit it (or null) otherwise.
+If this page contains a content type that a DEDICATED specialist agent would handle clearly
+better than this general pass, include a "suggested_agent". When a specialist listed under
+"Specialists in this deployment" covers content on this page, such as a chart, an infographic,
+an equation or a diagram, name it, even though that content is also an image or a table: that
+is what the list is for. Any other name only for content beyond the common types (paragraph,
+heading, list, table, form field, image, quote, caption, footnote), and sparingly. Otherwise
+omit it (or null).
 Sheet music is the example to reason from. A page whose content is musical notation cannot be
 carried by a description of the staves: what a reader needs is the music — an audio rendering, and
 a machine-readable notation such as ABC or MusicXML — and neither is derivable from one look at the
@@ -3610,6 +3613,8 @@ function pageSystem(ctx: PipelineContext, agent: AgentSpec, lessons: string): st
 // does not know which files a deployment has, so it guessed: `chart`, `statisticalChart` and
 // `dataVisualization` were all asked for while `chartDataAgent.md` sat unused. Library files
 // only, not this session's built agents, so the prompt is the same on every call in a session.
+// Each name carries what its Purpose says it converts: with names alone, 11 new specialists
+// were never named on 111 pages, 50 of them infographics (#574).
 function specialistList(ctx: PipelineContext): string {
   let names: string[];
   try {
@@ -3622,11 +3627,37 @@ function specialistList(ctx: PipelineContext): string {
     return "";
   }
   if (names.length === 0) return "";
+  const lines = names.map((n) => {
+    const covers = specialistCovers(join(ctx.paths.agentsDir, `${n}.md`));
+    return covers ? `- ${n}: ${covers}` : `- ${n}`;
+  });
   return (
-    `\n\n## Specialists in this deployment\n${names.join(", ")}.\n` +
-    `If one of these fits, put its name in "suggested_agent" exactly as written here. ` +
+    `\n\n## Specialists in this deployment\n${lines.join("\n")}\n` +
+    `If one of these covers content on this page, put its name in "suggested_agent" exactly as written here. ` +
     `Any other name runs nothing, so use another name only for content none of these covers.`
   );
+}
+
+// What a specialist converts, from the first paragraph of its "## Purpose": "Convert charts and
+// graphs (bar, line, ...) visible in source images into accessible HTML that ..." gives "charts
+// and graphs (bar, line, ...)". Empty when the file has no Purpose in that shape, which leaves a
+// bare name; test/dispatch.test.ts fails on any library file that does.
+function specialistCovers(file: string): string {
+  let text: string;
+  try {
+    text = readFileSync(file, "utf8");
+  } catch {
+    return "";
+  }
+  const m = text.match(/^## Purpose\s*\n([\s\S]*?)(?:\n\s*\n|\n#|(?![\s\S]))/m);
+  if (!m) return "";
+  const para = m[1].replace(/\s+/g, " ").trim();
+  const cut = para.match(/^Convert (.+?) into accessible\b/);
+  if (!cut) return "";
+  const covers = cut[1].replace(/ visible in source images/, "").replace(/\s*—\s*$/, "").trim();
+  if (covers.length <= 240) return covers;
+  const space = covers.lastIndexOf(" ", 240);
+  return `${covers.slice(0, space > 0 ? space : 240)} ...`;
 }
 
 // Three repairs to a page reply, on the line where that reply becomes markup Iris keeps: soft

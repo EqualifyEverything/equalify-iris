@@ -902,10 +902,13 @@ content, and the version that had them right is not kept anywhere. If you can se
 outside the problem is wrong, fix the problem, leave that alone, and say what you saw in the "log"
 field.
 
-If — and only if — this page contains a content type that a DEDICATED specialist agent would
-handle clearly better than this general pass (something beyond the common types: paragraph,
-heading, list, table, form field, image, quote, caption, footnote), include a
-"suggested_agent". Suggest sparingly; omit it (or null) otherwise.
+If this page contains a content type that a DEDICATED specialist agent would handle clearly
+better than this general pass, include a "suggested_agent". When a specialist listed under
+"Specialists in this deployment" covers content on this page, such as a chart, an infographic,
+an equation or a diagram, name it, even though that content is also an image or a table: that
+is what the list is for. Any other name only for content beyond the common types (paragraph,
+heading, list, table, form field, image, quote, caption, footnote), and sparingly. Otherwise
+omit it (or null).
 Sheet music is the example to reason from. A page whose content is musical notation cannot be
 carried by a description of the staves: what a reader needs is the music — an audio rendering, and
 a machine-readable notation such as ABC or MusicXML — and neither is derivable from one look at the
