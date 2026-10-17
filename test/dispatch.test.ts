@@ -31,7 +31,11 @@ interface Recorded {
 // resolve — which is the case a directory-listing-based decline would get wrong.
 // No feedback.md, so verifyAgentOutput short-circuits to ok and these tests stay
 // about dispatch.
-function makeCtx(dir: string, suggestedName: string | null): { ctx: PipelineContext; rec: Recorded } {
+function makeCtx(
+  dir: string,
+  suggestedName: string | null,
+  specialistHtml = `<p>${SUGGEST_MARK} fragment</p>`,
+): { ctx: PipelineContext; rec: Recorded } {
   const agentsDir = join(dir, "agents");
   const fragDir = join(dir, "fragments");
   const inputDir = join(dir, "input");
@@ -61,7 +65,7 @@ function makeCtx(dir: string, suggestedName: string | null): { ctx: PipelineCont
         rec.calls.push({ agent, prompt });
         // A specialist asked for just its own content type.
         if (prompt.includes("Extract ONLY the content your contract covers")) {
-          return { text: JSON.stringify({ no_content: false, html: `<p>${SUGGEST_MARK} fragment</p>` }) };
+          return { text: JSON.stringify({ no_content: false, html: specialistHtml }) };
         }
         // The page agent, called a second time to splice a fragment in.
         if (sys.includes("You merge a higher-fidelity HTML fragment")) {
@@ -239,5 +243,63 @@ test("no suggestion means no dispatch events at all", async () => {
     for (const type of ["specialist_dispatched", "specialist_declined", "specialist_unresolved"]) {
       assert.deepEqual(ev(rec, type), [], `${type} logged without a suggestion`);
     }
+  });
+});
+
+test("the page agent is told which specialists it can name", async () => {
+  await withTemp(async (dir) => {
+    // A model that cannot see the library guesses: "chart" and "statisticalChart" were both
+    // asked for while chartDataAgent.md was there. `table.md` is a standard type and page.md
+    // and feedback.md are not specialists, so none of those is offered.
+    const { ctx, rec } = makeCtx(dir, null);
+    writeFileSync(join(dir, "agents", "feedback.md"), "# Feedback\n");
+    await runExtraction(ctx);
+    const page = rec.calls.find((c) => c.agent === "page")!.prompt;
+    assert.match(page, /## Specialists in this deployment\nchartDataAgent\.\n/);
+    assert.match(page, /exactly as written here/);
+  });
+});
+
+test("with no specialists on disk, the page prompt lists none", async () => {
+  await withTemp(async (dir) => {
+    const { ctx, rec } = makeCtx(dir, null);
+    rmSync(join(dir, "agents", "chartDataAgent.md"));
+    await runExtraction(ctx);
+    const page = rec.calls.find((c) => c.agent === "page")!.prompt;
+    assert.ok(!page.includes("Specialists in this deployment"));
+  });
+});
+
+test("a name that differs from the file only by an Agent suffix or case still runs it", async () => {
+  for (const name of ["chartData", "ChartDataSpecialist", "chart-data"]) {
+    await withTemp(async (dir) => {
+      // The page agent wrote `chartData` on real pages; the file is chartDataAgent.md.
+      const { ctx, rec } = makeCtx(dir, name);
+      await runExtraction(ctx);
+      assert.deepEqual(ev(rec, "specialist_dispatched").map((e) => e.data.agent), ["chartDataAgent.md"], name);
+      assert.equal(ev(rec, "specialist_unresolved").length, 0, name);
+    });
+  }
+});
+
+test("a looser name does not run a standard agent, the page agent or another specialist", async () => {
+  for (const name of ["tableAgent", "pageAgent", "chart"]) {
+    await withTemp(async (dir) => {
+      const { ctx, rec } = makeCtx(dir, name);
+      await runExtraction(ctx);
+      assert.equal(ranSpecialist(rec), false, name);
+    });
+  }
+});
+
+test("a specialist's comments never reach the page", async () => {
+  await withTemp(async (dir) => {
+    // chartDataAgent.md asked for @source wrappers, and the delivered page carries no comments.
+    const html = "<!-- @source x --><figure>c</figure><!-- @end-source --><!<!---->-- y";
+    const { ctx, rec } = makeCtx(dir, "chartDataAgent", html);
+    await runExtraction(ctx);
+    const merge = rec.calls.find((c) => c.prompt.includes("Specialist (chartDataAgent) fragment"))!.prompt;
+    assert.match(merge, /<figure>c<\/figure>/);
+    assert.doesNotMatch(merge, /@source|@end-source|<!--/);
   });
 });

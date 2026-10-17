@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import express from "express";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { AddressInfo } from "node:net";
@@ -10,6 +10,7 @@ import { Store, type SuggestionRow } from "../src/store/db.ts";
 import { groupSuggestions, suggestionKey, suggestionsRouter } from "../src/routes/suggestions.ts";
 // @ts-expect-error — a plain .mjs script with no types.
 import * as script from "../.github/scripts/agent-suggestions.mjs";
+import { STANDARD } from "../src/pipeline/contribute.ts";
 
 const TOKEN = "fake-quality-token";
 
@@ -156,3 +157,64 @@ test("a row read back keeps its lesson, so writing it again does not collapse tw
     store.addSuggestions(store.listSuggestions());
     assert.deepEqual(store.listSuggestions().map((r) => r.lesson), ["a", "b"]);
   }));
+
+test("a drafted agent is named the way dispatch will look it up", () => {
+  assert.equal(script.agentFile("Scientific Figure And Plot Specialist"), "scientificFigureAndPlotAgent.md");
+  assert.equal(script.agentFile("Flowchart"), "flowchartAgent.md");
+  assert.equal(script.agentFile("Chart Data Agent"), "chartDataAgent.md");
+  const section = script.newAgentSection(["flow"], [], "flowchartAgent.md");
+  assert.match(section, /Save the agent as `agents\/flowchartAgent\.md`/);
+  assert.doesNotMatch(script.newAgentSection(["flow"], []), /Save the agent/);
+});
+
+test("grouping is offered the library's agents, and can assign a key to one", () => {
+  const agents = script.libraryAgents("agents", { readdirSync, readFileSync });
+  assert.deepEqual(agents.map((a: { name: string }) => a.name), ["chartDataAgent"]);
+  assert.equal(agents[0].key, "chartdata");
+  const prompt = script.groupingPrompt(
+    [
+      { number: 5, title: "New agent suggestion: Maps", state: "open", body: "" },
+      { number: 6, title: "New agent suggestion: Music", state: "closed", body: "" },
+    ],
+    [{ key: "chart", names: [{ name: "chart" }], reasons: ["a bar chart"] }],
+    agents,
+  );
+  assert.match(prompt, /Existing agents:\n- chartDataAgent: Convert charts/);
+  assert.match(prompt, /#5 Maps \(keys/);
+  assert.match(prompt, /#6 Music \(rejected\)/);
+  const out = script.parseAssignments('{"assign":[{"key":"chart","agent":"chartDataAgent"}]}', ["chart"]);
+  assert.deepEqual([...out], [["chart", { agent: "chartDataAgent" }]]);
+});
+
+test("the drafter is told how Iris runs a specialist and every saved reason", () => {
+  const reasons = Array.from({ length: 10 }, (_, i) => `reason ${i}`);
+  const prompt = script.draftPrompt("Flowchart", [{ names: [{ name: "flowchart" }], reasons }], "EXAMPLE", "flowchartAgent.md");
+  assert.match(prompt, /saved as agents\/flowchartAgent\.md/);
+  assert.match(prompt, /"no_content": true/);
+  assert.match(prompt, /replaces the page agent's own rendering/);
+  for (const r of reasons) assert.ok(prompt.includes(r), r);
+});
+
+test("a key leaves an issue closed as done, and stays on one that was rejected", () => {
+  assert.equal(script.keepsKeys({ state: "open" }), true);
+  assert.equal(script.keepsKeys({ state: "closed", state_reason: "not_planned" }), true);
+  assert.equal(script.keepsKeys({ state: "closed", state_reason: "duplicate" }), true);
+  assert.equal(script.keepsKeys({ state: "closed", state_reason: "completed" }), false);
+});
+
+test("an agent is matched by key, so a draft never names a file Iris has", () => {
+  const agents = script.libraryAgents("agents", { readdirSync, readFileSync });
+  for (const n of ["chartDataAgent", "chartDataAgent.md", "chartdataagent", "Chart Data"])
+    assert.equal(script.matchAgent(agents, n)?.name, "chartDataAgent", n);
+  assert.equal(script.matchAgent(agents, script.agentFile("Chart Data Specialist"))?.name, "chartDataAgent");
+  assert.equal(script.matchAgent(agents, "chart"), undefined);
+  const text = script.missedSummary([["chart", "chartDataAgent"]]);
+  assert.match(text, /- chart → chartDataAgent/);
+  assert.match(text, /Nothing was filed/);
+});
+
+test("the script's standard types are dispatch's, and are never offered as agents", () => {
+  assert.deepEqual([...script.STANDARD].sort(), [...STANDARD].map((s) => s.toLowerCase()).sort());
+  const fs = { readdirSync: () => ["page.md", "feedback.md", "Table.md", "chartDataAgent.md"], readFileSync: () => "# T\nabout" };
+  assert.deepEqual(script.libraryAgents("x", fs).map((a: { name: string }) => a.name), ["chartDataAgent"]);
+});

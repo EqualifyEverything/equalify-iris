@@ -3,10 +3,16 @@
 //
 // Iris saves every suggestion and serves them grouped at /v1/suggestions. This script:
 //   1. maps each new-agent group to an issue. Each issue lists the keys it covers. A key
-//      no issue covers yet goes to one model call, which assigns it to an existing issue
-//      or names a new concept. Each new concept gets a drafted agent and a new issue.
+//      no issue covers yet goes to one model call, which assigns it to an agent Iris already
+//      has, an issue, or a new concept. Each new concept gets a drafted agent and a new
+//      issue. A key that matches an existing agent is a naming miss, not a missing agent: it
+//      is reported in the run summary and filed nowhere.
 //   2. gives each agent update proposal its own issue, by agent and lesson.
-//   3. rewrites the counts on every issue it touches, open or closed.
+//   3. rewrites the counts on every issue it touches.
+//
+// A key on an issue closed as done is grouped again: Iris still asking means the agent is not
+// running. A key on an issue closed as not planned or as a duplicate stays there, so a
+// rejected idea is not filed again.
 //
 // Iris owns only the part of a body between the two markers, so people can edit the rest.
 //
@@ -23,7 +29,7 @@ const END = "<!-- iris-suggestions:end -->";
 const FENCE = "````";
 const KEYS = /<!-- iris-suggestion-keys: ([^>]*) -->/;
 
-// Same as suggestionKey in src/routes/suggestions.ts, so a title from before this
+// Same as suggestionKey in src/pipeline/contribute.ts, so a title from before this
 // workflow maps to the key its suggestions now have.
 export function suggestionKey(name) {
   let k = name.toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -61,7 +67,46 @@ const day = (iso) => (iso || "").slice(0, 10);
 // no section. Stripping only `<!--` once is not enough: `<!<!---->--` rebuilds it.
 const quote = (s) => s.replace(/[<>]/g, "").replace(/\s+/g, " ").trim();
 
-export function newAgentSection(keys, groups) {
+// The issues a key can stay on: open ones, and ones closed as not planned or as a duplicate,
+// so a rejected idea is not filed again. A key on an issue closed as done is grouped again.
+export function keepsKeys(issue) {
+  return issue.state === "open" || issue.state_reason === "not_planned" || issue.state_reason === "duplicate";
+}
+
+// The agent a grouping reply or a concept names, matched by key as dispatch matches it.
+export function matchAgent(agents, name) {
+  const key = suggestionKey(name.replace(/\.md$/, ""));
+  return agents.find((a) => a.key === key);
+}
+
+// The file a drafted agent is saved as. Dispatch finds a specialist by file name, and the page
+// agent is shown these names, so the issue states it. Follows chartDataAgent.md.
+export function agentFile(concept) {
+  const words = concept.replace(/[^A-Za-z0-9 ]/g, " ").split(/\s+/).filter(Boolean);
+  while (words.length > 1 && /^(agent|specialist)$/i.test(words.at(-1))) words.pop();
+  const camel = words.map((w, i) => (i ? w[0].toUpperCase() + w.slice(1).toLowerCase() : w.toLowerCase())).join("");
+  return `${camel || "new"}Agent.md`;
+}
+
+// The content types the page agent covers itself. Same list as STANDARD in
+// src/pipeline/contribute.ts; dispatch declines these, so they are never a naming miss.
+export const STANDARD = new Set(["paragraph", "heading", "list", "table", "formfield", "image", "quote", "caption", "footnote"]);
+
+// Agents in the library that a suggestion can name: everything in agents/ but the page and
+// feedback agents and the standard types. `about` is the file's first line after its title.
+export function libraryAgents(dir, fs) {
+  return fs
+    .readdirSync(dir)
+    .filter((f) => f.endsWith(".md") && f !== "page.md" && f !== "feedback.md" && !STANDARD.has(f.slice(0, -3).toLowerCase()))
+    .sort()
+    .map((f) => {
+      const text = fs.readFileSync(`${dir}/${f}`, "utf8");
+      const about = text.split("\n").find((l) => l.trim() && !l.startsWith("#")) ?? "";
+      return { name: f.slice(0, -3), key: suggestionKey(f.slice(0, -3)), about: about.trim() };
+    });
+}
+
+export function newAgentSection(keys, groups, file) {
   const mine = groups.filter((g) => keys.includes(g.key));
   const total = mine.reduce((n, g) => n + g.count, 0);
   const first = mine.map((g) => g.first_seen).sort()[0];
@@ -74,6 +119,11 @@ export function newAgentSection(keys, groups) {
       ? `Asked for ${total} time${total === 1 ? "" : "s"}, from ${day(first)} to ${day(last)}.`
       : "No saved suggestions match this issue yet.",
   ];
+  if (file)
+    lines.push(
+      "",
+      `Save the agent as \`agents/${file}\`. Iris runs a specialist only when the page agent names its file, and the page agent is shown each file's name, so keep that name if you edit the draft.`,
+    );
   if (mine.length) {
     lines.push("", "| Name Iris used | Times | Sessions |", "| --- | --- | --- |");
     for (const g of mine)
@@ -112,19 +162,26 @@ export function updateSection(g) {
 }
 
 // The model's job: put each unassigned key under an existing issue or a new concept.
-export function groupingPrompt(issues, unassigned) {
+export function groupingPrompt(issues, unassigned, agents = []) {
   return [
     "Iris is a PDF-to-accessible-HTML tool. While reading pages it suggests specialist agents it wishes it had.",
-    "Some suggestions below are not yet grouped. Put each under an existing issue if it means the same kind",
-    "of content, otherwise under a new concept. Merge new keys that mean the same thing into one concept.",
+    "Some suggestions below are not yet grouped. Put each under an existing agent if that agent already",
+    "handles this content. Otherwise put it under an issue if it means the same kind of content, or",
+    "under a new concept. Merge new keys that mean the same thing into one concept.",
     "",
-    "Existing issues:",
-    ...issues.map((i) => `- #${i.number} ${i.title.slice(NEW_PREFIX.length)} (keys: ${issueKeys(i).join(", ")})`),
+    "Existing agents:",
+    ...agents.map((a) => `- ${a.name}: ${quote(a.about)}`),
+    "",
+    "Issues:",
+    ...issues.map(
+      (i) =>
+        `- #${i.number} ${i.title.slice(NEW_PREFIX.length)}${i.state === "open" ? "" : " (rejected)"} (keys: ${issueKeys(i).join(", ")})`,
+    ),
     "",
     "Unassigned suggestions:",
     ...unassigned.map((g) => `- key ${g.key}: names ${g.names.map((n) => n.name).join(", ")}; reasons: ${g.reasons.slice(-3).map(quote).join(" | ")}`),
     "",
-    'Reply with JSON only: {"assign":[{"key":"...","issue":123}|{"key":"...","concept":"Short Title Case Name"}]}',
+    'Reply with JSON only: {"assign":[{"key":"...","agent":"agentName"}|{"key":"...","issue":123}|{"key":"...","concept":"Short Title Case Name"}]}',
   ].join("\n");
 }
 
@@ -134,21 +191,49 @@ export function parseAssignments(text, keys) {
   const out = new Map();
   for (const a of JSON.parse(m[0]).assign ?? []) {
     if (!keys.includes(a.key)) continue;
-    if (Number.isInteger(a.issue)) out.set(a.key, { issue: a.issue });
+    if (typeof a.agent === "string" && a.agent.trim()) out.set(a.key, { agent: a.agent.trim() });
+    else if (Number.isInteger(a.issue)) out.set(a.key, { issue: a.issue });
     else if (typeof a.concept === "string" && a.concept.trim()) out.set(a.key, { concept: a.concept.trim() });
   }
   return out;
 }
 
-export function draftPrompt(concept, groups, example) {
+// What the drafter is told about how Iris runs a specialist. Taken from runSpecialist and
+// mergeSpecialist in src/pipeline/extraction.ts; change both together.
+export const SPECIALIST_CONTRACT = [
+  "How Iris runs a specialist:",
+  "- The general page agent renders the whole page first. When it names this agent, Iris sends the agent",
+  "  the page image, with this file as the system prompt and Iris's accessibility requirements after it.",
+  '- The agent must reply with only JSON: {"no_content": false, "html": "<accessible HTML fragment>"}, or',
+  '  {"no_content": true} when the page has none of its content. The fragment has no HTML comments.',
+  '  A "log" field beside "html" is optional and is kept in the run log.',
+  "- The fragment replaces the page agent's own rendering of that content. It holds only this content,",
+  "  not the rest of the page.",
+  "- The \"## Required capability\" section must list vision.",
+].join("\n");
+
+export function draftPrompt(concept, groups, example, file) {
   return [
-    `Draft an Iris specialist agent for this content: ${concept}.`,
+    `Draft an Iris specialist agent for this content: ${concept}. It will be saved as agents/${file}.`,
     "Iris asked for it with these names and reasons:",
-    ...groups.flatMap((g) => [`- ${g.names.map((n) => n.name).join(", ")}`, ...g.reasons.slice(-5).map((r) => `  - ${quote(r)}`)]),
+    ...groups.flatMap((g) => [`- ${g.names.map((n) => n.name).join(", ")}`, ...g.reasons.map((r) => `  - ${quote(r)}`)]),
     "",
-    "Follow the shape of this existing agent file. Reply with the markdown file only.",
+    SPECIALIST_CONTRACT,
+    "",
+    "Follow the shape of this existing agent file. Write plain, concise language. Reply with the markdown file only.",
     "",
     example,
+  ].join("\n");
+}
+
+// The run summary for keys that name an agent Iris already has. Filed nowhere.
+export function missedSummary(missed) {
+  return [
+    "## Suggestions that name an agent Iris already has",
+    "",
+    "The page agent asked for these by another name, so the agent did not run. Nothing was filed.",
+    "",
+    ...missed.map(([k, a]) => `- ${k} → ${a}`),
   ].join("\n");
 }
 
@@ -201,9 +286,15 @@ async function main() {
   console.log(`new-agent groups: ${report.new_agents.length}, agent-update groups: ${report.agent_updates.length}`);
 
   const issues = await allIssues();
-  const concepts = issues.filter((i) => i.title.startsWith(NEW_PREFIX));
+  // Open issues, and closed ones Iris should leave alone. See the header.
+  const concepts = issues.filter(
+    (i) => i.title.startsWith(NEW_PREFIX) && keepsKeys(i),
+  );
   const keyed = new Map();
   for (const i of concepts) for (const k of issueKeys(i)) if (!keyed.has(k)) keyed.set(k, i);
+  const fs = await import("node:fs");
+  const agents = libraryAgents("agents", fs);
+  const missed = []; // [key, agent name]
 
   const write = async (what, fn) => {
     console.log(`${dry ? "would " : ""}${what}`);
@@ -211,23 +302,32 @@ async function main() {
   };
   const touched = new Map(); // issue number -> keys
 
-  const unassigned = report.new_agents.filter((g) => !keyed.has(g.key));
+  // A key that is an agent's own name needs no model to say so.
+  const unassigned = [];
+  for (const g of report.new_agents) {
+    if (keyed.has(g.key)) continue;
+    const agent = agents.find((a) => a.key === g.key);
+    if (agent) missed.push([g.key, agent.name]);
+    else unassigned.push(g);
+  }
   if (unassigned.length) {
     const keys = unassigned.map((g) => g.key);
-    const assigned = parseAssignments(await ask(groupingPrompt(concepts, unassigned)), keys);
+    const assigned = parseAssignments(await ask(groupingPrompt(concepts, unassigned, agents)), keys);
     const fresh = new Map(); // concept name -> groups
     for (const g of unassigned) {
       const a = assigned.get(g.key);
+      const agent = a?.agent ? matchAgent(agents, a.agent) : undefined;
       const target = a?.issue ? concepts.find((i) => i.number === a.issue) : undefined;
-      if (target) {
+      if (agent) {
+        missed.push([g.key, agent.name]);
+      } else if (target) {
         touched.set(target.number, [...(touched.get(target.number) ?? issueKeys(target)), g.key]);
       } else {
         const name = quote(a?.concept ?? g.names[0].name);
         fresh.set(name, [...(fresh.get(name) ?? []), g]);
       }
     }
-    const { readFileSync } = await import("node:fs");
-    const example = readFileSync("agents/chartDataAgent.md", "utf8");
+    const example = fs.readFileSync("agents/chartDataAgent.md", "utf8");
     for (const [concept, groups] of fresh) {
       const keys = groups.map((g) => g.key);
       // A concept the model named again, rather than assigning to its issue.
@@ -236,7 +336,14 @@ async function main() {
         touched.set(same.number, [...(touched.get(same.number) ?? issueKeys(same)), ...keys]);
         continue;
       }
-      const draft = await ask(draftPrompt(concept, groups, example));
+      const file = agentFile(concept);
+      // A concept named like an agent Iris has is that agent, not a new file over it.
+      const existing = matchAgent(agents, file);
+      if (existing) {
+        missed.push(...keys.map((k) => [k, existing.name]));
+        continue;
+      }
+      const draft = await ask(draftPrompt(concept, groups, example, file));
       const body = withSection(
         [
           "Iris asked for an agent for this content. Below is a draft for a maintainer to review.",
@@ -249,7 +356,7 @@ async function main() {
           "",
           "</details>",
         ].join("\n"),
-        newAgentSection(keys, report.new_agents),
+        newAgentSection(keys, report.new_agents, file),
       );
       await write(`create "${NEW_PREFIX}${concept}" (${keys.join(", ")})`, () =>
         gh("/issues", { method: "POST", body: JSON.stringify({ title: `${NEW_PREFIX}${concept}`, body }) }),
@@ -260,8 +367,15 @@ async function main() {
 
   for (const [number, keys] of touched) {
     const issue = concepts.find((i) => i.number === number);
-    const body = withSection(issue.body, newAgentSection(keys, report.new_agents));
+    const file = issue.state === "open" ? agentFile(issue.title.slice(NEW_PREFIX.length)) : undefined;
+    const body = withSection(issue.body, newAgentSection(keys, report.new_agents, file));
     if (body !== issue.body) await write(`update #${number}`, () => gh(`/issues/${number}`, { method: "PATCH", body: JSON.stringify({ body }) }));
+  }
+
+  if (missed.length) {
+    const text = missedSummary(missed);
+    console.log(text);
+    if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, text + "\n");
   }
 
   for (const g of report.agent_updates) {
