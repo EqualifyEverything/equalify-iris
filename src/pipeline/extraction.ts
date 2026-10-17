@@ -3640,7 +3640,8 @@ function specialistList(ctx: PipelineContext): string {
 
 // What a specialist converts, from the first paragraph of its "## Purpose": "Convert charts and
 // graphs (bar, line, ...) visible in source images into accessible HTML that ..." gives "charts
-// and graphs (bar, line, ...)". Empty when the file has no Purpose in that shape.
+// and graphs (bar, line, ...)". Empty when the file has no Purpose in that shape, which leaves a
+// bare name; test/dispatch.test.ts fails on any library file that does.
 function specialistCovers(file: string): string {
   let text: string;
   try {
@@ -3655,7 +3656,8 @@ function specialistCovers(file: string): string {
   if (!cut) return "";
   const covers = cut[1].replace(/ visible in source images/, "").replace(/\s*—\s*$/, "").trim();
   if (covers.length <= 240) return covers;
-  return `${covers.slice(0, covers.lastIndexOf(" ", 240))} ...`;
+  const space = covers.lastIndexOf(" ", 240);
+  return `${covers.slice(0, space > 0 ? space : 240)} ...`;
 }
 
 // Three repairs to a page reply, on the line where that reply becomes markup Iris keeps: soft
