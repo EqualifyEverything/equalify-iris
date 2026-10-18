@@ -598,3 +598,12 @@ test("the verify task states that a problem's reason is part of the licence it g
     assert.match(prompt, re, `agents/feedback.md no longer says: ${what}`);
   }
 });
+
+// #577: told only "merged X", the verifier called a specialist's required tables invented and had
+// them removed on 4 of 10 merged pages.
+test("the verify task keeps a merged specialist's tables and checks their entries", () => {
+  const prompt = readFileSync("agents/feedback.md", "utf8").replace(/\s+/g, " ");
+  assert.match(prompt, /part of the output came from a specialist that was merged into the page/);
+  assert.match(prompt, /It is not invented because the page prints no such table, so do not ask for it to be removed\./);
+  assert.match(prompt, /A wrong value is "content_wrong", and so is an entry for something the figure does not show\./);
+});

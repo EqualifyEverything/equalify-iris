@@ -3649,15 +3649,19 @@ function specialistCovers(file: string): string {
   } catch {
     return "";
   }
-  const m = text.match(/^## Purpose\s*\n([\s\S]*?)(?:\n\s*\n|\n#|(?![\s\S]))/m);
-  if (!m) return "";
-  const para = m[1].replace(/\s+/g, " ").trim();
+  const para = purposeParagraph(text);
   const cut = para.match(/^Convert (.+?) into accessible\b/);
   if (!cut) return "";
   const covers = cut[1].replace(/ visible in source images/, "").replace(/\s*—\s*$/, "").trim();
   if (covers.length <= 240) return covers;
   const space = covers.lastIndexOf(" ", 240);
   return `${covers.slice(0, space > 0 ? space : 240)} ...`;
+}
+
+// The first paragraph of an agent's "## Purpose", on one line. Empty when it has none.
+function purposeParagraph(text: string): string {
+  const m = text.match(/^## Purpose\s*\n([\s\S]*?)(?:\n\s*\n|\n#|(?![\s\S]))/m);
+  return m ? m[1].replace(/\s+/g, " ").trim() : "";
 }
 
 // Three repairs to a page reply, on the line where that reply becomes markup Iris keeps: soft
@@ -4611,7 +4615,7 @@ async function dispatchSpecialist(
   img: InputImage,
   pageHtml: string,
   suggestion: { name: string; reason: string },
-): Promise<{ html: string; dispatched: boolean; unmet?: string }> {
+): Promise<{ html: string; dispatched: boolean; unmet?: string; merged?: AgentSpec }> {
   // Normalized by the shared `logicalType`, and tested for standardness by the shared
   // `isStandardType`, so this site and `runContribution` cannot disagree about what a
   // name means. They did once: trim-then-strip versus strip-then-trim differed on
@@ -4691,7 +4695,7 @@ async function dispatchSpecialist(
     // fragment that was written and then not spliced leaves the same page behind as no
     // fragment at all, so it is reported as unmet even though the specialist did its part.
     return merged
-      ? { html: merged, dispatched: true }
+      ? { html: merged, dispatched: true, merged: specialist }
       : { html: pageHtml, dispatched: true, unmet: "The specialist's fragment could not be merged into the page" };
   } catch (e) {
     ctx.log.event("specialist_dispatch_failed", { agent: specialist.file, image: img.name, error: (e as Error).message });
@@ -4746,6 +4750,21 @@ function specialistCaution(
     `The page agent asked for a specialist it did not get: "${name}"` +
     `${why ? `, because "${why}"` : ""}. ${unmet}, so the HTML above is ` +
     `its own unaided attempt at the content it wanted help with.`
+  );
+}
+
+// What the verifier needs to know about a page a specialist merged into (#577). Told only "merged X"
+// in the log, it judged the merged fragment against page.md's "nothing invented", read the tables the
+// specialist's contract requires as inventions, and had them removed: 4 of 10 merges, among them
+// both of chemicalStructureDiagramAgent's atom and bond tables. The specialist's own Purpose is
+// quoted so the verifier knows what that part is for. `agents/feedback.md` says what it changes.
+function specialistMergedNote(spec: AgentSpec | undefined): string | undefined {
+  if (!spec) return undefined;
+  const purpose = oneLine(purposeParagraph(spec.content), 600);
+  return (
+    `Part of the HTML above came from the specialist "${spec.name}", which ran on this image and was ` +
+    `merged into the page.${purpose ? ` Its purpose: "${purpose}"` : ""} The figure, caption, tables and ` +
+    `lists it adds to lay out what the image shows are its contract's output, not invented content.`
   );
 }
 
@@ -4966,6 +4985,7 @@ async function extractPage(
   let logNote = log;
   let dispatched = false;
   let unmet: string | undefined;
+  let mergedSpecialist: AgentSpec | undefined;
 
   // Specialist dispatch: if the page flagged a content type that an existing
   // library agent handles (e.g. a chart), run that agent and merge its
@@ -4974,6 +4994,7 @@ async function extractPage(
     const result = await dispatchSpecialist(ctx, img, innerHtml, suggestion);
     dispatched = result.dispatched;
     unmet = result.unmet;
+    mergedSpecialist = result.merged;
     if (result.html !== innerHtml) {
       innerHtml = result.html;
       logNote = logNote ? `${logNote}; merged ${suggestion.name}` : `merged ${suggestion.name}`;
@@ -5060,6 +5081,9 @@ async function extractPage(
     (c): c is string => c !== undefined,
   );
   const caution = cautions.length > 0 ? cautions.join(" ") : undefined;
+  // Not a caution: the agent said nothing. It is Iris saying where part of the HTML came from, and it
+  // goes to both rechecks too, since a corrected fragment still holds the specialist's part.
+  const specialist = specialistMergedNote(mergedSpecialist);
   const blankSkip = blank === true && innerHtml === "" && !blankContradicted;
   // Which KIND of unjudged this page is, for `page_verify_ok`'s `skipped` below. It cannot be read off
   // the verdict: `unjudgedVerdict()` is deliberately one shape for every page nothing looked at, and a
@@ -5079,7 +5103,7 @@ async function extractPage(
       // verdict for a page nothing looked at, which is what this call failing MEANS — no problems, so
       // no correction is bought, and the page ships exactly as it would have with no verifier
       // configured at all.
-      await verifyAgentOutput(ctx, pageAgent, img, [{ html: innerHtml, caution, log: logNote }], "verify").catch(
+      await verifyAgentOutput(ctx, pageAgent, img, [{ html: innerHtml, caution, log: logNote, specialist }], "verify").catch(
         (e: unknown) => {
           verifyUnobtainable(ctx, img, "verify", e);
           verifyErrored = true;
@@ -5654,7 +5678,7 @@ async function extractPage(
         // known to be good) is the harm the branch was written to prevent. The correction is billed
         // either way; `correction_discarded` on the event is what says the money bought nothing, so
         // the discard is on the record rather than inferred from a missing rejection line.
-        recheck = await verifyAgentOutput(ctx, pageAgent, img, [{ html: corrected, caution }], "recheck_binding").catch(
+        recheck = await verifyAgentOutput(ctx, pageAgent, img, [{ html: corrected, caution, specialist }], "recheck_binding").catch(
           (e: unknown) => {
             verifyUnobtainable(ctx, img, "recheck_binding", e, { trigger, correction_discarded: true });
             return null;
@@ -5745,7 +5769,7 @@ async function extractPage(
         // taken: it is logged, the slot stays spent (a refund would let a throttled
         // provider be retried once per corrected page, which is the cost this bounds),
         // and the page ships exactly as it would have with no measurement at all.
-        recheck = await verifyAgentOutput(ctx, pageAgent, img, [{ html: corrected, caution }], "recheck_sampled").catch(
+        recheck = await verifyAgentOutput(ctx, pageAgent, img, [{ html: corrected, caution, specialist }], "recheck_sampled").catch(
           (e: unknown) => {
             ctx.log.event("page_correction_recheck_failed", {
               image: img.name,

@@ -29,6 +29,7 @@ import type { Fragment } from "../src/pipeline/fragment.ts";
 
 const LOG_HEADING = '## What the agent recorded in its own "log" field';
 const CAUTION_HEADING = "## What the agent said about its own output";
+const SPECIALIST_HEADING = "## Where part of this output came from";
 
 interface Recorded {
   calls: { agent: string; step: string | undefined; content: string; user: string; cachedPrefix: string }[];
@@ -52,7 +53,10 @@ function makeCtx(dir: string, stub: StubOpts = {}): { ctx: PipelineContext; rec:
   const inputDir = join(dir, "input");
   for (const d of [agentsDir, fragDir, inputDir]) mkdirSync(d, { recursive: true });
   writeFileSync(join(agentsDir, "page.md"), "# Page Agent\n\n## Required capability\nvision\n");
-  writeFileSync(join(agentsDir, "chartDataAgent.md"), "# Chart Agent\n\n## Required capability\nvision\n");
+  writeFileSync(
+    join(agentsDir, "chartDataAgent.md"),
+    "# Chart Agent\n\n## Purpose\nConvert charts into accessible HTML with a data table.\n\n## Required capability\nvision\n",
+  );
   writeFileSync(join(agentsDir, "feedback.md"), "# Feedback Agent\n\n## Required capability\nvision\n");
   writeFileSync(join(inputDir, "page-001.png"), "not-a-real-png");
 
@@ -215,6 +219,33 @@ test("a merged specialist is named in the log the verifier is shown", async () =
     assert.ok(verify.content.includes(NOTE), "merging dropped what the page agent had recorded");
     // And no caution: the request was MET, so nothing here narrows what the verifier may assert.
     assert.ok(!verify.content.includes(CAUTION_HEADING), "a dispatched specialist produced a caution");
+    // But the verifier is told what the merged part is for, or it reads the specialist's tables as
+    // invented and has them removed (#577).
+    assert.ok(verify.content.includes(SPECIALIST_HEADING), "the merge note never reached the verifier");
+    assert.match(verify.content, /came from the specialist "chartDataAgent"/);
+    assert.match(verify.content, /Its purpose: "Convert charts into accessible HTML with a data table\."/);
+  });
+});
+
+test("a page with no merge is sent no merge note", async () => {
+  await withTemp(async (dir) => {
+    const { ctx, rec } = makeCtx(dir, { log: NOTE });
+    await runExtraction(ctx);
+    const verify = callAt(rec, "verify");
+    assert.ok(verify, "no verify call was made");
+    assert.ok(!verify.content.includes(SPECIALIST_HEADING), "a page nothing merged into carried a merge note");
+  });
+});
+
+test("a recheck of a corrected merged page is still sent the merge note", async () => {
+  await withTemp(async (dir) => {
+    const { ctx, rec } = makeCtx(dir, { log: NOTE, suggest: "chartDataAgent", failVerify: true });
+    await runExtraction(ctx);
+    const rechecks = rec.calls.filter((c) => c.agent === "feedback" && c.step !== "verify");
+    assert.ok(rechecks.length > 0, "the page was never corrected, so there is no recheck to check");
+    for (const r of rechecks) {
+      assert.ok(r.content.includes(SPECIALIST_HEADING), `${r.step} was not told a specialist merged`);
+    }
   });
 });
 

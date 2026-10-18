@@ -251,7 +251,10 @@ export async function verifyAgentOutput(
   // not shown (#349). Optional, and absent wherever the reply being judged has no log of its own:
   // a correction reply is parsed for `html` alone, so both rechecks send this empty rather than
   // sending the first pass's note about a fragment that has since been rewritten.
-  blocks: { html: string; caution?: string; log?: string }[],
+  // `specialist` is Iris's own note that a specialist's fragment was merged into this block, and
+  // what that specialist is for (#577). Without it the verifier read the specialist's tables as
+  // inventions and had them removed.
+  blocks: { html: string; caution?: string; log?: string; specialist?: string }[],
   step: Extract<
     PipelineStep,
     "verify" | "recheck_binding" | "recheck_sampled" | "agent_calibrate" | "agent_regression"
@@ -263,6 +266,7 @@ export async function verifyAgentOutput(
   const html = blocks.map((b) => b.html).join("\n\n");
   const cautions = [...new Set(blocks.map((b) => b.caution?.trim()).filter((c): c is string => !!c))];
   const logs = [...new Set(blocks.map((b) => flattenLog(b.log)).filter((l) => !!l))];
+  const specialists = [...new Set(blocks.map((b) => b.specialist?.trim()).filter((c): c is string => !!c))];
   // Everything this task says that is not about the page in front of it: the task marker
   // and the whole contract of the agent being judged. It is the same bytes on every page
   // of a document — `agents/page.md` is 16 KB of it, re-sent per page and per correction
@@ -326,6 +330,9 @@ export async function verifyAgentOutput(
     (logs.length ? `## What the agent recorded in its own "log" field\n${logs.map((l) => `- ${l}`).join("\n")}\n\n` : "") +
     (cautions.length
       ? `## What the agent said about its own output\n${cautions.map((c) => `- ${c}`).join("\n")}\n\n`
+      : "") +
+    (specialists.length
+      ? `## Where part of this output came from\n${specialists.map((c) => `- ${c}`).join("\n")}\n\n`
       : "") +
     `Compare the output against the attached source image.`;
 
