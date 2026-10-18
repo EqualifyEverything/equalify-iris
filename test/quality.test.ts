@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
-import { uploadSha256 } from "../src/routes/sessions.ts";
+import { uploadSha256 } from "../src/pipeline/stage.ts";
 import {
   LINT_ERROR_WHERE,
   lintErrorWhereSignal,
