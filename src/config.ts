@@ -12,6 +12,7 @@ export interface ProviderBlock {
   base_url?: string;
   region?: string;
   default_model: string;
+  fallback?: string;
   per_capability?: Partial<Record<Capability, string>>;
   // Output-token ceiling for this provider's calls. A dense page of accessible
   // HTML is the binding case: hit the ceiling and the model stops mid-tag.
@@ -142,11 +143,14 @@ export interface IrisConfig {
   branding?: { name?: string; logo_file?: string; logo_alt?: string };
   providers: {
     default: string;
+    fallback?: string;
     // Per-agent override. A string is shorthand for a provider name (model then
     // comes from that provider's per_capability/default_model). The object form
     // also allows pinning a specific model for that agent.
     per_agent?: Record<string, string | { provider?: string; model?: string }>;
     openrouter?: ProviderBlock;
+    gemini?: ProviderBlock;
+    ollama?: ProviderBlock;
     bedrock?: ProviderBlock;
     [key: string]: unknown;
   };
@@ -395,6 +399,7 @@ function validateConfig(cfg: IrisConfig, unset: Set<string>, path: string): void
   if (!cfg.providers?.default) problems.push("providers.default is not set");
 
   const referenced = new Set<string>([cfg.providers.default]);
+  if (cfg.providers.fallback) referenced.add(cfg.providers.fallback);
   for (const entry of Object.values(cfg.providers.per_agent ?? {})) {
     const name = typeof entry === "string" ? entry : entry?.provider;
     if (name) referenced.add(name);
@@ -407,11 +412,14 @@ function validateConfig(cfg: IrisConfig, unset: Set<string>, path: string): void
       problems.push(`providers.${name} is referenced but has no configuration block`);
       continue;
     }
+    if (block.fallback) referenced.add(block.fallback);
     if (!block.default_model) problems.push(`providers.${name}.default_model is not set`);
-    // Bedrock authenticates through the standard AWS credential chain, so there
-    // is no key in config to check.
+    // Bedrock and Ollama do not require an API key in config (Bedrock uses AWS credentials, Ollama is local).
     if (name === "openrouter" && !block.api_key) {
       problems.push(`providers.openrouter.api_key is empty (set OPENROUTER_API_KEY)`);
+    }
+    if (name === "gemini" && !block.api_key && !process.env.GOOGLE_API_KEY && !process.env.GEMINI_API_KEY) {
+      problems.push(`providers.gemini.api_key is empty (set GOOGLE_API_KEY or GEMINI_API_KEY)`);
     }
   }
 
