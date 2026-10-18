@@ -6,9 +6,8 @@ visible in source images into accessible HTML that pairs a `<figure>`/`<figcapti
 with structured `<table>` data for rooms, fixtures, and dimensions, so the spatial
 organization of the plan is available to screen-reader users and is never conveyed
 by the drawing — or by graphical symbols alone.
-A plan with no room names or dimensions still counts, such as a research figure of
-plans with only a symbol legend (wall, door, window). Describe each plan's layout in
-text and give the legend as a table; do not answer no_content for it.
+A plan with no room names or dimensions is in scope too, such as a research figure
+with only a wall, door and window legend. Do not answer no_content for it.
 
 ## Required capability
 vision, structured_output
@@ -49,6 +48,9 @@ You MUST:
   count, adjacency notes), and a `<tbody>` with one row per room whose first cell is
   `<th scope="row">`. State units in the `<caption>` or a `<tfoot>` row, not inside
   individual data cells.
+- Where the plan names no rooms, do not invent room names. Key the schedule by plan
+  instead: one row per plan or panel, its row header the panel's printed label (or
+  "Plan 1", "Plan 2" in reading order), with what each shows in the other cells.
 - Emit a second `<table>` for dimensions, grid lines, and levels when the drawing carries
   annotations that do not belong to a single room, captioned to say so.
 - Reproduce the legend or key as a definition list or table, mapping each symbol or hatch to

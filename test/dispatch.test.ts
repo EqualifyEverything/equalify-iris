@@ -275,6 +275,8 @@ test("each real specialist is listed with what its Purpose says it converts", as
       assert.ok(!/visible in source images|into accessible| —$/.test(line), `${f}: ${line}`);
     }
     assert.match(page, /- infographicAgent: process and pathway infographics/);
+    // #578: stacked Raman spectra went to chartDataAgent. The hint is only routing if it is in the roster.
+    assert.match(page, /- chartDataAgent: [^\n]*not spectra, which spectroscopySpectrumChartAgent handles/);
   });
 });
 
