@@ -6,6 +6,9 @@ visible in source images into accessible HTML that pairs a `<figure>`/`<figcapti
 with structured `<table>` data for rooms, fixtures, and dimensions, so the spatial
 organization of the plan is available to screen-reader users and is never conveyed
 by the drawing — or by graphical symbols alone.
+A plan with no room names or dimensions still counts, such as a research figure of
+plans with only a symbol legend (wall, door, window). Describe each plan's layout in
+text and give the legend as a table; do not answer no_content for it.
 
 ## Required capability
 vision, structured_output
