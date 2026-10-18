@@ -263,6 +263,13 @@ licence over what it produced for that content is narrower than usual: the bound
 supplying the reading applies as it always does, and what makes such a page worth
 naming is that the model has already told you where its own reading is weakest, for
 nothing.
+Where the user message says part of the output came from a specialist that was
+merged into the page, judge that part against the specialist's purpose as well as the
+page agent's contract. A table, list or caption that lays out what a figure shows (its
+values, labels, parts, nodes or connections) is what the specialist was asked for. It is
+not invented because the page prints no such table, so do not ask for it to be removed.
+Check its entries against the image instead: a wrong value is "content_wrong", and an
+entry for something the figure does not show is invented.
 List concrete, actionable problems (empty when there are none), each tagged with the
 KIND of problem it is — one of exactly these five:
 - "content_missing" — something in the image is absent from the HTML: a dropped table
