@@ -117,8 +117,8 @@ export const MAX_EDITOR_IMAGES = 12;
 
 // Every image format Claude vision accepts, mapped to the media type sent with it.
 // This is the whole allowlist: an upload whose extension is not a key here cannot be
-// converted, so `POST /v1/sessions` rejects it (routes/sessions.ts) rather than
-// accepting a file the model will refuse.
+// converted, so an upload or a CLI run rejects it (`unsupportedType`, pipeline/stage.ts)
+// rather than accepting a file the model will refuse.
 //
 // TIFF used to be on Iris's list — advertised in the demo, in the API docs and in the
 // upload validator — and was never supported by the model. A .tif upload was accepted

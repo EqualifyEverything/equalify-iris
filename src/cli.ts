@@ -7,6 +7,7 @@ import { Store } from "./store/db.ts";
 import { Paths } from "./store/paths.ts";
 import { runPipeline } from "./pipeline/orchestrator.ts";
 import { PdfTooLargeError } from "./util/pdf.ts";
+import { titledAs } from "./util/outputNames.ts";
 import { resolveImageLimits } from "./providers/imageLimits.ts";
 import { renderUploads, stageSession, UploadRejectedError, uploadRejection, unsupportedType } from "./pipeline/stage.ts";
 
@@ -145,7 +146,9 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  const htmlContent = readFileSync(generatedHtmlPath, "utf8");
+  // Titled after the input file, as the API titles a download. The input's own stem rather
+  // than the session's stored, sanitized name, since this file is written locally.
+  const htmlContent = titledAs(readFileSync(generatedHtmlPath, "utf8"), inputStem);
   writeFileSync(outputPath, htmlContent, "utf8");
   console.log(`Converted output saved to: ${outputPath}`);
 }
