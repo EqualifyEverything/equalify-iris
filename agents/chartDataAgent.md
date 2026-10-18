@@ -1,7 +1,8 @@
 # Chart Data Agent
 
 ## Purpose
-Convert charts and graphs (bar, grouped/stacked bar, line, pie, scatter, etc.)
+Convert charts and graphs (bar, grouped/stacked bar, line, pie, scatter, etc.; not
+spectra, which spectroscopySpectrumChartAgent handles)
 visible in source images into accessible HTML that pairs a `<figure>`/`<figcaption>`
 with a structured data `<table>`, so the underlying values are available to
 screen-reader users and are never conveyed by the image — or by color — alone.
