@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
-import { writeFileSync, unlinkSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, unlinkSync, existsSync } from "node:fs";
 
 const ROOT = join(import.meta.dirname, "..");
 const CLI_PATH = join(ROOT, "src", "cli.ts");
@@ -53,8 +53,17 @@ test("cli rejects unsupported file types", () => {
   try {
     const res = runCli([tmpFile]);
     assert.equal(res.status, 1);
-    assert.ok(res.stderr.includes("Error: Unsupported file type: .txt"));
+    assert.ok(res.stderr.includes("Error: Unsupported file type: tmp_test_unsupported.txt (allowed: PNG,"), res.stderr);
   } finally {
     if (existsSync(tmpFile)) unlinkSync(tmpFile);
+  }
+});
+
+test("the CLI and the upload route stage a session through the same code", () => {
+  for (const file of [["src", "cli.ts"], ["src", "routes", "sessions.ts"]]) {
+    const src = readFileSync(join(ROOT, ...file), "utf8");
+    assert.match(src, /await renderUploads\(files, imageLimits\)/, file.join("/"));
+    assert.match(src, /await stageSession\(cfg, store, paths, files, rendered\.pages, rendered\.refits\)/, file.join("/"));
+    assert.doesNotMatch(src, /rasterizePdf\(|store\.createSession\(/, file.join("/"));
   }
 });

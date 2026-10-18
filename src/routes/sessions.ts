@@ -1,10 +1,7 @@
 import { Router } from "express";
 import type { Request, Response, NextFunction } from "express";
 import multer from "multer";
-import { writeFileSync, readFileSync, existsSync, rmSync, statSync } from "node:fs";
-import { extname, join } from "node:path";
-import { createHash } from "node:crypto";
-import { ulid } from "ulid";
+import { readFileSync, existsSync, rmSync, statSync } from "node:fs";
 import type { IrisConfig } from "../config.ts";
 import type { Store, SessionRecord } from "../store/db.ts";
 import { encodeCursor, pageSessions, parseCursor } from "../store/db.ts";
@@ -12,16 +9,10 @@ import { Paths } from "../store/paths.ts";
 import { runPipeline } from "../pipeline/orchestrator.ts";
 import { sendError } from "./errors.ts";
 import { summarizeRun } from "../diagnostics.ts";
-import {
-  rasterizePdf,
-  rasterizePageToFit,
-  PdfTooLargeError,
-  MAX_PDF_PAGES,
-  type PageImage,
-  type PdfLink,
-} from "../util/pdf.ts";
-import { outputBasenameFromUploads, convertedHtmlFilename, safeStem, titledAs } from "../util/outputNames.ts";
+import { PdfTooLargeError } from "../util/pdf.ts";
+import { convertedHtmlFilename, titledAs } from "../util/outputNames.ts";
 import { captureFixtures } from "../pipeline/regression.ts";
+import { MAX_TOTAL_PAGES, renderUploads, stageSession, UploadRejectedError, uploadRejection } from "../pipeline/stage.ts";
 import type { Fragment } from "../pipeline/fragment.ts";
 import { RunQueue } from "../util/queue.ts";
 import {
@@ -32,16 +23,7 @@ import {
   uploadRateLimit,
 } from "../util/requestLimits.ts";
 import { RunLog } from "../store/runlog.ts";
-import {
-  IMAGE_MEDIA_TYPES,
-  imageRejection,
-  rasterizedPageRejection,
-  refitLongEdge,
-  resolveImageLimits,
-  shrunkPageRejection,
-} from "../providers/imageLimits.ts";
-import { imageDimensions } from "../util/imageSize.ts";
-import { usableFieldName } from "../pipeline/fields.ts";
+import { resolveImageLimits } from "../providers/imageLimits.ts";
 import { createdFields, readFields, tagPdf, taggedPdfCommand, tagTimeoutSeconds, TaggedPdfError, type PdfField, type TagInput } from "../util/taggedPdf.ts";
 
 // 50 MB is a memory bound, not the image limit. It stays well above what an image may
@@ -95,23 +77,6 @@ function uploadImages(req: Request, res: Response, next: NextFunction): void {
   });
 }
 
-// Built from the formats the vision model actually reads (providers/imageLimits.ts)
-// rather than written out here, so this validator cannot go on accepting a format
-// the model stopped supporting — or, as it did with TIFF, never supported.
-const IMAGE_EXT = new RegExp(`(?:${Object.keys(IMAGE_MEDIA_TYPES).map((e) => `\\${e}`).join("|")})$`, "i");
-const PDF_EXT = /\.pdf$/i;
-const MAX_TOTAL_PAGES = MAX_PDF_PAGES; // overall cap across all uploaded files
-
-// How the allowed types read in an error message: ".png,.jpg" -> "PNG, JPG".
-const ALLOWED_TYPES = [...Object.keys(IMAGE_MEDIA_TYPES).map((e) => e.slice(1).toUpperCase()), "PDF"].join(", ");
-
-// A rasterized PDF page the vision model cannot accept. Thrown from the expansion
-// loop rather than returned, because the check sits inside an `await` over several
-// files and the alternative is threading a rejection out through both branches; it
-// lands in the same catch as the other PDF failures. It carries the finished message
-// so the handler decides the status code and nothing else re-words the diagnosis.
-class PageTooLargeError extends Error {}
-
 // One row of `GET /v1/sessions` (see its handler below). Deliberately no lint result and no
 // document: a list is for finding a session, and everything about its output is on the session
 // itself.
@@ -130,55 +95,6 @@ export function remember<K, V>(map: Map<K, V>, key: K, value: V, max: number): v
   map.delete(key);
   map.set(key, value);
   while (map.size > max) map.delete(map.keys().next().value!);
-}
-
-// Keep the upload for a tagged PDF later, when this deployment makes them and the upload
-// was one PDF on its own. Then the PDF's page N is the session's page N.
-export function keepSourcePdf(
-  cfg: IrisConfig,
-  paths: Paths,
-  sessionId: string,
-  files: { originalname: string; buffer: Buffer }[],
-): boolean {
-  if (!taggedPdfCommand(cfg) || files.length !== 1 || !PDF_EXT.test(files[0].originalname)) return false;
-  writeFileSync(paths.sessionSourcePdf(sessionId), files[0].buffer);
-  return true;
-}
-
-// What `sessions.source_sha256` stores (#509). One file: its own sha256. Several: the sha256 of
-// their hex digests, one per line, in upload order.
-export function uploadSha256(files: { buffer: Buffer }[]): string {
-  const digests = files.map((f) => createHash("sha256").update(f.buffer).digest("hex"));
-  return digests.length === 1 ? digests[0] : createHash("sha256").update(digests.join("\n")).digest("hex");
-}
-
-// The kept PDF's form fields, by page, so the page agent can name each control after its
-// field (#483, pipeline/fields.ts). Written only when there are some. A failure is returned
-// for the run log rather than raised: the run converts the same without them. A name that
-// could end the attribute it is copied into is dropped and counted (`usableFieldName`).
-export async function keepPdfFields(
-  command: string,
-  paths: Paths,
-  sessionId: string,
-): Promise<{ fields: number; unusable: number } | { error: string }> {
-  let fields: PdfField[];
-  try {
-    fields = await readFields(command, paths.sessionSourcePdf(sessionId));
-  } catch (e) {
-    return { error: e instanceof TaggedPdfError ? e.code : "tagger_failed" };
-  }
-  if (!Array.isArray(fields)) return { error: "tagger_failed" };
-  const byPage: Record<string, PdfField[]> = {};
-  let unusable = 0;
-  for (const f of fields) {
-    if (!usableFieldName(f?.name) || !Number.isInteger(f.page)) {
-      unusable++;
-      continue;
-    }
-    (byPage[String(f.page)] ??= []).push(f);
-  }
-  if (Object.keys(byPage).length) writeFileSync(paths.sessionFields(sessionId), JSON.stringify(byPage, null, 2));
-  return { fields: fields.length - unusable, unusable };
 }
 
 export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
@@ -317,37 +233,10 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
       sendError(res, 400, "invalid_request", "At least one file part named 'images' is required (image or PDF)");
       return;
     }
-    for (const f of files) {
-      if (!IMAGE_EXT.test(f.originalname) && !PDF_EXT.test(f.originalname)) {
-        sendError(res, 400, "invalid_request", `Unsupported file type: ${f.originalname} (allowed: ${ALLOWED_TYPES})`);
-        return;
-      }
-      // Too heavy for the vision model to accept, checked before anything is written
-      // to disk or queued. Without this the upload succeeded, the run started, and
-      // the first vision call ate the whole payload and then failed — reaching the
-      // user two to four minutes later as a message about a stream that produced no
-      // output, naming neither the file nor anything to do about it.
-      //
-      // A PDF is not measured here — the file the caller sent is not what reaches the
-      // model. A 20 MB PDF of 25 light pages is a perfectly convertible document, so
-      // the size that matters is the size of each page AFTER rasterizing, and that is
-      // checked where the pages exist (below).
-      if (!PDF_EXT.test(f.originalname)) {
-        const size = imageDimensions(f.buffer);
-        const why = imageRejection(
-          {
-            name: f.originalname,
-            bytes: f.buffer.length,
-            width: size?.width,
-            height: size?.height,
-          },
-          imageLimits,
-        );
-        if (why) {
-          sendError(res, 400, "invalid_request", why);
-          return;
-        }
-      }
+    const rejected = uploadRejection(files, imageLimits);
+    if (rejected) {
+      sendError(res, 400, "invalid_request", rejected);
+      return;
     }
 
     // The review cap is the deployment's `defaults.max_review_iterations`. A per-request `config`
@@ -362,131 +251,19 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
     // still sending one keeps working, at the deployment's cap.
     const maxIter = cfg.defaults.max_review_iterations;
 
-    // Expand uploads into ordered page images (PDF -> one PNG per page), each
-    // carrying the link annotations on that page — the one part of a PDF that
-    // rasterizing destroys, so it travels alongside the image (see pipeline/links.ts).
-    const pages: PageImage[] = [];
-    // Pages that only fit after a second, smaller render. Collected rather than logged
-    // here because the session whose log this belongs in does not exist yet — the pages
-    // have to be measured before there is anything to record against (below).
-    const refits: { pdf: string; page: number; long_edge_px: number; from: string }[] = [];
+    let rendered: Awaited<ReturnType<typeof renderUploads>>;
     try {
-      for (const f of files) {
-        if (PDF_EXT.test(f.originalname)) {
-          const rendered = await rasterizePdf(f.buffer, f.originalname);
-          // The uploaded PDF was exempt from the per-image limits; its pages are not.
-          // Rasterizing at a fixed DPI means the page image's size follows the
-          // PHYSICAL page, so a large-format page (a drawing, a fold-out) renders past
-          // what the model accepts — and the run would then die inside the first
-          // vision call, minutes in, which is the failure this route exists to catch.
-          for (const [i, p] of rendered.entries()) {
-            const page = p.page ?? i + 1;
-            const size = imageDimensions(p.buffer);
-            const why = rasterizedPageRejection(
-              f.originalname,
-              page,
-              { bytes: p.buffer.length, width: size?.width, height: size?.height },
-              imageLimits,
-            );
-            if (!why) continue;
-            // Iris chose these pixels, so before refusing the document it renders the
-            // page again at a size it can send (issue #485). Only this page, and only
-            // on the path that was about to fail: a document that converts today is
-            // rendered exactly as it was.
-            const target = refitLongEdge({ width: size?.width, height: size?.height }, imageLimits);
-            // A target means the page's dimensions parsed (`refitLongEdge` answers null
-            // otherwise), and `page` is set on everything `rasterizePdf` returns — but a
-            // rejection is the safe reading of either being absent, since re-rendering
-            // needs both the page to ask for and a size to ask for it at.
-            if (target === null || !size || p.page === undefined) throw new PageTooLargeError(why);
-            // A failed re-render gets the refusal it would have had, not pdftoppm's error.
-            const smaller = await rasterizePageToFit(f.buffer, p.page, target).catch(() => {
-              throw new PageTooLargeError(why);
-            });
-            const shrunk = imageDimensions(smaller);
-            const still = shrunkPageRejection(
-              f.originalname,
-              page,
-              target,
-              { bytes: smaller.length, width: shrunk?.width, height: shrunk?.height },
-              imageLimits,
-            );
-            if (still) throw new PageTooLargeError(still);
-            refits.push({
-              pdf: f.originalname,
-              page,
-              long_edge_px: target,
-              from: `${size.width}x${size.height}`,
-            });
-            p.buffer = smaller;
-          }
-          pages.push(...rendered);
-        } else {
-          // Filtered like a PDF's page names (safeStem); the extension already passed IMAGE_EXT.
-          pages.push({ name: safeStem(f.originalname, "page") + extname(f.originalname).toLowerCase(), buffer: f.buffer, links: [] });
-        }
-      }
+      rendered = await renderUploads(files, imageLimits);
     } catch (e) {
-      if (e instanceof PageTooLargeError || e instanceof PdfTooLargeError) {
+      if (e instanceof UploadRejectedError || e instanceof PdfTooLargeError) {
         sendError(res, 400, "invalid_request", e.message);
       } else {
         sendError(res, 422, "pdf_conversion_failed", `Could not process a PDF: ${(e as Error).message}`);
       }
       return;
     }
-
-    if (pages.length === 0) {
-      sendError(res, 400, "invalid_request", "No pages found in the uploaded files");
-      return;
-    }
-    if (pages.length > MAX_TOTAL_PAGES) {
-      sendError(res, 400, "invalid_request", `Too many pages (${pages.length}); the maximum is ${MAX_TOTAL_PAGES}.`);
-      return;
-    }
-
-    const sessionId = `ses_${ulid()}`;
-    paths.initSession(sessionId);
-    // Remember the source basename so the output title + download filename
-    // mirror the upload (e.g. report.pdf -> report_converted.html).
-    writeFileSync(paths.sessionSourceName(sessionId), outputBasenameFromUploads(files));
-    // Persist page images with an order prefix so submitted order survives.
-    pages.forEach((p, i) => {
-      const order = String(i + 1).padStart(4, "0");
-      writeFileSync(join(paths.sessionInput(sessionId), `${order}__${p.name}`), p.buffer);
-    });
-    // …and the link annotations beside them, keyed by that same order. Only when
-    // there are some, so a session of plain images gains no empty file.
-    const linksByOrder: Record<string, PdfLink[]> = {};
-    pages.forEach((p, i) => {
-      if (p.links.length) linksByOrder[String(i + 1)] = p.links;
-    });
-    if (Object.keys(linksByOrder).length) {
-      writeFileSync(paths.sessionLinks(sessionId), JSON.stringify(linksByOrder, null, 2));
-    }
-    const formFields = keepSourcePdf(cfg, paths, sessionId, files)
-      ? await keepPdfFields(taggedPdfCommand(cfg)!, paths, sessionId)
-      : null;
-    // A page the model reads at lower resolution than the rest is a fact about this
-    // document's output, so the session says so rather than the deployment's stdout: the
-    // owner of a document whose fold-out reads worse than its letter pages can find out
-    // why from the log they already have (`GET /v1/sessions/{id}/logs`). Best-effort for
-    // the same reason `run_queued` is — a run must not fail to start over its own log.
-    if (refits.length || formFields) {
-      try {
-        const log = new RunLog(paths.sessionLog(sessionId));
-        for (const r of refits) log.event("page_refit", r);
-        if (formFields) log.event("form_fields", formFields);
-      } catch {
-        // ignore — observability must not block the run
-      }
-    }
-
-    const record = store.createSession({
-      session_id: sessionId,
-      image_count: pages.length,
-      iterations_max: maxIter,
-      source_sha256: uploadSha256(files),
-    });
+    const record = await stageSession(cfg, store, paths, files, rendered.pages, rendered.refits);
+    const sessionId = record.session_id;
 
     // Queue the pipeline; clients poll GET /v1/sessions/{id}. The session stays
     // in the `queued` status it was created with until a slot frees up, so a

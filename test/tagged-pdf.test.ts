@@ -9,7 +9,8 @@ import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { IrisConfig } from "../src/config.ts";
-import { keepPdfFields, keepSourcePdf, remember, sessionsRouter } from "../src/routes/sessions.ts";
+import { remember, sessionsRouter } from "../src/routes/sessions.ts";
+import { keepPdfFields, keepSourcePdf } from "../src/pipeline/stage.ts";
 import { enumerateInputs } from "../src/pipeline/orchestrator.ts";
 import { limitsRouter } from "../src/routes/limits.ts";
 import { Store } from "../src/store/db.ts";
@@ -117,10 +118,10 @@ test("the upload is kept only when tagged PDFs are on and it is one PDF", () => 
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
-  // And the upload route is what calls it, after the session directory exists.
-  const route = readFileSync(join(dirname(FAKE), "..", "..", "src", "routes", "sessions.ts"), "utf8");
-  const handler = route.slice(route.indexOf('r.post("/", '), route.indexOf("store.createSession("));
-  assert.match(handler, /paths\.initSession\(sessionId\);[\s\S]*keepSourcePdf\(cfg, paths, sessionId, files\)\s*\?\s*await keepPdfFields\(/);
+  // And staging is what calls it, after the session directory exists.
+  const stage = readFileSync(join(dirname(FAKE), "..", "..", "src", "pipeline", "stage.ts"), "utf8");
+  const staging = stage.slice(stage.indexOf("export async function stageSession("), stage.indexOf("store.createSession("));
+  assert.match(staging, /paths\.initSession\(sessionId\);[\s\S]*keepSourcePdf\(cfg, paths, sessionId, files\)\s*\?\s*await keepPdfFields\(/);
 });
 
 test("the kept PDF's form fields reach its pages, and a failure writes nothing", async () => {
