@@ -237,6 +237,18 @@ test("a page with no merge is sent no merge note", async () => {
   });
 });
 
+test("a recheck of a corrected merged page is still sent the merge note", async () => {
+  await withTemp(async (dir) => {
+    const { ctx, rec } = makeCtx(dir, { log: NOTE, suggest: "chartDataAgent", failVerify: true });
+    await runExtraction(ctx);
+    const rechecks = rec.calls.filter((c) => c.agent === "feedback" && c.step !== "verify");
+    assert.ok(rechecks.length > 0, "the page was never corrected, so there is no recheck to check");
+    for (const r of rechecks) {
+      assert.ok(r.content.includes(SPECIALIST_HEADING), `${r.step} was not told a specialist merged`);
+    }
+  });
+});
+
 test("a recheck of a corrected fragment is sent no log", async () => {
   await withTemp(async (dir) => {
     const { ctx, rec } = makeCtx(dir, { log: NOTE, failVerify: true });

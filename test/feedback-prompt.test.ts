@@ -605,5 +605,5 @@ test("the verify task keeps a merged specialist's tables and checks their entrie
   const prompt = readFileSync("agents/feedback.md", "utf8").replace(/\s+/g, " ");
   assert.match(prompt, /part of the output came from a specialist that was merged into the page/);
   assert.match(prompt, /It is not invented because the page prints no such table, so do not ask for it to be removed\./);
-  assert.match(prompt, /a wrong value is "content_wrong", and an entry for something the figure does not show is invented/);
+  assert.match(prompt, /A wrong value is "content_wrong", and so is an entry for something the figure does not show\./);
 });
