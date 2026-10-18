@@ -19,6 +19,7 @@
     "start": "node --use-system-ca --env-file-if-exists=.env src/index.ts",
     "dev": "node --use-system-ca --env-file-if-exists=.env --watch src/index.ts",
     "typecheck": "tsc --noEmit",
+    "convert": "node --use-system-ca --env-file-if-exists=.env src/cli.ts",
     "test": "node --no-sparkplug --test --test-reporter=spec --test-reporter-destination=stdout --test-reporter=./test/spec-with-signals.mjs --test-reporter-destination=stdout \"test/*.test.ts\""
   },
   "dependencies": {
