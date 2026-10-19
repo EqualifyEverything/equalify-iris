@@ -114,6 +114,10 @@ test("a folder whose delete failed is retried on the next sweep", async () => {
   writeFileSync(paths.sessionOutput("ses_stuck"), "<p>x</p>");
   assert.equal(await pruneSessions(store, paths, 30, later), 0, "a retry is not a new expiry");
   assert.equal(existsSync(paths.sessionDir("ses_stuck")), false);
+  // The same when only tmp/<id> is left.
+  mkdirSync(paths.tmpDir("ses_stuck"), { recursive: true });
+  await pruneSessions(store, paths, 30, later);
+  assert.equal(existsSync(paths.tmpDir("ses_stuck")), false);
 });
 
 test("a failed sweep is logged, not thrown", async () => {

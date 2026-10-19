@@ -1104,11 +1104,6 @@ export class Store {
     return this.db.prepare(`SELECT * FROM sessions WHERE session_id = ?`).get(id) as SessionRecord | undefined;
   }
 
-  /**
-   * Mark every finished session last updated before `cutoff` as expired, and return their ids
-   * so the caller can delete their folders (store/retention.ts). Queued and running sessions
-   * are never picked. The row is kept: `publicStats` and the quality tally count it.
-   */
   // Every session the retention rule has marked, so a sweep can retry a folder whose delete failed.
   expiredSessionIds(): string[] {
     const rows = this.db.prepare(`SELECT session_id FROM sessions WHERE files_deleted_at IS NOT NULL`).all() as {
@@ -1117,6 +1112,11 @@ export class Store {
     return rows.map((r) => r.session_id);
   }
 
+  /**
+   * Mark every finished session last updated before `cutoff` as expired, and return their ids
+   * so the caller can delete their folders (store/retention.ts). Queued and running sessions
+   * are never picked. The row is kept: `publicStats` and the quality tally count it.
+   */
   expireSessions(cutoff: string, now: string): string[] {
     const rows = this.db
       .prepare(

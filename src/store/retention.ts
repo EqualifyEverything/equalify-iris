@@ -21,7 +21,7 @@ export async function pruneSessions(store: Store, paths: Paths, days: number, no
   const ids = store.expireSessions(new Date(now - days * DAY_MS).toISOString(), new Date(now).toISOString());
   // A delete that failed on an earlier sweep left its row marked, so retry any marked folder still there.
   const fresh = new Set(ids);
-  const retry = store.expiredSessionIds().filter((id) => !fresh.has(id) && existsSync(paths.sessionDir(id)));
+  const retry = store.expiredSessionIds().filter((id) => !fresh.has(id) && (existsSync(paths.sessionDir(id)) || existsSync(paths.tmpDir(id))));
   for (const id of [...ids, ...retry]) {
     try {
       await rm(paths.sessionDir(id), { recursive: true, force: true });
