@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import type { IrisConfig } from "../config.ts";
 import type { Store } from "./db.ts";
@@ -18,7 +19,10 @@ export function retentionDays(cfg: IrisConfig): number | null {
  */
 export async function pruneSessions(store: Store, paths: Paths, days: number, now = Date.now()): Promise<number> {
   const ids = store.expireSessions(new Date(now - days * DAY_MS).toISOString(), new Date(now).toISOString());
-  for (const id of ids) {
+  // A delete that failed on an earlier sweep left its row marked, so retry any marked folder still there.
+  const fresh = new Set(ids);
+  const retry = store.expiredSessionIds().filter((id) => !fresh.has(id) && existsSync(paths.sessionDir(id)));
+  for (const id of [...ids, ...retry]) {
     try {
       await rm(paths.sessionDir(id), { recursive: true, force: true });
       // Only /close removes tmp/<id>, and an expired session can't be closed.

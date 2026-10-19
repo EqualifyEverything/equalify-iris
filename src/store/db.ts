@@ -1109,6 +1109,14 @@ export class Store {
    * so the caller can delete their folders (store/retention.ts). Queued and running sessions
    * are never picked. The row is kept: `publicStats` and the quality tally count it.
    */
+  // Every session the retention rule has marked, so a sweep can retry a folder whose delete failed.
+  expiredSessionIds(): string[] {
+    const rows = this.db.prepare(`SELECT session_id FROM sessions WHERE files_deleted_at IS NOT NULL`).all() as {
+      session_id: string;
+    }[];
+    return rows.map((r) => r.session_id);
+  }
+
   expireSessions(cutoff: string, now: string): string[] {
     const rows = this.db
       .prepare(

@@ -104,6 +104,18 @@ test("an expired session's file routes answer 410 session_expired, and GET says 
   }
 });
 
+test("a folder whose delete failed is retried on the next sweep", async () => {
+  const { store, paths, make } = setup(30);
+  make("ses_stuck", "closed");
+  const later = Date.now() + 31 * DAY;
+  await pruneSessions(store, paths, 30, later);
+  // As if the delete had failed: the row is marked and the folder is still there.
+  paths.initSession("ses_stuck");
+  writeFileSync(paths.sessionOutput("ses_stuck"), "<p>x</p>");
+  assert.equal(await pruneSessions(store, paths, 30, later), 0, "a retry is not a new expiry");
+  assert.equal(existsSync(paths.sessionDir("ses_stuck")), false);
+});
+
 test("a failed sweep is logged, not thrown", async () => {
   const { config, store, paths } = setup(30);
   store.expireSessions = () => {
