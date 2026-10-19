@@ -9,9 +9,10 @@ import {
   missingNumberProblem,
   numberTokens,
   numbersMissingFromTextLayer,
-  textLayerNumbers,
+  textLayer,
 } from "../src/pipeline/numbers.ts";
 import { parsePdfHtmlText } from "../src/util/pdf.ts";
+import { tightenDigitGroups } from "../src/util/html.ts";
 import { declinedSource, runExtraction } from "../src/pipeline/extraction.ts";
 import { enumerateInputs } from "../src/pipeline/orchestrator.ts";
 import type { PipelineContext } from "../src/pipeline/context.ts";
@@ -32,57 +33,87 @@ test("numbers are normalised: thousands separators, leading zeros, am/pm", () =>
 });
 
 test("9:45 pm read as 4:45 pm is missing from the text layer", () => {
-  const layer = textLayerNumbers(LAYER)!;
-  const r = numbersMissingFromTextLayer(layer, "<p>Doors open at 4:45 pm.</p>");
-  assert.deepEqual(r.missing, ["4:45 pm"]);
+  const layer = textLayer(LAYER)!;
+  const r = numbersMissingFromTextLayer(layer, "<p>Doors open at 4:45 pm.</p>")!;
+  assert.deepEqual(r.numbers, ["4:45 pm"]);
   assert.equal(r.checked, 1);
-  assert.deepEqual(numbersMissingFromTextLayer(layer, "<p>Doors open at 9:45&nbsp;PM.</p>").missing, []);
-  assert.deepEqual(numbersMissingFromTextLayer(layer, "<p>Doors open at 9:45 am.</p>").missing, ["9:45 am"]);
-  assert.deepEqual(numbersMissingFromTextLayer(layer, "<p>9:45</p>").missing, [], "a bare time matches either");
+  assert.deepEqual(numbersMissingFromTextLayer(layer, "<p>At 4:45 p.m. sharp.</p>")!.numbers, ["4:45 p.m."], "quoted as written");
+  assert.deepEqual(numbersMissingFromTextLayer(layer, "<p>Doors open at 9:45&nbsp;PM.</p>")!.numbers, []);
+  assert.deepEqual(numbersMissingFromTextLayer(layer, "<p>Doors open at 9:45 am.</p>")!.numbers, ["9:45 am"]);
+  assert.deepEqual(numbersMissingFromTextLayer(layer, "<p>9:45</p>")!.numbers, [], "a bare time matches either");
   // A timetable whose column is headed "PM" prints the bare time; the HTML may add the pm.
-  const timetable = textLayerNumbers("Evening departures PM 9:45 10:15")!;
-  assert.deepEqual(numbersMissingFromTextLayer(timetable, "<td>9:45 pm</td>").missing, []);
+  const timetable = textLayer("Evening departures PM 9:45 10:15")!;
+  assert.deepEqual(numbersMissingFromTextLayer(timetable, "<td>9:45 pm</td>")!.numbers, []);
 });
 
 test("1,200 matches 1200, and a range matches with a hyphen or an en dash", () => {
-  const layer = textLayerNumbers(LAYER)!;
-  assert.deepEqual(numbersMissingFromTextLayer(layer, "<p>$1200 for 3 nights, 10-12 June 2026</p>").missing, []);
-  assert.deepEqual(numbersMissingFromTextLayer(textLayerNumbers("pages 10-12 of the report")!, "<p>10–12</p>").missing, []);
-  assert.deepEqual(numbersMissingFromTextLayer(layer, "<p>$1,300</p>").missing, ["1300"]);
+  const layer = textLayer(LAYER)!;
+  assert.deepEqual(numbersMissingFromTextLayer(layer, "<p>$1200 for 3 nights, 10-12 June 2026</p>")!.numbers, []);
+  assert.deepEqual(numbersMissingFromTextLayer(textLayer("pages 10-12 of the report")!, "<p>10–12</p>")!.numbers, []);
+  assert.deepEqual(numbersMissingFromTextLayer(layer, "<p>$1,300</p>")!.numbers, ["1,300"]);
+});
+
+test("a text layer's `4, 271` is the 4,271 that tightenDigitGroups writes", () => {
+  const layer = textLayer("Table 2. Enrolment by year: 2024 total 4, 271 students")!;
+  assert.deepEqual(layer.numbers, ["2", "2024", "4271"]);
+  const html = tightenDigitGroups("<table><tr><td>2024</td><td>4, 271</td></tr></table>").html;
+  assert.match(html, /<td>4,271<\/td>/);
+  assert.deepEqual(numbersMissingFromTextLayer(layer, html)!.numbers, []);
+  assert.deepEqual(numbersMissingFromTextLayer(layer, "<p>4, 271</p>")!.numbers, [], "and the HTML's own gap");
+  assert.deepEqual(numbersMissingFromTextLayer(layer, "<td>4,217</td>")!.numbers, ["4,217"]);
+  assert.deepEqual(numberTokens("4, 2711"), ["4", "2711"], "a fourth digit is two numbers");
+});
+
+test("a scan with a typed stamp is not checked against the stamp", () => {
+  const layer = textLayer("CONFIDENTIAL — Exhibit 3, Page 12 of 40")!;
+  const body =
+    `<p>The committee met on 14 March and approved a budget of $82,500 for the coming year. ` +
+    `Attendance at the spring meeting was 214, up from the year before, and members asked that ` +
+    `the minutes be circulated before the next meeting rather than read aloud at it.</p>`;
+  const r = numbersMissingFromTextLayer(layer, body)!;
+  assert.equal(r.skipped, "thin_layer");
+  assert.equal(r.missing, 3);
+  assert.deepEqual(r.numbers, []);
+  // The same layer against a page no longer than it is checked.
+  assert.deepEqual(numbersMissingFromTextLayer(layer, "<p>Exhibit 3, page 12 of 41</p>")!.numbers, ["41"]);
 });
 
 test("a scan's text layer is not checked against", () => {
-  assert.equal(textLayerNumbers(""), null);
-  assert.equal(textLayerNumbers("  \n 3 \n"), null, "a page number alone is a scan");
-  assert.equal(textLayerNumbers(undefined), null);
-  assert.deepEqual(textLayerNumbers("A page of words and no digits at all."), [], "text with no numbers is not a scan");
-  const r = numbersMissingFromTextLayer(undefined, "<p>4:45 pm</p>");
-  assert.deepEqual(r, { checked: 0, missing: [], skipped: false });
+  assert.equal(textLayer(""), null);
+  assert.equal(textLayer("  \n 3 \n"), null, "a page number alone is a scan");
+  assert.equal(textLayer(undefined), null);
+  assert.deepEqual(textLayer("A page of words and no digits at all."), { chars: 28, numbers: [] }, "text with no numbers is not a scan");
+  assert.equal(textLayer("Page 3 of 9 — final, signed"), null, "19 letters and digits is a scan");
+  assert.deepEqual(textLayer("Page 3 of 9 — final, signedX"), { chars: 20, numbers: ["3", "9"] });
+  assert.equal(numbersMissingFromTextLayer(undefined, "<p>4:45 pm</p>"), null);
 });
 
 test("the page-break marker, attributes, comments, figures and math are not checked", () => {
-  const layer = textLayerNumbers(LAYER)!;
+  const layer = textLayer(LAYER)!;
   const html =
     `<hr role="doc-pagebreak" aria-label="Page 7" id="page-7"><p role="doc-pagebreak">7</p>` +
     `<!-- @unresolved 88 --><img alt="A chart peaking at 450" src="x.png">` +
     `<figure><table><tr><td>451</td></tr></table></figure><math><mn>42</mn></math><p>9:45 pm</p>`;
-  assert.deepEqual(numbersMissingFromTextLayer(layer, html), { checked: 1, missing: [], skipped: false });
+  assert.deepEqual(numbersMissingFromTextLayer(layer, html), { checked: 1, missing: 0, numbers: [] });
 });
 
 test("a page whose numbers are mostly not in the text layer is skipped, not flagged", () => {
   const many = Array.from({ length: MAX_NUMBER_PROBLEMS + 1 }, (_, i) => `<td>${700 + i}</td>`).join("");
-  const r = numbersMissingFromTextLayer(textLayerNumbers(LAYER)!, `<table><tr>${many}</tr></table>`);
-  assert.equal(r.skipped, true);
-  assert.deepEqual(r.missing, []);
+  const r = numbersMissingFromTextLayer(textLayer(LAYER)!, `<table><tr>${many}</tr></table>`)!;
+  assert.equal(r.skipped, "mostly_absent");
+  assert.equal(r.missing, MAX_NUMBER_PROBLEMS + 1);
+  assert.deepEqual(r.numbers, []);
   // Under the cap it is flagged even when all are missing: one misread time on a page is the case.
-  const few = numbersMissingFromTextLayer(textLayerNumbers(LAYER)!, "<p>700 701</p>");
-  assert.deepEqual(few.missing, ["700", "701"]);
-  // Over the cap but under half missing: the layer does describe the page, so the first ten are sent.
+  const few = numbersMissingFromTextLayer(textLayer(LAYER)!, "<p>700 701</p>")!;
+  assert.deepEqual(few.numbers, ["700", "701"]);
+  // Over the cap but under half missing: the layer does describe the page, so the first ten are sent,
+  // and `missing` still counts all of them.
   const present = Array.from({ length: 2 * MAX_NUMBER_PROBLEMS }, (_, i) => String(100 + i));
-  const r2 = numbersMissingFromTextLayer(textLayerNumbers(`Figures ${present.join(" ")}`)!, `<p>${present.join(" ")}</p>${many}`);
-  assert.equal(r2.skipped, false);
-  assert.equal(r2.missing.length, MAX_NUMBER_PROBLEMS);
-  assert.equal(r2.missing[0], "700");
+  const r2 = numbersMissingFromTextLayer(textLayer(`Figures ${present.join(" ")}`)!, `<p>${present.join(" ")}</p>${many}`)!;
+  assert.equal(r2.skipped, undefined);
+  assert.equal(r2.missing, MAX_NUMBER_PROBLEMS + 1);
+  assert.equal(r2.numbers.length, MAX_NUMBER_PROBLEMS);
+  assert.equal(r2.numbers[0], "700");
 });
 
 test("pdftohtml's XML gives each page its text", () => {
@@ -91,7 +122,7 @@ test("pdftohtml's XML gives each page its text", () => {
     `<text top="2">pm &amp; closes</text></page><page number="2"></page></pdf2xml>`;
   const text = parsePdfHtmlText(xml);
   assert.equal(text.get(1), "Opens 9:45\npm & closes\n");
-  assert.equal(text.get(2), "", "a page with no text is an empty string, which textLayerNumbers reads as a scan");
+  assert.equal(text.get(2), "", "a page with no text is an empty string, which textLayer reads as a scan");
   assert.deepEqual(numberTokens(text.get(1)!), ["9:45 pm"], "an am/pm on the next line still belongs to the time");
 });
 
@@ -109,28 +140,37 @@ test("a decline in the numbers band is attributed to it", () => {
   assert.equal(declinedSource(5, counts), null);
 });
 
-test("enumerateInputs puts the text-layer numbers on the page, and leaves a scan without them", () => {
+test("enumerateInputs puts the text layer on the page, and leaves a scan or a malformed entry without one", () => {
   const dir = mkdtempSync(join(tmpdir(), "iris-numbers-"));
   try {
     mkdirSync(join(dir, "input"));
     writeFileSync(join(dir, "input", "0001__a.png"), "x");
     writeFileSync(join(dir, "input", "0002__b.png"), "x");
-    writeFileSync(join(dir, "text-numbers.json"), JSON.stringify({ "1": ["9:45 pm"] }));
+    writeFileSync(join(dir, "input", "0003__c.png"), "x");
+    writeFileSync(join(dir, "input", "0004__d.png"), "x");
+    writeFileSync(
+      join(dir, "text-layer.json"),
+      JSON.stringify({ "1": { chars: 40, numbers: ["9:45 pm"] }, "3": ["9:45 pm"], "4": { numbers: ["9:45 pm"] }, "5": { chars: 40, numbers: "9:45 pm" } }),
+    );
+    writeFileSync(join(dir, "input", "0005__e.png"), "x");
     const paths = {
       sessionInput: () => join(dir, "input"),
       sessionLinks: () => join(dir, "links.json"),
       sessionFields: () => join(dir, "fields.json"),
-      sessionTextNumbers: () => join(dir, "text-numbers.json"),
+      sessionTextLayer: () => join(dir, "text-layer.json"),
     } as unknown as Paths;
-    const [a, b] = enumerateInputs(paths, "ses_x");
-    assert.deepEqual(a.textNumbers, ["9:45 pm"]);
-    assert.equal(b.textNumbers, undefined);
+    const [a, b, c, d, e] = enumerateInputs(paths, "ses_x");
+    assert.equal(d.textLayer, undefined, "and one without its size");
+    assert.equal(e.textLayer, undefined, "and one whose numbers are not a list");
+    assert.deepEqual(a.textLayer, { chars: 40, numbers: ["9:45 pm"] });
+    assert.equal(b.textLayer, undefined);
+    assert.equal(c.textLayer, undefined, "an entry of the wrong shape is no text layer");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test("stageSession writes each text-layer page's numbers by order, and nothing for a scan", async () => {
+test("stageSession writes each text-layer page by order, and nothing for a scan", async () => {
   const dir = mkdtempSync(join(tmpdir(), "iris-numbers-stage-"));
   try {
     const cfg = { storage: { data_dir: dir, agents_dir: join(dir, "agents") }, defaults: { max_review_iterations: 1 } } as unknown as IrisConfig;
@@ -142,9 +182,9 @@ test("stageSession writes each text-layer page's numbers by order, and nothing f
       { name: "c.png", buffer: Buffer.from("x"), links: [] },
     ];
     const rec = await stageSession(cfg, store, paths, [{ originalname: "doc.pdf", buffer: Buffer.from("%PDF") }], pages, []);
-    const written = JSON.parse(readFileSync(paths.sessionTextNumbers(rec.session_id), "utf8"));
+    const written = JSON.parse(readFileSync(paths.sessionTextLayer(rec.session_id), "utf8"));
     assert.deepEqual(Object.keys(written), ["1"]);
-    assert.ok(written["1"].includes("9:45 pm"));
+    assert.deepEqual(written["1"], { chars: 53, numbers: ["9:45 pm", "1200", "3", "10", "12", "2026"] });
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -161,7 +201,7 @@ const page = (time: string) =>
   `<h2>Opening hours</h2><p>The hall is open to members every weekday evening. Doors open at ${time}, ` +
   `and the bar closes half an hour before the hall does. Members may bring one guest each.</p>`;
 
-async function run(textNumbers: string[] | undefined, corrected: string, declined?: { problem: number; why: string }[]) {
+async function run(numbers: string[] | undefined, corrected: string, declined?: { problem: number; why: string }[], chars = 200) {
   const dir = mkdtempSync(join(tmpdir(), "iris-numbers-run-"));
   const events: Event[] = [];
   const prompts: string[] = [];
@@ -175,7 +215,7 @@ async function run(textNumbers: string[] | undefined, corrected: string, decline
     writeFileSync(join(inputDir, "page-001.png"), "not-a-real-png");
     const ctx = {
       sessionId: "ses_test",
-      images: [{ name: "page-001.png", order: 1, path: join(inputDir, "page-001.png"), links: [], textNumbers }],
+      images: [{ name: "page-001.png", order: 1, path: join(inputDir, "page-001.png"), links: [], ...(numbers ? { textLayer: { chars, numbers } } : {}) }],
       extractionConcurrency: 1,
       recheckSampleSize: 0,
       maxReviewIterations: 1,
@@ -235,6 +275,19 @@ test("a correction that keeps the misread says so", async () => {
 test("a page with no text layer is not checked and buys no correction", async () => {
   const { events, prompts } = await run(undefined, page("9:45 pm"));
   assert.equal(of(events, "text_layer_numbers").length, 0);
+  assert.equal(prompts.length, 0);
+});
+
+test("a page whose text layer is a stamp logs why it was skipped and buys no correction", async () => {
+  const { events, prompts } = await run(["12"], page("9:45 pm"), undefined, 30);
+  assert.deepEqual(of(events, "text_layer_numbers")[0], {
+    type: "text_layer_numbers",
+    image: "page-001.png",
+    page: 1,
+    checked: 1,
+    missing: 1,
+    skipped: "thin_layer",
+  });
   assert.equal(prompts.length, 0);
 });
 

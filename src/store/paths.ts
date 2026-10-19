@@ -10,7 +10,7 @@ import type { IrisConfig } from "../config.ts";
 //                   final.json), history/ (the PRIOR output.html, snapshotted only when a
 //                   feedback re-run is about to overwrite it — not the review loop's rounds),
 //                   output.html, log.jsonl (the run log), lint.json, unresolved.md,
-//                   agent-updates.md, links.json, text-numbers.json, source-name.txt, source.pdf and
+//                   agent-updates.md, links.json, text-layer.json, source-name.txt, source.pdf and
 //                   fields.json (only with tagged PDFs on)
 //   fixtures/<agent>/  and  memory/<agent>.json  — keyed by agent, shared by every session
 //   tmp/<id>/       one run's scratch. `tmp/<id>/agents/` holds agents that session BUILT,
@@ -73,10 +73,10 @@ export class Paths {
   sessionFields(id: string): string {
     return join(this.sessionDir(id), "fields.json");
   }
-  // The numbers in each PDF page's text layer, by page order, like links.json (#585,
-  // pipeline/numbers.ts). A page with no text layer (a scan) has no entry.
-  sessionTextNumbers(id: string): string {
-    return join(this.sessionDir(id), "text-numbers.json");
+  // Each PDF page's text layer, reduced to its size and its numbers, by page order like
+  // links.json (#585, pipeline/numbers.ts). A page with no text layer (a scan) has no entry.
+  sessionTextLayer(id: string): string {
+    return join(this.sessionDir(id), "text-layer.json");
   }
   // The uploaded PDF, kept only when tagged PDFs are on and the upload was one PDF.
   // It is what `iris-pdf` tags (util/taggedPdf.ts).

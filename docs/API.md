@@ -2151,11 +2151,13 @@ rather than `declined.code_checked` for exactly this reason.
 ### `text_layer_numbers`
 
 A page from a PDF with a text layer had its numbers checked against that layer (`page`, `image`,
-`checked` — distinct numbers in the HTML — `missing`, and `numbers`, the missing ones). Each missing
-number goes to the correction as a problem (trigger `numbers`), so a time misread as `4:45 pm` where
-the page prints `9:45 pm` gets fixed even when verification passed (#585). Thousands separators,
-dashes and am/pm case do not count as differences. Not logged for a scan. `skipped: true` means more
-than 10 numbers, and most of them, were missing, so the layer does not describe the page.
+`checked` — distinct numbers in the HTML — `missing`, how many of them the layer lacks, and `numbers`,
+the ones sent, at most 10). Each one sent goes to the correction as a problem (trigger `numbers`), so
+a time misread as `4:45 pm` where the page prints `9:45 pm` gets fixed even when verification passed
+(#585). Thousands separators (and a space after one, `4, 271`), dashes and am/pm case do not count as
+differences. Not logged for a scan. `skipped` means nothing was sent: `thin_layer`, the layer has
+less than half the HTML's text (a scan with a typed stamp); `mostly_absent`, more than 10 numbers,
+and most of them, were missing.
 
 ### `text_layer_numbers_unrecovered`
 
@@ -2761,16 +2763,17 @@ counts it as `verification.declined`.
 A second verdict on a corrected page (`ok`, `problems`), with `problems_before` / `problems_after` —
 how many **fidelity** problems the page was sent to be corrected with, and how many this verdict names
 — `kinds_before` / `kinds_after`, the same two sides as kinds, and `links_before` / `alt_before` /
-`ids_before` / `words_before`, the missing links, placeholder alts, duplicated ids and words written
-two ways it was also given.
+`ids_before` / `words_before` / `numbers_before`, the missing links, placeholder alts, duplicated ids,
+words written two ways and numbers the text layer lacks it was also given.
 
-**The four code-found counts are kept out of `problems_before`**, so that a page with one fidelity
+**The five code-found counts are kept out of `problems_before`**, so that a page with one fidelity
 problem and two code-found defects does not read as three-in-one-out. `words_before` is the one whose
 family this verdict can also raise, since a visible hyphen is on the page, so `problems_after` may name
-a split word `words_before` also counts. **The exact answer to whether any of the four came back is the
+a split word `words_before` also counts. **The exact answer to whether any of the five came back is the
 matching `_unrecovered` line, not the difference between these two numbers:**
 `page_links_unrecovered` says whether the links came back, and `page_generic_alt_unrecovered` /
-`page_duplicate_ids_unrecovered` answer the alts and the ids exactly and for free.
+`page_duplicate_ids_unrecovered` / `text_layer_numbers_unrecovered` answer the alts, the ids and the
+numbers exactly and for free.
 `page_corrected`'s `problems` is the correction's whole bill.
 
 The kinds are what turn "the recheck did not pass" into an answer about the correction:
@@ -2810,7 +2813,7 @@ so every corrected page's recheck is the binding one and every one of them would
 rewrite checked and found good. `verification.rechecks.binding_unjudged` and `sampled_unjudged` are
 those, per population.
 
-What a census of the sample answered, why the four code-found counts are carried apart, and which pages
+What a census of the sample answered, why the code-found counts are carried apart, and which pages
 the sample lands on, is in [design notes — the recheck, and what a sample of one can
 say](design-notes.md#the-recheck-and-what-a-sample-of-one-can-say).
 

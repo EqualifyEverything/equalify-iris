@@ -42,6 +42,7 @@ import { markupReport } from "./markup.ts";
 import type { Fragment } from "./fragment.ts";
 import type { PdfLink } from "../util/pdf.ts";
 import type { PdfField } from "../util/taggedPdf.ts";
+import type { TextLayer } from "./numbers.ts";
 
 // The link annotations the upload extracted from its PDFs, keyed by page order
 // (see Paths.sessionLinks). Absent for a session of plain images, for a PDF with no
@@ -60,13 +61,26 @@ function readByOrder<T>(path: string): Record<string, T[]> {
   }
 }
 
+// The text layers by page order (text-layer.json, #585). A missing or malformed file, or entry, is
+// no text layer, so that page's numbers are not checked.
+function readTextLayers(path: string): Record<string, TextLayer> {
+  const out: Record<string, TextLayer> = {};
+  for (const [order, v] of Object.entries(readByOrder<unknown>(path) as Record<string, unknown>)) {
+    const l = v as Partial<TextLayer> | null;
+    if (l && typeof l.chars === "number" && Array.isArray(l.numbers) && l.numbers.every((n) => typeof n === "string")) {
+      out[order] = { chars: l.chars, numbers: l.numbers };
+    }
+  }
+  return out;
+}
+
 // Input files are stored as "<0001>__<original-name>" so submitted order
 // (which is significant — see docs/API.md) survives, independent of filename.
 export function enumerateInputs(paths: Paths, sessionId: string): InputImage[] {
   const dir = paths.sessionInput(sessionId);
   const links = readByOrder<PdfLink>(paths.sessionLinks(sessionId));
   const fields = readByOrder<PdfField>(paths.sessionFields(sessionId));
-  const textNumbers = readByOrder<string>(paths.sessionTextNumbers(sessionId));
+  const layers = readTextLayers(paths.sessionTextLayer(sessionId));
   return readdirSync(dir)
     .filter((f) => f.includes("__"))
     .map((f) => {
@@ -78,7 +92,7 @@ export function enumerateInputs(paths: Paths, sessionId: string): InputImage[] {
         path: join(dir, f),
         links: links[String(order)] ?? [],
         fields: fields[String(order)] ?? [],
-        ...(Array.isArray(textNumbers[String(order)]) ? { textNumbers: textNumbers[String(order)] } : {}),
+        ...(layers[String(order)] ? { textLayer: layers[String(order)] } : {}),
       };
     })
     .sort((a, b) => a.order - b.order);

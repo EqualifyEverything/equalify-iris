@@ -5222,15 +5222,15 @@ async function extractPage(
   // pipeline/numbers.ts) — a digit misread off the image, which a checker reading the same image can
   // miss. Logged on every page that has a text layer, so `checked` is the denominator. Only the
   // missing numbers are on the line, never the rest of the page's text.
-  const numberCheck = numbersMissingFromTextLayer(img.textNumbers, innerHtml);
-  const numbers = numberCheck.missing;
-  if (img.textNumbers) {
+  const numberCheck = numbersMissingFromTextLayer(img.textLayer, innerHtml);
+  const numbers = numberCheck?.numbers ?? [];
+  if (numberCheck) {
     ctx.log.event("text_layer_numbers", {
       image: img.name,
       page: img.order,
       checked: numberCheck.checked,
-      missing: numbers.length,
-      ...(numberCheck.skipped ? { skipped: true } : {}),
+      missing: numberCheck.missing,
+      ...(numberCheck.skipped ? { skipped: numberCheck.skipped } : {}),
       ...(numbers.length ? { numbers } : {}),
     });
   }
@@ -6010,7 +6010,7 @@ async function extractPage(
         // And the numbers, read like the words above: one still missing may be the model declining
         // because the image does print it.
         if (numbers.length) {
-          const stillMissingNumbers = numbersMissingFromTextLayer(img.textNumbers, innerHtml).missing;
+          const stillMissingNumbers = numbersMissingFromTextLayer(img.textLayer, innerHtml)?.numbers ?? [];
           if (stillMissingNumbers.length) {
             ctx.log.event("text_layer_numbers_unrecovered", {
               image: img.name,
