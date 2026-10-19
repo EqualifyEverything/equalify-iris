@@ -917,8 +917,8 @@ threw, the same one the run log's [`run_failed`](#run_failed) line carries. Abse
 on every other status, so branch on the status and not on the field.
 
 If the deployment sets `storage.session_retention_days`, a finished session that hasn't changed in that
-many days has its files deleted. It then carries `expired_at`, and its other routes answer 410
-`session_expired`.
+many days has its files deleted. This GET then shows `expired_at` (the list doesn't), and the
+session's other routes answer 410 `session_expired`.
 
 `phase` is one of `extraction`, `assembly`, `review`, `done`, and is only meaningful while
 `status` is `running` — a `queued` session reports the phase it will start in, not one it has
