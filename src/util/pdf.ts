@@ -158,7 +158,10 @@ export function parsePdfHtmlText(xml: string): Map<number, string> {
       continue;
     }
     if (page < 1) continue;
-    byPage.set(page, `${byPage.get(page)}${decodeEntities(m[2].replace(/<[^>]*>/g, ""))}\n`);
+    // Only the numbers in it are used, so no angle bracket needs to survive: dropping them all means
+    // nothing that reads this text can take it for markup.
+    const text = decodeEntities(m[2].replace(/<[^>]*>/g, "")).replace(/[<>]/g, " ");
+    byPage.set(page, `${byPage.get(page)}${text}\n`);
   }
   return byPage;
 }
