@@ -61,6 +61,7 @@ test("a text layer's `4, 271` is the 4,271 that tightenDigitGroups writes", () =
   assert.deepEqual(numbersMissingFromTextLayer(layer, html)!.numbers, []);
   assert.deepEqual(numbersMissingFromTextLayer(layer, "<p>4, 271</p>")!.numbers, [], "and the HTML's own gap");
   assert.deepEqual(numbersMissingFromTextLayer(layer, "<td>4,217</td>")!.numbers, ["4,217"]);
+  assert.deepEqual(numbersMissingFromTextLayer(layer, "<p>4, 371</p>")!.numbers, ["4, 371"], "quoted with its gap, as the HTML spells it");
   assert.deepEqual(numberTokens("4, 2711"), ["4", "2711"], "a fourth digit is two numbers");
 });
 

@@ -12,16 +12,12 @@ import { decodeEntities } from "../util/html.ts";
 
 // A run of digits with its thousands separators, decimal points and time colons, and an am/pm
 // after it. Commas are only thousands separators when every group after the first is three digits,
-// so "1,2,3" is three numbers and "1,200" is one. A dash is never part of a number, so a range reads
+// so "1,2,3" is three numbers and "1,200" is one. A space may follow the comma: the printer's
+// alignment gap, `4, 271`, which `tightenDigitGroups` (util/html.ts) closes up in a table cell. A text
+// layer prints the gap and the HTML has it closed, so both must read as 4271. A dash is never part of a number, so a range reads
 // the same with a hyphen, an en dash or an em dash, and a sign is not compared. The am/pm takes a
 // closing dot only after an inner one, `p.m.`, so a sentence's full stop after `pm.` is not quoted.
-const NUMBER = /(\d{1,3}(?:,\d{3})+(?!\d)|\d+)((?:[.:]\d+)*)(?:\s?([ap])(\.?)\s?m\b\4)?/giu;
-
-// The printer's alignment space inside a thousands group, `4, 271`. The same pattern
-// `tightenDigitGroups` (util/html.ts) closes up in a table cell, applied to both sides here: a text
-// layer prints the gap, and the HTML has it closed, so without this the repaired figure would read
-// as a number the layer lacks.
-const DIGIT_GROUP_GAP = /(\d),\s+(?=\d{3}(?!\d))/g;
+const NUMBER = /(\d{1,3}(?:, ?\d{3})+(?!\d)|\d+)((?:[.:]\d+)*)(?:\s?([ap])(\.?)\s?m\b\4)?/giu;
 
 // A text layer with less than this many letters and digits is a scan (or a page that is all
 // picture). Its numbers are not evidence of anything, so the page is not checked.
@@ -46,11 +42,11 @@ export function numberTokens(text: string): string[] {
   return numbersIn(text).map((n) => n.key);
 }
 
-// Each number with the spelling the text gave it, so a problem can quote what the HTML says.
+// Each number with the spelling the text gave it, gap and all, so a problem quotes what the HTML says.
 function numbersIn(text: string): { key: string; raw: string }[] {
   const out: { key: string; raw: string }[] = [];
-  for (const m of text.replace(/\s+/g, " ").replace(DIGIT_GROUP_GAP, "$1,").matchAll(NUMBER)) {
-    const whole = m[1].replace(/,/g, "").replace(/^0+(?=\d)/, "");
+  for (const m of text.replace(/\s+/g, " ").matchAll(NUMBER)) {
+    const whole = m[1].replace(/[, ]/g, "").replace(/^0+(?=\d)/, "");
     const value = whole + m[2];
     out.push({ key: m[3] ? `${value} ${m[3].toLowerCase()}m` : value, raw: m[0].trim() });
   }
