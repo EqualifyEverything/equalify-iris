@@ -362,7 +362,8 @@ export interface Diagnostics {
     // matters: the figure to expect from a run is its own page model's, not the highest measured.
     // Either way it is a rate to watch rather than a number to fear at these volumes, and it is the
     // trigger a reader should look at first when `corrections` grows without `verify_failed`.
-    triggers: { verify: number; links: number; alt: number; ids: number; words: number; both: number };
+    // `numbers` is a number in the HTML that the PDF's text for the page lacks (#585).
+    triggers: { verify: number; links: number; alt: number; ids: number; words: number; numbers: number; both: number };
     // What the corrector said it would NOT do, and why that is a number worth publishing rather
     // than a log line worth grepping (#373 directive 4). Before it, the corrector's only legal move
     // was compliance: a checker's claim that a page's ids are duplicated when they are not is
@@ -400,6 +401,8 @@ export interface Diagnostics {
       problems_offered: number;
       code_checked: number;
       words: number;
+      // Like `words`: the image may really print the number, so a decline can be right (#585).
+      numbers: number;
       unattributed: number;
     };
     // What the corrections that DID change something changed, as observed on the two
@@ -869,7 +872,7 @@ const CORRECTION_RESULTS = ["kept", "rejected", "identical", "empty", "failed"] 
 // board, which reads as a reader that cannot count rather than as a source it has not heard of. The
 // guard on line ~1200 finds the value in this list before indexing, so an unlisted trigger is
 // silently dropped rather than turned into a NaN, which is what makes the omission hard to see.
-const CORRECTION_TRIGGERS = ["verify", "links", "alt", "ids", "words", "both"] as const;
+const CORRECTION_TRIGGERS = ["verify", "links", "alt", "ids", "words", "numbers", "both"] as const;
 
 // What the Feedback Agent said was wrong with a page (`page_verify_failed`'s `kinds`).
 // Declared here rather than imported from pipeline/feedback.ts, like the two lists above
@@ -1264,8 +1267,8 @@ export function summarizeRun(
     },
     corrections: 0,
     results: { kept: 0, rejected: 0, identical: 0, empty: 0, failed: 0 },
-    triggers: { verify: 0, links: 0, alt: 0, ids: 0, words: 0, both: 0 },
-    declined: { pages: 0, problems: 0, problems_offered: 0, code_checked: 0, words: 0, unattributed: 0 },
+    triggers: { verify: 0, links: 0, alt: 0, ids: 0, words: 0, numbers: 0, both: 0 },
+    declined: { pages: 0, problems: 0, problems_offered: 0, code_checked: 0, words: 0, numbers: 0, unattributed: 0 },
     effects: { alt_only: 0, text: 0, attrs: 0, structure: 0, text_grew: 0, text_shrank: 0 },
     rechecks: {
       sampled: 0,
@@ -1479,6 +1482,7 @@ export function summarizeRun(
         // know", and a legitimate refusal is not that.
         if (source === "links" || source === "alt" || source === "ids") verification.declined.code_checked += 1;
         else if (source === "words") verification.declined.words += 1;
+        else if (source === "numbers") verification.declined.numbers += 1;
         else if (source === null || source === undefined) verification.declined.unattributed += 1;
       }
     } else if (e.type === "page_correction_recheck") {

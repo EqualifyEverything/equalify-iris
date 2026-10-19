@@ -21,6 +21,8 @@ export interface InputImage {
   links?: PdfLink[];
   // The source PDF's form fields on this page, when tagged PDFs are on (pipeline/fields.ts).
   fields?: PdfField[];
+  // The numbers in this page's PDF text layer (pipeline/numbers.ts). Absent for a scan or an image.
+  textNumbers?: string[];
 }
 
 // Everything a pipeline phase needs. Created once per run.

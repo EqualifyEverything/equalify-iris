@@ -66,6 +66,7 @@ export function enumerateInputs(paths: Paths, sessionId: string): InputImage[] {
   const dir = paths.sessionInput(sessionId);
   const links = readByOrder<PdfLink>(paths.sessionLinks(sessionId));
   const fields = readByOrder<PdfField>(paths.sessionFields(sessionId));
+  const textNumbers = readByOrder<string>(paths.sessionTextNumbers(sessionId));
   return readdirSync(dir)
     .filter((f) => f.includes("__"))
     .map((f) => {
@@ -77,6 +78,7 @@ export function enumerateInputs(paths: Paths, sessionId: string): InputImage[] {
         path: join(dir, f),
         links: links[String(order)] ?? [],
         fields: fields[String(order)] ?? [],
+        ...(Array.isArray(textNumbers[String(order)]) ? { textNumbers: textNumbers[String(order)] } : {}),
       };
     })
     .sort((a, b) => a.order - b.order);

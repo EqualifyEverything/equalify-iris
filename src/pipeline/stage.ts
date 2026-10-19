@@ -21,6 +21,7 @@ import {
   type ImageLimits,
 } from "../providers/imageLimits.ts";
 import { usableFieldName } from "./fields.ts";
+import { textLayerNumbers } from "./numbers.ts";
 import { readFields, taggedPdfCommand, TaggedPdfError, type PdfField } from "../util/taggedPdf.ts";
 
 export type Upload = { originalname: string; buffer: Buffer };
@@ -232,6 +233,15 @@ export async function stageSession(
   });
   if (Object.keys(linksByOrder).length) {
     writeFileSync(paths.sessionLinks(sessionId), JSON.stringify(linksByOrder, null, 2));
+  }
+  // The numbers in each page's text layer, for the check in pipeline/numbers.ts (#585).
+  const numbersByOrder: Record<string, string[]> = {};
+  pages.forEach((p, i) => {
+    const numbers = textLayerNumbers(p.text);
+    if (numbers) numbersByOrder[String(i + 1)] = numbers;
+  });
+  if (Object.keys(numbersByOrder).length) {
+    writeFileSync(paths.sessionTextNumbers(sessionId), JSON.stringify(numbersByOrder));
   }
   const formFields = keepSourcePdf(cfg, paths, sessionId, files)
     ? await keepPdfFields(taggedPdfCommand(cfg)!, paths, sessionId)

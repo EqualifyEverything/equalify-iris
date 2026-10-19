@@ -1081,8 +1081,8 @@ The events worth grepping for have a section each below, and the index is a link
 the index when you have a `type` off a log line and want to know what it means; read a section when
 you want to know what the field it names is for and what it costs.
 
-**The index is the whole log.** `src/` emits **123** event types and every one of them has a section
-below — **114** sections, because a few cover two or three events that are only read together. So a
+**The index is the whole log.** `src/` emits **125** event types and every one of them has a section
+below — **116** sections, because a few cover two or three events that are only read together. So a
 `type` you cannot find here is not one the index skipped: it is a misread line, or a name `src/` no
 longer emits.
 
@@ -1128,6 +1128,8 @@ emits fails it too.
 | [`page_digit_groups`](#page_digit_groups) | A thousands separator split by the printer's alignment space was closed up |
 | [`page_split_words`](#page_split_words) | A page wrote one word two ways, `Compos-ite` here and `Composite` there |
 | [`page_split_words_unrecovered`](#page_split_words_unrecovered) | A correction bought for a word written two ways left both spellings there |
+| [`text_layer_numbers`](#text_layer_numbers) | A PDF page's numbers were checked against its own text layer |
+| [`text_layer_numbers_unrecovered`](#text_layer_numbers_unrecovered) | A correction bought for a number the text layer lacks left it there |
 | [`page_caption_claim`](#page_caption_claim) | A `<figcaption>` makes a claim about the picture its `alt` describes |
 | [`specialist_unresolved`](#specialist_unresolved) | A page asked for a specialist **no available agent answers to** |
 | [`specialist_declined`](#specialist_declined) | A page asked for a specialist the general pass already covers |
@@ -2145,6 +2147,21 @@ reading a real channel instead of a hope. This line therefore says the contradic
 nothing about whose fault that is. [`page_correction_declined`](#page_correction_declined), keyed by
 the same `image`, is where the model's side of it is, and a cited decline lands in `declined.words`
 rather than `declined.code_checked` for exactly this reason.
+
+### `text_layer_numbers`
+
+A page from a PDF with a text layer had its numbers checked against that layer (`page`, `image`,
+`checked` — distinct numbers in the HTML — `missing`, and `numbers`, the missing ones). Each missing
+number goes to the correction as a problem (trigger `numbers`), so a time misread as `4:45 pm` where
+the page prints `9:45 pm` gets fixed even when verification passed (#585). Thousands separators,
+dashes and am/pm case do not count as differences. Not logged for a scan. `skipped: true` means more
+than 10 numbers, and most of them, were missing, so the layer does not describe the page.
+
+### `text_layer_numbers_unrecovered`
+
+A kept correction bought for a missing number still writes it (`page`, `image`, `numbers`). Like
+[`page_split_words_unrecovered`](#page_split_words_unrecovered), this may be the model declining
+because the image does print it; a cited decline lands in `declined.numbers`.
 
 ### `page_caption_claim`
 
@@ -4399,9 +4416,9 @@ curl -s -H "$AUTH" "$BASE/sessions/$SID/diagnostics" | jq
                              "structure_wrong": 1, "a11y_only": 0, "alt_quality": 1,
                              "content_or_structure": 2, "undecided_pages": 1 },
     "results": { "kept": 12, "rejected": 0, "identical": 2, "empty": 0, "failed": 0 },
-    "triggers": { "verify": 13, "links": 1, "alt": 0, "ids": 0, "words": 0, "both": 0 },
+    "triggers": { "verify": 13, "links": 1, "alt": 0, "ids": 0, "words": 0, "numbers": 0, "both": 0 },
     "declined": { "pages": 1, "problems": 1, "problems_offered": 31, "code_checked": 0,
-                  "words": 0, "unattributed": 0 },
+                  "words": 0, "numbers": 0, "unattributed": 0 },
     "effects": { "alt_only": 4, "text": 8, "attrs": 3, "structure": 6, "text_grew": 5, "text_shrank": 1 },
     "rechecks": {
       "sampled": 1, "sampled_ok": 1, "sampled_unjudged": 0,
@@ -4583,7 +4600,8 @@ code finds a link the model dropped, and that costs the same page call, so `trig
 `verify` is a page the Feedback Agent rejected, `links` a page that passed and lost a link, `alt` a
 page that passed and described an image with a placeholder (#290), `ids` a page that passed and used
 one `id` on two elements (#373), `words` a page that passed and wrote one word two ways (#334),
-`both` one with more than one of those.
+`numbers` a page whose HTML has a number its PDF text layer lacks (#585, see
+[`text_layer_numbers`](#text_layer_numbers)), `both` one with more than one of those.
 
 `alt` and `ids` are both expected to be 0 on most runs, and that is the point of counting them: the
 alt rule flags nothing this pipeline writes, and the id rule flags 2 of 1,501 measured page replies
@@ -4643,6 +4661,9 @@ marked problem ends "so fix it" and that would order the corrector to join `non-
 stretched. Reading it as misuse would put compliance in the one field whose job is to count abuse. A
 non-zero `words` is a rate to compare against the [`page_split_words`](#page_split_words) lines —
 how often a page really did print both — and not a number to act on by itself.
+
+`numbers` is the same kind of band for the text-layer number check (#585): Iris knows the PDF's
+text lacks the number, and only the image says what the page prints, so a decline can be right.
 
 `unattributed` is a decline that cited no problem number, or cited one the request never listed: not
 evidence about a code-checked fact and not nothing either, but a disagreement whose subject cannot

@@ -26,6 +26,9 @@ export interface PageImage {
   // four pixels-worth of words with no target. Extracted separately and handed to
   // the page agent as ground truth (see pipeline/links.ts).
   links: PdfLink[];
+  // The page's text layer, as pdftohtml reads it. Absent when that read failed. Used only to check
+  // the numbers the page's HTML writes (pipeline/numbers.ts), never sent to a model.
+  text?: string;
   // Which page of the PDF this image is, by the document's own numbering — what
   // `rasterizePageToFit` needs to render it again. Absent for an uploaded image,
   // which is not a page of anything.
@@ -142,6 +145,24 @@ export function parsePdfHtmlLinks(xml: string): Map<number, PdfLink[]> {
   return byPage;
 }
 
+// Parse the same XML into each page's text: the content of its <text> elements, one per line,
+// markup stripped and entities decoded. Exported for the test, like `parsePdfHtmlLinks`.
+export function parsePdfHtmlText(xml: string): Map<number, string> {
+  const byPage = new Map<number, string>();
+  const token = /<page\b[^>]*\bnumber="(\d+)"|<text\b[^>]*>([\s\S]*?)<\/text>/gi;
+  let page = 0;
+  for (const m of xml.matchAll(token)) {
+    if (m[1] !== undefined) {
+      page = parseInt(m[1], 10);
+      byPage.set(page, byPage.get(page) ?? "");
+      continue;
+    }
+    if (page < 1) continue;
+    byPage.set(page, `${byPage.get(page)}${decodeEntities(m[2].replace(/<[^>]*>/g, ""))}\n`);
+  }
+  return byPage;
+}
+
 // Read the link annotations out of a PDF, per page, using poppler's own renderer
 // (pdftohtml -xml) so we inherit its mapping from annotation rectangles to the text
 // underneath them. That mapping is the hard part, and the reason this shells out
@@ -160,7 +181,10 @@ export function parsePdfHtmlLinks(xml: string): Map<number, PdfLink[]> {
 // maxBuffer) resolves to "no links for that page" rather than a failed conversion.
 // Links over an image with no text under them are lost the same way, since there is
 // no anchor text for poppler to emit.
-async function extractPdfLinks(pdfPath: string): Promise<Map<number, PdfLink[]>> {
+//
+// The same read gives each page's text layer (`parsePdfHtmlText`), on the same terms: a failure is
+// no text, and no text means the page's numbers are not checked.
+async function extractPdfLinks(pdfPath: string): Promise<{ links: Map<number, PdfLink[]>; text: Map<number, string> }> {
   try {
     const { stdout } = await execFileP(
       "pdftohtml",
@@ -169,9 +193,9 @@ async function extractPdfLinks(pdfPath: string): Promise<Map<number, PdfLink[]>>
       // every page's text passes through here, not just its links.
       { maxBuffer: 64 * 1024 * 1024 },
     );
-    return parsePdfHtmlLinks(stdout);
+    return { links: parsePdfHtmlLinks(stdout), text: parsePdfHtmlText(stdout) };
   } catch {
-    return new Map();
+    return { links: new Map(), text: new Map() };
   }
 }
 
@@ -337,7 +361,7 @@ export async function rasterizePdf(pdf: Buffer, originalName: string): Promise<P
     await rasterizePages(pdfPath, dir, pages);
     const pngs = readdirSync(dir).filter((f) => f.endsWith(".png")).sort((a, b) => pageNum(a) - pageNum(b));
     if (pngs.length === 0) throw new Error("no pages produced — is this a valid PDF?");
-    const links = await extractPdfLinks(pdfPath);
+    const { links, text } = await extractPdfLinks(pdfPath);
     // Keyed by the PDF's own page number (`pageNum(f)`), not the array index: a PDF
     // whose first rendered page is not page 1 would otherwise get another page's
     // links. Both tools number by the PDF's own pages and neither is given a range
@@ -348,6 +372,7 @@ export async function rasterizePdf(pdf: Buffer, originalName: string): Promise<P
       name: `${base}-p${i + 1}.png`,
       buffer: readFileSync(join(dir, f)),
       links: links.get(pageNum(f)) ?? [],
+      text: text.get(pageNum(f)),
       page: pageNum(f),
     }));
   } finally {
