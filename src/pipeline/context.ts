@@ -8,6 +8,7 @@ import type { SuggestionRow } from "../store/db.ts";
 import type { IrisConfig } from "../config.ts";
 import type { PdfLink } from "../util/pdf.ts";
 import type { PdfField } from "../util/taggedPdf.ts";
+import type { TextLayer } from "./numbers.ts";
 
 export interface InputImage {
   name: string; // filename, e.g. page-001.png
@@ -21,6 +22,9 @@ export interface InputImage {
   links?: PdfLink[];
   // The source PDF's form fields on this page, when tagged PDFs are on (pipeline/fields.ts).
   fields?: PdfField[];
+  // This page's PDF text layer, as its size and numbers (pipeline/numbers.ts). Absent for a scan or
+  // an image.
+  textLayer?: TextLayer;
 }
 
 // Everything a pipeline phase needs. Created once per run.

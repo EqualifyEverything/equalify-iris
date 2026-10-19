@@ -207,6 +207,10 @@ test(
     ]);
     // Attributed to the page it is actually on — page 2's link is not page 1's.
     assert.deepEqual(pages[1].links, [{ text: "Email the team", href: "mailto:team@example.org" }]);
+    // The same read gives each page its own text layer (#585, pipeline/numbers.ts).
+    assert.match(pages[0].text ?? "", /annual report here/);
+    assert.doesNotMatch(pages[0].text ?? "", /Email the team/);
+    assert.match(pages[1].text ?? "", /Email the team/);
   },
 );
 
@@ -1028,13 +1032,15 @@ test("anchor text is JSON-quoted in the page agent's link list", () => {
 
 // A new page field fails here until it is checked for what reaches a prompt: `name` is filtered
 // (safeStem), `links` quoted (links.ts), and `page` is an integer only the upload route reads.
+// `text` reaches no prompt: only its numbers are kept (pipeline/numbers.ts), and a problem quotes
+// the HTML's number, which is digits and an am/pm.
 test(
-  "a rasterized page carries only a filtered name, its image, its links and its page number",
+  "a rasterized page carries only a filtered name, its image, its links, its text and its page number",
   { skip: hasPoppler() ? false : "poppler-utils not installed" },
   async () => {
     const pages = await rasterizePdf(linkPdf(), 'Say "hi"\nnow.PDF');
     for (const p of pages) {
-      assert.deepEqual(Object.keys(p).sort(), ["buffer", "links", "name", "page"]);
+      assert.deepEqual(Object.keys(p).sort(), ["buffer", "links", "name", "page", "text"]);
       assert.ok(Number.isInteger(p.page), String(p.page));
       assert.match(p.name, /^[A-Za-z0-9._-]+-p\d+\.png$/);
     }

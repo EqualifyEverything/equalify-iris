@@ -23,6 +23,7 @@ import { missingLinkProblem, missingLinks, pageLinkContext, unexpectedHrefs } fr
 import { missingFields, pageFieldContext } from "./fields.ts";
 import { duplicateIdProblem, duplicateIds, idAudit } from "./anchors.ts";
 import { splitWordAudit, splitWordContradictions, splitWordProblem } from "./hyphens.ts";
+import { missingNumberProblem, numbersMissingFromTextLayer } from "./numbers.ts";
 import { STANDARD as STANDARD_AGENTS, findSpecialist, isStandardType, logicalType } from "./contribute.ts";
 import { isTruncatedResponseError, replyExcerpt, TruncatedResponseError } from "../providers/types.ts";
 import type { Fragment } from "./fragment.ts";
@@ -4154,7 +4155,7 @@ async function renderPage(
 
 // One problem the corrector says it is not acting on, and what the HTML shows instead (#373
 // directive 4). `problem` is the number it was listed under in the request, so the decline can be
-// joined back to the problem itself and to which of the five sources raised it — the join is by
+// joined back to the problem itself and to which of the six sources raised it — the join is by
 // index rather than by matching the sentence back, because a model quoting a problem back
 // paraphrases it and a paraphrase cannot be matched to the entry it came from.
 //
@@ -4168,7 +4169,7 @@ export interface Declination {
 }
 
 // What separates the problems Iris CHECKED from the one it was told, where the corrector reads them
-// (#373 directive 4). The list it is shown is five sources concatenated with nothing to say which is
+// (#373 directive 4). The list it is shown is six sources concatenated with nothing to say which is
 // which, and the licence to decline is written around claims about the markup — whose wordings are
 // exactly the code-checked ones ("More than one element on this page has id=…"). Without this mark a
 // corrector following the licence as written declines into `links`, `alt` and `ids`, and
@@ -4204,6 +4205,11 @@ export const CHECKED_IN_CODE = " (Iris checked this one in code.)";
 // so the field that exists to count misuse still counts only misuse.
 export const SPELLINGS_CHECKED_IN_CODE =
   " (Iris checked in code that both spellings are on this page, not which one is right.)";
+
+// The text-layer number problem's mark (#585). Open in the same way as the one above: Iris checked
+// that the PDF's text for this page lacks the number, not what the page prints, so the image decides.
+export const NUMBER_CHECKED_IN_CODE =
+  " (Iris checked in code that the PDF's text for this page lacks this number, not what the page prints.)";
 
 // What a corrector's reply says it declined, out of whatever shape the reply used.
 //
@@ -4270,7 +4276,7 @@ export function parseDeclined(value: unknown): Declination[] {
   return out;
 }
 
-// Which of the five sources raised the problem a decline names, by its position in the list the
+// Which of the six sources raised the problem a decline names, by its position in the list the
 // request numbered. The order here is the order `problems` is built in at the call site and the two
 // cannot be allowed to drift, so this takes the counts rather than re-deriving them.
 //
@@ -4283,15 +4289,17 @@ export function parseDeclined(value: unknown): Declination[] {
 // contradiction was Iris's reading and not the model's error (#334 part B, `splitWordProblem`).
 export function declinedSource(
   problem: number | undefined,
-  counts: { verify: number; links: number; alt: number; ids: number; words: number },
-): "verify" | "links" | "alt" | "ids" | "words" | null {
+  counts: { verify: number; links: number; alt: number; ids: number; words: number; numbers?: number },
+): "verify" | "links" | "alt" | "ids" | "words" | "numbers" | null {
   if (problem === undefined) return null;
-  const bands: ["verify" | "links" | "alt" | "ids" | "words", number][] = [
+  const bands: ["verify" | "links" | "alt" | "ids" | "words" | "numbers", number][] = [
     ["verify", counts.verify],
     ["links", counts.links],
     ["alt", counts.alt],
     ["ids", counts.ids],
     ["words", counts.words],
+    // After `words` because it is appended after it (#585), and open in the same way.
+    ["numbers", counts.numbers ?? 0],
   ];
   let seen = 0;
   for (const [source, n] of bands) {
@@ -4384,6 +4392,9 @@ async function correctPage(
     `which one this page prints is a question only the image answers. Make the page agree with the ` +
     `image. If the image shows the page printing both spellings, make no change for it and say so — ` +
     `for this one problem, what the image shows IS a reason not to act.\n` +
+    `A problem marked "${NUMBER_CHECKED_IN_CODE.trim()}" is the same kind: the number really is ` +
+    `missing from the PDF's text, but only the image says what the page prints. Write what the ` +
+    `image shows, and if it shows the number as the HTML has it, make no change for it and say so.\n` +
     // The destination, because an instruction to "say which problem and why" with nowhere to say it
     // lands in the document — the page gains a sentence about the checker, which is the defect
     // #373's own instance A describes in the other direction. `declined` is introduced here rather
@@ -5207,6 +5218,23 @@ async function extractPage(
     });
   }
 
+  // Numbers the HTML writes that the PDF's own text for this page does not have (#585,
+  // pipeline/numbers.ts) — a digit misread off the image, which a checker reading the same image can
+  // miss. Logged on every page that has a text layer, so `checked` is the denominator. Only the
+  // missing numbers are on the line, never the rest of the page's text.
+  const numberCheck = numbersMissingFromTextLayer(img.textLayer, innerHtml);
+  const numbers = numberCheck?.numbers ?? [];
+  if (numberCheck) {
+    ctx.log.event("text_layer_numbers", {
+      image: img.name,
+      page: img.order,
+      checked: numberCheck.checked,
+      missing: numberCheck.missing,
+      ...(numberCheck.skipped ? { skipped: numberCheck.skipped } : {}),
+      ...(numbers.length ? { numbers } : {}),
+    });
+  }
+
   // page_verify_ok / page_verify_failed report the Feedback Agent's verdict and
   // nothing else, exactly as they did before links existed — a missing link is not
   // part of that verdict, and folding it in would make the two events mean different
@@ -5340,31 +5368,32 @@ async function extractPage(
     ...generic.map((a) => genericAltProblem(a) + CHECKED_IN_CODE),
     ...duplicated.map((id) => duplicateIdProblem(id) + CHECKED_IN_CODE),
     ...contradictions.map((w) => splitWordProblem(w) + SPELLINGS_CHECKED_IN_CODE),
+    ...numbers.map((n) => missingNumberProblem(n) + NUMBER_CHECKED_IN_CODE),
   ];
   if (problems.length) {
-    // What the correction was asked to fix, for the event below. Any of the five can fire on one
+    // What the correction was asked to fix, for the event below. Any of the six can fire on one
     // page, and they cost the same call but mean different things: a link the model dropped, a
-    // placeholder alt, a duplicate id and a word written two ways are exact, code-checked findings,
-    // while a fidelity problem is the Feedback Agent's judgement.
+    // placeholder alt, a duplicate id, a word written two ways and a number the PDF's text lacks are
+    // exact, code-checked findings, while a fidelity problem is the Feedback Agent's judgement.
     //
-    // `words` is the one of the five whose right answer Iris does not hold — the other three name
-    // their repair, this one names a contradiction and asks the image — but that is a fact about the
+    // `words` and `numbers` are the two whose right answer Iris does not hold — the other three name
+    // their repair, these name a discrepancy and ask the image — but that is a fact about the
     // problem text, not about this line, which only records what bought the call.
     //
     // `both` is more than one source, which is what it has always counted — until #290 there
     // were two sources, until #373's directive 3 three, and until #334's part B four, so every line
     // an old log calls `both` is still one and no reading of an old log changes. What it no longer
     // does is name WHICH pair, and that is on purpose rather than traded away: the alternative is
-    // thirty-one buckets for five sources, where four gave fifteen, and the per-source detail is
-    // already exact on
-    // `page_links_missing`, `page_generic_alt`, `page_duplicate_ids` and `page_split_words`, all
-    // keyed by the same `image` as this line.
+    // sixty-three buckets for six sources, and the per-source detail is already exact on
+    // `page_links_missing`, `page_generic_alt`, `page_duplicate_ids`, `page_split_words` and
+    // `text_layer_numbers`, all keyed by the same `image` as this line.
     const sources = [
       verifyFailed ? "verify" : null,
       missing.length ? "links" : null,
       generic.length ? "alt" : null,
       duplicated.length ? "ids" : null,
       contradictions.length ? "words" : null,
+      numbers.length ? "numbers" : null,
     ].filter((s): s is string => s !== null);
     const trigger = sources.length > 1 ? "both" : sources[0];
     const before = innerHtml.trim();
@@ -5459,7 +5488,7 @@ async function extractPage(
     // never silence. What it removes is the edit: today the corrector's only legal move is
     // compliance, so a false claim about the HTML is answered by changing a page that was right.
     if (attempt.declined.length) {
-      const counts = { verify: verifyFailed ? verdict.problems.length : 0, links: missing.length, alt: generic.length, ids: duplicated.length, words: contradictions.length };
+      const counts = { verify: verifyFailed ? verdict.problems.length : 0, links: missing.length, alt: generic.length, ids: duplicated.length, words: contradictions.length, numbers: numbers.length };
       ctx.log.event("page_correction_declined", {
         image: img.name,
         page: img.order,
@@ -5848,6 +5877,9 @@ async function extractPage(
           // this field also counts, and the pair is not a clean in/out on this share. What is exact
           // and free is `page_split_words_unrecovered`; read that, not the difference.
           words_before: contradictions.length,
+          // The sixth share (#585), apart for the same reason; `text_layer_numbers_unrecovered` is
+          // the exact answer.
+          numbers_before: numbers.length,
           problems_after: recheck.problems.length,
           // The same two sides as kinds (issue #182), which is what turns "the recheck did
           // not pass" into an answer about the CORRECTION: `content_missing` going in and
@@ -5972,6 +6004,18 @@ async function extractPage(
               image: img.name,
               page: img.order,
               words: stillSplit.map((w) => `${w.split} / ${w.joined}`),
+            });
+          }
+        }
+        // And the numbers, read like the words above: one still missing may be the model declining
+        // because the image does print it.
+        if (numbers.length) {
+          const stillMissingNumbers = numbersMissingFromTextLayer(img.textLayer, innerHtml)?.numbers ?? [];
+          if (stillMissingNumbers.length) {
+            ctx.log.event("text_layer_numbers_unrecovered", {
+              image: img.name,
+              page: img.order,
+              numbers: stillMissingNumbers,
             });
           }
         }

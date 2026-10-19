@@ -1081,8 +1081,8 @@ The events worth grepping for have a section each below, and the index is a link
 the index when you have a `type` off a log line and want to know what it means; read a section when
 you want to know what the field it names is for and what it costs.
 
-**The index is the whole log.** `src/` emits **123** event types and every one of them has a section
-below — **114** sections, because a few cover two or three events that are only read together. So a
+**The index is the whole log.** `src/` emits **125** event types and every one of them has a section
+below — **116** sections, because a few cover two or three events that are only read together. So a
 `type` you cannot find here is not one the index skipped: it is a misread line, or a name `src/` no
 longer emits.
 
@@ -1128,6 +1128,8 @@ emits fails it too.
 | [`page_digit_groups`](#page_digit_groups) | A thousands separator split by the printer's alignment space was closed up |
 | [`page_split_words`](#page_split_words) | A page wrote one word two ways, `Compos-ite` here and `Composite` there |
 | [`page_split_words_unrecovered`](#page_split_words_unrecovered) | A correction bought for a word written two ways left both spellings there |
+| [`text_layer_numbers`](#text_layer_numbers) | A PDF page's numbers were checked against its own text layer |
+| [`text_layer_numbers_unrecovered`](#text_layer_numbers_unrecovered) | A correction bought for a number the text layer lacks left it there |
 | [`page_caption_claim`](#page_caption_claim) | A `<figcaption>` makes a claim about the picture its `alt` describes |
 | [`specialist_unresolved`](#specialist_unresolved) | A page asked for a specialist **no available agent answers to** |
 | [`specialist_declined`](#specialist_declined) | A page asked for a specialist the general pass already covers |
@@ -2146,6 +2148,23 @@ nothing about whose fault that is. [`page_correction_declined`](#page_correction
 the same `image`, is where the model's side of it is, and a cited decline lands in `declined.words`
 rather than `declined.code_checked` for exactly this reason.
 
+### `text_layer_numbers`
+
+A page from a PDF with a text layer had its numbers checked against that layer (`page`, `image`,
+`checked` — distinct numbers in the HTML — `missing`, how many of them the layer lacks, and `numbers`,
+the ones sent, at most 10). Each one sent goes to the correction as a problem (trigger `numbers`), so
+a time misread as `4:45 pm` where the page prints `9:45 pm` gets fixed even when verification passed
+(#585). Thousands separators (and a space after one, `4, 271`), dashes and am/pm case do not count as
+differences. Not logged for a scan. `skipped` means nothing was sent: `thin_layer`, the layer has
+less than half the HTML's text (a scan with a typed stamp); `mostly_absent`, more than 10 numbers,
+and most of them, were missing.
+
+### `text_layer_numbers_unrecovered`
+
+A kept correction bought for a missing number still writes it (`page`, `image`, `numbers`). Like
+[`page_split_words_unrecovered`](#page_split_words_unrecovered), this may be the model declining
+because the image does print it; a cited decline lands in `declined.numbers`.
+
 ### `page_caption_claim`
 
 A figure whose `<figcaption>` makes a claim about the picture its `alt` describes, recorded as the
@@ -2744,16 +2763,17 @@ counts it as `verification.declined`.
 A second verdict on a corrected page (`ok`, `problems`), with `problems_before` / `problems_after` —
 how many **fidelity** problems the page was sent to be corrected with, and how many this verdict names
 — `kinds_before` / `kinds_after`, the same two sides as kinds, and `links_before` / `alt_before` /
-`ids_before` / `words_before`, the missing links, placeholder alts, duplicated ids and words written
-two ways it was also given.
+`ids_before` / `words_before` / `numbers_before`, the missing links, placeholder alts, duplicated ids,
+words written two ways and numbers the text layer lacks it was also given.
 
-**The four code-found counts are kept out of `problems_before`**, so that a page with one fidelity
+**The five code-found counts are kept out of `problems_before`**, so that a page with one fidelity
 problem and two code-found defects does not read as three-in-one-out. `words_before` is the one whose
 family this verdict can also raise, since a visible hyphen is on the page, so `problems_after` may name
-a split word `words_before` also counts. **The exact answer to whether any of the four came back is the
+a split word `words_before` also counts. **The exact answer to whether any of the five came back is the
 matching `_unrecovered` line, not the difference between these two numbers:**
 `page_links_unrecovered` says whether the links came back, and `page_generic_alt_unrecovered` /
-`page_duplicate_ids_unrecovered` answer the alts and the ids exactly and for free.
+`page_duplicate_ids_unrecovered` / `text_layer_numbers_unrecovered` answer the alts, the ids and the
+numbers exactly and for free.
 `page_corrected`'s `problems` is the correction's whole bill.
 
 The kinds are what turn "the recheck did not pass" into an answer about the correction:
@@ -2793,7 +2813,7 @@ so every corrected page's recheck is the binding one and every one of them would
 rewrite checked and found good. `verification.rechecks.binding_unjudged` and `sampled_unjudged` are
 those, per population.
 
-What a census of the sample answered, why the four code-found counts are carried apart, and which pages
+What a census of the sample answered, why the code-found counts are carried apart, and which pages
 the sample lands on, is in [design notes — the recheck, and what a sample of one can
 say](design-notes.md#the-recheck-and-what-a-sample-of-one-can-say).
 
@@ -4399,9 +4419,9 @@ curl -s -H "$AUTH" "$BASE/sessions/$SID/diagnostics" | jq
                              "structure_wrong": 1, "a11y_only": 0, "alt_quality": 1,
                              "content_or_structure": 2, "undecided_pages": 1 },
     "results": { "kept": 12, "rejected": 0, "identical": 2, "empty": 0, "failed": 0 },
-    "triggers": { "verify": 13, "links": 1, "alt": 0, "ids": 0, "words": 0, "both": 0 },
+    "triggers": { "verify": 13, "links": 1, "alt": 0, "ids": 0, "words": 0, "numbers": 0, "both": 0 },
     "declined": { "pages": 1, "problems": 1, "problems_offered": 31, "code_checked": 0,
-                  "words": 0, "unattributed": 0 },
+                  "words": 0, "numbers": 0, "unattributed": 0 },
     "effects": { "alt_only": 4, "text": 8, "attrs": 3, "structure": 6, "text_grew": 5, "text_shrank": 1 },
     "rechecks": {
       "sampled": 1, "sampled_ok": 1, "sampled_unjudged": 0,
@@ -4583,7 +4603,8 @@ code finds a link the model dropped, and that costs the same page call, so `trig
 `verify` is a page the Feedback Agent rejected, `links` a page that passed and lost a link, `alt` a
 page that passed and described an image with a placeholder (#290), `ids` a page that passed and used
 one `id` on two elements (#373), `words` a page that passed and wrote one word two ways (#334),
-`both` one with more than one of those.
+`numbers` a page whose HTML has a number its PDF text layer lacks (#585, see
+[`text_layer_numbers`](#text_layer_numbers)), `both` one with more than one of those.
 
 `alt` and `ids` are both expected to be 0 on most runs, and that is the point of counting them: the
 alt rule flags nothing this pipeline writes, and the id rule flags 2 of 1,501 measured page replies
@@ -4643,6 +4664,9 @@ marked problem ends "so fix it" and that would order the corrector to join `non-
 stretched. Reading it as misuse would put compliance in the one field whose job is to count abuse. A
 non-zero `words` is a rate to compare against the [`page_split_words`](#page_split_words) lines —
 how often a page really did print both — and not a number to act on by itself.
+
+`numbers` is the same kind of band for the text-layer number check (#585): Iris knows the PDF's
+text lacks the number, and only the image says what the page prints, so a decline can be right.
 
 `unattributed` is a decline that cited no problem number, or cited one the request never listed: not
 evidence about a code-checked fact and not nothing either, but a disagreement whose subject cannot
