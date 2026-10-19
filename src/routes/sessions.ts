@@ -97,6 +97,14 @@ export function remember<K, V>(map: Map<K, V>, key: K, value: V, max: number): v
   while (map.size > max) map.delete(map.keys().next().value!);
 }
 
+// A session whose files the retention rule deleted (store/retention.ts): 410, rather than a
+// failure on missing files.
+function expired(res: Response, s: SessionRecord): boolean {
+  if (!s.files_deleted_at) return false;
+  sendError(res, 410, "session_expired", "This session's files were deleted after the retention period.");
+  return true;
+}
+
 export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
   const r = Router();
   const paths = new Paths(cfg);
@@ -301,6 +309,7 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
       updated_at: s.updated_at,
     };
     if (s.status === "failed" && s.error) body.error = s.error;
+    if (s.files_deleted_at) body.expired_at = s.files_deleted_at;
     res.json(body);
   });
 
@@ -311,6 +320,7 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
       sendError(res, 404, "session_not_found", "No such session");
       return;
     }
+    if (expired(res, s)) return;
     if (s.status !== "ready_for_review" && s.status !== "closed") {
       sendError(res, 409, "invalid_state", "Output not available until session is ready_for_review");
       return;
@@ -337,6 +347,7 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
       sendError(res, 404, "session_not_found", "No such session");
       return null;
     }
+    if (expired(res, s)) return null;
     const command = taggedPdfCommand(cfg);
     if (!command) {
       sendError(res, 404, "tagged_pdf_unavailable", "This deployment does not make tagged PDFs.");
@@ -523,6 +534,7 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
       sendError(res, 404, "session_not_found", "No such session");
       return;
     }
+    if (expired(res, s)) return;
     const logPath = paths.sessionLog(s.session_id);
     res.type("application/x-ndjson").send(existsSync(logPath) ? readFileSync(logPath, "utf8") : "");
   });
@@ -536,6 +548,7 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
       sendError(res, 404, "session_not_found", "No such session");
       return;
     }
+    if (expired(res, s)) return;
     const logPath = paths.sessionLog(s.session_id);
     const text = existsSync(logPath) ? readFileSync(logPath, "utf8") : "";
     res.json(summarizeRun(text, { sessionId: s.session_id, status: s.status, phase: s.phase, now: Date.now() }));
@@ -548,6 +561,7 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
       sendError(res, 404, "session_not_found", "No such session");
       return;
     }
+    if (expired(res, s)) return;
     if (s.status !== "ready_for_review") {
       sendError(res, 409, "invalid_state", "Feedback can only be submitted when ready_for_review");
       return;
@@ -598,6 +612,7 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
       sendError(res, 404, "session_not_found", "No such session");
       return;
     }
+    if (expired(res, s)) return;
     if (s.status !== "ready_for_review") {
       sendError(res, 409, "invalid_state", "Session is not ready_for_review");
       return;
