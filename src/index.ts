@@ -25,6 +25,8 @@ import { visionModelWarning } from "./providers/imageLimits.ts";
 import { generalRateLimit } from "./util/requestLimits.ts";
 import { VERSION } from "./version.ts";
 import { brandDemo, loadBrand } from "./branding.ts";
+import { Paths } from "./store/paths.ts";
+import { scheduleRetention } from "./store/retention.ts";
 
 const cfg = loadConfig();
 
@@ -245,6 +247,8 @@ const openStorage = (): { store: Store; stale: number } => {
 // produces it is the guarded first write above.
 const { store, stale } = openStorage();
 if (stale > 0) console.log(`Marked ${stale} interrupted session(s) as failed on startup.`);
+// Deletes old sessions' files now and daily, when storage.session_retention_days is set.
+scheduleRetention(cfg, store, new Paths(cfg));
 // Optional. Silent when tagged_pdf.command is blank; says so when it is set and does not run.
 const pdfStatus = taggedPdfStatus(cfg);
 const leftover = clearPdfScratch(join(cfg.storage.data_dir, "tmp"));

@@ -134,7 +134,8 @@ export interface IrisConfig {
     // (or a hand-built one in a test) still gets a complete, usable set.
     rate_limits?: Partial<RateLimitConfig>;
   };
-  storage: { data_dir: string; agents_dir: string; database: string };
+  // session_retention_days is optional: blank or 0 keeps every session (store/retention.ts).
+  storage: { data_dir: string; agents_dir: string; database: string; session_retention_days?: number };
   // Optional. The `iris-pdf` command that tags an uploaded PDF (util/taggedPdf.ts).
   // Blank or absent means the feature is off.
   tagged_pdf?: { command?: string; timeout_seconds?: number };

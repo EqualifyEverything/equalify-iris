@@ -30,6 +30,9 @@ storage:
   # The agent library checkout. Changed only by `git pull`.
   agents_dir: ./agents
   database: ./data/iris.sqlite
+  # Optional: delete a finished session's files after this many days without a change.
+  # The session's row stays, so counts don't drop. Blank or 0 keeps everything.
+  session_retention_days:
 
 # Optional: return the uploaded PDF tagged, with form fields filled. Needs the `iris-pdf`
 # command from https://github.com/EqualifyEverything/equalify-iris-pdf. Blank turns it off.

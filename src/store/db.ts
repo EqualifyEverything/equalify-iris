@@ -52,13 +52,16 @@ export interface SessionRecord {
   // the hash of their hashes, in upload order. Null on sessions from before the column. Never
   // served: the session routes pick their fields.
   source_sha256: string | null;
+  // When the retention rule deleted this session's folder, or null. The row stays, so the
+  // public tally and the quality figures keep counting it (see expireSessions).
+  files_deleted_at: string | null;
 }
 
 // What a caller may change about a session. `first_completed_at` is omitted
 // alongside the immutable identity/creation fields: it is derived from the
 // status transition itself, so no handler needs to (or gets to) set it by hand.
 export type SessionPatch = Partial<
-  Omit<SessionRecord, "session_id" | "created_at" | "first_completed_at" | "source_sha256">
+  Omit<SessionRecord, "session_id" | "created_at" | "first_completed_at" | "source_sha256" | "files_deleted_at">
 >;
 
 // The sort key `GET /v1/sessions` pages on. Both halves are required: session
@@ -902,6 +905,7 @@ export class Store {
     this.addCompletionColumn();
     // No backfill: an old session keeps its page images, not the file that was uploaded.
     this.addColumn("source_sha256", `ALTER TABLE sessions ADD COLUMN source_sha256 TEXT;`);
+    this.addColumn("files_deleted_at", `ALTER TABLE sessions ADD COLUMN files_deleted_at TEXT;`);
   }
 
   /**
@@ -1098,6 +1102,24 @@ export class Store {
 
   getSession(id: string): SessionRecord | undefined {
     return this.db.prepare(`SELECT * FROM sessions WHERE session_id = ?`).get(id) as SessionRecord | undefined;
+  }
+
+  /**
+   * Mark every finished session last updated before `cutoff` as expired, and return their ids
+   * so the caller can delete their folders (store/retention.ts). Queued and running sessions
+   * are never picked. The row is kept: `publicStats` and the quality tally count it.
+   */
+  expireSessions(cutoff: string, now: string): string[] {
+    const rows = this.db
+      .prepare(
+        `UPDATE sessions SET files_deleted_at = ?
+          WHERE files_deleted_at IS NULL
+            AND status IN ('ready_for_review', 'closed', 'failed')
+            AND updated_at < ?
+          RETURNING session_id`,
+      )
+      .all(now, cutoff) as { session_id: string }[];
+    return rows.map((r) => r.session_id);
   }
 
   updateSession(id: string, patch: SessionPatch): void {

@@ -916,6 +916,10 @@ the payload above because it appears on a failed session and only there: `error`
 threw, the same one the run log's [`run_failed`](#run_failed) line carries. Absent rather than empty
 on every other status, so branch on the status and not on the field.
 
+If the deployment sets `storage.session_retention_days`, a finished session that hasn't changed in that
+many days has its files deleted. It then carries `expired_at`, and its other routes answer 410
+`session_expired`.
+
 `phase` is one of `extraction`, `assembly`, `review`, `done`, and is only meaningful while
 `status` is `running` — a `queued` session reports the phase it will start in, not one it has
 reached. These are the four phases the pipeline enters; `triage` and `reconciliation` appear in
@@ -5338,8 +5342,8 @@ All errors share one shape:
 ```
 Common codes: `unauthorized` (401 — see [Authenticate](#authenticate)), `session_not_found` (404), `invalid_state` (409), `invalid_request` (400), `rate_limited`
 (429, carries `Retry-After` — see [Rate limits](#rate-limits-how-often-you-may-ask)),
-`upload_too_large` (413), `body_too_large` (413, a JSON body over 2 MB), `not_found` (404, no such
-route), `server_error` (500). Another 4xx refused while reading the request is `invalid_request`.
+`upload_too_large` (413), `body_too_large` (413, a JSON body over 2 MB), `session_expired` (410, see
+[Poll status](#poll-status)), `not_found` (404, no such route), `server_error` (500). Another 4xx refused while reading the request is `invalid_request`.
 
 A run that fails reports why in the `error` field of `GET /v1/sessions/{id}`. One worth
 recognizing:
