@@ -109,6 +109,10 @@ providers:
     reader: openrouter
     chartDataAgent: openrouter
     table: openrouter
+# A stand-in for iris-pdf (step 9k), the same one test/tagged-pdf.test.ts uses. Its
+# "PDF" is JSON of what it was given, so the step can check what Iris sent it.
+tagged_pdf:
+  command: $ROOT/test/fixtures/fake-iris-pdf.mjs
 defaults:
   max_review_iterations: 1
   extraction_concurrency: 4
@@ -1136,6 +1140,33 @@ refit=$(curl -s "${AUTH[@]}" "$BASE/sessions/$BIG/logs" | jq -c 'select(.type=="
 echo "$refit" | jq -e '.page==1 and .long_edge_px>0 and (.from|test("^8[0-9]{3}x8[0-9]{3}$"))' >/dev/null \
   && pass "the smaller render is recorded in the session's own log ($refit)" \
   || fail "page_refit" "expected a page_refit line naming the page and the size it was rendered at, got '$refit'"
+
+echo "==> 9k. a PDF upload is read for fields, filled in and downloaded as a tagged PDF"
+# Uses step 9j's one-page PDF. With tagged_pdf on, Iris kept it, and the fake lists two
+# fields for any PDF.
+fields=$(curl -s "${AUTH[@]}" "$BASE/sessions/$BIG/fields")
+echo "$fields" | jq -e '[.fields[].name] == ["applicant.name","applicant.consent"]' >/dev/null \
+  && pass "GET /fields lists the PDF's fields" \
+  || fail "fields" "expected applicant.name and applicant.consent, got $fields"
+tagged=$(curl -s -X POST "${AUTH[@]}" "$BASE/sessions/$BIG/pdf" -H 'content-type: application/json' \
+  -d '{"values":{"applicant.name":"Test Name"}}')
+echo "$tagged" | jq -e '.filename == "foldout_tagged.pdf" and (.report.tool | startswith("iris-pdf"))' >/dev/null \
+  && pass "POST /pdf returns a tagged PDF and the tagger's report" \
+  || fail "tagged pdf" "expected foldout_tagged.pdf with a report, got $(echo "$tagged" | jq -c 'del(.pdf)')"
+# The fake's output is "%PDF-fake " and JSON of its input: the kept upload, the
+# converted page and the value posted.
+made=$(echo "$tagged" | jq -r '.pdf' | base64 -d | sed '1s/^%PDF-fake //')
+echo "$made" | jq -e '(.source | startswith("%PDF-1.7")) and (.input.pages | length) == 1 and .values["applicant.name"] == "Test Name"' >/dev/null \
+  && pass "the tagger got the uploaded PDF, its converted page and the value" \
+  || fail "tagger input" "expected the source PDF, 1 page and the value, got $(echo "$made" | head -c 400)"
+# The whole log is searched for the value, not just this event. Fetched once and grepped from
+# a variable: under pipefail, `! curl | grep -q` passes when grep finds it and curl gets SIGPIPE.
+# No `| head -1`, for the reason given at step 8.
+biglog=$(curl -s "${AUTH[@]}" "$BASE/sessions/$BIG/logs")
+pdflog=$(echo "$biglog" | jq -c 'select(.type=="tagged_pdf")')
+echo "$pdflog" | jq -e '.fields_given == ["applicant.name"]' >/dev/null && ! grep -q "Test Name" <<<"$biglog" \
+  && pass "the log names the field, never the value" \
+  || fail "tagged_pdf log" "expected fields_given and no value, got '$pdflog'"
 
 echo "==> 10. an unknown session id is a 404"
 code=$(curl -s -o /dev/null -w '%{http_code}' "${AUTH[@]}" "$BASE/sessions/ses_doesnotexist")
