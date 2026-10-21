@@ -1159,8 +1159,12 @@ made=$(echo "$tagged" | jq -r '.pdf' | base64 -d | sed '1s/^%PDF-fake //')
 echo "$made" | jq -e '(.source | startswith("%PDF-1.7")) and (.input.pages | length) == 1 and .values["applicant.name"] == "Test Name"' >/dev/null \
   && pass "the tagger got the uploaded PDF, its converted page and the value" \
   || fail "tagger input" "expected the source PDF, 1 page and the value, got $(echo "$made" | head -c 400)"
-pdflog=$(curl -s "${AUTH[@]}" "$BASE/sessions/$BIG/logs" | jq -c 'select(.type=="tagged_pdf")' | head -1)
-echo "$pdflog" | jq -e '.fields_given == ["applicant.name"]' >/dev/null && ! echo "$pdflog" | grep -q "Test Name" \
+# The whole log is searched for the value, not just this event. Fetched once and grepped from
+# a variable: under pipefail, `! curl | grep -q` passes when grep finds it and curl gets SIGPIPE.
+# No `| head -1`, for the reason given at step 8.
+biglog=$(curl -s "${AUTH[@]}" "$BASE/sessions/$BIG/logs")
+pdflog=$(echo "$biglog" | jq -c 'select(.type=="tagged_pdf")')
+echo "$pdflog" | jq -e '.fields_given == ["applicant.name"]' >/dev/null && ! grep -q "Test Name" <<<"$biglog" \
   && pass "the log names the field, never the value" \
   || fail "tagged_pdf log" "expected fields_given and no value, got '$pdflog'"
 

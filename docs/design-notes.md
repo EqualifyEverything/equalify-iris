@@ -2930,10 +2930,10 @@ These are the rules both adapters enforce on a model call. The README states the
   check what it writes. Both page producers are typed `PageImage` (`src/util/pdf.ts`), so a new
   field fails the typecheck until each one sets it.
 - **Tagged PDFs are built on request, not stored.** When `tagged_pdf.command` is set and the upload is
-  one PDF, Iris keeps that PDF. `POST /v1/sessions/{id}/pdf` hands it, the finished pages and any
-  form values to `iris-pdf`, a separate program, and returns the result (`src/util/taggedPdf.ts`).
-  The values and the filled PDF sit in a scratch folder only while `iris-pdf` runs, then are
-  deleted, so a form's answers are not kept.
+  one PDF, Iris keeps that PDF. `POST /v1/sessions/{id}/pdf` hands it, the pages as first extracted
+  (before the review loop) and any form values to `iris-pdf`, a separate program, and returns the
+  result (`src/util/taggedPdf.ts`). The values and the filled PDF live in a scratch folder that is
+  deleted when `iris-pdf` exits.
 
 ## Designed for, and not built
 
