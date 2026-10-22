@@ -90,6 +90,27 @@ test("a field is labelled with the PDF's own label, or a converted XFA path read
   assert.deepEqual(fieldValues(list), { "SC-100[0].Page1[0].CN[0].CaseNumber[0]": "SC-1" });
 });
 
+test("an acronym keeps its capitals, and two fields that would read the same are told apart", () => {
+  const doc = new JSDOM('<!DOCTYPE html><html lang="en"><head><title>t</title></head><body><form id="f"></form></body></html>').window.document;
+  const list = doc.getElementById("f")!;
+  renderFields(doc, list, [
+    { name: "F[0].P1[0].SSN[0]", type: "text", options: [] },
+    { name: "F[0].P1[0].DOBField[0]", type: "text", options: [] },
+    { name: "F[0].P1[0].CN[0].CaseNumber[0]", type: "text", options: [], page: 1 },
+    { name: "F[0].P2[0].CN[0].CaseNumber[0]", type: "text", options: [], page: 2 },
+    { name: "F[0].P2[0].A[0].Name[0]", type: "text", options: [], page: 2 },
+    { name: "F[0].P2[0].B[0].Name[0]", type: "text", options: [], page: 2 },
+  ] as Field[]);
+  assert.deepEqual([...list.querySelectorAll("label")].map((l) => l.textContent), [
+    "SSN",
+    "DOB field",
+    "Case number (page 1)",
+    "Case number (page 2)",
+    "F[0].P2[0].A[0].Name[0]",
+    "F[0].P2[0].B[0].Name[0]",
+  ]);
+});
+
 test("an untouched form sends nothing, so the PDF keeps what it had", () => {
   assert.deepEqual(fieldValues(form().list), {});
 });

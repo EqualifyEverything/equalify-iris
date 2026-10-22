@@ -1039,11 +1039,13 @@ answers `422 already_tagged`.
 The session must have finished (`ready_for_review` or `closed`), or you get `409 invalid_state`. The
 PDF is tagged from the first pass's HTML for each page, before review. A page that failed extraction is
 left out, and the report lists it as `page_not_in_html`. Errors from the tagger keep
-its code: `400` for a bad value, `422` for a PDF it refuses (for example `encrypted`, or `permissions_denied` for a PDF its owner locked against
-changes, whose message says to ask for an unlocked copy), and `504
+its code: `400` for a bad value, `422` for a PDF it refuses (for example `encrypted`), and `504
 timeout` after `tagged_pdf.timeout_seconds` (300 by default). Two tagger runs at once, counting
 both `/fields` and `/pdf`, is the limit, so a third gets `503 busy` with `Retry-After`. A deployment without the feature answers
 `404 tagged_pdf_unavailable`.
+
+`422 permissions_denied` means the PDF's owner locked it against changes. The message says to ask for
+an unlocked copy.
 
 ## Submit feedback (re-run)
 
