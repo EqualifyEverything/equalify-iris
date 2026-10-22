@@ -443,8 +443,14 @@
     function renderFields(doc, list, fields) {
       const el = (tag, props = {}) => Object.assign(doc.createElement(tag), props);
       const req = (f) => (f.required ? ' (required on the form)' : '');
-      // A field Iris made for a flat form is named like `home-address-2`. Read it as words.
-      const label = (f) => (f.created ? f.name.replace(/[-_]+/g, ' ').replace(/^./, (c) => c.toUpperCase()) : f.name) + req(f);
+      // The PDF's own label when iris-pdf sends one. Otherwise the name, read as words when it
+      // is one Iris made for a flat form (`home-address-2`) or a converted XFA form's path
+      // (`SC-100[0].Page2[0].PlaintiffClaimAmount1[0]`, read from its last part).
+      const words = (s) => s.replace(/[-_]+/g, ' ').replace(/([a-z])([A-Z0-9])/g, '$1 $2').replace(/([0-9])([A-Za-z])/g, '$1 $2')
+        .trim().toLowerCase().replace(/^./, (c) => c.toUpperCase());
+      const xfa = (n) => (/\[\d+\]/.test(n) ? words(n.split('.').pop().replace(/\[\d+\]/g, '')) : '');
+      const named = (f) => (typeof f.label === 'string' && f.label.trim()) || (f.created ? words(f.name) : xfa(f.name) || f.name);
+      const label = (f) => named(f) + req(f);
       let n = 0;
       for (const f of fields) {
         if (f.readonly) continue;

@@ -43,6 +43,18 @@ test("a name that could end its attribute, or is too long, is not usable; a spac
   }
 });
 
+test("a field's own label is listed beside its name, quoted; a blank or long one is not", () => {
+  const { section } = pageFieldContext([
+    { ...field("SC-100[0].Page1[0].CN[0].CaseNumber[0]"), label: 'Case "Number"' },
+    { ...field("b"), label: "  " },
+    { ...field("c"), label: "x".repeat(81) },
+    { ...field("d"), label: null },
+  ]);
+  assert.ok(section.includes(`1. "SC-100[0].Page1[0].CN[0].CaseNumber[0]" (text; label: "Case \\"Number\\"")`));
+  for (const n of ["b", "c", "d"]) assert.ok(section.includes(`"${n}" (text)`), n);
+  assert.ok(!section.includes("xxxx"));
+});
+
 test("a choice field lists its options; a long list is left out", () => {
   const { section } = pageFieldContext([
     field("contact", "radio", ["email", "phone"]),

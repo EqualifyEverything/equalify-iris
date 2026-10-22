@@ -27,10 +27,17 @@ const MAX_OPTIONS = 10;
 const MAX_OPTION_CHARS = 40;
 const CHOICE_TYPES = new Set(["radio", "combobox", "listbox"]);
 
+const MAX_LABEL_CHARS = 80;
+
 function describe(f: PdfField): string {
   const parts: string[] = [];
   // iris-pdf's own type word. Anything else is not printed.
   if (/^[a-z]+$/.test(f.type ?? "")) parts.push(f.type);
+  // The PDF's own label for the field, which helps match it to the control the page shows.
+  // JSON-quoted like the name.
+  if (typeof f.label === "string" && f.label.trim() && f.label.length <= MAX_LABEL_CHARS) {
+    parts.push(`label: ${JSON.stringify(f.label.trim())}`);
+  }
   const options = Array.isArray(f.options) ? f.options : [];
   if (
     CHOICE_TYPES.has(f.type) &&

@@ -367,7 +367,12 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
       return;
     }
     const status = e.code === "timeout" ? 504 : e.exit === 3 ? 400 : 422;
-    sendError(res, status, e.code, e.message);
+    // A locked PDF cannot be fixed by trying again, so say what can be done (#593).
+    const note =
+      e.code === "permissions_denied"
+        ? " Iris cannot tag it. Ask whoever made the PDF for a copy without change restrictions. The HTML version is not affected."
+        : "";
+    sendError(res, status, e.code, e.message + note);
   }
 
   // Each tagger run is a child process with seconds of CPU. Two at once, across both

@@ -39,6 +39,7 @@ if (command === "fields" && pdf.includes("FLAT")) {
   // So a test can tell whether a tag ran: one line per run, beside the source.
   appendFileSync(join(dirname(a.pdf), "tag-runs.txt"), "tag\n");
   if (pdf.includes("TAGFAIL")) fail("text_lost", "Page 1 lost text.", 2);
+  if (pdf.includes("RESTRICTED")) fail("permissions_denied", "The PDF's owner does not permit changes to it.", 1);
   const values = JSON.parse(readFileSync(a.values, "utf8"));
   if ("unknown.field" in values) fail("bad_value", "No field is named unknown.field.", 3);
   if ("crash" in values) fail("internal_error", `Cannot set ${values.crash}.`, 3);
