@@ -350,6 +350,17 @@ test("POST /pdf passes the tagger's refusals on with its code", async () => {
   } finally {
     locked.close();
   }
+  // A PDF its owner locked against changes: the error says what the reader can do (#593).
+  const restricted = await serve({ source: "%PDF RESTRICTED" });
+  try {
+    const res = await restricted.tag({});
+    assert.equal(res.status, 422);
+    const { error } = await res.json();
+    assert.equal(error.code, "permissions_denied");
+    assert.match(error.message, /^The PDF's owner does not permit changes to it\. Iris cannot tag it\. Ask whoever made the PDF for a copy without change restrictions\./);
+  } finally {
+    restricted.close();
+  }
 });
 
 test("POST /pdf waits for the finished document and stops a run that takes too long", async () => {

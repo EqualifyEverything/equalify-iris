@@ -53,6 +53,9 @@ export function tagTimeoutSeconds(cfg: IrisConfig): number {
 // One form field, as `iris-pdf fields --json` prints it. Passed through unchanged.
 export type PdfField = {
   name: string;
+  // The field's /TU tooltip, the label a person reads. Newer iris-pdf only
+  // (equalify-iris-pdf#49); absent or null otherwise.
+  label?: string | null;
   type: string;
   page: number;
   options: string[];

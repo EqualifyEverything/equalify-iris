@@ -1001,7 +1001,10 @@ curl -s -H "$AUTH" "$BASE/sessions/$SID/fields" | jq '.fields[0]'
 ```
 
 `type` is one of `text`, `checkbox`, `radio`, `combobox`, `listbox`, `button` or `signature`. A PDF with
-no form gives `{"fields": []}`.
+no form gives `{"fields": []}`. `label` is the field's own label (its tooltip) when the PDF has one.
+It needs iris-pdf with
+[equalify-iris-pdf#49](https://github.com/EqualifyEverything/equalify-iris-pdf/issues/49); an older one
+leaves it out.
 
 A flat form, such as a scan, has no fields until it is tagged. If its HTML has form controls, Iris
 tags it once and lists the fields it made, each with `"created": true`. `POST /pdf` fills them by
@@ -1040,6 +1043,9 @@ its code: `400` for a bad value, `422` for a PDF it refuses (for example `encryp
 timeout` after `tagged_pdf.timeout_seconds` (300 by default). Two tagger runs at once, counting
 both `/fields` and `/pdf`, is the limit, so a third gets `503 busy` with `Retry-After`. A deployment without the feature answers
 `404 tagged_pdf_unavailable`.
+
+`422 permissions_denied` means the PDF's owner locked it against changes. The message says to ask for
+an unlocked copy.
 
 ## Submit feedback (re-run)
 

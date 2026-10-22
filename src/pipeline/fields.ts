@@ -27,10 +27,20 @@ const MAX_OPTIONS = 10;
 const MAX_OPTION_CHARS = 40;
 const CHOICE_TYPES = new Set(["radio", "combobox", "listbox"]);
 
+const MAX_LABEL_CHARS = 80;
+// A name's filter, less the apostrophe: labels say "Plaintiff's".
+const UNSAFE_LABEL = /["<>`\u0000-\u001f\u007f]/;
+
 function describe(f: PdfField): string {
   const parts: string[] = [];
   // iris-pdf's own type word. Anything else is not printed.
   if (/^[a-z]+$/.test(f.type ?? "")) parts.push(f.type);
+  // The PDF's own label for the field, which helps match it to the control the page shows.
+  // JSON-quoted like the name, and refused on nearly the same characters.
+  const label = typeof f.label === "string" ? f.label.trim() : "";
+  if (label && label.length <= MAX_LABEL_CHARS && !UNSAFE_LABEL.test(label)) {
+    parts.push(`label: ${JSON.stringify(label)}`);
+  }
   const options = Array.isArray(f.options) ? f.options : [];
   if (
     CHOICE_TYPES.has(f.type) &&

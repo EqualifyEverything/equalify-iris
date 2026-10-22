@@ -26,7 +26,7 @@ function extract(name: string): string {
   throw new Error(`unbalanced braces reading ${name} from public/demo.html`);
 }
 
-type Field = { name: string; type: string; options: string[]; created?: boolean; required?: boolean; readonly?: boolean; maxlen?: number | null; editable?: boolean; multiSelect?: boolean };
+type Field = { name: string; type: string; options: string[]; label?: string | null; created?: boolean; required?: boolean; readonly?: boolean; maxlen?: number | null; editable?: boolean; multiSelect?: boolean };
 const renderFields = new Function(`${extract("renderFields")}; return renderFields;`)() as (doc: Document, list: Element, fields: Field[]) => number;
 const fieldValues = new Function(`${extract("fieldValues")}; return fieldValues;`)() as (list: Element) => Record<string, unknown>;
 const pdfNotes = new Function(`${extract("pdfNotes")}; return pdfNotes;`)() as (report: unknown) => string[];
@@ -74,6 +74,41 @@ test("a field made for a flat form is labelled in words, and sent under its own 
   assert.deepEqual([...list.querySelectorAll("label, legend")].map((l) => l.textContent).filter((t) => !["Leave as it is", "Cash", "Card"].includes(t!)), ["Home address 2", "Pay by", "applicant.name-x"]);
   (list.querySelector('[data-field="home-address-2"] input') as HTMLInputElement).value = "x";
   assert.deepEqual(fieldValues(list), { "home-address-2": "x" });
+});
+
+test("a field is labelled with the PDF's own label, or a converted XFA path read as words (#593)", () => {
+  const doc = new JSDOM('<!DOCTYPE html><html lang="en"><head><title>t</title></head><body><form id="f"></form></body></html>').window.document;
+  const list = doc.getElementById("f")!;
+  renderFields(doc, list, [
+    { name: "SC-100[0].Page1[0].CN[0].CaseNumber[0]", type: "text", options: [], label: "Case Number" },
+    { name: "SC-100[0].Page2[0].List3[0].PlaintiffClaimAmount1[0]", type: "text", options: [] },
+    { name: "SC-100[0].Page2[0].List3[0].Item1[0]", type: "text", options: [], label: " " },
+  ] as Field[]);
+  assert.deepEqual([...list.querySelectorAll("label")].map((l) => l.textContent), ["Case Number", "Plaintiff claim amount 1", "Item 1"]);
+  // Still sent under the PDF's own name.
+  (list.querySelector("input") as HTMLInputElement).value = "SC-1";
+  assert.deepEqual(fieldValues(list), { "SC-100[0].Page1[0].CN[0].CaseNumber[0]": "SC-1" });
+});
+
+test("an acronym keeps its capitals, and two fields that would read the same are told apart", () => {
+  const doc = new JSDOM('<!DOCTYPE html><html lang="en"><head><title>t</title></head><body><form id="f"></form></body></html>').window.document;
+  const list = doc.getElementById("f")!;
+  renderFields(doc, list, [
+    { name: "F[0].P1[0].SSN[0]", type: "text", options: [] },
+    { name: "F[0].P1[0].DOBField[0]", type: "text", options: [] },
+    { name: "F[0].P1[0].CN[0].CaseNumber[0]", type: "text", options: [], page: 1 },
+    { name: "F[0].P2[0].CN[0].CaseNumber[0]", type: "text", options: [], page: 2 },
+    { name: "F[0].P2[0].A[0].Name[0]", type: "text", options: [], page: 2 },
+    { name: "F[0].P2[0].B[0].Name[0]", type: "text", options: [], page: 2 },
+  ] as Field[]);
+  assert.deepEqual([...list.querySelectorAll("label")].map((l) => l.textContent), [
+    "SSN",
+    "DOB field",
+    "Case number (page 1)",
+    "Case number (page 2)",
+    "F[0].P2[0].A[0].Name[0]",
+    "F[0].P2[0].B[0].Name[0]",
+  ]);
 });
 
 test("an untouched form sends nothing, so the PDF keeps what it had", () => {
