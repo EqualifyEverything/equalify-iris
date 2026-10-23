@@ -156,6 +156,8 @@ test("the delivered HTML names a PDF's controls readably, one name per field (#5
     '<input type="text" name=F[0].Bare[0]>' +
     '<input type="text" name="plaintiff-city-1">' +
     '<input value="name=x" name="F[0].A[0]"><input placeholder="Your name= here" name="F[0].A[0]">' +
+    '<input type="text" name="SC-100[0].Page4[0].Sign[0].PlaintiffSign1[0]">' +
+    '<input type="text" name="F[0].P4[0].CaseNumber[0]">' +
     '<p data-x name="SC-100[0].Page1[0].CN[0].CaseNumber[0]">kept</p>';
   const out = readableFieldNames(html, [
     { ...field("SC-100[0].Page1[0].CN[0].CaseNumber[0]"), label: "Case Number" },
@@ -178,8 +180,17 @@ test("the delivered HTML names a PDF's controls readably, one name per field (#5
     "plaintiff-city-1",
     "a", // a `name=` inside another attribute's value is not the name
     "a",
+    "plaintiff-sign-1", // a path name the PDF has no field for is renamed too
+    "case-number-3", // after the PDF's own fields
   ]);
   assert.ok(out.includes('id="cn"'), "other attributes are kept");
   assert.ok(out.includes('<p data-x name="SC-100[0].Page1[0].CN[0].CaseNumber[0]">'), "only form controls are renamed");
-  assert.equal(readableFieldNames(html, []), html);
+  const plain = '<input type="text" name="made-by-agent"><input name=bare>';
+  assert.equal(readableFieldNames(plain, []), plain);
+  assert.match(readableFieldNames(html, []), /name="plaintiff-sign-1"/, "no field list still renames path names");
+  assert.equal(
+    readableFieldNames('<span name="X[0].City[0]">x</span><input type="text" name="Y[0].City[0]">', []),
+    '<span name="X[0].City[0]">x</span><input type="text" name="city">',
+    "a name on something that is not a control takes no name",
+  );
 });
