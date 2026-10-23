@@ -26,7 +26,7 @@ function extract(name: string): string {
   throw new Error(`unbalanced braces reading ${name} from public/demo.html`);
 }
 
-type Field = { name: string; type: string; options: string[]; label?: string | null; created?: boolean; required?: boolean; readonly?: boolean; maxlen?: number | null; editable?: boolean; multiSelect?: boolean };
+type Field = { name: string; type: string; options: string[]; label?: string | null; page?: number; created?: boolean; required?: boolean; readonly?: boolean; maxlen?: number | null; editable?: boolean; multiSelect?: boolean };
 const renderFields = new Function(`${extract("renderFields")}; return renderFields;`)() as (doc: Document, list: Element, fields: Field[]) => number;
 const fieldValues = new Function(`${extract("fieldValues")}; return fieldValues;`)() as (list: Element) => Record<string, unknown>;
 const pdfNotes = new Function(`${extract("pdfNotes")}; return pdfNotes;`)() as (report: unknown) => string[];
@@ -106,8 +106,71 @@ test("an acronym keeps its capitals, and two fields that would read the same are
     "DOB field",
     "Case number (page 1)",
     "Case number (page 2)",
-    "F[0].P2[0].A[0].Name[0]",
-    "F[0].P2[0].B[0].Name[0]",
+    "A name",
+    "B name",
+  ]);
+});
+
+test("no label on SC-100's real form is a raw name or a repeat (#593)", () => {
+  // The field list iris-pdf returned for SC-100 on UIC: page 2 labels four fields "city".
+  const fields = JSON.parse(readFileSync(join(repoRoot, "test", "fixtures", "sc100-fields.json"), "utf8")) as Field[];
+  const doc = new JSDOM('<!DOCTYPE html><html lang="en"><head><title>t</title></head><body><form id="f"></form></body></html>').window.document;
+  const list = doc.getElementById("f")!;
+  assert.equal(renderFields(doc, list, fields), 95);
+  // Each control's own label: a text box's <label>, or a choice's <legend> (not its options').
+  const labels = [...list.querySelectorAll("label:not(.choice label), legend")].map((l) => l.textContent!);
+  assert.equal(labels.length, 95);
+  assert.deepEqual(labels.filter((t) => /\[\d+\]/.test(t)), []);
+  assert.equal(new Set(labels).size, labels.length);
+  assert.ok(labels.includes("Plaintiff mailing city 1"));
+});
+
+test("fields that read the same through their whole name are numbered", () => {
+  const doc = new JSDOM('<!DOCTYPE html><html lang="en"><head><title>t</title></head><body><form id="f"></form></body></html>').window.document;
+  const list = doc.getElementById("f")!;
+  renderFields(doc, list, [
+    { name: "F[0].Name[0]", type: "text", options: [], label: "Name" },
+    { name: "F[1].Name[0]", type: "text", options: [], label: "Name" },
+  ] as Field[]);
+  assert.deepEqual([...list.querySelectorAll("label")].map((l) => l.textContent), ["F name (1)", "F name (2)"]);
+});
+
+test("a number never lands on another field's label", () => {
+  const doc = new JSDOM('<!DOCTYPE html><html lang="en"><head><title>t</title></head><body><form id="f"></form></body></html>').window.document;
+  const list = doc.getElementById("f")!;
+  renderFields(doc, list, [
+    { name: "F[0].Name[0]", type: "text", options: [], label: "Name" },
+    { name: "F[1].Name[0]", type: "text", options: [], label: "Name" },
+    { name: "G[0].Other[0]", type: "text", options: [], label: "F name (1)" },
+  ] as Field[]);
+  assert.deepEqual([...list.querySelectorAll("label")].map((l) => l.textContent), ["F name (2)", "F name (3)", "F name (1)"]);
+});
+
+test("a field's own unique label is not taken by another field's name", () => {
+  const doc = new JSDOM('<!DOCTYPE html><html lang="en"><head><title>t</title></head><body><form id="f"></form></body></html>').window.document;
+  const list = doc.getElementById("f")!;
+  renderFields(doc, list, [
+    { name: "F[0].A[0].Zed[0]", type: "text", options: [], label: "Plaintiff city 1", page: 2 },
+    { name: "F[0].B[0].PlaintiffCity1[0]", type: "text", options: [], label: "City", page: 2 },
+    { name: "F[0].C[0].Other[0]", type: "text", options: [], label: "City", page: 2 },
+  ] as Field[]);
+  assert.deepEqual([...list.querySelectorAll("label")].map((l) => l.textContent), ["Plaintiff city 1", "City (page 2)", "Other"]);
+});
+
+test("a label repeated on different pages keeps its words and gains the page", () => {
+  const doc = new JSDOM('<!DOCTYPE html><html lang="en"><head><title>t</title></head><body><form id="f"></form></body></html>').window.document;
+  const list = doc.getElementById("f")!;
+  renderFields(doc, list, [
+    { name: "topmostSubform[0].Page1[0].f1_12[0]", type: "text", options: [], label: "Signature", page: 1 },
+    { name: "topmostSubform[0].Page3[0].f3_04[0]", type: "text", options: [], label: "Signature", page: 3 },
+    { name: "[0].[1]", type: "text", options: [], label: "City", page: 2 },
+    { name: "[2].[3]", type: "text", options: [], label: "City", page: 2 },
+  ] as Field[]);
+  assert.deepEqual([...list.querySelectorAll("label")].map((l) => l.textContent), [
+    "Signature (page 1)",
+    "Signature (page 3)",
+    "City (page 2) (1)",
+    "City (page 2) (2)",
   ]);
 });
 
