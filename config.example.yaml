@@ -101,6 +101,29 @@ providers:
     # model, and applies to every agent on this provider.
     # api: converse
 
+  # Google Gemini provider (via Google AI Studio / Gemini API). Set GEMINI_API_KEY or GOOGLE_API_KEY.
+  # gemini:
+  #   api_key: ${GEMINI_API_KEY}
+  #   default_model: gemini-2.5-flash
+  #   max_tokens: 32000
+  #   # Opt-in failover: route to local Ollama if Gemini returns 429 quota exhaustion.
+  #   # Unset by default: failover is strictly opt-in and operators choose where calls route.
+  #   # fallback: ollama
+  #   per_capability:
+  #     vision: gemini-2.5-flash
+  #     structured_output: gemini-2.5-flash
+  #     text: gemini-2.5-flash
+
+  # Local Ollama server for offline inference (e.g. minicpm-v, llama3.2-vision).
+  # ollama:
+  #   base_url: http://localhost:11434/v1
+  #   default_model: minicpm-v
+  #   max_tokens: 32000
+  #   per_capability:
+  #     vision: minicpm-v
+  #     structured_output: minicpm-v
+  #     text: minicpm-v
+
 defaults:
   # Review rounds per document. Read once, when the database is created. Set it before the
   # first run.
