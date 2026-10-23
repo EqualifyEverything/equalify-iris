@@ -67,3 +67,10 @@ test("the CLI and the upload route stage a session through the same code", () =>
     assert.doesNotMatch(src, /rasterizePdf\(|store\.createSession\(/, file.join("/"));
   }
 });
+
+test("the CLI and GET /output name a PDF's controls the same way (#593)", () => {
+  for (const file of [["src", "cli.ts"], ["src", "routes", "sessions.ts"]]) {
+    const src = readFileSync(join(ROOT, ...file), "utf8");
+    assert.match(src, /readableFieldNames\(titledAs\(readFileSync\(.*keptFields\(paths, /, file.join("/"));
+  }
+});

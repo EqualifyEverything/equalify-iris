@@ -155,6 +155,7 @@ test("the delivered HTML names a PDF's controls readably, one name per field (#5
     '<input type="text" name="made-by-agent">' +
     '<input type="text" name=F[0].Bare[0]>' +
     '<input type="text" name="plaintiff-city-1">' +
+    '<input value="name=x" name="F[0].A[0]"><input placeholder="Your name= here" name="F[0].A[0]">' +
     '<p data-x name="SC-100[0].Page1[0].CN[0].CaseNumber[0]">kept</p>';
   const out = readableFieldNames(html, [
     { ...field("SC-100[0].Page1[0].CN[0].CaseNumber[0]"), label: "Case Number" },
@@ -163,6 +164,7 @@ test("the delivered HTML names a PDF's controls readably, one name per field (#5
     { ...field("F[0].Pay[0]", "radio", ["a", "b"]), label: "Pay by: " + "x".repeat(60) },
     field("a&b"),
     field("F[0].Bare[0]"),
+    field("F[0].A[0]"),
   ]);
   assert.deepEqual([...out.matchAll(/<input[^>]*name="([^"]+)"/g)].map((m) => m[1]), [
     "case-number",
@@ -174,6 +176,8 @@ test("the delivered HTML names a PDF's controls readably, one name per field (#5
     "made-by-agent",
     "bare",
     "plaintiff-city-1",
+    "a", // a `name=` inside another attribute's value is not the name
+    "a",
   ]);
   assert.ok(out.includes('id="cn"'), "other attributes are kept");
   assert.ok(out.includes('<p data-x name="SC-100[0].Page1[0].CN[0].CaseNumber[0]">'), "only form controls are renamed");

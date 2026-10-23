@@ -87,7 +87,7 @@ export function pageFieldContext(fields: PdfField[] = []): {
 // and preceded by whitespace or a quote so `data-name=` does not count.
 function namesIn(html: string): Set<string> {
   const found = new Set<string>();
-  for (const m of html.matchAll(/(?<=[\s"'])name\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/gi)) {
+  for (const m of html.matchAll(/(?<=[\s"'])name\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+)(?=[\s>]))/gi)) {
     found.add(decodeEntities(m[1] ?? m[2] ?? m[3] ?? ""));
   }
   return found;
@@ -155,7 +155,7 @@ export function readableFieldNames(html: string, fields: PdfField[]): string {
   }
   if (renamed.size === 0) return html;
   return html.replace(
-    /(<(?:input|select|textarea|button)\b[^>]*?[\s"'])(name\s*=\s*)(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/gi,
+    /(<(?:input|select|textarea|button)\b[^>]*?[\s"'])(name\s*=\s*)(?:"([^"]*)"|'([^']*)'|([^\s"'>]+)(?=[\s>]))/gi,
     (all, head: string, eq: string, dq?: string, sq?: string, bare?: string) => {
       const to = renamed.get(decodeEntities(dq ?? sq ?? bare ?? ""));
       return to ? `${head}${eq}"${to}"` : all;
