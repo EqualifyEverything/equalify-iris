@@ -112,9 +112,12 @@ export function missingFields(fields: PdfField[] = [], html: string): PdfField[]
 // A converted XFA form names its fields by path (`SC-100[0].Page2[0].PlaintiffCity1[0]`), and
 // that is what a reader of the HTML file saw. The tagger matches controls by the PDF's names,
 // but it reads the extracted pages, not this file, so only the delivered copy is renamed. Each
-// field gets one name, so a radio group stays a group. A name that is not a PDF field's, such
-// as one the page agent made for a flat form, is left as it is.
+// field gets one name, so a radio group stays a group. The page agent also makes up path names
+// for controls the PDF has no field for (SC-100's signature lines are static text), so any
+// name shaped like a path is renamed too. Other names, such as one the page agent made for a
+// flat form, are left as they are.
 const MAX_READABLE_CHARS = 40;
+const PATH_LIKE = /\[\d+\]/;
 
 function slug(s: string): string {
   const words = s
@@ -144,8 +147,11 @@ export function readableFieldNames(html: string, fields: PdfField[]): string {
   const renamed = new Map<string, string>();
   const pdfNames = new Set(fields.map((f) => f?.name));
   // A name already in the HTML that is not renamed is taken, so a new one cannot join it.
-  const taken = new Set([...namesIn(html)].filter((n) => !pdfNames.has(n)));
-  for (const f of fields) {
+  const inHtml = [...namesIn(html)].filter((n) => !pdfNames.has(n));
+  const taken = new Set(inHtml.filter((n) => !PATH_LIKE.test(n)));
+  // The PDF's fields first, so they get the plain names.
+  const made = inHtml.filter((n) => PATH_LIKE.test(n)).map((name) => ({ name }) as PdfField);
+  for (const f of [...fields, ...made]) {
     if (!usableFieldName(f?.name) || renamed.has(f.name)) continue;
     const base = readableName(f);
     let name = base;
