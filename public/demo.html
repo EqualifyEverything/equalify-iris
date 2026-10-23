@@ -461,9 +461,15 @@
       const tail = (f, k) => words(f.name.split('.').map((p) => p.replace(/\[\d+\]/g, '')).filter(Boolean).slice(-k).join(' '));
       const page = (f) => (f.page ? ` (page ${f.page})` : '');
       let texts = shown.map(named);
+      // A retold label may not take one another field already has by itself.
       const retell = (to) => {
         const seen = count(texts);
-        texts = texts.map((s, i) => (seen.get(s) > 1 ? to(shown[i], s) : s));
+        const unique = new Set(texts.filter((s) => seen.get(s) === 1));
+        texts = texts.map((s, i) => {
+          if (seen.get(s) === 1) return s;
+          const t = to(shown[i], s);
+          return unique.has(t) ? s : t;
+        });
       };
       retell((f, s) => s + page(f));
       // What still repeats shares a page, so the page is not repeated here.
