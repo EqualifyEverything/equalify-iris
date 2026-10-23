@@ -54,6 +54,12 @@ export interface ProviderBlock {
   // two is an empirical question about a live endpoint, so this exists to be measured
   // with. Anything unrecognized is the default, and is warned about at boot.
   api?: string;
+  // BEDROCK ONLY. A model id -> the ARN of an application inference profile to call it
+  // through, so its cost carries that profile's tags. The profile must be built on that same
+  // model: only the call uses the ARN, and caching, output ceilings and the run log still read
+  // the model id. A model not listed is called by its id, and so is any value that is not a
+  // Bedrock ARN (warned at boot, `inferenceProfileWarning`).
+  inference_profiles?: Record<string, string>;
 }
 
 // How much one caller may ask of this deployment per minute, and how many uploads it
@@ -462,6 +468,29 @@ export function promptCacheTtlWarning(providers: IrisConfig["providers"]): strin
     `what a cache write is BILLED at (1.25x against 2x), not in the token counts ` +
     `diagnostics publishes, so a deployment that meant to hold its cache for an hour ` +
     `would never find out from Iris.`
+  );
+}
+
+// Which `inference_profiles` values are used (providers/bedrock.ts).
+export function usableProfileArn(v: unknown): v is string {
+  return typeof v === "string" && v.startsWith("arn:aws:bedrock:");
+}
+
+// A Bedrock `inference_profiles` value that is not an ARN. The call still works, by the model
+// id, so the only symptom would be cost missing from the profile's tags a month later.
+export function inferenceProfileWarning(providers: IrisConfig["providers"]): string | undefined {
+  const block = providers.bedrock as ProviderBlock | undefined;
+  const map = block?.inference_profiles as unknown;
+  if (map === null || map === undefined) return undefined;
+  if (typeof map !== "object" || Array.isArray(map)) {
+    return `providers.bedrock.inference_profiles must map model ids to profile ARNs. It is ignored, so no call goes through a profile.`;
+  }
+  const bad = Object.entries(map).filter(([, v]) => !usableProfileArn(v)).map(([k]) => k);
+  if (bad.length === 0) return undefined;
+  return (
+    `providers.bedrock.inference_profiles: ${bad.join(", ")} ${bad.length === 1 ? "is" : "are"} not mapped to a Bedrock ARN ` +
+    `("arn:aws:bedrock:..."), so ${bad.length === 1 ? "that model is" : "those models are"} called by id and ` +
+    `${bad.length === 1 ? "its" : "their"} cost does not carry the profile's tags.`
   );
 }
 

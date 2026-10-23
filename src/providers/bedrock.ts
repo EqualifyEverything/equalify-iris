@@ -8,7 +8,7 @@ import {
   type Message as ConverseMessage,
   type SystemContentBlock,
 } from "@aws-sdk/client-bedrock-runtime";
-import { DEFAULT_MAX_TOKENS, type Capability, type ProviderBlock } from "../config.ts";
+import { DEFAULT_MAX_TOKENS, usableProfileArn, type Capability, type ProviderBlock } from "../config.ts";
 import {
   EmptyStreamError,
   StalledStreamError,
@@ -572,6 +572,7 @@ export class BedrockProvider implements ModelProvider {
   private idleTimeoutMs: number;
   private trailingTimeoutMs: number;
   private maxTotalMs: number;
+  private profiles: Map<string, string>;
 
   // `timeouts` is a test seam: the defaults are what production runs, but a test
   // for stall handling cannot wait a minute to observe it.
@@ -595,6 +596,9 @@ export class BedrockProvider implements ModelProvider {
     this.idleTimeoutMs = timeouts.idleTimeoutMs ?? IDLE_TIMEOUT_MS;
     this.trailingTimeoutMs = timeouts.trailingTimeoutMs ?? TRAILING_TIMEOUT_MS;
     this.maxTotalMs = timeouts.maxTotalMs ?? MAX_TOTAL_MS;
+    this.profiles = new Map(
+      Object.entries(cfg.inference_profiles ?? {}).filter((e): e is [string, string] => usableProfileArn(e[1])),
+    );
   }
 
   // The invariant head of a user message, or null when it must not be split off.
@@ -938,7 +942,7 @@ export class BedrockProvider implements ModelProvider {
     }
 
     return new InvokeModelWithResponseStreamCommand({
-      modelId: req.model,
+      modelId: this.profiles.get(req.model) ?? req.model,
       contentType: "application/json",
       accept: "application/json",
       body: JSON.stringify(payload),
@@ -1001,7 +1005,7 @@ export class BedrockProvider implements ModelProvider {
     }
 
     return new ConverseStreamCommand({
-      modelId: req.model,
+      modelId: this.profiles.get(req.model) ?? req.model,
       messages,
       // Omitted rather than sent empty when there is no system prompt: an empty list is
       // not the same request as no list, and the one this replaces sent no field at all.

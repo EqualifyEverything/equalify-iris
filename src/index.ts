@@ -6,6 +6,7 @@ import {
   apiToken,
   applyTrustProxy,
   bedrockApiWarning,
+  inferenceProfileWarning,
   accessWarning,
   loadConfig,
   perAgentKeyWarning,
@@ -43,6 +44,8 @@ if (ttlWarning) console.warn(`WARNING: ${ttlWarning}`);
 // only symptom is that the deployment is on the path it was trying to leave.
 const apiWarning = bedrockApiWarning(cfg.providers);
 if (apiWarning) console.warn(`WARNING: ${apiWarning}`);
+const profileWarning = inferenceProfileWarning(cfg.providers);
+if (profileWarning) console.warn(`WARNING: ${profileWarning}`);
 
 // And an override that names no agent, which is the same failure on the one key that
 // decides which model runs: the entry is ignored and the call takes the provider's own

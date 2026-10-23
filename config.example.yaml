@@ -100,6 +100,11 @@ providers:
     # `invoke` (default) reaches Claude models only. `converse` is needed for any other
     # model, and applies to every agent on this provider.
     # api: converse
+    # To see a model's cost under a tag, call it through a tagged application inference
+    # profile built on that same model. Map the model id to the profile's ARN (the id is kept
+    # everywhere else):
+    # inference_profiles:
+    #   us.anthropic.claude-sonnet-4-6: arn:aws:bedrock:us-east-1:111122223333:application-inference-profile/example
 
 defaults:
   # Review rounds per document. Read once, when the database is created. Set it before the
