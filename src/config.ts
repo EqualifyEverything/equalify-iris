@@ -471,19 +471,6 @@ export function promptCacheTtlWarning(providers: IrisConfig["providers"]): strin
   );
 }
 
-// The same kind of warning for `api`, which picks the Bedrock API a block's calls go out
-// on (providers/bedrock.ts `bedrockApi`).
-//
-// Same asymmetry as the TTL above and the same treatment: an unrecognized value falls back
-// to `invoke`, which is the path that works, and nothing downstream can tell you it did.
-// Both APIs return the same text through the same interface, so an operator who wrote
-// `Converse` or `converse-stream` and set out to measure the new path against the old
-// would be measuring the old path twice.
-//
-// Named blocks rather than a bare complaint, and only Bedrock blocks: the field is
-// meaningless to the OpenRouter adapter, and warning about it there would send an operator
-// looking for a setting that does not exist. Which blocks are Bedrock is decided by the
-// provider NAME, the same way loadConfig decides which adapter to construct.
 // Which `inference_profiles` values are used (providers/bedrock.ts).
 export function usableProfileArn(v: unknown): v is string {
   return typeof v === "string" && v.startsWith("arn:aws:bedrock:");
@@ -507,6 +494,19 @@ export function inferenceProfileWarning(providers: IrisConfig["providers"]): str
   );
 }
 
+// The same kind of warning for `api`, which picks the Bedrock API a block's calls go out
+// on (providers/bedrock.ts `bedrockApi`).
+//
+// Same asymmetry as the TTL above and the same treatment: an unrecognized value falls back
+// to `invoke`, which is the path that works, and nothing downstream can tell you it did.
+// Both APIs return the same text through the same interface, so an operator who wrote
+// `Converse` or `converse-stream` and set out to measure the new path against the old
+// would be measuring the old path twice.
+//
+// Named blocks rather than a bare complaint, and only Bedrock blocks: the field is
+// meaningless to the OpenRouter adapter, and warning about it there would send an operator
+// looking for a setting that does not exist. Which blocks are Bedrock is decided by the
+// provider NAME, the same way loadConfig decides which adapter to construct.
 export function bedrockApiWarning(providers: IrisConfig["providers"]): string | undefined {
   const bad: string[] = [];
   for (const [name, block] of Object.entries(providers)) {
