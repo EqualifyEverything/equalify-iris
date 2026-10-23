@@ -563,10 +563,10 @@
         signature_invalidated: () => 'The PDF was signed. The signature no longer holds, because the file changed.',
         signature_field_skipped: () => 'Signature fields cannot be filled in here, so they were left empty.',
         retagged: () => 'The PDF\'s old tags were replaced with tags from the HTML.',
-        figure_without_image: () => 'Some images could not be matched to the HTML, so their descriptions are not attached to them.',
+        figure_without_image: () => 'Some images could not be matched to the HTML, so their descriptions are still read but not attached to them.',
         layer_auto_state: () => 'The PDF has a layer setting that PDF/UA, the PDF accessibility standard, forbids, so it cannot claim to meet it.',
         field_not_placed: (n) => s(n, 'One form field in the HTML had no blank on the page, so it was not added.', '# form fields in the HTML had no blank on the page, so they were not added.'),
-        in_place_failed: () => 'The PDF\'s own text could not be tagged where it is, so its words were added again in a new layer.',
+        in_place_failed: () => 'The PDF\'s own text could not be tagged where it is, so all its words were added again in a new layer. Copied text may come out doubled.',
         owner_restricted: () => 'The PDF\'s owner restricts changes to it, but lets accessibility tools read it, so it was tagged. The tagged file keeps the same restrictions.',
       };
       return Object.keys(count).filter((c) => c !== 'no_title').map((c) => (say[c] ? say[c](count[c]) : 'Note from the tagger: ' + c + '.'));
