@@ -8,6 +8,7 @@ import { Paths } from "./store/paths.ts";
 import { runPipeline } from "./pipeline/orchestrator.ts";
 import { PdfTooLargeError } from "./util/pdf.ts";
 import { titledAs } from "./util/outputNames.ts";
+import { keptFields, readableFieldNames } from "./pipeline/fields.ts";
 import { resolveImageLimits } from "./providers/imageLimits.ts";
 import { renderUploads, stageSession, UploadRejectedError, uploadRejection, unsupportedType } from "./pipeline/stage.ts";
 
@@ -148,7 +149,8 @@ async function main(): Promise<void> {
 
   // Titled after the input file, as the API titles a download. The input's own stem rather
   // than the session's stored, sanitized name, since this file is written locally.
-  const htmlContent = titledAs(readFileSync(generatedHtmlPath, "utf8"), inputStem);
+  // Controls named readably, as the API serves them (#593).
+  const htmlContent = readableFieldNames(titledAs(readFileSync(generatedHtmlPath, "utf8"), inputStem), keptFields(paths, sessionId));
   writeFileSync(outputPath, htmlContent, "utf8");
   console.log(`Converted output saved to: ${outputPath}`);
 }

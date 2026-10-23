@@ -1,5 +1,7 @@
 import type { PdfField } from "../util/taggedPdf.ts";
+import { readFileSync } from "node:fs";
 import { decodeEntities } from "../util/html.ts";
+import type { Paths } from "../store/paths.ts";
 
 // Naming a PDF's form controls after its own fields (#483).
 //
@@ -140,7 +142,9 @@ function readableName(f: PdfField): string {
 
 export function readableFieldNames(html: string, fields: PdfField[]): string {
   const renamed = new Map<string, string>();
-  const taken = new Set<string>();
+  const pdfNames = new Set(fields.map((f) => f?.name));
+  // A name already in the HTML that is not renamed is taken, so a new one cannot join it.
+  const taken = new Set([...namesIn(html)].filter((n) => !pdfNames.has(n)));
   for (const f of fields) {
     if (!usableFieldName(f?.name) || renamed.has(f.name)) continue;
     const base = readableName(f);
@@ -151,10 +155,23 @@ export function readableFieldNames(html: string, fields: PdfField[]): string {
   }
   if (renamed.size === 0) return html;
   return html.replace(
-    /(<(?:input|select|textarea|button)\b[^>]*?[\s"'])(name\s*=\s*)(?:"([^"]*)"|'([^']*)')/gi,
-    (all, head: string, eq: string, dq?: string, sq?: string) => {
-      const to = renamed.get(decodeEntities(dq ?? sq ?? ""));
+    /(<(?:input|select|textarea|button)\b[^>]*?[\s"'])(name\s*=\s*)(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/gi,
+    (all, head: string, eq: string, dq?: string, sq?: string, bare?: string) => {
+      const to = renamed.get(decodeEntities(dq ?? sq ?? bare ?? ""));
       return to ? `${head}${eq}"${to}"` : all;
     },
   );
+}
+
+// The PDF's form fields kept at upload (stage.ts, `keepPdfFields`), in page order. None when
+// there are none or the file cannot be read: the output then keeps the names it has.
+export function keptFields(paths: Paths, id: string): PdfField[] {
+  try {
+    const byPage = JSON.parse(readFileSync(paths.sessionFields(id), "utf8")) as Record<string, PdfField[]>;
+    return Object.keys(byPage)
+      .sort((a, b) => Number(a) - Number(b))
+      .flatMap((k) => (Array.isArray(byPage[k]) ? byPage[k] : []));
+  } catch {
+    return [];
+  }
 }
