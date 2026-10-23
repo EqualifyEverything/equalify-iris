@@ -368,10 +368,11 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
     }
     const status = e.code === "timeout" ? 504 : e.exit === 3 ? 400 : 422;
     // A locked PDF cannot be fixed by trying again, so say what can be done (#593).
-    const note =
-      e.code === "permissions_denied"
-        ? " Iris cannot tag it. Ask whoever made the PDF for a copy without change restrictions. The HTML version is not affected."
-        : "";
+    const notes = new Map([
+      ["permissions_denied", " Iris cannot tag it. Ask whoever made the PDF for a copy without change restrictions. The HTML version is not affected."],
+      ["values_not_permitted", " Leave the form empty to get a tagged copy."],
+    ]);
+    const note = notes.get(e.code) ?? "";
     sendError(res, status, e.code, e.message + note);
   }
 
