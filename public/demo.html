@@ -563,6 +563,7 @@
         signature_invalidated: () => 'The PDF was signed. The signature no longer holds, because the file changed.',
         signature_field_skipped: () => 'Signature fields cannot be filled in here, so they were left empty.',
         retagged: () => 'The PDF\'s old tags were replaced with tags from the HTML.',
+        owner_restricted: () => 'The PDF\'s owner restricts changes to it, but lets accessibility tools read it, so it was tagged. The tagged file keeps the same restrictions.',
       };
       return Object.keys(count).filter((c) => c !== 'no_title').map((c) => (say[c] ? say[c](count[c]) : 'Note from the tagger: ' + c + '.'));
     }
