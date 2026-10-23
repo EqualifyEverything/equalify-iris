@@ -1,5 +1,7 @@
 import type { PdfField } from "../util/taggedPdf.ts";
+import { readFileSync } from "node:fs";
 import { decodeEntities } from "../util/html.ts";
+import type { Paths } from "../store/paths.ts";
 
 // Naming a PDF's form controls after its own fields (#483).
 //
@@ -85,7 +87,7 @@ export function pageFieldContext(fields: PdfField[] = []): {
 // and preceded by whitespace or a quote so `data-name=` does not count.
 function namesIn(html: string): Set<string> {
   const found = new Set<string>();
-  for (const m of html.matchAll(/(?<=[\s"'])name\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/gi)) {
+  for (const m of html.matchAll(/(?<=[\s"'])name\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+)(?=[\s>]))/gi)) {
     found.add(decodeEntities(m[1] ?? m[2] ?? m[3] ?? ""));
   }
   return found;
@@ -104,4 +106,72 @@ export function missingFields(fields: PdfField[] = [], html: string): PdfField[]
     missing.push(f);
   }
   return missing;
+}
+
+// The delivered HTML's controls, renamed from the PDF's field names to readable ones (#593).
+// A converted XFA form names its fields by path (`SC-100[0].Page2[0].PlaintiffCity1[0]`), and
+// that is what a reader of the HTML file saw. The tagger matches controls by the PDF's names,
+// but it reads the extracted pages, not this file, so only the delivered copy is renamed. Each
+// field gets one name, so a radio group stays a group. A name that is not a PDF field's, such
+// as one the page agent made for a flat form, is left as it is.
+const MAX_READABLE_CHARS = 40;
+
+function slug(s: string): string {
+  const words = s
+    .replace(/([a-z])([A-Z0-9])/g, "$1 $2")
+    .replace(/([A-Z])([A-Z][a-z])/g, "$1 $2")
+    .replace(/([0-9])([A-Za-z])/g, "$1 $2")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+  let out = "";
+  for (const w of words) {
+    const next = out ? `${out}-${w}` : w;
+    if (next.length > MAX_READABLE_CHARS) break;
+    out = next;
+  }
+  return out || words[0]?.slice(0, MAX_READABLE_CHARS) || "";
+}
+
+function readableName(f: PdfField): string {
+  const label = typeof f.label === "string" ? slug(f.label) : "";
+  if (label) return label;
+  const last = f.name.split(".").pop()!.replace(/\[\d+\]/g, "");
+  return slug(last) || slug(f.name) || "field";
+}
+
+export function readableFieldNames(html: string, fields: PdfField[]): string {
+  const renamed = new Map<string, string>();
+  const pdfNames = new Set(fields.map((f) => f?.name));
+  // A name already in the HTML that is not renamed is taken, so a new one cannot join it.
+  const taken = new Set([...namesIn(html)].filter((n) => !pdfNames.has(n)));
+  for (const f of fields) {
+    if (!usableFieldName(f?.name) || renamed.has(f.name)) continue;
+    const base = readableName(f);
+    let name = base;
+    for (let n = 2; taken.has(name); n++) name = `${base}-${n}`;
+    taken.add(name);
+    renamed.set(f.name, name);
+  }
+  if (renamed.size === 0) return html;
+  return html.replace(
+    /(<(?:input|select|textarea|button)\b[^>]*?[\s"'])(name\s*=\s*)(?:"([^"]*)"|'([^']*)'|([^\s"'>]+)(?=[\s>]))/gi,
+    (all, head: string, eq: string, dq?: string, sq?: string, bare?: string) => {
+      const to = renamed.get(decodeEntities(dq ?? sq ?? bare ?? ""));
+      return to ? `${head}${eq}"${to}"` : all;
+    },
+  );
+}
+
+// The PDF's form fields kept at upload (stage.ts, `keepPdfFields`), in page order. None when
+// there are none or the file cannot be read: the output then keeps the names it has.
+export function keptFields(paths: Paths, id: string): PdfField[] {
+  try {
+    const byPage = JSON.parse(readFileSync(paths.sessionFields(id), "utf8")) as Record<string, PdfField[]>;
+    return Object.keys(byPage)
+      .sort((a, b) => Number(a) - Number(b))
+      .flatMap((k) => (Array.isArray(byPage[k]) ? byPage[k] : []));
+  } catch {
+    return [];
+  }
 }

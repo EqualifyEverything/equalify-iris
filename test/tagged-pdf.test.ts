@@ -64,6 +64,7 @@ async function serve(opts: { command?: string; source?: string | null; status?: 
     tag: (body: unknown) =>
       fetch(`${base}/sessions/${id}/pdf`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
     limits: () => fetch(`${base}/limits`),
+    output: () => fetch(`${base}/sessions/${id}/output`),
     close: () => {
       server.close();
       rmSync(dir, { recursive: true, force: true });
@@ -430,4 +431,21 @@ test("startup removes the scratch a killed process left, and nothing else", () =
   const index = readFileSync(join(dirname(FAKE), "..", "..", "src", "index.ts"), "utf8");
   const call = index.indexOf('clearPdfScratch(join(cfg.storage.data_dir, "tmp"))');
   assert.ok(call > 0 && call < index.indexOf("app.listen("));
+});
+
+test("GET /output names the PDF's controls readably; the tagger still gets the PDF's names (#593)", async () => {
+  const xfa = "SC-100[0].Page2[0].List1[0].Item1[0].PlaintiffCity1[0]";
+  const s = await serve({ page1: `<input type="text" name="${xfa}">` });
+  try {
+    writeFileSync(s.paths.sessionFields(s.id), JSON.stringify({ "1": [{ name: xfa, type: "text", page: 1, options: [], label: "City" }] }));
+    writeFileSync(s.paths.sessionOutput(s.id), `<!DOCTYPE html><html lang="en"><head><title>x</title></head><body><input type="text" name="${xfa}"></body></html>`);
+    const html = await (await s.output()).text();
+    assert.ok(html.includes('name="city"'));
+    assert.ok(!html.includes(xfa));
+    const { pdf } = await (await s.tag({})).json();
+    const made = JSON.parse(Buffer.from(pdf, "base64").toString().slice("%PDF-fake ".length));
+    assert.ok(made.input.pages[0].html.includes(xfa), "the tagger matches by the PDF's own name");
+  } finally {
+    s.close();
+  }
 });

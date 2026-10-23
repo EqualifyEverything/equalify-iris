@@ -11,6 +11,7 @@ import { sendError } from "./errors.ts";
 import { summarizeRun } from "../diagnostics.ts";
 import { PdfTooLargeError } from "../util/pdf.ts";
 import { convertedHtmlFilename, titledAs } from "../util/outputNames.ts";
+import { keptFields, readableFieldNames } from "../pipeline/fields.ts";
 import { captureFixtures } from "../pipeline/regression.ts";
 import { MAX_TOTAL_PAGES, renderUploads, stageSession, UploadRejectedError, uploadRejection } from "../pipeline/stage.ts";
 import type { Fragment } from "../pipeline/fragment.ts";
@@ -334,7 +335,7 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
     const base = existsSync(paths.sessionSourceName(s.session_id))
       ? readFileSync(paths.sessionSourceName(s.session_id), "utf8").trim() || "document"
       : "document";
-    const html = titledAs(readFileSync(outPath, "utf8"), base);
+    const html = readableFieldNames(titledAs(readFileSync(outPath, "utf8"), base), keptFields(paths, s.session_id));
     res.setHeader("Content-Disposition", `inline; filename="${convertedHtmlFilename(base)}"`);
     res.type("text/html").send(html);
   });

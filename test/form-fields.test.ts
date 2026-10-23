@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { MAX_FIELDS_PER_PAGE, MAX_NAME_CHARS, missingFields, pageFieldContext, usableFieldName } from "../src/pipeline/fields.ts";
+import { MAX_FIELDS_PER_PAGE, MAX_NAME_CHARS, missingFields, pageFieldContext, readableFieldNames, usableFieldName } from "../src/pipeline/fields.ts";
 import { runExtraction } from "../src/pipeline/extraction.ts";
 import type { PdfField } from "../src/util/taggedPdf.ts";
 import type { Paths } from "../src/store/paths.ts";
@@ -143,4 +143,43 @@ test("a page with no fields sends the prompt it always sent", async () => {
   const { prompts, events } = await render([], "<p>Plain page.</p>");
   assert.ok(!prompts[0].includes("## Form fields"));
   assert.ok(!events.some((e) => e.type.startsWith("page_fields")));
+});
+
+test("the delivered HTML names a PDF's controls readably, one name per field (#593)", () => {
+  const html =
+    '<input type="text" id="cn" name="SC-100[0].Page1[0].CN[0].CaseNumber[0]">' +
+    '<input type="text" name="SC-100[0].Page2[0].List1[0].Item1[0].PlaintiffCity1[0]">' +
+    '<input type="text" name="F[0].P3[0].CaseNumber[0]">' +
+    '<input type="radio" name="F[0].Pay[0]" value="a"><input type="radio" name=\'F[0].Pay[0]\' value="b">' +
+    '<input type="text" name="a&amp;b">' +
+    '<input type="text" name="made-by-agent">' +
+    '<input type="text" name=F[0].Bare[0]>' +
+    '<input type="text" name="plaintiff-city-1">' +
+    '<input value="name=x" name="F[0].A[0]"><input placeholder="Your name= here" name="F[0].A[0]">' +
+    '<p data-x name="SC-100[0].Page1[0].CN[0].CaseNumber[0]">kept</p>';
+  const out = readableFieldNames(html, [
+    { ...field("SC-100[0].Page1[0].CN[0].CaseNumber[0]"), label: "Case Number" },
+    field("SC-100[0].Page2[0].List1[0].Item1[0].PlaintiffCity1[0]"),
+    field("F[0].P3[0].CaseNumber[0]"),
+    { ...field("F[0].Pay[0]", "radio", ["a", "b"]), label: "Pay by: " + "x".repeat(60) },
+    field("a&b"),
+    field("F[0].Bare[0]"),
+    field("F[0].A[0]"),
+  ]);
+  assert.deepEqual([...out.matchAll(/<input[^>]*name="([^"]+)"/g)].map((m) => m[1]), [
+    "case-number",
+    "plaintiff-city-1-2", // the agent's own control below already has `plaintiff-city-1`
+    "case-number-2",
+    "pay-by",
+    "pay-by",
+    "a-b",
+    "made-by-agent",
+    "bare",
+    "plaintiff-city-1",
+    "a", // a `name=` inside another attribute's value is not the name
+    "a",
+  ]);
+  assert.ok(out.includes('id="cn"'), "other attributes are kept");
+  assert.ok(out.includes('<p data-x name="SC-100[0].Page1[0].CN[0].CaseNumber[0]">'), "only form controls are renamed");
+  assert.equal(readableFieldNames(html, []), html);
 });
