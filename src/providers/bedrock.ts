@@ -8,7 +8,7 @@ import {
   type Message as ConverseMessage,
   type SystemContentBlock,
 } from "@aws-sdk/client-bedrock-runtime";
-import { DEFAULT_MAX_TOKENS, type Capability, type ProviderBlock } from "../config.ts";
+import { DEFAULT_MAX_TOKENS, usableProfileArn, type Capability, type ProviderBlock } from "../config.ts";
 import {
   EmptyStreamError,
   StalledStreamError,
@@ -597,9 +597,7 @@ export class BedrockProvider implements ModelProvider {
     this.trailingTimeoutMs = timeouts.trailingTimeoutMs ?? TRAILING_TIMEOUT_MS;
     this.maxTotalMs = timeouts.maxTotalMs ?? MAX_TOTAL_MS;
     this.profiles = new Map(
-      Object.entries(cfg.inference_profiles ?? {}).filter(
-        (e): e is [string, string] => typeof e[1] === "string" && e[1].startsWith("arn:aws:bedrock:"),
-      ),
+      Object.entries(cfg.inference_profiles ?? {}).filter((e): e is [string, string] => usableProfileArn(e[1])),
     );
   }
 
