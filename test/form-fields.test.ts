@@ -188,4 +188,9 @@ test("the delivered HTML names a PDF's controls readably, one name per field (#5
   const plain = '<input type="text" name="made-by-agent"><input name=bare>';
   assert.equal(readableFieldNames(plain, []), plain);
   assert.match(readableFieldNames(html, []), /name="plaintiff-sign-1"/, "no field list still renames path names");
+  assert.equal(
+    readableFieldNames('<span name="X[0].City[0]">x</span><input type="text" name="Y[0].City[0]">', []),
+    '<span name="X[0].City[0]">x</span><input type="text" name="city">',
+    "a name on something that is not a control takes no name",
+  );
 });

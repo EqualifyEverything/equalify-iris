@@ -941,9 +941,9 @@ curl -s -H "$AUTH" "$BASE/sessions/$SID/output" -o output.html
 ```
 `text/html` — clean, content-only accessible HTML. Provenance comments (`@source`, `@agent`,
 `@fragment`) are **not** included, deliberately; provenance lives in the [run log](#run-log)
-instead. A form control named after one of the PDF's fields, or with a name shaped like one, gets a readable name, from the field's
+instead. A form control named after one of the PDF's fields gets a readable name, from the field's
 label or the end of its name (`case-number`, not `SC-100[0].Page1[0].CN[0].CaseNumber[0]`).
-`/fields` and `/pdf` still use the PDF's own names. An `<!-- @unresolved -->` comment listing outstanding issues is appended if the review loop
+A name merely shaped like a field path is shortened the same way. `/fields` and `/pdf` still use the PDF's own names. An `<!-- @unresolved -->` comment listing outstanding issues is appended if the review loop
 stopped with any still open — at its iteration cap, or on a round that changed nothing, which is how
 a document whose remaining issues the loop is designed not to fix ordinarily ends. A third stop
 reason adds a second comment: `<!-- @editor-truncated -->` says a correction round's response hit
