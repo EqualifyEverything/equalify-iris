@@ -1047,8 +1047,8 @@ both `/fields` and `/pdf`, is the limit, so a third gets `503 busy` with `Retry-
 `422 permissions_denied` means the PDF's owner locked it against changes. The message says to ask for
 an unlocked copy. A locked PDF that still lets accessibility tools read it is tagged instead, with an
 `owner_restricted` warning, and keeps the owner's restrictions. If the owner also forbids filling in
-the form, sending `values` gets `422 values_not_permitted`. Send none to get the tagged copy. This
-needs iris-pdf with
+the form, sending any values gets `422 values_not_permitted`. An empty or missing `values` still gets
+the tagged copy. This needs iris-pdf with
 [equalify-iris-pdf#51](https://github.com/EqualifyEverything/equalify-iris-pdf/pull/51).
 
 ## Submit feedback (re-run)
