@@ -453,9 +453,9 @@
         .replace(/^./, (c) => c.toUpperCase());
       const xfa = (n) => (/\[\d+\]/.test(n) ? words(n.split('.').pop().replace(/\[\d+\]/g, '')) : '');
       const named = (f) => (typeof f.label === 'string' && f.label.trim()) || (f.created ? words(f.name) : xfa(f.name) || f.name);
-      // Two fields must not read the same, and none may read as its raw name (#593: SC-100's
-      // page 2 has four fields labelled "city"). A repeat is read from its name instead
-      // (`Plaintiff mailing city 1`), then given its page, then more of its name, then a number.
+      // Two fields must not read the same, and a repeat is never told apart by a raw XFA path
+      // (#593: SC-100's page 2 has four fields labelled "city"). A repeat gets its page, then
+      // is read from its name (`Plaintiff mailing city 1`), then from more of it, then numbered.
       const shown = fields.filter((f) => !f.readonly);
       const count = (xs) => xs.reduce((m, s) => m.set(s, (m.get(s) || 0) + 1), new Map());
       const tail = (f, k) => words(f.name.split('.').map((p) => p.replace(/\[\d+\]/g, '')).filter(Boolean).slice(-k).join(' '));
@@ -465,13 +465,18 @@
         const seen = count(texts);
         texts = texts.map((s, i) => (seen.get(s) > 1 ? to(shown[i], s) : s));
       };
-      retell((f, s) => tail(f, 1) || s);
       retell((f, s) => s + page(f));
-      for (let k = 2; k <= 4; k++) retell((f, s) => tail(f, k) + page(f) || s);
-      const nth = new Map();
-      retell((f, s) => {
-        nth.set(s, (nth.get(s) || 0) + 1);
-        return `${s} (${nth.get(s)})`;
+      // What still repeats shares a page, so the page is not repeated here.
+      for (let k = 1; k <= 4; k++) retell((f, s) => tail(f, k) || s);
+      // A number must not land on a label another field already has.
+      const seen = count(texts);
+      const used = new Set(texts.filter((s) => seen.get(s) === 1));
+      texts = texts.map((s) => {
+        if (seen.get(s) === 1) return s;
+        let n = 1;
+        while (used.has(`${s} (${n})`)) n++;
+        used.add(`${s} (${n})`);
+        return `${s} (${n})`;
       });
       const text = new Map(shown.map((f, i) => [f, texts[i]]));
       const label = (f) => text.get(f) + req(f);

@@ -106,8 +106,8 @@ test("an acronym keeps its capitals, and two fields that would read the same are
     "DOB field",
     "Case number (page 1)",
     "Case number (page 2)",
-    "A name (page 2)",
-    "B name (page 2)",
+    "A name",
+    "B name",
   ]);
 });
 
@@ -133,6 +133,34 @@ test("fields that read the same through their whole name are numbered", () => {
     { name: "F[1].Name[0]", type: "text", options: [], label: "Name" },
   ] as Field[]);
   assert.deepEqual([...list.querySelectorAll("label")].map((l) => l.textContent), ["F name (1)", "F name (2)"]);
+});
+
+test("a number never lands on another field's label", () => {
+  const doc = new JSDOM('<!DOCTYPE html><html lang="en"><head><title>t</title></head><body><form id="f"></form></body></html>').window.document;
+  const list = doc.getElementById("f")!;
+  renderFields(doc, list, [
+    { name: "F[0].Name[0]", type: "text", options: [], label: "Name" },
+    { name: "F[1].Name[0]", type: "text", options: [], label: "Name" },
+    { name: "G[0].Other[0]", type: "text", options: [], label: "F name (1)" },
+  ] as Field[]);
+  assert.deepEqual([...list.querySelectorAll("label")].map((l) => l.textContent), ["F name (2)", "F name (3)", "F name (1)"]);
+});
+
+test("a label repeated on different pages keeps its words and gains the page", () => {
+  const doc = new JSDOM('<!DOCTYPE html><html lang="en"><head><title>t</title></head><body><form id="f"></form></body></html>').window.document;
+  const list = doc.getElementById("f")!;
+  renderFields(doc, list, [
+    { name: "topmostSubform[0].Page1[0].f1_12[0]", type: "text", options: [], label: "Signature", page: 1 },
+    { name: "topmostSubform[0].Page3[0].f3_04[0]", type: "text", options: [], label: "Signature", page: 3 },
+    { name: "[0].[1]", type: "text", options: [], label: "City", page: 2 },
+    { name: "[2].[3]", type: "text", options: [], label: "City", page: 2 },
+  ] as Field[]);
+  assert.deepEqual([...list.querySelectorAll("label")].map((l) => l.textContent), [
+    "Signature (page 1)",
+    "Signature (page 3)",
+    "City (page 2) (1)",
+    "City (page 2) (2)",
+  ]);
 });
 
 test("an untouched form sends nothing, so the PDF keeps what it had", () => {
