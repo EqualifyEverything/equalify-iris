@@ -1045,10 +1045,9 @@ both `/fields` and `/pdf`, is the limit, so a third gets `503 busy` with `Retry-
 `404 tagged_pdf_unavailable`.
 
 `422 permissions_denied` means the PDF's owner locked it against changes. The message says to ask for
-an unlocked copy. With iris-pdf
-[equalify-iris-pdf#51](https://github.com/EqualifyEverything/equalify-iris-pdf/pull/51), a locked PDF
-that still lets accessibility tools read it is tagged instead, with an `owner_restricted` warning. The
-tagged file keeps the owner's restrictions.
+an unlocked copy. A locked PDF that still lets accessibility tools read it is tagged instead, with an
+`owner_restricted` warning, and keeps the owner's restrictions. This needs iris-pdf with
+[equalify-iris-pdf#51](https://github.com/EqualifyEverything/equalify-iris-pdf/pull/51).
 
 ## Submit feedback (re-run)
 
