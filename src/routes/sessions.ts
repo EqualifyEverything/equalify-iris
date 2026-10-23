@@ -11,6 +11,7 @@ import { sendError } from "./errors.ts";
 import { summarizeRun } from "../diagnostics.ts";
 import { PdfTooLargeError } from "../util/pdf.ts";
 import { convertedHtmlFilename, titledAs } from "../util/outputNames.ts";
+import { readableFieldNames } from "../pipeline/fields.ts";
 import { captureFixtures } from "../pipeline/regression.ts";
 import { MAX_TOTAL_PAGES, renderUploads, stageSession, UploadRejectedError, uploadRejection } from "../pipeline/stage.ts";
 import type { Fragment } from "../pipeline/fragment.ts";
@@ -334,10 +335,23 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
     const base = existsSync(paths.sessionSourceName(s.session_id))
       ? readFileSync(paths.sessionSourceName(s.session_id), "utf8").trim() || "document"
       : "document";
-    const html = titledAs(readFileSync(outPath, "utf8"), base);
+    const html = readableFieldNames(titledAs(readFileSync(outPath, "utf8"), base), keptFields(s.session_id));
     res.setHeader("Content-Disposition", `inline; filename="${convertedHtmlFilename(base)}"`);
     res.type("text/html").send(html);
   });
+
+  // The PDF's form fields kept at upload, in page order. None when there are none, or the
+  // file cannot be read: the output is then served with the names it has.
+  function keptFields(id: string): PdfField[] {
+    try {
+      const byPage = JSON.parse(readFileSync(paths.sessionFields(id), "utf8")) as Record<string, PdfField[]>;
+      return Object.keys(byPage)
+        .sort((a, b) => Number(a) - Number(b))
+        .flatMap((k) => (Array.isArray(byPage[k]) ? byPage[k] : []));
+    } catch {
+      return [];
+    }
+  }
 
   // ----- Tagged PDF (optional; util/taggedPdf.ts) -----
   // The session's source PDF, or the reason it has none. Sends that error itself.
