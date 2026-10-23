@@ -41,6 +41,7 @@ if (command === "fields" && pdf.includes("FLAT")) {
   if (pdf.includes("TAGFAIL")) fail("text_lost", "Page 1 lost text.", 2);
   if (pdf.includes("RESTRICTED")) fail("permissions_denied", "The PDF's owner does not permit changes to it.", 1);
   const values = JSON.parse(readFileSync(a.values, "utf8"));
+  if (pdf.includes("NOFILL") && Object.keys(values).length) fail("values_not_permitted", "The PDF's owner does not permit filling in its form.", 1);
   if ("unknown.field" in values) fail("bad_value", "No field is named unknown.field.", 3);
   if ("crash" in values) fail("internal_error", `Cannot set ${values.crash}.`, 3);
   if ("slow" in values) await new Promise((r) => setTimeout(r, 5000));

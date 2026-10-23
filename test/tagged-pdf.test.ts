@@ -361,6 +361,18 @@ test("POST /pdf passes the tagger's refusals on with its code", async () => {
   } finally {
     restricted.close();
   }
+  // Tagging is allowed but filling is not: the reader is told to leave the form empty.
+  const nofill = await serve({ source: "%PDF NOFILL" });
+  try {
+    const res = await nofill.tag({ values: { name: "x" } });
+    assert.equal(res.status, 422);
+    const { error } = await res.json();
+    assert.equal(error.code, "values_not_permitted");
+    assert.equal(error.message, "The PDF's owner does not permit filling in its form. Leave the form empty to get a tagged copy.");
+    assert.equal((await nofill.tag({})).status, 200, "an empty form still tags");
+  } finally {
+    nofill.close();
+  }
 });
 
 test("POST /pdf waits for the finished document and stops a run that takes too long", async () => {
