@@ -453,15 +453,26 @@
         .replace(/^./, (c) => c.toUpperCase());
       const xfa = (n) => (/\[\d+\]/.test(n) ? words(n.split('.').pop().replace(/\[\d+\]/g, '')) : '');
       const named = (f) => (typeof f.label === 'string' && f.label.trim()) || (f.created ? words(f.name) : xfa(f.name) || f.name);
-      // Two fields must not read the same: a repeat gets its page, and if that still
-      // repeats, its full name.
+      // Two fields must not read the same, and none may read as its raw name (#593: SC-100's
+      // page 2 has four fields labelled "city"). A repeat is read from its name instead
+      // (`Plaintiff mailing city 1`), then given its page, then more of its name, then a number.
       const shown = fields.filter((f) => !f.readonly);
       const count = (xs) => xs.reduce((m, s) => m.set(s, (m.get(s) || 0) + 1), new Map());
+      const tail = (f, k) => words(f.name.split('.').map((p) => p.replace(/\[\d+\]/g, '')).filter(Boolean).slice(-k).join(' '));
+      const page = (f) => (f.page ? ` (page ${f.page})` : '');
       let texts = shown.map(named);
-      let seen = count(texts);
-      texts = texts.map((s, i) => (seen.get(s) > 1 && shown[i].page ? `${s} (page ${shown[i].page})` : s));
-      seen = count(texts);
-      texts = texts.map((s, i) => (seen.get(s) > 1 ? shown[i].name : s));
+      const retell = (to) => {
+        const seen = count(texts);
+        texts = texts.map((s, i) => (seen.get(s) > 1 ? to(shown[i], s) : s));
+      };
+      retell((f, s) => tail(f, 1) || s);
+      retell((f, s) => s + page(f));
+      for (let k = 2; k <= 4; k++) retell((f, s) => tail(f, k) + page(f) || s);
+      const nth = new Map();
+      retell((f, s) => {
+        nth.set(s, (nth.get(s) || 0) + 1);
+        return `${s} (${nth.get(s)})`;
+      });
       const text = new Map(shown.map((f, i) => [f, texts[i]]));
       const label = (f) => text.get(f) + req(f);
       let n = 0;

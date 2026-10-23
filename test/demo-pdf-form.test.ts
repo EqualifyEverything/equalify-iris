@@ -106,9 +106,33 @@ test("an acronym keeps its capitals, and two fields that would read the same are
     "DOB field",
     "Case number (page 1)",
     "Case number (page 2)",
-    "F[0].P2[0].A[0].Name[0]",
-    "F[0].P2[0].B[0].Name[0]",
+    "A name (page 2)",
+    "B name (page 2)",
   ]);
+});
+
+test("no label on SC-100's real form is a raw name or a repeat (#593)", () => {
+  // The field list iris-pdf returned for SC-100 on UIC: page 2 labels four fields "city".
+  const fields = JSON.parse(readFileSync(join(repoRoot, "test", "fixtures", "sc100-fields.json"), "utf8")) as Field[];
+  const doc = new JSDOM('<!DOCTYPE html><html lang="en"><head><title>t</title></head><body><form id="f"></form></body></html>').window.document;
+  const list = doc.getElementById("f")!;
+  assert.equal(renderFields(doc, list, fields), 95);
+  // Each control's own label: a text box's <label>, or a choice's <legend> (not its options').
+  const labels = [...list.querySelectorAll("label:not(.choice label), legend")].map((l) => l.textContent!);
+  assert.equal(labels.length, 95);
+  assert.deepEqual(labels.filter((t) => /\[\d+\]/.test(t)), []);
+  assert.equal(new Set(labels).size, labels.length);
+  assert.ok(labels.includes("Plaintiff mailing city 1"));
+});
+
+test("fields that read the same through their whole name are numbered", () => {
+  const doc = new JSDOM('<!DOCTYPE html><html lang="en"><head><title>t</title></head><body><form id="f"></form></body></html>').window.document;
+  const list = doc.getElementById("f")!;
+  renderFields(doc, list, [
+    { name: "F[0].Name[0]", type: "text", options: [], label: "Name" },
+    { name: "F[1].Name[0]", type: "text", options: [], label: "Name" },
+  ] as Field[]);
+  assert.deepEqual([...list.querySelectorAll("label")].map((l) => l.textContent), ["F name (1)", "F name (2)"]);
 });
 
 test("an untouched form sends nothing, so the PDF keeps what it had", () => {
