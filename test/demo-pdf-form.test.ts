@@ -144,6 +144,7 @@ test("the report's warnings come back as one sentence per kind", () => {
       { code: "field_not_in_html", page: 1 },
       { code: "no_title" },
       { code: "retagged" },
+      { code: "owner_restricted" },
       { code: "something_new" },
     ],
   });
@@ -151,6 +152,7 @@ test("the report's warnings come back as one sentence per kind", () => {
     "2 images have no description.",
     "One form field was not found in the HTML, so a screen reader reaches it at the end of its page.",
     "The PDF's old tags were replaced with tags from the HTML.",
+    "The PDF's owner restricts changes to it, but lets accessibility tools read it, so it was tagged. The tagged file keeps the same restrictions.",
     "Note from the tagger: something_new.",
   ]);
   assert.deepEqual(pdfNotes({ warnings: [] }), []);
