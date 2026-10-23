@@ -472,7 +472,7 @@
         });
       };
       retell((f, s) => s + page(f));
-      // What still repeats shares a page, so the page is not repeated here.
+      // What still repeats almost always shares a page, so the page is not added here.
       for (let k = 1; k <= 4; k++) retell((f, s) => tail(f, k) || s);
       // A number must not land on a label another field already has.
       const seen = count(texts);
