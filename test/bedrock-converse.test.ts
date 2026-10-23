@@ -804,3 +804,27 @@ function sleepUnlessAborted(ms: number, signal: AbortSignal): Promise<void> {
     signal.addEventListener("abort", onAbort, { once: true });
   });
 }
+
+// --- application inference profiles (cost attribution) ---------------------------------
+
+const PROFILE = "arn:aws:bedrock:us-east-2:111122223333:application-inference-profile/abc123";
+
+test("a listed model is called through its inference profile, on both APIs, and still cached", async () => {
+  const profiles = { [MODEL]: PROFILE, "other-model": "not-an-arn" };
+  for (const bedrock of [converse({ inference_profiles: profiles }), new BedrockProvider({ default_model: MODEL, inference_profiles: profiles } as never)]) {
+    const captured = stubConverse(bedrock, script(done("end_turn", { inputTokens: 1 })));
+    const out = await bedrock.complete(req({ messages: [{ role: "system", content: LONG }, { role: "user", content: "go" }] })).catch(() => null);
+    assert.equal(captured.input.modelId, PROFILE);
+    // Caching reads the model id, which an ARN does not contain.
+    const sent = JSON.stringify(captured.input);
+    assert.ok(sent.includes("cachePoint") || sent.includes("cache_control"), "the system prompt still gets a breakpoint");
+    if (out) assert.equal(out.model, MODEL, "the reply names the model, not the ARN");
+  }
+  // Not listed, or not a Bedrock ARN: called by its id.
+  for (const model of ["us.anthropic.claude-haiku-4-5", "other-model"]) {
+    const bedrock = converse({ inference_profiles: profiles });
+    const captured = stubConverse(bedrock, script(done("end_turn", { inputTokens: 1 })));
+    await bedrock.complete(req({ model }));
+    assert.equal(captured.input.modelId, model);
+  }
+});

@@ -54,6 +54,11 @@ export interface ProviderBlock {
   // two is an empirical question about a live endpoint, so this exists to be measured
   // with. Anything unrecognized is the default, and is warned about at boot.
   api?: string;
+  // BEDROCK ONLY. A model id -> the ARN of an application inference profile to call it
+  // through, so its cost carries that profile's tags. Only the call uses the ARN; caching,
+  // output ceilings and the run log still read the model id. A model not listed is called by
+  // its id, and so is any value that is not a Bedrock ARN.
+  inference_profiles?: Record<string, string>;
 }
 
 // How much one caller may ask of this deployment per minute, and how many uploads it
