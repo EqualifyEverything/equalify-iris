@@ -20,7 +20,7 @@ export class AuditRecorder {
   private dir: string;
   private log: RunLog;
   // This run's number: one more than the runs already recorded, so a feedback re-run keeps the
-  // first run's snapshots.
+  // first run's snapshots. The constructor makes its folder.
   readonly run: number;
 
   constructor(dir: string, log: RunLog) {
@@ -29,6 +29,8 @@ export class AuditRecorder {
     mkdirSync(join(dir, "prompts"), { recursive: true });
     mkdirSync(join(dir, "runs"), { recursive: true });
     this.run = readdirSync(join(dir, "runs")).filter((n) => /^\d+$/.test(n)).length + 1;
+    // Claimed now, so a run that saves no snapshot still takes its number and the next run's is right.
+    mkdirSync(join(dir, "runs", String(this.run)), { recursive: true });
   }
 
   // What `model_call_start` carries about the prompt: each message by role, hash and length, and
@@ -39,7 +41,13 @@ export class AuditRecorder {
         messages: messages.map((m) => {
           const hash = sha256(m.content);
           const file = join(this.dir, "prompts", `${hash}.txt`);
-          if (!existsSync(file)) writeFileSync(file, m.content);
+          // Best-effort, like `snapshot`: this runs before the model call, and a failed write must not
+          // be reported as the model failing.
+          try {
+            if (!existsSync(file)) writeFileSync(file, m.content);
+          } catch {
+            // ignore — observability must not block the run
+          }
           return { role: m.role, sha256: hash, chars: m.content.length };
         }),
         images: images.map((i) => ({ media_type: i.media_type, bytes: i.data.length, sha256: sha256(i.data) })),

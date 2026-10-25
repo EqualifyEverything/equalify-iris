@@ -65,8 +65,24 @@ test("the recorder keeps each distinct prompt once, names images by hash, and nu
       lines(join(dir, "log.jsonl")).map(({ ts: _, ...e }) => e),
       [{ type: "audit_snapshot", run: 1, name: "assembled", chars: 11 }],
     );
-    // A feedback re-run is the next run, and keeps the first run's snapshots.
+    // A feedback re-run is the next run, and keeps the first run's snapshots. A run that saves
+    // nothing still takes its number, so the one after it is run 3.
     assert.equal(new AuditRecorder(join(dir, "audit"), log).run, 2);
+    assert.equal(new AuditRecorder(join(dir, "audit"), log).run, 3);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a prompt that cannot be saved is still described, and does not throw", () => {
+  const dir = mkdtempSync(join(tmpdir(), "iris-audit-ro-"));
+  try {
+    const rec = new AuditRecorder(join(dir, "audit"), new RunLog(join(dir, "log.jsonl")));
+    rmSync(join(dir, "audit", "prompts"), { recursive: true });
+    writeFileSync(join(dir, "audit", "prompts"), "not a folder");
+    assert.deepEqual(rec.prompt([{ role: "user", content: "x" }]), {
+      prompt: { messages: [{ role: "user", sha256: sha256("x"), chars: 1 }], images: [] },
+    });
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

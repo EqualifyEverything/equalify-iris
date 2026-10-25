@@ -113,7 +113,13 @@ export async function runPipeline(args: {
   const paths = new Paths(cfg);
   const log = new RunLog(paths.sessionLog(sessionId));
   // Audit mode keeps the prompts and the document at each stage (store/audit.ts).
-  const audit = auditOn(cfg) ? new AuditRecorder(paths.sessionAudit(sessionId), log) : undefined;
+  // Best-effort: if its folders cannot be made, the run goes on without it.
+  let audit: AuditRecorder | undefined;
+  try {
+    audit = auditOn(cfg) ? new AuditRecorder(paths.sessionAudit(sessionId), log) : undefined;
+  } catch {
+    audit = undefined;
+  }
   // Route every model call's timing into the run log for diagnostics.
   const router = new ProviderRouter(
     cfg,

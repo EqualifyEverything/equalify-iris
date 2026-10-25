@@ -29,6 +29,22 @@ const FILES: Record<string, { path: (p: Paths, id: string) => string; type: stri
   "source.pdf": { path: (p, id) => p.sessionSourcePdf(id), type: "application/pdf" },
 };
 
+// Each page image's sha256, so the list does not re-read every image on every request: the page
+// polls it while the run works, in the process that runs the pipeline. Keyed by path, size and time
+// written, and bounded.
+const digests = new Map<string, string>();
+function digest(file: string): string {
+  const st = statSync(file);
+  const key = `${file}:${st.size}:${st.mtimeMs}`;
+  let d = digests.get(key);
+  if (!d) {
+    d = sha256(readFileSync(file));
+    if (digests.size >= 2000) digests.delete(digests.keys().next().value!);
+    digests.set(key, d);
+  }
+  return d;
+}
+
 export function auditRouter(cfg: IrisConfig, store: Store): Router {
   const r = Router();
   const paths = new Paths(cfg);
@@ -67,17 +83,14 @@ export function auditRouter(cfg: IrisConfig, store: Store): Router {
   r.get("/:id/audit", (req, res) => {
     const id = session(req.params.id, res);
     if (!id) return;
-    const pages = pageFiles(id).map((p) => {
-      const data = readFileSync(p.file);
-      return {
-        order: p.order,
-        name: p.name,
-        media_type: mediaTypeFor(p.name),
-        bytes: data.length,
-        sha256: sha256(data),
-        url: `${base(id)}/pages/${p.order}`,
-      };
-    });
+    const pages = pageFiles(id).map((p) => ({
+      order: p.order,
+      name: p.name,
+      media_type: mediaTypeFor(p.name),
+      bytes: statSync(p.file).size,
+      sha256: digest(p.file),
+      url: `${base(id)}/pages/${p.order}`,
+    }));
     const files = Object.entries(FILES)
       .filter(([, f]) => existsSync(f.path(paths, id)))
       .map(([name, f]) => ({ name, bytes: statSync(f.path(paths, id)).size, url: `${base(id)}/files/${name}` }));
