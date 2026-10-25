@@ -64,4 +64,8 @@ test("the settings are the values Iris uses, and each agent's model is resolved 
   assert.deepEqual(reader.models.text, { provider: "bedrock", model: "us.anthropic.claude-sonnet-4-6" });
   assert.deepEqual(s.agents.filter((a) => a.kind === "core").map((a) => a.agent), ["page", "reader", "copy_editor", "feedback"]);
   assert.ok(s.agents.some((a) => a.kind === "specialist" && a.agent === "chartDataAgent"), "specialists come from agents/");
+  const purpose = (n: string) => (s.agents.find((a) => a.agent === n) as unknown as { purpose: string | null }).purpose;
+  assert.match(purpose("chartDataAgent")!, /^Convert charts and graphs/, "an agent's purpose comes from its file");
+  assert.ok(s.agents.every((a) => !(a as unknown as { purpose: string | null }).purpose || (a as unknown as { purpose: string }).purpose.length <= 250), "each purpose is short");
+  assert.equal(purpose("reader"), null, "an agent with no file in agents/ has none");
 });

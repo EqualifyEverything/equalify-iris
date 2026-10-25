@@ -43,17 +43,23 @@ const pure = script.slice(script.indexOf("// ----- Reading the log"), script.ind
 const lib = new Function(
   "EVENT_INDEX",
   `const REF = 'https://x/API.md'; const API = '/v1'; const location = { origin: 'https://iris.test' };
-   const esc = (s) => String(s); const AI = ''; const CODE = '';
+   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]); const AI = ''; const CODE = '';
    const plural = (n, one, many) => n + ' ' + (n === 1 ? one : (many || one + 's'));
    ${pure}
-   return { settingsHtml, inputsHtml, processSteps, pdfReportHtml, PDF_WARN, INPUTS, parseLog, parseReply, explain, SAY, runsOf, pagesFrom, roundsFrom, problems, unresolvedFrom, stagesFrom, curl };`,
+   return { firstSummary, changeSummary, stageSettings, modelFor, usageByStage, usageLine, settingsHtml, inputsHtml, processSteps, pdfReportHtml, PDF_WARN, INPUTS, parseLog, parseReply, explain, SAY, runsOf, pagesFrom, roundsFrom, problems, unresolvedFrom, stagesFrom, curl };`,
 )(index) as {
   parseLog(t: string): Record<string, unknown>[];
   parseReply(o: unknown): Record<string, unknown> | null;
   explain(e: Record<string, unknown>): string;
   SAY: Record<string, unknown>;
   INPUTS: { method: string; path: string; field: string | null }[];
-  settingsHtml(st: unknown, limits?: unknown): string;
+  settingsHtml(st: unknown, limits?: unknown, stats?: unknown): string;
+  firstSummary(steps: unknown[], id: string, uploaded: boolean): string;
+  changeSummary(prev: Map<string, string>, steps: unknown[]): string[];
+  stageSettings(key: string, ev: unknown[], st: unknown, limits: unknown, session: unknown): string;
+  modelFor(ev: unknown[], st: unknown, agent: string, step: string, cap: string): string | null;
+  usageByStage(ev: unknown[]): Record<string, { calls: number; input: number; output: number; cacheRead: number; cacheWrite: number; ms: number }>;
+  usageLine(u: unknown, label?: string): string;
   inputsHtml(): string;
   processSteps(ev: unknown[], s: unknown, o?: unknown): { key: string; state: string; detail: string; seconds?: number | null }[];
   pdfReportHtml(r: unknown): string;
@@ -324,4 +330,55 @@ test("iris-pdf's detailed report shows the tree, the unmatched words with their 
   const bare = lib.pdfReportHtml({ detail: { structure: null, pages: [{ page: 2, lost: { count: 1, words: ["z"] } }] } });
   assert.ok(!bare.includes("undefined"), "a page without `matched` leaves it out");
   assert.ok(bare.includes("Page 2: 1 kind of difference"));
+});
+
+test("tokens and model time are counted per step, from the step that was running", () => {
+  const call = (input: number, output: number, ms: number) => ({ type: "model_call", ok: true, input_tokens: input, output_tokens: output, cache_read_input_tokens: 10, cache_creation_input_tokens: 0, duration_ms: ms });
+  const u = lib.usageByStage([
+    { type: "phase", phase: "extraction" }, call(100, 50, 1000), call(100, 50, 1000),
+    { type: "phase", phase: "assembly" }, call(5, 5, 500),
+    { type: "phase", phase: "review" }, call(1000, 200, 3000),
+  ]);
+  assert.deepEqual([u.pages.calls, u.pages.input, u.pages.output, u.join.calls, u.review.output, u.total.calls, u.total.cacheRead], [2, 200, 100, 1, 200, 4, 40]);
+  assert.match(lib.usageLine(u.total), /4 model calls · 1,205 tokens in, 305 out · cache: 40 read, 0 written · 6 s of model time/);
+  assert.equal(lib.usageLine(u.join && { ...u.join, calls: 0 }), "", "a step with no calls shows nothing");
+});
+
+test("each step's Settings line names its caps and models, the run's model before the configured one", async () => {
+  const { deploymentSettings } = await import("../src/routes/settings.ts");
+  const st = deploymentSettings({
+    server: { port: 1, base_url: "x", audit: true },
+    storage: { data_dir: "/d", agents_dir: join(root, "agents"), database: "/d/db", session_retention_days: 30 },
+    providers: { default: "openrouter", per_agent: { page: { model: "us.page-model" } }, openrouter: { default_model: "configured-model" } },
+    defaults: { max_review_iterations: 2, extraction_concurrency: 5, max_concurrent_runs: 2, recheck_sample_size: 1 },
+  } as never);
+  // Before a call: the configured model, with the `us.` prefix dropped.
+  assert.equal(lib.modelFor([], st, "page", "extract", "vision"), "page-model");
+  // After one: the model the run's log says it used.
+  const ev = [{ type: "model_call", agent: "page", step: "extract", model: "us.used-model" }];
+  assert.equal(lib.modelFor(ev, st, "page", "extract", "vision"), "used-model");
+  const pages = lib.stageSettings("pages", ev, st, null, null);
+  for (const part of ["up to 5 pages at a time", "page agent: used-model", "checker: configured-model", "a failed page is fixed once", "1 fixed page checked again", "12 specialist agents available"]) assert.ok(pages.includes(part), part);
+  // The session's own cap wins over the deployment's: it was fixed when the session was made.
+  assert.ok(lib.stageSettings("review", [], st, null, { iterations_max: 3 }).includes("up to 3 rounds"));
+  assert.ok(lib.stageSettings("review", [], st, null, null).includes("up to 2 rounds"));
+  assert.ok(lib.stageSettings("result", [], st, null, null).includes("files kept 30 days"));
+  assert.ok(lib.stageSettings("join", [], st, null, null).includes("colour contrast is not checked"));
+});
+
+test("the status region says when a session opens failed, finished or working, and then only what changed", () => {
+  const failed = lib.processSteps([{ type: "run_start" }], { status: "failed", phase: "extraction", image_count: 2 }, {});
+  assert.match(lib.firstSummary(failed, "ses_X", false), /^Opened session ses_X\. 1 of 7 steps done\. Result: problem, the run failed\.$/);
+  const done = lib.processSteps([{ type: "run_start" }, { type: "extraction_complete" }, { type: "assembly", lint_ok: true }, { type: "reader" }, { type: "run_complete", unresolved: 3 }], { status: "ready_for_review", phase: "done", image_count: 2 }, {});
+  assert.match(lib.firstSummary(done, "ses_Y", true), /^Uploaded\. Session ses_Y\. .* Finished: 3 left open\.$/);
+  const mid = lib.processSteps([{ type: "run_start" }], { status: "running", phase: "extraction", image_count: 2 }, {});
+  assert.match(lib.firstSummary(mid, "ses_Z", false), /Working now: Read each page\./);
+  // Ready, but the run's last line is not written yet: no dangling "Finished: ."
+  const early = lib.processSteps([{ type: "run_start" }, { type: "extraction_complete" }], { status: "ready_for_review", phase: "done", image_count: 2 }, {});
+  assert.ok(!lib.firstSummary(early, "ses_W", false).includes("Finished"));
+  // An update says only the steps that changed.
+  const prev = new Map(mid.map((x) => [x.key, x.state]));
+  const next = lib.processSteps([{ type: "run_start" }, { type: "extraction_complete" }], { status: "running", phase: "assembly", image_count: 2 }, {});
+  assert.deepEqual(lib.changeSummary(prev, next), ["Read each page: done, 0 of 2 written.", "Check each page: done.", "Working now: Join and check."]);
+  assert.deepEqual(lib.changeSummary(new Map(next.map((x) => [x.key, x.state])), next), [], "nothing changed, nothing said");
 });
