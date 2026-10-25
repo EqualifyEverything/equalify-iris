@@ -4,6 +4,10 @@ Iris turns the pages of a PDF into one accessible HTML document that meets WCAG 
 model reads each page, using prompts anyone can improve. Then a reader and a copy editor review the
 whole document and fix what they find.
 
+**To see how it works**, open `/how-it-works` on any running Iris (after the [Quick start](#quick-start),
+`http://localhost:8080/how-it-works`). It takes one document through the whole system in plain
+language, showing every API call and what each step did.
+
 **Where we are.** We're focused on one thing: the most accessible HTML conversion we can deliver.
 With the optional [equalify-iris-pdf](https://github.com/EqualifyEverything/equalify-iris-pdf), that
 HTML can also go back into a tagged PDF. Once we're confident in the conversion, we may move on to
@@ -25,23 +29,15 @@ Design constraints:
 
 ## How it works
 
-The pipeline as **implemented today** runs in three phases:
+`/how-it-works` shows this with a real document. In short:
 
-1. **Extraction** — for each page image, the `page` agent (`agents/page.md`) converts the whole
-   page to an accessible HTML fragment in one vision call. The output is then verified, and
-   corrected if the verifier objects. If the page agent names a content type a specialist would
-   handle better, that specialist is dispatched and its output merged. Pages are independent, so
-   they are extracted **in parallel** — up to `defaults.extraction_concurrency` at a time — and
-   fragments keep submitted document order regardless of which page finishes first.
-2. **Assembly** — fragments are joined in page order into a minimal accessible document shell
-   (`<html lang>`, `<title>`, `<main>`) and validated with axe-core.
-3. **Review** — the Reader reads the document in chunks as two views (HTML + a flattened
-   screen-reader view) and flags reading-order / semantic / accessibility issues, attributing
-   each to the source page(s) it appears on; the Copy Editor proposes fixes against **just those
-   pages'** source images; fixes are applied and the document re-linted. Loops up to
-   `max_review_iterations` (default 3), or until a round changes nothing. A document that spans
-   several chunks is read in parallel under the same concurrency cap, and the issues the chunks
-   raise stay in chunk order.
+1. **Each page.** The `page` agent (`agents/page.md`) writes the page's HTML from its image. A
+   second model checks it against the image, and code checks its links, image descriptions and ids.
+   A page that fails is fixed once. Pages run in parallel, up to `defaults.extraction_concurrency`.
+2. **Joining.** The pages are joined in order and checked with axe-core.
+3. **Review.** The reader lists problems in the whole document, and the copy editor fixes them
+   from the page images, for up to `max_review_iterations` rounds. Code throws away a fix that would
+   lose content. What is still open is listed in the HTML.
 
 When Iris meets content a specialist agent would handle better than the general pass, it saves a
 suggestion: the agent's name, the page, and why. Feedback that improves an agent is saved the same
@@ -285,6 +281,7 @@ src/
   version.ts             # the running build's version, reported by GET /v1/health
   index.ts               # server entry point
 public/demo.html         # the browser app served at /, driving the same /v1 API
+public/how-it-works.html # the technical walkthrough served at /how-it-works
 data/                    # sessions/, tmp/, and the SQLite DB (created at runtime)
 ```
 
@@ -306,6 +303,7 @@ change:
 | accessibility reporting, testing, or support information | [ACCESSIBILITY.md](ACCESSIBILITY.md) | reporting and triage guidance, contributor checks, and testing limitations |
 | a workflow in `.github/` | [docs/ci.md](docs/ci.md) | the five workflows, including the bot that reviews your PR |
 | the gate, or what a 401 means | [docs/access.md](docs/access.md) | who may call the API, and an older database |
+| a pipeline step, or a run-log event a person needs explained | [`public/how-it-works.html`](public/how-it-works.html) | the walkthrough. An event's one-line meaning comes from API.md's index, so only a new step or a plainer sentence (`SAY`) needs an edit here |
 | a config key | [`config.example.yaml`](config.example.yaml) | the key list, documented inline. This README states decisions, not keys |
 | one of the five words in [Terms](#terms) | every doc that uses it | each is narrower here than in English and each has an unrelated sense |
 
@@ -322,6 +320,10 @@ Four things that catch most mistakes:
 - **Do not write a closing keyword next to an issue number** you do not mean to close. GitHub closes
   issues from PR bodies and commit messages, including from prose.
 
+**Diagnosing a run:** open `/how-it-works#session=<id>`. It lists what to look at first, and its
+download button gives an agent the session, the problems found, the diagnostics, the audit list and
+every log line as one JSON file.
+
 Commands: `npm test` is `node --test` over `test/*.test.ts` (not vitest), plus a reporter and a V8
 flag a bare run loses — see [CONTRIBUTING.md § Development](CONTRIBUTING.md#development). `npm run
 typecheck` is `tsc --noEmit`, and `./test/e2e.sh` runs the whole lifecycle against mocks with no
@@ -331,6 +333,7 @@ credentials.
 
 | Document | What is in it |
 |---|---|
+| `/how-it-works` on a running Iris | How a document moves through Iris and iris-pdf, step by step, with every API call. Open a session there to find out what went wrong. Start here. |
 | [docs/API.md](docs/API.md) | Every endpoint, with copy-pasteable `curl`. The run log's fields. |
 | [docs/design-notes.md](docs/design-notes.md) | Why the code is the way it is. Read this before changing it. |
 | [docs/models.md](docs/models.md) | Which model to run on which agent, what each was measured at, and how a swap fails quietly. |

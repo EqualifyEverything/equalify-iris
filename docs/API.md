@@ -1,5 +1,8 @@
 # Equalify Iris — API Guide (bash / curl)
 
+For how the system works, in plain language, open `/how-it-works` on a running Iris. It makes these
+calls on a real document and explains each. This file is the exact reference.
+
 Every endpoint is under `/v1`. All responses are JSON unless noted. There is no sign-in
 ([Authenticate](#authenticate)). Whether you send anything at all depends on the deployment: where the operator set `server.api_token`, `/v1/me` and
 `/v1/sessions` need `Authorization: Bearer <that shared secret>`; where they did not, send no header.

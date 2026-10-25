@@ -1,0 +1,700 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>How Iris works - Equalify Iris</title>
+  <style>
+    :root {
+      --fg: #14161a; --bg: #ffffff; --muted: #4a4f57; --accent: #0b4f9c; --accent-fg: #ffffff;
+      --border: #6b7280; --ok: #156534; --warn: #7a4a00; --err: #a31515; --panel: #f3f5f8;
+      --ai-bg: #fbe3c8; --ai-fg: #7a3e00; --code-bg: #dfe9f7; --code-fg: #0b3d7a;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --fg: #f2f4f8; --bg: #14161a; --muted: #c2c8d2; --accent: #7db4ff; --accent-fg: #08182e;
+        --border: #8a93a3; --ok: #6ee7a0; --warn: #ffcf70; --err: #ff9a9a; --panel: #1d2128;
+      }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font: 1.05rem/1.6 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; color: var(--fg); background: var(--bg); }
+    .skip-link { position: absolute; left: -999px; top: 0; background: var(--accent); color: var(--accent-fg); padding: .6rem 1rem; z-index: 10; }
+    .skip-link:focus { left: 0; }
+    header, main, footer { max-width: 72rem; margin: 0 auto; padding: 0 1.25rem; }
+    header { padding-top: 2rem; }
+    h1 { font-size: 2rem; margin: 0 0 .25rem; }
+    h2 { font-size: 1.35rem; margin: 0 0 .75rem; }
+    h3 { font-size: 1.15rem; margin: 1.25rem 0 .5rem; }
+    h4 { font-size: 1.05rem; margin: 1rem 0 .4rem; }
+    h2:focus-visible, h3:focus-visible { outline: 3px solid var(--accent); outline-offset: 4px; }
+    a { color: var(--accent); }
+    .tagline { color: var(--muted); margin: 0 0 1rem; font-size: 1.15rem; }
+    .not-demo { border-left: 5px solid var(--accent); background: var(--panel); padding: .75rem 1rem; margin: 0 0 1rem; }
+    section.box { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 1.25rem 1.5rem; margin: 1.25rem 0; }
+    label { display: block; font-weight: 600; margin: 1rem 0 .35rem; }
+    .hint { color: var(--muted); font-size: .95rem; margin: 0 0 .35rem; }
+    input[type=file], input[type=text] { font: inherit; width: 100%; max-width: 32rem; padding: .55rem .65rem; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--fg); }
+    button { font: inherit; font-weight: 600; padding: .55rem 1.1rem; border-radius: 8px; border: 2px solid var(--accent); background: var(--accent); color: var(--accent-fg); cursor: pointer; margin: .75rem .5rem 0 0; }
+    button.secondary { background: var(--bg); color: var(--accent); }
+    button:disabled { opacity: .55; cursor: not-allowed; }
+    button:focus-visible, input:focus-visible, summary:focus-visible, a:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+    .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+    .who { display: inline-block; font: bold .75rem system-ui, sans-serif; padding: 1px 7px; border-radius: 9px; vertical-align: 1px; }
+    .who.ai { background: var(--ai-bg); color: var(--ai-fg); border: 1px solid var(--ai-fg); }
+    .who.code { background: var(--code-bg); color: var(--code-fg); border: 1px solid var(--code-fg); }
+    #diagram { width: 100%; height: auto; max-width: 1180px; display: block; }
+    #diagram .b { font: 600 14px system-ui, sans-serif; fill: #1a1a1a; }
+    #diagram .tag { font: bold 11px system-ui, sans-serif; }
+    #diagram .note { font: 12px system-ui, sans-serif; fill: #444; }
+    #diagram .data { font: 12px ui-monospace, monospace; fill: #222; }
+    #diagram .lane { font: bold 14px system-ui, sans-serif; fill: #333; }
+    /* A step lights up while it runs and is ticked when it is done. Shape and text say it too, not colour alone. */
+    #diagram .st.active .bx { stroke-width: 5; filter: drop-shadow(0 0 6px #0b4f9c); }
+    #diagram .st.done .bx { stroke-width: 3; }
+    #diagram .state { font: bold 12px system-ui, sans-serif; fill: #14161a; }
+    pre { background: var(--bg); border: 1px solid var(--border); padding: .6rem; overflow: auto; max-height: 24rem; font-size: .85rem; white-space: pre-wrap; word-break: break-word; }
+    details { margin: .4rem 0; }
+    summary { cursor: pointer; font-weight: 600; }
+    ol.calls { list-style: none; padding: 0; }
+    ol.calls > li { border: 1px solid var(--border); border-radius: 8px; padding: .6rem .9rem; margin: .5rem 0; background: var(--bg); }
+    .method { font: bold .9rem ui-monospace, monospace; }
+    .status-ok { color: var(--ok); font-weight: 600; }
+    .status-bad { color: var(--err); font-weight: 600; }
+    .pages { display: grid; grid-template-columns: repeat(auto-fill, minmax(20rem, 1fr)); gap: 1rem; }
+    .page { border: 1px solid var(--border); border-radius: 8px; padding: .75rem; background: var(--bg); }
+    .page img { max-width: 100%; border: 1px solid var(--border); }
+    iframe.render { width: 100%; height: 28rem; border: 1px solid var(--border); background: #fff; }
+    ul.problems > li { margin: .5rem 0; }
+    .lvl { font-weight: 700; }
+    .lvl.high { color: var(--err); } .lvl.medium { color: var(--warn); } .lvl.info { color: var(--muted); }
+    table { border-collapse: collapse; width: 100%; font-size: .9rem; }
+    th, td { border: 1px solid var(--border); padding: .3rem .5rem; text-align: left; vertical-align: top; }
+    td code { word-break: break-all; }
+    .now { font-weight: 600; }
+    footer { padding: 2rem 1.25rem 3rem; color: var(--muted); }
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to the content</a>
+  <header>
+    <h1>How Iris works</h1>
+    <p class="tagline">A plain-language look inside Equalify Iris: what happens to a document, step by step, and the API calls behind each step.</p>
+    <p class="not-demo"><strong>This is the technical view.</strong> It is for understanding how Iris works, or finding out what went wrong with a document. To simply convert a document, <a href="/">use the demo</a>.</p>
+  </header>
+
+  <main id="main">
+    <div id="live" class="visually-hidden" role="status" aria-live="polite"></div>
+    <div id="error" role="alert"></div>
+
+    <section class="box" aria-labelledby="overview-h">
+      <h2 id="overview-h">The short version</h2>
+      <p>Iris turns a PDF or page images into accessible HTML: headings, lists, tables, form labels and image descriptions that a screen reader can use. AI models do the reading and writing. Code prepares what they see, checks what they send back with fixed rules, and throws away replies that would lose content.</p>
+      <p>If a tagged PDF is wanted too, a second tool, <strong>iris-pdf</strong>, puts the HTML's structure onto the original PDF. It is code only, and it refuses to save if the pages would look different.</p>
+      <p><span class="who ai">AI</span> means a model call. <span class="who code">Code</span> means no model: the same input always gives the same result.</p>
+      <svg id="diagram" viewBox="0 0 1180 752" role="img" aria-labelledby="diagram-t diagram-d"><title id="diagram-t">How a document moves through Iris and iris-pdf</title><desc id="diagram-d">Three lanes of steps. The numbered list after the diagram says the same in words.</desc><defs><marker id="hiw-ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#333"/></marker></defs><rect x="4" y="4" width="1172" height="258" rx="10" fill="#f6f6f6" stroke="#ccc"/><text x="1162" y="26" class="lane" text-anchor="end">1  Iris, one page at a time</text><rect x="4" y="266" width="1172" height="206" rx="10" fill="#f6f6f6" stroke="#ccc"/><text x="1162" y="288" class="lane" text-anchor="end">2  Iris, the whole document</text><rect x="4" y="480" width="1172" height="266" rx="10" fill="#f6f6f6" stroke="#ccc"/><text x="1162" y="502" class="lane" text-anchor="end">3  iris-pdf, only if a tagged PDF is asked for</text><g class="st" id="st-upload"><path class="bx" d="M22,82 h110 l22,22 v56 h-132 z" fill="#fff" stroke="#555" stroke-width="2"/><path d="M132,82 v22 h22" fill="none" stroke="#555" stroke-width="2"/><text x="32" y="116" class="b">Your</text><text x="32" y="133" class="b">document</text></g><g class="st" id="st-render"><rect class="bx" x="200" y="44" width="190" height="74" rx="8" fill="#dfe9f7" stroke="#0b3d7a" stroke-width="2"/><rect x="208" y="52" width="46" height="17" rx="8" fill="#fff" stroke="#0b3d7a"/><text x="215" y="65" class="tag" fill="#0b3d7a">Code</text><text x="210" y="88" class="b">Turn each page</text><text x="210" y="105" class="b">into an image</text><text id="n-render" x="295.0" y="134" class="note" text-anchor="middle">150 DPI</text></g><g class="st" id="st-fields"><rect class="bx" x="200" y="160" width="190" height="74" rx="8" fill="#dfe9f7" stroke="#0b3d7a" stroke-width="2"/><rect x="208" y="168" width="46" height="17" rx="8" fill="#fff" stroke="#0b3d7a"/><text x="215" y="181" class="tag" fill="#0b3d7a">Code</text><text x="210" y="204" class="b">Read the form&#x27;s</text><text x="210" y="221" class="b">fields (iris-pdf)</text><text id="n-fields" x="295.0" y="250" class="note" text-anchor="middle">if it is a form</text></g><g class="st" id="st-page"><rect class="bx" x="500" y="100" width="190" height="74" rx="8" fill="#fbe3c8" stroke="#7a3e00" stroke-width="2"/><rect x="508" y="108" width="30" height="17" rx="8" fill="#fff" stroke="#7a3e00"/><text x="515" y="121" class="tag" fill="#7a3e00">AI</text><text x="510" y="144" class="b">Page agent writes</text><text x="510" y="161" class="b">the page&#x27;s HTML</text><text id="n-page" x="595.0" y="190" class="note" text-anchor="middle">one call per page</text></g><g class="st" id="st-verify"><rect class="bx" x="826" y="100" width="190" height="74" rx="8" fill="#fbe3c8" stroke="#7a3e00" stroke-width="2"/><rect x="834" y="108" width="30" height="17" rx="8" fill="#fff" stroke="#7a3e00"/><text x="841" y="121" class="tag" fill="#7a3e00">AI</text><text x="836" y="144" class="b">Check HTML against</text><text x="836" y="161" class="b">the image (+ Code rules)</text><text id="n-verify" x="921.0" y="190" class="note" text-anchor="middle">a second model</text></g><path d="M154,110 H192" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><path d="M154,132 C176,132 176,197 192,197" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><path d="M390,81 C445,81 445,125 492,125" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><rect x="401.5" y="58" width="87.0" height="19" rx="9" fill="#fff" stroke="#888"/><text x="445" y="72" class="data" text-anchor="middle">page image</text><path d="M390,197 C445,197 445,152 492,152" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><rect x="397.85" y="202" width="94.3" height="19" rx="9" fill="#fff" stroke="#888"/><text x="445" y="216" class="data" text-anchor="middle">field names</text><path d="M690,137 H818" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><rect x="714.15" y="125" width="79.7" height="19" rx="9" fill="#fff" stroke="#888"/><text x="754" y="139" class="data" text-anchor="middle">page HTML</text><path d="M921,100 C921,50 595,50 595,92" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><rect x="685.3" y="40" width="145.4" height="19" rx="9" fill="#fff" stroke="#888"/><text x="758" y="54" class="data" text-anchor="middle">problems: fix once</text><path d="M1016,137 H1130 V264 H117 V312" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><rect x="550.95" y="252" width="138.1" height="19" rx="9" fill="#fff" stroke="#888"/><text x="620" y="266" class="data" text-anchor="middle">every page&#x27;s HTML</text><g class="st" id="st-assemble"><rect class="bx" x="22" y="320" width="190" height="74" rx="8" fill="#dfe9f7" stroke="#0b3d7a" stroke-width="2"/><rect x="30" y="328" width="46" height="17" rx="8" fill="#fff" stroke="#0b3d7a"/><text x="37" y="341" class="tag" fill="#0b3d7a">Code</text><text x="32" y="364" class="b">Join pages, fix ids,</text><text x="32" y="381" class="b">axe-core check</text><text id="n-assemble" x="117.0" y="410" class="note" text-anchor="middle">accessibility check</text></g><g class="st" id="st-reader"><rect class="bx" x="290" y="320" width="190" height="74" rx="8" fill="#fbe3c8" stroke="#7a3e00" stroke-width="2"/><rect x="298" y="328" width="30" height="17" rx="8" fill="#fff" stroke="#7a3e00"/><text x="305" y="341" class="tag" fill="#7a3e00">AI</text><text x="300" y="364" class="b">Reader lists</text><text x="300" y="381" class="b">problems</text><text id="n-reader" x="385.0" y="410" class="note" text-anchor="middle">reads text only</text></g><g class="st" id="st-editor"><rect class="bx" x="558" y="320" width="190" height="74" rx="8" fill="#fbe3c8" stroke="#7a3e00" stroke-width="2"/><rect x="566" y="328" width="30" height="17" rx="8" fill="#fff" stroke="#7a3e00"/><text x="573" y="341" class="tag" fill="#7a3e00">AI</text><text x="568" y="364" class="b">Copy editor fixes</text><text x="568" y="381" class="b">(Code refuses losses)</text><text id="n-editor" x="653.0" y="410" class="note" text-anchor="middle">a few rounds at most</text></g><g class="st" id="st-serve"><rect class="bx" x="826" y="320" width="190" height="74" rx="8" fill="#dfe9f7" stroke="#0b3d7a" stroke-width="2"/><rect x="834" y="328" width="46" height="17" rx="8" fill="#fff" stroke="#0b3d7a"/><text x="841" y="341" class="tag" fill="#0b3d7a">Code</text><text x="836" y="364" class="b">Readable names,</text><text x="836" y="381" class="b">unsolved list added</text><text id="n-serve" x="921.0" y="410" class="note" text-anchor="middle">when you download it</text></g><path d="M212,357 H282" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><rect x="210.8" y="336" width="72.4" height="19" rx="9" fill="#fff" stroke="#888"/><text x="247" y="350" class="data" text-anchor="middle">document</text><path d="M480,342 H550" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><rect x="478.8" y="321" width="72.4" height="19" rx="9" fill="#fff" stroke="#888"/><text x="515" y="335" class="data" text-anchor="middle">problems</text><path d="M558,374 H488" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)" stroke-dasharray="5 4"/><rect x="497.75" y="374" width="50.5" height="19" rx="9" fill="#fff" stroke="#888"/><text x="523" y="388" class="data" text-anchor="middle">fixes</text><path d="M748,357 H818" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><rect x="746.8" y="336" width="72.4" height="19" rx="9" fill="#fff" stroke="#888"/><text x="783" y="350" class="data" text-anchor="middle">document</text><g class="st" id="st-html"><path class="bx" d="M1040,318 h110 l22,22 v56 h-132 z" fill="#fff" stroke="#111" stroke-width="3"/><path d="M1150,318 v22 h22" fill="none" stroke="#111" stroke-width="2"/><text x="1050" y="352" class="b">Accessible</text><text x="1050" y="369" class="b">HTML</text></g><path d="M1016,357 H1034" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><path d="M1106,396 V476 H117 V532" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><rect x="523.65" y="464" width="152.7" height="19" rx="9" fill="#fff" stroke="#888"/><text x="600" y="478" class="data" text-anchor="middle">HTML + original PDF</text><g class="st" id="st-pdf-read"><rect class="bx" x="22" y="540" width="190" height="74" rx="8" fill="#dfe9f7" stroke="#0b3d7a" stroke-width="2"/><rect x="30" y="548" width="46" height="17" rx="8" fill="#fff" stroke="#0b3d7a"/><text x="37" y="561" class="tag" fill="#0b3d7a">Code</text><text x="32" y="584" class="b">Read the page&#x27;s</text><text x="32" y="601" class="b">words + positions</text><text id="n-pdf-read" x="117.0" y="630" class="note" text-anchor="middle">OCR for a scan</text></g><g class="st" id="st-pdf-match"><rect class="bx" x="290" y="540" width="190" height="74" rx="8" fill="#dfe9f7" stroke="#0b3d7a" stroke-width="2"/><rect x="298" y="548" width="46" height="17" rx="8" fill="#fff" stroke="#0b3d7a"/><text x="305" y="561" class="tag" fill="#0b3d7a">Code</text><text x="300" y="584" class="b">Match Iris&#x27;s words</text><text x="300" y="601" class="b">to the page&#x27;s</text><text id="n-pdf-match" x="385.0" y="630" class="note" text-anchor="middle">words, not coordinates</text></g><g class="st" id="st-pdf-tag"><rect class="bx" x="558" y="540" width="190" height="74" rx="8" fill="#dfe9f7" stroke="#0b3d7a" stroke-width="2"/><rect x="566" y="548" width="46" height="17" rx="8" fill="#fff" stroke="#0b3d7a"/><text x="573" y="561" class="tag" fill="#0b3d7a">Code</text><text x="568" y="584" class="b">Tag text in place,</text><text x="568" y="601" class="b">add form fields</text><text id="n-pdf-tag" x="653.0" y="630" class="note" text-anchor="middle">structure tree</text></g><g class="st" id="st-pdf-check"><rect class="bx" x="826" y="540" width="190" height="74" rx="8" fill="#dfe9f7" stroke="#0b3d7a" stroke-width="2"/><rect x="834" y="548" width="46" height="17" rx="8" fill="#fff" stroke="#0b3d7a"/><text x="841" y="561" class="tag" fill="#0b3d7a">Code</text><text x="836" y="584" class="b">Check pixels and</text><text x="836" y="601" class="b">words, then save</text><text id="n-pdf-check" x="921.0" y="630" class="note" text-anchor="middle">refuses if changed</text></g><path d="M212,577 H282" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><rect x="221.75" y="556" width="50.5" height="19" rx="9" fill="#fff" stroke="#888"/><text x="247" y="570" class="data" text-anchor="middle">words</text><path d="M480,577 H550" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><rect x="482.45" y="556" width="65.1" height="19" rx="9" fill="#fff" stroke="#888"/><text x="515" y="570" class="data" text-anchor="middle">matches</text><path d="M748,577 H818" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><rect x="761.4" y="556" width="43.2" height="19" rx="9" fill="#fff" stroke="#888"/><text x="783" y="570" class="data" text-anchor="middle">tags</text><g class="st" id="st-pdf"><path class="bx" d="M1040,538 h110 l22,22 v56 h-132 z" fill="#fff" stroke="#111" stroke-width="3"/><path d="M1150,538 v22 h22" fill="none" stroke="#111" stroke-width="2"/><text x="1050" y="572" class="b">Tagged</text><text x="1050" y="589" class="b">PDF</text></g><path d="M1016,577 H1034" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><g class="st" id="st-pdf-review"><rect class="bx" x="826" y="660" width="190" height="74" rx="8" fill="#fbe3c8" stroke="#7a3e00" stroke-width="2" stroke-dasharray="6 4"/><rect x="834" y="668" width="30" height="17" rx="8" fill="#fff" stroke="#7a3e00"/><text x="841" y="681" class="tag" fill="#7a3e00">AI</text><text x="836" y="704" class="b">Optional review:</text><text x="836" y="721" class="b">does it say what it shows?</text></g><path d="M1000,614 V652" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)" stroke-dasharray="5 4"/></svg>
+      <p id="diagram-state" class="hint"></p>
+      <h3>The same in words</h3>
+      <ol>
+        <li><strong>Iris, page by page.</strong> <span class="who code">Code</span> Each page becomes an image, and a form's fields are read. <span class="who ai">AI</span> The page agent writes the page's HTML from the image. <span class="who ai">AI</span> A second model checks it against the image, and <span class="who code">Code</span> fixed rules check its links, image descriptions and ids. A page that fails goes back once to be fixed.</li>
+        <li><strong>Iris, the whole document.</strong> <span class="who code">Code</span> The pages are joined and checked with axe-core, a standard accessibility checker. <span class="who ai">AI</span> A reader lists problems, and <span class="who ai">AI</span> a copy editor fixes them, for a few rounds at most. <span class="who code">Code</span> A fix that would lose content is thrown away. What is still wrong at the end is listed in the HTML.</li>
+        <li><strong>iris-pdf, only if a tagged PDF is asked for.</strong> <span class="who code">Code</span> It matches the HTML's words to the PDF's words, tags the text where it already is, adds form fields, and checks every page before saving.</li>
+      </ol>
+    </section>
+
+    <section class="box" id="start" aria-labelledby="start-h">
+      <h2 id="start-h" tabindex="-1">Watch a document go through Iris</h2>
+      <form id="run-form">
+        <label for="file">Your document</label>
+        <p class="hint" id="file-hint">A PDF, or images in reading order. It is converted for real, the same as on the demo, and takes a few minutes.</p>
+        <input id="file" type="file" multiple aria-describedby="file-hint" accept="application/pdf,image/png,image/jpeg,image/gif,image/webp">
+        <button id="run-btn" type="submit" disabled>Convert it and show each step</button>
+      </form>
+      <form id="open-form">
+        <label for="session-id">Or open a document that already ran</label>
+        <p class="hint" id="session-hint">Paste its session id. It starts with <code>ses_</code>. Nothing is converted again.</p>
+        <input id="session-id" type="text" aria-describedby="session-hint" autocomplete="off" spellcheck="false">
+        <button id="open-btn" type="submit" class="secondary">Open it</button>
+      </form>
+    </section>
+
+    <section class="box" id="progress" aria-labelledby="progress-h" hidden>
+      <h2 id="progress-h" tabindex="-1">What Iris did</h2>
+      <p id="now" class="now"></p>
+      <div id="run-pick-box"></div>
+      <p id="audit-note" class="hint" hidden>Audit mode is off on this deployment, so page images, prompts and the in-between versions of the document are not shown. Everything else comes from the run log.</p>
+      <div id="stage-start"></div>
+      <div id="stage-pages"></div>
+      <div id="stage-join"></div>
+      <div id="stage-review"></div>
+      <div id="stage-result"></div>
+      <div id="stage-pdf"></div>
+    </section>
+
+    <section class="box" id="problems" aria-labelledby="problems-h" hidden>
+      <h2 id="problems-h">Things to look at</h2>
+      <p class="hint">Found by reading the run log. Start here when a document came out wrong.</p>
+      <div id="problem-list"></div>
+    </section>
+
+    <section class="box" id="calls" aria-labelledby="calls-h" hidden>
+      <h2 id="calls-h">The API calls this page made</h2>
+      <p class="hint">Every request this page sent to Iris, in order, with what came back. You can make the same calls with <code>curl</code>. The <a href="https://github.com/EqualifyEverything/equalify-iris/blob/main/docs/API.md">API reference</a> has the details of each.</p>
+      <ol id="call-list" class="calls"></ol>
+    </section>
+
+    <section class="box" id="log" aria-labelledby="log-h" hidden>
+      <h2 id="log-h">Every line of the run log</h2>
+      <p class="hint">Iris writes one line for each thing it does. Each event's name links to its exact definition in the reference.</p>
+      <div id="log-table"></div>
+    </section>
+
+    <section class="box" id="share" aria-labelledby="share-h" hidden>
+      <h2 id="share-h">Share this run</h2>
+      <p>A link to this page that opens this run: <a id="share-link" href="#"></a></p>
+      <p>To ask an AI agent what went wrong, give it everything this page read, as one file:</p>
+      <button id="export-btn" type="button" class="secondary">Download the run for an AI agent (JSON)</button>
+    </section>
+  </main>
+
+  <footer>
+    <p><a href="/">The demo</a> · <a href="https://github.com/EqualifyEverything/equalify-iris/blob/main/docs/API.md">API reference</a> · <a href="https://github.com/EqualifyEverything/equalify-iris">Source on GitHub</a></p>
+  </footer>
+
+  <script>
+    // Filled in by the server from docs/API.md's run-log index (src/eventIndex.ts): each event's
+    // one-line meaning and its anchor in the reference.
+    const EVENT_INDEX = /*IRIS_EVENT_INDEX*/{};
+    const API = '/v1';
+    const REF = 'https://github.com/EqualifyEverything/equalify-iris/blob/main/docs/API.md';
+    const $ = (id) => document.getElementById(id);
+    const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+    const AI = '<span class="who ai">AI</span>';
+    const CODE = '<span class="who code">Code</span>';
+    const plural = (n, one, many) => n + ' ' + (n === 1 ? one : (many || one + 's'));
+
+    // ----- Reading the log (pure functions, tested in test/how-it-works.test.ts) -----
+
+    // The run log as events. A line that is not JSON is skipped: the log is written while the
+    // run works, and a read can catch the last line half-written.
+    function parseLog(text) {
+      const out = [];
+      for (const line of String(text).split('\n')) {
+        if (!line.trim()) continue;
+        try { out.push(JSON.parse(line)); } catch { /* partial line */ }
+      }
+      return out;
+    }
+
+    // A model's JSON reply, which may come wrapped in a ```json fence or with prose around it.
+    function parseReply(output) {
+      const text = String(output ?? '').trim();
+      const tries = [text, text.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '')];
+      const a = text.indexOf('{'), b = text.lastIndexOf('}');
+      if (a !== -1 && b > a) tries.push(text.slice(a, b + 1));
+      for (const t of tries) {
+        try { const v = JSON.parse(t); if (v && typeof v === 'object') return v; } catch { /* next */ }
+      }
+      return null;
+    }
+
+    // Plain sentences for the events a person most often needs. Every other event falls back to
+    // the reference's own one-line summary (EVENT_INDEX), so no line is left unexplained.
+    const SAY = {
+      form_fields: (e) => 'Iris read the PDF\'s form: ' + plural(e.fields, 'field') + (e.unusable ? ', and ' + e.unusable + ' with names it could not use' : '') + '.',
+      page_refit: (e) => 'Page ' + e.page + ' was too large to send, so it was turned into a smaller image instead (' + e.long_edge_px + ' pixels on the long side).',
+      run_queued: (e) => e.waiting ? 'The document waited for a free slot: ' + e.running + ' running, ' + e.waiting + ' waiting.' : 'The document was put in the queue.',
+      run_dequeued: (e) => 'A slot was free' + (e.waited_ms ? ' after ' + Math.round(e.waited_ms / 1000) + ' seconds' : '') + ', so the run started.',
+      run_start: (e) => 'The run started, for ' + plural(e.images, 'page') + (e.feedback ? ', with feedback: "' + e.feedback + '"' : '') + '.',
+      phase: (e) => ({ extraction: 'Step: reading each page.', assembly: 'Step: joining the pages.', review: 'Step: reviewing the whole document.', done: 'Finished.' })[e.phase] || 'Step: ' + e.phase + '.',
+      extraction_start: () => 'The page agent started reading the pages.',
+      page_fields: (e) => 'The page agent for ' + e.image + ' was given ' + plural(e.fields, 'form field name') + (e.dropped ? ' (' + e.dropped + ' more were left out to keep the request small)' : '') + '.',
+      page_links: (e) => 'The page agent for ' + e.image + ' was given the ' + plural(e.links, 'link') + ' in the PDF, which the image cannot show.',
+      model_call_start: (e) => 'Asked ' + e.model + ' (' + e.agent + ', to ' + stepWords(e.step) + ').',
+      model_call: (e) => (e.ok ? 'Answer' : 'Failed answer') + ' from ' + e.model + ' after ' + (e.duration_ms / 1000).toFixed(1) + ' s' + (e.ok ? '' : ': ' + e.error) + '.',
+      agent_call: (e) => 'The ' + e.agent.replace(/\.md$/, '') + ' agent\'s reply' + (e.image ? ' for ' + e.image : '') + ' was recorded (' + String(e.output ?? '').length.toLocaleString() + ' characters).',
+      page_verify_ok: (e) => 'Page ' + (e.image) + ' passed the check against its image.',
+      page_verify_failed: (e) => e.image + ' failed the check: ' + plural(e.problems.length, 'problem') + '. It goes back to the page agent once.',
+      page_verify_inconsistent: (e) => 'The check passed ' + e.image + ' but still listed ' + plural(e.problems.length, 'problem') + '. A pass counts, so the page was kept as it was.',
+      page_corrected: (e) => 'Page ' + e.page + ' was fixed and the fix was ' + (e.result === 'kept' ? 'kept' : e.result) + '.',
+      page_correction_declined: (e) => 'On page ' + e.page + ', the page agent refused ' + plural(e.declined.length, 'problem') + ' as untrue, and said why.',
+      page_correction_recheck: (e) => 'A fixed page (' + e.image + ') was checked again, to measure the checker: ' + (e.ok ? 'it passed.' : 'it still had problems.'),
+      page_no_output: (e) => 'The page agent answered for ' + e.image + ', but no HTML could be read from its answer.',
+      page_extraction_failed: (e) => 'Page ' + e.page + ' could not be read: ' + e.error,
+      page_blank: (e) => 'The page agent said ' + e.image + ' is blank.',
+      extraction_complete: (e) => 'All ' + plural(e.pages, 'page') + ' were read' + (e.failed && e.failed.length ? ', but ' + e.failed.length + ' failed' : '') + '. Code checked ' + (e.alts_checked ?? 0) + ' image descriptions, ' + (e.ids_checked ?? 0) + ' ids and ' + (e.words_checked ?? 0).toLocaleString() + ' words.',
+      assembly: (e) => 'The pages were joined into one document. ' + (e.lint_ok ? 'axe-core found no problems.' : e.violations !== undefined ? 'axe-core found ' + plural(e.violations, 'problem') + ', which go to the review.' : 'axe-core could not run.'),
+      assembly_anchors: (e) => e.collisions && e.collisions.length ? 'Ids used on more than one page were made unique: ' + e.collisions.join(', ') + '.' : 'Ids were checked across pages.',
+      reader_start: (e) => 'The reader started review round ' + (e.iteration + 1) + (e.chunks > 1 ? ', in ' + e.chunks + ' parts' : '') + '.',
+      reader: (e) => 'The reader listed ' + plural(e.issues, 'problem') + ' in the whole document.',
+      editor_images: (e) => 'The copy editor was sent ' + e.attached + ' of ' + plural(e.of, 'page image') + '.',
+      editor_patch: (e) => 'The copy editor proposed ' + plural(e.edits, 'change') + '; ' + e.applied + ' applied' + (e.discarded ? '. Code threw the whole round away (' + e.discarded.replace(/_/g, ' ') + ')' : '') + '.',
+      editor: (e) => 'Review round ' + e.iteration + (e.changed ? ' changed the document.' : ' changed nothing.'),
+      editor_fidelity_observed: (e) => 'While fixing, the copy editor noticed ' + plural(e.count, 'other difference') + ' between the HTML and the pages. These are noted, not acted on.',
+      editor_truncated: () => 'The copy editor\'s answer was cut off at its length limit. What it did say is still used.',
+      review_converged: (e) => 'The review stopped early: round ' + e.iteration + ' changed nothing.',
+      audit_snapshot: (e) => 'Saved the document ' + (e.name === 'assembled' ? 'after joining' : 'after review ' + e.name.replace('-', ' ')) + ' (audit mode).',
+      run_complete: (e) => 'Done after ' + plural(e.iterations, 'review round') + '. ' + (e.unresolved ? plural(e.unresolved, 'problem was', 'problems were') + ' left open, and they are listed at the end of the HTML.' : 'No problems were left open.'),
+      run_failed: (e) => 'The run failed: ' + (e.error || 'no reason was recorded') + '.',
+      suggestions_recorded: (e) => 'Iris saved ' + plural(e.count, 'suggestion') + ' for a specialist agent (' + (e.agents || []).join(', ') + ') for the maintainers.',
+      tagged_pdf: (e) => 'iris-pdf made the tagged PDF in ' + (e.ms / 1000).toFixed(1) + ' s' + (e.fields_given && e.fields_given.length ? ', filling ' + plural(e.fields_given.length, 'field') : '') + '.',
+      tagged_pdf_failed: (e) => 'iris-pdf could not tag the PDF (' + e.code + ').',
+      feedback_rerun: (e) => 'Feedback arrived: "' + e.feedback + '". The document is worked on again.',
+    };
+    function stepWords(step) {
+      return ({ extract: 'write a page', verify: 'check a page', correct: 'fix a page', recheck_sampled: 'check a fixed page again', read: 'read the document', edit: 'fix the document' })[step] || step;
+    }
+    function explain(e) {
+      try {
+        if (SAY[e.type]) return SAY[e.type](e);
+      } catch { /* a field this version does not know: fall back below */ }
+      const ix = EVENT_INDEX[e.type];
+      return ix ? ix.summary + '.' : 'Iris recorded ' + e.type + '.';
+    }
+    const refLink = (type) => {
+      const ix = EVENT_INDEX[type];
+      return REF + '#' + (ix ? ix.anchor : type);
+    };
+
+    // A session's log holds every run it has had (a feedback re-run is the next), so each view reads
+    // one run. A run starts at its run_start, with the queue and feedback lines just before it; the
+    // first run also has the upload's lines. A run's last line (run_complete or run_failed) can come
+    // after the next run_start, when feedback arrives during a run's last step, so the n-th last line
+    // is given to the n-th run, as /v1/sessions/{id}/diagnostics counts them.
+    function runsOf(all) {
+      const terminal = (e) => e.type === 'run_complete' || e.type === 'run_failed';
+      const ends = all.filter(terminal);
+      const events = all.filter((e) => !terminal(e));
+      const starts = [];
+      events.forEach((e, i) => { if (e.type === 'run_start') starts.push(i); });
+      if (!starts.length) return [all];
+      const lead = new Set(['run_queued', 'run_dequeued', 'feedback_rerun', 'feedback_scoped']);
+      const from = starts.map((i, k) => {
+        if (k === 0) return 0;
+        let j = i;
+        while (j > starts[k - 1] + 1 && (lead.has(events[j - 1].type) || (events[j - 1].type === 'phase' && events[j - 1].phase === 'extraction'))) j--;
+        return j;
+      });
+      const runs = from.map((f, k) => events.slice(f, k + 1 < from.length ? from[k + 1] : events.length));
+      ends.forEach((e, k) => runs[Math.min(k, runs.length - 1)].push(e));
+      return runs;
+    }
+
+    // What happened to each page, from the log.
+    function pagesFrom(events, manifest) {
+      const byImage = new Map();
+      const get = (image) => {
+        if (!byImage.has(image)) byImage.set(image, { image, drafts: [], verify: null, problems: [], corrected: null, declined: null, fields: null, prompts: [] });
+        return byImage.get(image);
+      };
+      const shaToImage = new Map((manifest?.pages || []).map((p) => [p.sha256, p.name]));
+      for (const e of events) {
+        if (e.type === 'page_fields') get(e.image).fields = e;
+        else if (e.type === 'agent_call' && e.agent === 'page.md' && e.image) get(e.image).drafts.push(parseReply(e.output)?.html ?? null);
+        else if (e.type === 'page_verify_ok') get(e.image).verify = 'ok';
+        else if (e.type === 'page_verify_failed') { const p = get(e.image); p.verify = 'failed'; p.problems = e.problems || []; }
+        else if (e.type === 'page_verify_inconsistent') { const p = get(e.image); p.problems = e.problems || []; p.inconsistent = true; }
+        else if (e.type === 'page_corrected') get(e.image).corrected = e;
+        else if (e.type === 'page_correction_declined') get(e.image).declined = e;
+        else if ((e.type === 'page_extraction_failed' || e.type === 'page_no_output') && e.image) get(e.image).failed = e;
+        else if (e.type === 'model_call_start' && e.prompt && e.prompt.images && e.prompt.images.length) {
+          const image = shaToImage.get(e.prompt.images[0].sha256);
+          if (image) get(image).prompts.push(e);
+        }
+      }
+      const order = new Map((manifest?.pages || []).map((p) => [p.name, p.order]));
+      const num = (img) => order.get(img) ?? (Number((/(\d+)\.\w+$/.exec(img) || [])[1]) || 0);
+      return [...byImage.values()].map((p) => ({ ...p, order: num(p.image) })).sort((a, b) => a.order - b.order);
+    }
+
+    // The review loop's rounds: what the reader listed, what the editor did.
+    function roundsFrom(events) {
+      const rounds = [];
+      let cur = null;
+      for (const e of events) {
+        if (e.type === 'reader_start') { cur = { iteration: e.iteration, issues: [], patch: null, editor: null, snapshot: null }; rounds.push(cur); }
+        else if (e.type === 'agent_call' && e.agent === 'reader.md' && cur) cur.issues.push(...((parseReply(e.output) || {}).issues || []));
+        else if (e.type === 'reader' && cur) cur.count = e.issues;
+        else if (e.type === 'editor_patch' && cur) cur.patch = e;
+        else if (e.type === 'editor' && cur) cur.editor = e;
+        else if (e.type === 'audit_snapshot' && cur && e.name.startsWith('round-')) cur.snapshot = e;
+      }
+      return rounds;
+    }
+
+    // What a person diagnosing this run should look at first. Each item: how serious, what
+    // happened, and where to read more.
+    function problems(events, session) {
+      const out = [];
+      const add = (level, text, type) => out.push({ level, text, type });
+      if (session && session.status === 'failed') add('high', 'The run failed: ' + (session.error || 'no reason given') + '.', 'run_failed');
+      const fixed = new Set(events.filter((e) => e.type === 'page_corrected' && e.result === 'kept').map((e) => e.image));
+      for (const e of events) {
+        switch (e.type) {
+          case 'page_extraction_failed': add('high', 'Page ' + e.page + ' could not be read, so the document is missing it: ' + e.error, e.type); break;
+          case 'page_no_output': add('medium', 'The page agent\'s answer for ' + e.image + ' had no usable HTML.', e.type); break;
+          case 'page_verify_failed': if (!fixed.has(e.image)) add('high', e.image + ' failed the check and no fix was kept, so it was delivered with these problems: ' + e.problems.join(' / '), e.type); break;
+          case 'page_correction_declined': add('info', 'On page ' + e.page + ' the page agent refused ' + plural(e.declined.length, 'claim') + ' from the check as untrue. Read its reasons: ' + e.declined.map((d) => d.why).join(' / '), e.type); break;
+          case 'page_links_unrecovered': add('medium', e.image + ' is still missing links the PDF has: ' + (e.links || []).join(', '), e.type); break;
+          case 'page_generic_alt_unrecovered': add('medium', e.image + ' still has a placeholder image description: ' + (e.alts || []).join(', '), e.type); break;
+          case 'page_duplicate_ids_unrecovered': add('medium', e.image + ' still uses an id twice.', e.type); break;
+          case 'editor_patch': if (e.discarded) add('medium', 'A review round\'s fixes were all thrown away, because the reply would have lost content (' + e.discarded.replace(/_/g, ' ') + ').', e.type); break;
+          case 'editor_truncated': add('medium', 'A review round\'s answer was cut off at the model\'s length limit, so some fixes may be missing.', e.type); break;
+          case 'assembly': if (!e.lint_ok && e.violations === undefined) add('high', 'axe-core could not check the document, so nothing was checked for accessibility: ' + (e.lint_error || ''), e.type); break;
+          case 'model_call': if (!e.ok) add('medium', 'A call to ' + e.model + ' (' + e.agent + ') failed: ' + e.error, e.type); break;
+          case 'run_complete':
+            if (e.failed_pages && e.failed_pages.length) add('high', 'The delivered document is missing ' + plural(e.failed_pages.length, 'page') + ': ' + e.failed_pages.join(', ') + '.', e.type);
+            if (e.uncorrected_pages && e.uncorrected_pages.length) add('medium', 'Pages ' + e.uncorrected_pages.join(', ') + ' failed the check and were delivered without a fix.', e.type);
+            if (e.unresolved) add('info', plural(e.unresolved, 'problem was', 'problems were') + ' still open at the end. They are listed at the end of the HTML.', e.type); break;
+          case 'tagged_pdf_failed': add('medium', 'iris-pdf could not tag the PDF: ' + e.code + (e.error ? ' (' + e.error + ')' : ''), e.type); break;
+        }
+      }
+      return out;
+    }
+
+    // The unsolved list Iris appends to the HTML (`<!-- @unresolved ... -->`).
+    function unresolvedFrom(html) {
+      const m = /<!-- @unresolved\n([\s\S]*?)-->/.exec(String(html));
+      return m ? m[1].split('\n').map((l) => l.trim()).filter((l) => l.startsWith('- ')).map((l) => l.slice(2)) : [];
+    }
+
+    // Which diagram steps are done, and which one is running.
+    function stagesFrom(events, session) {
+      const has = (t, f) => events.some((e) => e.type === t && (!f || f(e)));
+      const done = new Set(['upload', 'render']);
+      if (has('form_fields')) done.add('fields');
+      let active = null;
+      if (has('agent_call', (e) => e.agent === 'page.md')) done.add('page');
+      if (has('page_verify_ok') || has('page_verify_failed')) done.add('verify');
+      if (has('extraction_complete')) { done.add('page'); done.add('verify'); }
+      if (has('assembly')) done.add('assemble');
+      if (has('reader')) done.add('reader');
+      if (has('editor')) done.add('editor');
+      const finished = session && (session.status === 'ready_for_review' || session.status === 'closed');
+      if (finished) { done.add('serve'); done.add('html'); }
+      if (has('tagged_pdf')) ['pdf-read', 'pdf-match', 'pdf-tag', 'pdf-check', 'pdf'].forEach((s) => done.add(s));
+      const phase = session && session.phase;
+      if (!finished && session && session.status !== 'failed') {
+        active = phase === 'extraction' ? (has('page_verify_ok') || has('page_verify_failed') ? 'verify' : 'page')
+          : phase === 'assembly' ? 'assemble'
+          : phase === 'review' ? (events.length && events[events.length - 1].type.startsWith('editor') ? 'editor' : 'reader') : null;
+      }
+      return { done: [...done], active };
+    }
+
+    function curl(method, path, extra) {
+      const url = location.origin + API + path;
+      return 'curl -s' + (method !== 'GET' ? ' -X ' + method : '') + (extra ? ' ' + extra : '') + " '" + url + "'";
+    }
+
+    // ----- State and API calls -----
+    const state = { id: null, run: null, timer: null, gated: false, events: [], session: null, manifest: null, auditOff: false, limits: null, output: null, diagnostics: null, fields: null, pdf: null, calls: new Map(), done: false, sourceIsPdf: false };
+
+    // One card per endpoint: a call made again (a poll) updates its card's count.
+    function record(key, { method, path, extra, status, body, plain }) {
+      let c = state.calls.get(key);
+      if (!c) { c = { key, method, path, extra, count: 0 }; state.calls.set(key, c); }
+      Object.assign(c, { status, body, plain, count: c.count + 1, path });
+      renderCalls();
+    }
+    function summarise(text, type) {
+      if (type && type.includes('ndjson')) { const n = text.split('\n').filter(Boolean).length; return n + ' lines of the run log. The last one:\n' + (text.trim().split('\n').pop() || '').slice(0, 1500); }
+      if (type && type.includes('html')) return text.length.toLocaleString() + ' characters of HTML.';
+      try { return JSON.stringify(JSON.parse(text), null, 2).slice(0, 4000); } catch { return text.slice(0, 4000); }
+    }
+    async function call(key, method, path, { body, extra, plain, json = true } = {}) {
+      const res = await fetch(API + path, { method, body, headers: body && !(body instanceof FormData) ? { 'Content-Type': 'application/json' } : undefined });
+      const type = res.headers.get('content-type') || '';
+      const text = await res.text();
+      record(key, { method, path, extra, status: res.status, body: summarise(text, type), plain });
+      return { res, text, data: json && type.includes('json') ? JSON.parse(text) : null };
+    }
+
+    async function loadLimits() {
+      try { state.limits = (await call('limits', 'GET', '/limits', { plain: 'What this deployment accepts, and whether it makes tagged PDFs.' })).data; } catch { /* optional */ }
+    }
+
+    // Before a new upload or a newly opened session: the last one's polling stops, and its cards go.
+    // The two calls about the deployment itself (/limits, /me) stay.
+    function resetSession() {
+      clearTimeout(state.timer);
+      Object.assign(state, { id: null, run: null, events: [], session: null, manifest: null, output: null, diagnostics: null, fields: null, pdf: null, done: false, sourceIsPdf: false });
+      for (const k of [...state.calls.keys()]) if (k !== 'limits' && k !== 'me') state.calls.delete(k);
+      snaps.clear();
+    }
+
+    async function start(id) {
+      if (state.gated) { setError(GATED); return; }
+      if (state.id === id) return;
+      state.id = id;
+      $('progress').hidden = false; $('calls').hidden = false; $('log').hidden = false; $('share').hidden = false;
+      const link = location.origin + location.pathname + '#session=' + id;
+      $('share-link').href = link; $('share-link').textContent = link;
+      history.replaceState(null, '', '#session=' + id);
+      $('progress-h').focus();
+      await tick();
+    }
+
+    async function tick() {
+      const id = state.id;
+      try {
+        const s = await call('session', 'GET', '/sessions/' + id, { plain: 'The document\'s status: where the run is, and whether it is finished. Asked every few seconds.' });
+        if (s.res.status === 401) { state.gated = true; setError(GATED); return; }
+        if (!s.res.ok) { setError(s.res.status === 404 ? 'Iris does not know session ' + id + '.' : 'Iris answered ' + s.res.status + ' for session ' + id + '.'); return; }
+        state.session = s.data;
+        const log = await call('logs', 'GET', '/sessions/' + id + '/logs', { plain: 'The run log: one line for each thing Iris did. Read again every few seconds, so this page fills in as the run works.', json: false });
+        state.events = parseLog(log.text);
+        if (!state.auditOff) {
+          const a = await call('audit', 'GET', '/sessions/' + id + '/audit', { plain: 'Audit mode\'s list of page images, prompts and in-between documents for this run.' });
+          if (a.res.status === 404 && a.data && a.data.error && a.data.error.code === 'audit_off') { state.auditOff = true; $('audit-note').hidden = false; }
+          else if (a.res.ok) state.manifest = a.data;
+        }
+        state.sourceIsPdf = !!(state.manifest && state.manifest.files.some((f) => f.name === 'source.pdf'));
+      } catch (e) {
+        setError('Could not reach Iris: ' + e.message);
+      }
+      const st = state.session && state.session.status;
+      const finished = st === 'ready_for_review' || st === 'closed' || st === 'failed';
+      if (finished && !state.done) {
+        state.done = true;
+        if (st !== 'failed') {
+          const o = await call('output', 'GET', '/sessions/' + id + '/output', { plain: 'The finished accessible HTML.', json: false });
+          if (o.res.ok) state.output = o.text;
+        }
+        state.diagnostics = (await call('diagnostics', 'GET', '/sessions/' + id + '/diagnostics', { plain: 'A summary of the run: how long each step took, what it cost in tokens, and any call still running.' })).data;
+        live(st === 'failed' ? 'The run failed.' : 'The run is finished.');
+      }
+      safeRender();
+      if (!finished && state.id === id) state.timer = setTimeout(tick, 3000);
+    }
+    function safeRender() {
+      try { render(); } catch (e) { setError('This page could not show the run: ' + e.message); }
+    }
+
+    async function makePdf() {
+      const btn = $('pdf-btn'); btn.disabled = true;
+      try {
+        const f = await call('fields', 'GET', '/sessions/' + state.id + '/fields', { plain: 'iris-pdf lists the PDF\'s form fields (for a flat form, the ones it would add).' });
+        state.fields = f.data && f.data.fields;
+        const p = await call('pdf', 'POST', '/sessions/' + state.id + '/pdf', { body: JSON.stringify({ values: {} }), extra: "-H 'Content-Type: application/json' -d '{\"values\":{}}'", plain: 'iris-pdf tags the original PDF from the HTML, and reports what it checked.' });
+        state.pdf = p.res.ok ? p.data : { error: p.data && p.data.error };
+        // Re-read the log, which now has the tagged_pdf line.
+        state.events = parseLog((await call('logs', 'GET', '/sessions/' + state.id + '/logs', { json: false, plain: 'The run log, read again for the tagged PDF\'s line.' })).text);
+      } catch (e) { setError('The tagged PDF could not be made: ' + e.message); }
+      btn.disabled = false;
+      safeRender();
+    }
+
+    // ----- Rendering -----
+    const live = (msg) => { $('live').textContent = msg; };
+    const setError = (msg) => { $('error').textContent = msg || ''; };
+    let lastNow = '';
+
+    // Replace a region's HTML only when it changed, keeping which <details> were open and where focus was.
+    const shown = new WeakMap();
+    function patch(el, html) {
+      if (shown.get(el) === html) return;
+      const open = new Set([...el.querySelectorAll('details[open]')].map((d) => d.dataset.k));
+      const focusKey = el.contains(document.activeElement) ? document.activeElement.closest('[data-k]')?.dataset.k : null;
+      el.innerHTML = html; shown.set(el, html);
+      el.querySelectorAll('details[data-k]').forEach((d) => { if (open.has(d.dataset.k)) d.open = true; });
+      if (focusKey) el.querySelector('[data-k="' + CSS.escape(focusKey) + '"] summary, [data-k="' + CSS.escape(focusKey) + '"]')?.focus();
+    }
+    const frame = (title, html) => '<iframe class="render" sandbox title="' + esc(title) + '" srcdoc="' + esc('<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><style>body{font:16px/1.5 system-ui,sans-serif;margin:1rem}img{border:1px dashed #999;min-width:40px;min-height:16px}input,textarea,select{display:block;margin:.2rem 0 .6rem}</style></head><body>' + html + '</body></html>') + '"></iframe>';
+    // A saved in-between document, fetched when its section is opened (it is served as text, and
+    // shown here in a sandbox that runs no scripts).
+    const snaps = new Map();
+    const snapshot = (title, url) => '<details data-k="s-' + esc(url) + '" data-src="' + esc(url) + '" data-title="' + esc(title) + '"><summary>' + esc(title) + '</summary>'
+      + (snaps.has(url) ? frame(title, snaps.get(url)) : '<p>Loading…</p>') + '</details>';
+    document.addEventListener('toggle', async (ev) => {
+      const d = ev.target;
+      if (!(d instanceof HTMLDetailsElement) || !d.open || !d.dataset.src || snaps.has(d.dataset.src)) return;
+      const r = await call('snapshot', 'GET', d.dataset.src.slice(API.length), { json: false, plain: 'One of the in-between versions of the document that audit mode saved.' });
+      snaps.set(d.dataset.src, r.res.ok ? r.text : '<p>Could not load it.</p>');
+      render();
+    }, true);
+    const det = (k, summary, body) => '<details data-k="' + esc(k) + '"><summary>' + summary + '</summary>' + body + '</details>';
+    const promptLink = (m) => state.manifest ? '<a href="' + API + '/sessions/' + state.id + '/audit/prompts/' + m.sha256 + '">' + esc(m.role) + ' message, ' + m.chars.toLocaleString() + ' characters</a>' : esc(m.role) + ' message, ' + m.chars.toLocaleString() + ' characters';
+
+    function render() {
+      const runs = runsOf(state.events);
+      const pick = state.run === null ? runs.length - 1 : Math.min(state.run, runs.length - 1);
+      const ev = runs[pick], s = state.session;
+      const latest = pick === runs.length - 1;
+      patch($('run-pick-box'), runs.length > 1 ? '<label for="run-pick">Which run to show</label><p class="hint" id="run-pick-hint">This document was worked on ' + runs.length + ' times. Each feedback re-run is the next run.</p><select id="run-pick" data-k="run-pick" aria-describedby="run-pick-hint">'
+        + runs.map((r, i) => { const st = r.find((e) => e.type === 'run_start'); return '<option value="' + i + '"' + (i === pick ? ' selected' : '') + '>Run ' + (i + 1) + (st && st.feedback ? ', feedback: ' + esc(st.feedback) : ', the first conversion') + '</option>'; }).join('') + '</select>' : '');
+      const sel = $('run-pick'); if (sel && !sel.dataset.wired) { sel.dataset.wired = '1'; sel.addEventListener('change', () => { state.run = Number(sel.value); safeRender(); }); }
+      // The diagram.
+      const { done, active } = stagesFrom(ev, latest ? s : { status: 'ready_for_review' });
+      document.querySelectorAll('#diagram .st').forEach((g) => {
+        const k = g.id.slice(3);
+        g.classList.toggle('done', done.includes(k));
+        g.classList.toggle('active', k === active);
+        // Said in words too, not only by the border: "done" or "working now".
+        let t = g.querySelector('text.state');
+        const r = g.querySelector('rect.bx, path.bx');
+        if (!t && r && r.tagName === 'rect') {
+          t = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+          t.setAttribute('class', 'state');
+          t.setAttribute('x', String(Number(r.getAttribute('x')) + Number(r.getAttribute('width')) - 8));
+          t.setAttribute('y', String(Number(r.getAttribute('y')) + 21));
+          t.setAttribute('text-anchor', 'end');
+          g.appendChild(t);
+        }
+        if (t) t.textContent = k === active ? 'working now' : done.includes(k) ? '\u2713 done' : '';
+      });
+      // The diagram is one image to a screen reader, so its state is also said here in words.
+      const label = (k) => (document.querySelector('#st-' + k + ' text.b') || {}).textContent || k;
+      $('diagram-state').textContent = (active ? 'Working now: ' + label(active) + '. ' : '') + 'Done so far: ' + done.filter((k) => document.getElementById('st-' + k)).map(label).join(', ') + '.';
+      const pages = pagesFrom(ev, state.manifest);
+      const n = s ? s.image_count : pages.length;
+      const fixedPages = pages.filter((p) => p.corrected).length;
+      const setNote = (k, t) => { const el = document.getElementById('n-' + k); if (el && t) el.textContent = t; };
+      const pageModel = (ev.find((e) => e.type === 'model_call' && e.agent === 'page') || {}).model;
+      setNote('page', pages.filter((p) => p.drafts.length).length + ' of ' + n + ' pages written' + (pageModel ? ' (' + pageModel.replace(/^us\./, '') + ')' : ''));
+      setNote('verify', pages.filter((p) => p.verify === 'failed').length + ' failed, ' + fixedPages + ' fixed');
+      const rounds = roundsFrom(ev);
+      setNote('reader', rounds.length ? plural(rounds.length, 'read') : null);
+      const done1 = ev.find((e) => e.type === 'run_complete');
+      setNote('serve', done1 ? done1.unresolved + ' left open' : null);
+
+      // Now.
+      const phaseWords = { extraction: 'reading each page', assembly: 'joining the pages', review: 'reviewing the whole document', done: 'finished' };
+      const now = !s ? '' : s.status === 'failed' ? 'The run failed: ' + (s.error || '') : (s.status === 'ready_for_review' || s.status === 'closed') ? 'Finished.' : s.status === 'queued' ? 'Waiting for a free slot.' : 'Working: ' + (phaseWords[s.phase] || s.phase) + '.';
+      $('now').textContent = now + (s ? ' Session ' + s.session_id + '.' : '');
+      if (now !== lastNow) { if (lastNow) live(now); lastNow = now; }
+
+      // 1. Getting ready.
+      const startEvents = ev.filter((e) => ['form_fields', 'page_refit', 'run_queued', 'run_dequeued', 'run_start', 'feedback_rerun'].includes(e.type));
+      patch($('stage-start'), '<h3>1. Getting the document ready</h3><p>' + CODE + ' Each page was turned into an image' + (n ? ' (' + plural(n, 'page') + ')' : '') + '.</p><ul>' + startEvents.map((e) => '<li>' + esc(explain(e)) + '</li>').join('') + '</ul>');
+
+      // 2. Pages.
+      const pageHtml = pages.map((p) => {
+        const img = state.manifest && state.manifest.pages.find((m) => m.name === p.image);
+        const verdict = p.failed ? '<p class="status-bad">This page could not be read.</p>'
+          : p.verify === 'ok' ? '<p class="status-ok">Passed the check' + (p.inconsistent ? ', though the check listed ' + plural(p.problems.length, 'problem') : '') + '.</p>'
+          : p.verify === 'failed' ? '<p class="status-bad">Failed the check: ' + plural(p.problems.length, 'problem') + '.' + (p.corrected ? ' Fixed, and the fix was ' + esc(p.corrected.result) + '.' : '') + '</p>'
+          : '<p>Being read…</p>';
+        const k = 'p' + p.order;
+        return '<div class="page"><h4>Page ' + (p.order || '?') + ' <span class="hint">(' + esc(p.image) + ')</span></h4>'
+          + (img ? '<img src="' + API + '/sessions/' + state.id + '/audit/pages/' + img.order + '" alt="Page ' + img.order + ' as the models saw it" loading="lazy">' : '')
+          + (p.fields ? '<p>' + CODE + ' Given ' + plural(p.fields.fields, 'form field name') + '.</p>' : '')
+          + verdict
+          + (p.drafts[0] ? det(k + 'd', AI + ' The page agent\'s first draft', frame('Page ' + p.order + ', first draft', p.drafts[0]) + det(k + 'ds', 'The HTML itself', '<pre>' + esc(p.drafts[0]) + '</pre>')) : '')
+          + (p.problems.length ? det(k + 'v', AI + ' What the check said', '<ol>' + p.problems.map((x) => '<li>' + esc(x) + '</li>').join('') + '</ol>') : '')
+          + (p.declined ? det(k + 'x', AI + ' What the page agent refused, and why', '<ul>' + p.declined.declined.map((d) => '<li>' + esc(d.why) + '</li>').join('') + '</ul>') : '')
+          + (p.drafts[1] ? det(k + 'f', AI + ' After the fix', frame('Page ' + p.order + ', after the fix', p.drafts[1])) : '')
+          + (p.prompts.length ? det(k + 'pr', 'What the models were sent for this page', '<ul>' + p.prompts.map((e) => '<li>' + esc(e.agent) + ', to ' + esc(stepWords(e.step)) + ': ' + e.prompt.messages.map(promptLink).join(', ') + ', and the page image</li>').join('') + '</ul>') : '')
+          + '</div>';
+      }).join('');
+      const ec = ev.find((e) => e.type === 'extraction_complete');
+      const reread = pick > 0 ? '<p>This run re-read ' + (pages.length ? plural(pages.length, 'page') : 'no pages') + '. The other pages are as earlier runs left them.</p>' : '';
+      patch($('stage-pages'), pages.length || pick > 0 ? '<h3>2. Reading each page</h3>' + reread + '<p>' + AI + ' The page agent wrote each page\'s HTML from its image. ' + AI + ' A second model checked it. ' + CODE + ' Fixed rules checked links, image descriptions and ids.</p>' + (ec ? '<p>' + esc(explain(ec)) + '</p>' : '') + '<div class="pages">' + pageHtml + '</div>' : '');
+
+      // 3. Join.
+      const asm = ev.find((e) => e.type === 'assembly');
+      const anchors = ev.find((e) => e.type === 'assembly_anchors');
+      const assembled = state.manifest && state.manifest.runs.length && state.manifest.runs[state.manifest.runs.length - 1].snapshots.find((x) => x.name === 'assembled');
+      patch($('stage-join'), asm ? '<h3>3. Joining the pages</h3><p>' + CODE + ' ' + esc(explain(asm)) + (anchors ? ' ' + esc(explain(anchors)) : '') + '</p>'
+        + (assembled ? snapshot('The joined document, before review', assembled.url) : '') : '');
+
+      // 4. Review.
+      const edited = rounds.some((r) => r.editor);
+      patch($('stage-review'), rounds.length ? '<h3>4. Reviewing the whole document</h3><p>' + AI + ' The reader read the document as text and listed problems. '
+        + (edited ? AI + ' The copy editor fixed them, looking at the page images. ' + CODE + ' Each fix was checked, and a round that would lose content was thrown away.' : 'It found nothing to fix, so the copy editor did not run.') + '</p>'
+        + rounds.map((r, i) => '<h4>Round ' + (i + 1) + '</h4><p>' + (r.count !== undefined ? 'The reader listed ' + plural(r.count, 'problem') + '.' : 'The reader is reading…') + (r.patch ? ' ' + esc(explain(r.patch)) : '') + (r.editor ? ' ' + esc(explain(r.editor)) : '') + '</p>'
+          + (r.issues.length ? det('r' + i + 'i', AI + ' The problems the reader listed', '<ol>' + r.issues.map((x) => '<li>' + esc(x.issue) + (x.pages ? ' <span class="hint">(page ' + esc(x.pages.join(', ')) + ')</span>' : '') + '</li>').join('') + '</ol>') : '')
+          + (r.snapshot && state.manifest ? snapshot('The document after round ' + (i + 1), API + '/sessions/' + state.id + '/audit/runs/' + r.snapshot.run + '/' + r.snapshot.name) : '')).join('') : '');
+
+      // 5. Result.
+      const rc = ev.find((e) => e.type === 'run_complete');
+      const un = unresolvedFrom(state.output);
+      patch($('stage-result'), state.output ? '<h3>5. The result</h3><p>' + (rc ? esc(explain(rc)) : '') + '</p>' + frame('The finished accessible HTML', state.output.replace(/^[\s\S]*?<main>/, '').replace(/<\/main>[\s\S]*$/, ''))
+        + (un.length ? det('un', 'The ' + plural(un.length, 'problem') + ' left open', '<ol>' + un.map((u) => '<li>' + esc(u) + '</li>').join('') + '</ol>') : '')
+        + '<p><a href="' + API + '/sessions/' + state.id + '/output">Open the HTML on its own</a></p>' : '');
+
+      // 6. Tagged PDF.
+      const pdfOn = state.limits && state.limits.tagged_pdf;
+      const pdfHtml = !state.output || !pdfOn ? '' : !state.sourceIsPdf && state.manifest ? '' :
+        '<h3>6. The tagged PDF (iris-pdf)</h3><p>' + CODE + ' iris-pdf puts the HTML\'s structure onto the original PDF. It is not run unless you ask, because only some people need the PDF.'
+        + (state.manifest ? '' : ' It works only when the upload was one PDF, which this page cannot see with audit mode off.') + '</p>'
+        + '<button id="pdf-btn" type="button" class="secondary">Make the tagged PDF</button>'
+        + (state.fields ? '<p>iris-pdf listed ' + plural(state.fields.length, 'form field') + '.</p>' : '')
+        + (state.pdf && state.pdf.report ? det('pdfr', 'What iris-pdf checked', '<pre>' + esc(JSON.stringify(state.pdf.report.verification ?? state.pdf.report, null, 2)) + '</pre>') + '<p><a id="pdf-dl" download="' + esc(state.pdf.filename) + '" href="data:application/pdf;base64,' + state.pdf.pdf + '">Download the tagged PDF</a></p>' : '')
+        + (state.pdf && state.pdf.error ? '<p class="status-bad">' + esc(state.pdf.error.message || state.pdf.error.code) + '</p>' : '');
+      patch($('stage-pdf'), pdfHtml);
+      const pb = $('pdf-btn'); if (pb && !pb.dataset.wired) { pb.dataset.wired = '1'; pb.addEventListener('click', makePdf); }
+
+      // Problems.
+      const probs = problems(ev, latest ? s : null);
+      $('problems').hidden = !ev.length;
+      patch($('problem-list'), probs.length ? '<ul class="problems">' + probs.map((p) => '<li><span class="lvl ' + p.level + '">' + ({ high: 'Look at this:', medium: 'Worth checking:', info: 'For your information:' })[p.level] + '</span> ' + esc(p.text) + ' <a href="' + refLink(p.type) + '">What this means</a></li>').join('') + '</ul>' : '<p>Nothing unusual found in the run log.</p>');
+
+      // The log.
+      patch($('log-table'), '<table><caption class="visually-hidden">The run log, one row per line</caption><thead><tr><th scope="col">Time</th><th scope="col">Event</th><th scope="col">What it means</th></tr></thead><tbody>'
+        + ev.map((e, i) => '<tr><td>' + esc((e.ts || '').slice(11, 19)) + '</td><td><a href="' + refLink(e.type) + '"><code>' + esc(e.type) + '</code></a></td><td>' + esc(explain(e)) + det('l' + i, 'The line itself', '<pre>' + esc(JSON.stringify(e, null, 2).slice(0, 6000)) + '</pre>') + '</td></tr>').join('') + '</tbody></table>');
+    }
+
+    function renderCalls() {
+      patch($('call-list'), [...state.calls.values()].map((c) => '<li data-k="c-' + esc(c.key) + '"><p><span class="method">' + esc(c.method) + ' ' + esc(API + c.path) + '</span> '
+        + '<span class="' + (c.status < 400 ? 'status-ok' : 'status-bad') + '">' + c.status + '</span>' + (c.count > 1 ? ' <span class="hint">(asked ' + c.count + ' times)</span>' : '') + '</p>'
+        + '<p>' + esc(c.plain || '') + '</p>'
+        + det('c-' + c.key + '-q', 'The same request with curl', '<pre>' + esc(curl(c.method, c.path, c.extra)) + '</pre>')
+        + det('c-' + c.key + '-a', 'What came back', '<pre>' + esc(c.body) + '</pre>') + '</li>').join(''));
+    }
+
+    // ----- Export for an agent -----
+    $('export-btn').addEventListener('click', () => {
+      const bundle = {
+        about: 'An Equalify Iris run, as read by /how-it-works. The run log\'s fields are defined in ' + REF + '#run-log.',
+        session: state.session, problems: problems(state.events, state.session), diagnostics: state.diagnostics,
+        audit: state.manifest, events: state.events, output_html: state.output,
+      };
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' }));
+      a.download = (state.id || 'iris-run') + '.json';
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    });
+
+    // ----- Starting -----
+    $('file').addEventListener('change', () => { $('run-btn').disabled = !$('file').files.length; });
+    $('run-form').addEventListener('submit', async (ev) => {
+      ev.preventDefault(); setError('');
+      const fd = new FormData();
+      for (const f of $('file').files) fd.append('images', f);
+      $('run-btn').disabled = true;
+      resetSession();
+      try {
+        const r = await call('upload', 'POST', '/sessions', { body: fd, extra: "-F 'images=@your-file.pdf'", plain: 'The upload. Iris turns each page into an image, saves the document as a new session, and starts the run.' });
+        if (!r.res.ok) throw new Error((r.data && r.data.error && r.data.error.message) || r.res.statusText);
+        $('calls').hidden = false;
+        await start(r.data.session_id);
+      } catch (e) { setError('The upload failed: ' + e.message); $('run-btn').disabled = false; }
+    });
+    $('open-form').addEventListener('submit', (ev) => {
+      ev.preventDefault(); setError('');
+      const id = $('session-id').value.trim();
+      if (!/^ses_[A-Za-z0-9]+$/.test(id)) { setError('A session id starts with ses_ and has only letters and digits after it.'); return; }
+      if (id !== state.id) { resetSession(); start(id); }
+    });
+    // On a deployment with server.api_token set, /v1/sessions needs a key this page cannot send (it
+    // holds no credential, like the demo). /v1/me runs the same check, so it is the probe.
+    const GATED = 'This deployment needs an API key (server.api_token), which this page cannot send. Make the same calls with curl and the key: the API reference shows how.';
+    async function probe() {
+      try {
+        const r = await call('me', 'GET', '/me', { plain: 'A check that this page may use the API here. It holds no key, so on a deployment that needs one this answers 401.' });
+        if (r.res.status === 401) {
+          state.gated = true; setError(GATED);
+          for (const id of ['file', 'run-btn', 'session-id', 'open-btn']) $(id).disabled = true;
+          $('calls').hidden = false;
+        }
+      } catch { /* unreachable: the first real call will say so */ }
+    }
+    loadLimits();
+    probe().then(() => {
+      const fromHash = /^#session=(ses_[A-Za-z0-9]+)$/.exec(location.hash);
+      if (fromHash && !state.gated) { $('session-id').value = fromHash[1]; start(fromHash[1]); }
+    });
+  </script>
+</body>
+</html>
