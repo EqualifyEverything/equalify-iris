@@ -3,7 +3,7 @@
 // test/demo-pdf-form.test.ts does for the demo, so a change to the page is what gets tested.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { eventIndex, howItWorksPage } from "../src/eventIndex.ts";
@@ -46,12 +46,15 @@ const lib = new Function(
    const esc = (s) => String(s); const AI = ''; const CODE = '';
    const plural = (n, one, many) => n + ' ' + (n === 1 ? one : (many || one + 's'));
    ${pure}
-   return { parseLog, parseReply, explain, SAY, runsOf, pagesFrom, roundsFrom, problems, unresolvedFrom, stagesFrom, curl };`,
+   return { settingsHtml, inputsHtml, INPUTS, parseLog, parseReply, explain, SAY, runsOf, pagesFrom, roundsFrom, problems, unresolvedFrom, stagesFrom, curl };`,
 )(index) as {
   parseLog(t: string): Record<string, unknown>[];
   parseReply(o: unknown): Record<string, unknown> | null;
   explain(e: Record<string, unknown>): string;
   SAY: Record<string, unknown>;
+  INPUTS: { method: string; path: string; field: string | null }[];
+  settingsHtml(st: unknown, limits?: unknown): string;
+  inputsHtml(): string;
   runsOf(ev: Record<string, unknown>[]): Record<string, unknown>[][];
   pagesFrom(ev: unknown[], m?: unknown): { image: string; order: number; drafts: (string | null)[]; verify: string | null; corrected: unknown; prompts: unknown[] }[];
   roundsFrom(ev: unknown[]): { issues: { issue: string }[]; count?: number; patch: unknown; snapshot: unknown }[];
@@ -211,4 +214,38 @@ test("a run's last line that lands after the next run starts still belongs to it
   ]);
   assert.deepEqual(runs.map((r) => r.map((e) => e.type)), [["run_start", "reader", "run_complete"], ["run_start", "reader"]]);
   assert.deepEqual(lib.problems(runs[1]), [], "run 2 is still working and has no last line yet");
+});
+
+// "What you can send" is the API's whole input surface: every field a route reads from a request.
+test("every request field a route reads is listed under What you can send", () => {
+  const found = new Set<string>();
+  for (const f of readdirSync(join(root, "src", "routes")).filter((n) => n.endsWith(".ts"))) {
+    const src = readFileSync(join(root, "src", "routes", f), "utf8");
+    for (const m of src.matchAll(/req\.query\.(\w+)/g)) found.add(m[1]);
+    for (const m of src.matchAll(/upload\.(?:array|single)\("(\w+)"/g)) found.add(m[1]);
+    for (const line of src.split("\n").filter((l) => /req\.body/.test(l))) {
+      const m = /req\.body[^\n]*?\)\??\.(\w+)/.exec(line);
+      assert.ok(m, `a req.body read this test cannot parse, in ${f}:\n  ${line.trim()}`);
+      found.add(m[1]);
+    }
+  }
+  assert.ok(found.size >= 7, `only ${found.size} inputs found; the patterns above stopped matching`);
+  const listed = new Set(lib.INPUTS.map((i) => i.field).filter(Boolean));
+  assert.deepEqual([...found].filter((f) => !listed.has(f)).sort(), [], "a route reads an input the page does not list");
+});
+
+// axe has no rule for a data table without column headers, so this checks it directly.
+test("the settings and inputs tables all have column headers, and say the settings in words", async () => {
+  const { deploymentSettings } = await import("../src/routes/settings.ts");
+  const st = deploymentSettings({
+    server: { port: 1, base_url: "x" },
+    storage: { data_dir: "/d", agents_dir: join(root, "agents"), database: "/d/db" },
+    providers: { default: "openrouter", openrouter: { default_model: "m-1" } },
+    defaults: { max_review_iterations: 2, extraction_concurrency: 5, max_concurrent_runs: 2, recheck_sample_size: 1 },
+  } as never);
+  const html = lib.settingsHtml(st, { max_pages: 25 }) + lib.inputsHtml();
+  const tables = html.split("<table>").slice(1);
+  assert.ok(tables.length >= 3, "the core, specialist and inputs tables");
+  for (const t of tables) assert.match(t.slice(0, t.indexOf("</table>")), /<thead><tr><th scope="col">/);
+  for (const words of ["Up to 2 review rounds per document.", "Up to 5 pages read at the same time.", "Up to 25 pages per document."]) assert.ok(html.includes(words), words);
 });

@@ -39,7 +39,7 @@ Iris prints which of the two you chose at every boot.
 
 ## What the gate does not cover
 
-The gate covers `/v1/me` and `/v1/sessions`. These answer without it, and none touches a document:
+The gate covers `/v1/me`, `/v1/settings` and `/v1/sessions`. These answer without it, and none touches a document:
 
 | Endpoint | Why |
 | --- | --- |

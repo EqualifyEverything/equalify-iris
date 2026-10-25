@@ -18,6 +18,7 @@ import { makeAuthMiddleware } from "./auth/middleware.ts";
 import { meRouter } from "./routes/me.ts";
 import { sessionsRouter } from "./routes/sessions.ts";
 import { auditRouter } from "./routes/audit.ts";
+import { settingsRouter } from "./routes/settings.ts";
 import { howItWorksPage } from "./eventIndex.ts";
 import { statsRouter } from "./routes/stats.ts";
 import { limitsRouter } from "./routes/limits.ts";
@@ -361,16 +362,18 @@ app.get("/how-it-works", (_req, res) => {
 
 // Everything else needs `server.api_token`, when it is set (auth/middleware.ts).
 //
-// `auth` is attached PER ROUTE, on the two mounts below and nowhere else. That, and not its
+// `auth` is attached PER ROUTE, on the three mounts below and nowhere else. That, and not its
 // position in this file, is what leaves /v1/health, /v1/stats, /v1/limits and /v1/quality
 // reachable on a gated deployment: nothing stands in front of them because nothing was put
-// there, and moving any of those lines below these two would not change it.
+// there, and moving any of those lines below these three would not change it.
 //
 // Read top to bottom the order looks load-bearing, and for one middleware it is — the rate
 // limiter above is mounted on the whole of `/v1`. So /v1/health being registered above THAT
 // is a real decision (see its own comment) and the four mounts sitting above `auth` is not.
 const auth = makeAuthMiddleware(cfg);
 app.use("/v1/me", auth, meRouter(cfg));
+// How this deployment is set up, minus every secret (routes/settings.ts). Gated like /v1/sessions.
+app.use("/v1/settings", auth, settingsRouter(cfg));
 app.use("/v1/sessions", auth, auditRouter(cfg, store));
 app.use("/v1/sessions", auth, sessionsRouter(cfg, store));
 app.use(notFound);

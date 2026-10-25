@@ -613,8 +613,8 @@ To find out which kind you are talking to, call `GET /v1/me` with no header: **2
 
 ### What the gate covers
 
-`server.api_token` protects `/v1/me` and everything under `/v1/sessions`, and nothing else — the
-gate is attached to those two mounts rather than to `/v1` as a whole. Five endpoints are outside it
+`server.api_token` protects `/v1/me`, `/v1/settings` and everything under `/v1/sessions`, and nothing
+else — the gate is attached to those three mounts rather than to `/v1` as a whole. Five endpoints are outside it
 and stay reachable on a gated deployment, on purpose. None of them touches a document:
 
 | Endpoint | Why it is open |
@@ -647,6 +647,35 @@ it runs the same check an upload runs:
 | --- | --- |
 | **200** | Usable. If you sent no header, the deployment is open. |
 | **401** `This deployment requires a shared API token.` | Gated — you need `server.api_token` from the operator. |
+
+## Settings
+
+```bash
+curl -s -H "$AUTH" "$BASE/settings"
+```
+
+How this deployment is set up: every non-secret setting, as the value Iris actually uses (after
+defaults), and the provider and model each agent resolves to for each kind of call. `/how-it-works`
+shows it in words. It is behind the same key as `/v1/sessions`.
+
+```json
+{ "version": "1.3.0",
+  "access": { "api_key_required": false, "audit": true, "quality_report": true },
+  "run": { "max_review_iterations": 2, "extraction_concurrency": 5, "max_concurrent_runs": 2, "recheck_sample_size": 1 },
+  "retention_days": 30,
+  "tagged_pdf": { "on": true, "version": "iris-pdf 0.4.0", "timeout_seconds": 300 },
+  "providers": { "default": "bedrock",
+    "blocks": { "bedrock": { "api": "converse", "region": "us-east-2", "default_model": "us.anthropic.claude-sonnet-4-6",
+      "per_capability": {}, "max_tokens": 32000, "prompt_cache": true, "prompt_cache_ttl": "5m",
+      "inference_profiles": ["us.anthropic.claude-sonnet-4-6"] } } },
+  "agents": [{ "agent": "page", "kind": "core",
+    "models": { "vision": { "provider": "bedrock", "model": "us.openai.gpt-5.6-luna" }, "text": { "…": "…" }, "structured_output": { "…": "…" } } }] }
+```
+
+`agents` lists the four agents Iris always runs, then the specialist agents in `agents/`. An agent's
+`models` names one model per kind of call. Which kinds an agent actually uses depends on the step, so
+read a run's `model_call` lines for what ran. It never shows an API key, a token, a provider URL, a
+file path, or an inference profile's ARN: only the model ids that go through one.
 
 ## Create a session (upload images)
 
