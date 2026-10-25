@@ -72,6 +72,9 @@ server:
   # 11c needs it on. Written literally rather than via \${IRIS_QUALITY_TOKEN} so
   # the test does not depend on the caller's environment.
   quality_token: $QUALITY_TOKEN
+  # Audit mode on, so step 7a can check that a run keeps its prompts and snapshots. This run's
+  # reader finds nothing, so it has no editor round: test/audit.test.ts covers round-<n>.
+  audit: true
   # Written literally for the same reason as quality_token above.
   api_token: $API_TOKEN
   # A whole test run is one client from one address (issue #102): this script creates ~11
@@ -403,6 +406,22 @@ fragmarks=$(jq -r '[.[].innerHtml | capture("Page marker (?<n>[0-9]+)").n] | @cs
 [ "$fragorder" = '1,2,3' ] && [ "$fragmarks" = '"1","2","3"' ] \
   && pass "fragments.json in submitted order pre-sort (order=$fragorder)" \
   || fail "fragment order" "order=$fragorder markers=$fragmarks"
+
+echo "==> 7a. GET /v1/sessions/{id}/audit (audit mode)"
+audit=$(curl -s "${AUTH[@]}" "$BASE/sessions/$SID/audit")
+echo "$audit" | jq -e '(.pages|length)==3 and (.prompts.count>0) and ([.runs[0].snapshots[].name]|any(.=="assembled"))' >/dev/null \
+  && pass "audit list: 3 pages, prompts and the assembled snapshot" || fail "audit list" "$audit"
+log=$(curl -s "${AUTH[@]}" "$BASE/sessions/$SID/logs")
+hash=$(echo "$log" | jq -r 'select(.type=="model_call_start") | .prompt.messages[0].sha256' | head -1)
+ptxt=$(curl -s "${AUTH[@]}" "$BASE/sessions/$SID/audit/prompts/$hash")
+[ -n "$hash" ] && [ "$hash" != "null" ] && [ -n "$ptxt" ] && ! echo "$ptxt" | grep -q '"audit_off"\|"not_found"' \
+  && pass "a model_call_start's prompt hash serves the prompt's text" || fail "audit prompt" "hash=$hash"
+snaps=$(echo "$log" | jq -r 'select(.type=="audit_snapshot") | .name' | tr '\n' ',')
+echo "$snaps" | grep -q '^assembled,' \
+  && pass "audit_snapshot lines in run order ($snaps)" || fail "audit snapshots" "$snaps"
+snap=$(curl -s -D - "${AUTH[@]}" "$BASE/sessions/$SID/audit/runs/1/assembled")
+echo "$snap" | grep -qi '^content-type: text/plain' && echo "$snap" | grep -q 'Page marker 1' \
+  && pass "a snapshot is served as plain text and holds the document" || fail "audit snapshot" "$(echo "$snap" | head -5)"
 
 echo "==> 7b. GET /v1/stats (public tally, no token)"
 # Deliberately WITHOUT "${AUTH[@]}": this endpoint is never handed the auth

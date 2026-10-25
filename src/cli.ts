@@ -2,7 +2,7 @@
 import { parseArgs } from "node:util";
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { resolve, extname, basename, join } from "node:path";
-import { loadConfig } from "./config.ts";
+import { auditOn, loadConfig } from "./config.ts";
 import { Store } from "./store/db.ts";
 import { Paths } from "./store/paths.ts";
 import { runPipeline } from "./pipeline/orchestrator.ts";
@@ -27,6 +27,8 @@ Options:
   -i, --input <file>          Input file path (alternative to positional argument)
   -o, --output <file>         Output HTML file path (default: <input-stem>_converted.html)
   -c, --config <file>         Path to config.yaml (default: config.yaml)
+      --audit                 Keep the prompts and each stage's document, and print where the
+                              session's files are (the same as server.audit: true)
   -h, --help                  Show this help documentation
 
 Examples:
@@ -49,6 +51,7 @@ async function main(): Promise<void> {
     input: { type: "string" as const, short: "i" },
     output: { type: "string" as const, short: "o" },
     config: { type: "string" as const, short: "c" },
+    audit: { type: "boolean" as const },
     help: { type: "boolean" as const, short: "h" },
   };
 
@@ -96,6 +99,7 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  if (values.audit) cfg.server.audit = true;
   mkdirSync(join(cfg.storage.data_dir, "sessions"), { recursive: true });
   mkdirSync(join(cfg.storage.data_dir, "tmp"), { recursive: true });
 
@@ -153,6 +157,7 @@ async function main(): Promise<void> {
   const htmlContent = readableFieldNames(titledAs(readFileSync(generatedHtmlPath, "utf8"), inputStem), keptFields(paths, sessionId));
   writeFileSync(outputPath, htmlContent, "utf8");
   console.log(`Converted output saved to: ${outputPath}`);
+  if (auditOn(cfg)) console.log(`Session files (run log, page images, audit/): ${paths.sessionDir(sessionId)}`);
 }
 
 main().catch((err) => {

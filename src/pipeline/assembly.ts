@@ -611,6 +611,7 @@ export async function runAssembly(
   // is the output the pipeline had before it existed.
   const body = await joinContinuedTables(ctx, joinedPages);
   const html = wrapDocument(body, opts);
+  ctx.audit?.snapshot("assembled", body);
   const lint = await runAxe(html);
   // `lint_error` is logged because a gate that could not run has to be distinguishable
   // from one that found nothing — and for a while this line was the only thing that made

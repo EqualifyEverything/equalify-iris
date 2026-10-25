@@ -118,6 +118,11 @@ export interface IrisConfig {
     // It answers "may this caller use the API", never "who is this caller": every session
     // belongs to the deployment.
     api_token?: string;
+    // Audit mode (`auditOn`). Off by default. On, each run also keeps the prompts it sent and the
+    // document after assembly and after each review round, and `/v1/sessions/{id}/audit` serves
+    // those plus the page images and the session's working files, for the /how-it-works page and
+    // for diagnosing a run. Anyone who can read a session can then read all of that.
+    audit?: boolean | string;
     // How many reverse proxies sit in front of this deployment, as a hop count (1 for a
     // single Caddy or nginx). Passed to Express's `trust proxy` setting, which is what
     // decides whether `req.ip` is the caller's address or the proxy's.
@@ -469,6 +474,12 @@ export function promptCacheTtlWarning(providers: IrisConfig["providers"]): strin
     `diagnostics publishes, so a deployment that meant to hold its cache for an hour ` +
     `would never find out from Iris.`
   );
+}
+
+// Whether audit mode is on. `true`, or the string "true" from an environment variable.
+export function auditOn(cfg: IrisConfig): boolean {
+  const v = cfg.server.audit as unknown;
+  return v === true || (typeof v === "string" && v.trim().toLowerCase() === "true");
 }
 
 // Which `inference_profiles` values are used (providers/bedrock.ts).

@@ -13,6 +13,10 @@ server:
   # Secret for GET /v1/quality, read by the weekly quality report. Blank makes it 404.
   # Keep it separate from api_token.
   quality_token: ${IRIS_QUALITY_TOKEN}
+  # true keeps each run's prompts and the document at each stage, and serves them, the page
+  # images and the working files at /v1/sessions/{id}/audit (for /how-it-works). Anyone who
+  # can read a session can then read all of that. Blank or false is off.
+  audit: ${IRIS_AUDIT}
   # Number of proxies in front of Iris (1 behind one Caddy/nginx). Unset behind a proxy,
   # every caller shares one rate-limit bucket.
   trust_proxy: ${IRIS_TRUST_PROXY}

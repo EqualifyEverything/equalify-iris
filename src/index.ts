@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import {
   apiToken,
   applyTrustProxy,
+  auditOn,
   bedrockApiWarning,
   inferenceProfileWarning,
   accessWarning,
@@ -16,6 +17,7 @@ import { Store } from "./store/db.ts";
 import { makeAuthMiddleware } from "./auth/middleware.ts";
 import { meRouter } from "./routes/me.ts";
 import { sessionsRouter } from "./routes/sessions.ts";
+import { auditRouter } from "./routes/audit.ts";
 import { statsRouter } from "./routes/stats.ts";
 import { limitsRouter } from "./routes/limits.ts";
 import { clearPdfScratch, taggedPdfStatus } from "./util/taggedPdf.ts";
@@ -46,6 +48,13 @@ const apiWarning = bedrockApiWarning(cfg.providers);
 if (apiWarning) console.warn(`WARNING: ${apiWarning}`);
 const profileWarning = inferenceProfileWarning(cfg.providers);
 if (profileWarning) console.warn(`WARNING: ${profileWarning}`);
+// Said at boot because it changes what any reader of a session can see.
+if (auditOn(cfg)) {
+  console.warn(
+    "AUDIT MODE: each session's page images, prompts and in-progress documents are served at " +
+      "/v1/sessions/{id}/audit to anyone who can read that session.",
+  );
+}
 
 // And an override that names no agent, which is the same failure on the one key that
 // decides which model runs: the entry is ignored and the call takes the provider's own
@@ -349,6 +358,7 @@ app.get("/demo", (_req, res) => res.redirect(302, "/"));
 // is a real decision (see its own comment) and the four mounts sitting above `auth` is not.
 const auth = makeAuthMiddleware(cfg);
 app.use("/v1/me", auth, meRouter(cfg));
+app.use("/v1/sessions", auth, auditRouter(cfg, store));
 app.use("/v1/sessions", auth, sessionsRouter(cfg, store));
 app.use(notFound);
 app.use(errorHandler);

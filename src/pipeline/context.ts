@@ -4,6 +4,7 @@ import type { ProviderRouter, Image } from "../providers/index.ts";
 import { IMAGE_MEDIA_TYPES } from "../providers/imageLimits.ts";
 import type { Paths } from "../store/paths.ts";
 import type { RunLog } from "../store/runlog.ts";
+import type { AuditRecorder } from "../store/audit.ts";
 import type { SuggestionRow } from "../store/db.ts";
 import type { IrisConfig } from "../config.ts";
 import type { PdfLink } from "../util/pdf.ts";
@@ -49,6 +50,8 @@ export interface PipelineContext {
   // Where agent suggestions are recorded (Store.addSuggestions; #539). Optional so a
   // test can build a context without a store.
   recordSuggestions?: (rows: SuggestionRow[]) => void;
+  // Audit mode only (store/audit.ts): saves the document at a stage of the run.
+  audit?: AuditRecorder;
 }
 
 // The extension -> media type map lives with the rest of the model's input limits
