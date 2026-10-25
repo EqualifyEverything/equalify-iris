@@ -543,8 +543,9 @@
         if (t) t.textContent = k === active ? 'working now' : done.includes(k) ? '\u2713 done' : '';
       });
       // The diagram is one image to a screen reader, so its state is also said here in words.
-      const label = (k) => (document.querySelector('#st-' + k + ' text.b') || {}).textContent || k;
-      $('diagram-state').textContent = (active ? 'Working now: ' + label(active) + '. ' : '') + 'Done so far: ' + done.filter((k) => document.getElementById('st-' + k)).map(label).join(', ') + '.';
+      // A step's whole label: its box holds one line per text element ("Turn each page", "into an image").
+      const label = (k) => [...document.querySelectorAll('#st-' + k + ' text.b')].map((t) => t.textContent).join(' ') || k;
+      $('diagram-state').textContent = (active ? 'Working now: ' + label(active) + '. ' : '') + 'Done so far: ' + done.filter((k) => document.getElementById('st-' + k)).map(label).join('; ') + '.';
       const pages = pagesFrom(ev, state.manifest);
       const n = s ? s.image_count : pages.length;
       const fixedPages = pages.filter((p) => p.corrected).length;
