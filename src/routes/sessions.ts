@@ -2,7 +2,7 @@ import { Router } from "express";
 import type { Request, Response, NextFunction } from "express";
 import multer from "multer";
 import { readFileSync, existsSync, rmSync, statSync } from "node:fs";
-import type { IrisConfig } from "../config.ts";
+import { auditOn, type IrisConfig } from "../config.ts";
 import type { Store, SessionRecord } from "../store/db.ts";
 import { encodeCursor, pageSessions, parseCursor } from "../store/db.ts";
 import { Paths } from "../store/paths.ts";
@@ -514,6 +514,8 @@ export function sessionsRouter(cfg: IrisConfig, store: Store): Router {
         values: values as Record<string, unknown>,
         scratchRoot: paths.pdfScratchRoot(),
         timeoutSeconds: tagTimeoutSeconds(cfg),
+        // The detailed report is for /how-it-works, so only in audit mode.
+        detail: auditOn(cfg),
       });
       // Field names only. A value is never logged.
       log.event("tagged_pdf", { ms: Date.now() - started, fields_given: Object.keys(values) });

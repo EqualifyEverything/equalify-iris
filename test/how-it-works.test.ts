@@ -46,7 +46,7 @@ const lib = new Function(
    const esc = (s) => String(s); const AI = ''; const CODE = '';
    const plural = (n, one, many) => n + ' ' + (n === 1 ? one : (many || one + 's'));
    ${pure}
-   return { settingsHtml, inputsHtml, INPUTS, parseLog, parseReply, explain, SAY, runsOf, pagesFrom, roundsFrom, problems, unresolvedFrom, stagesFrom, curl };`,
+   return { settingsHtml, inputsHtml, processSteps, pdfReportHtml, PDF_WARN, INPUTS, parseLog, parseReply, explain, SAY, runsOf, pagesFrom, roundsFrom, problems, unresolvedFrom, stagesFrom, curl };`,
 )(index) as {
   parseLog(t: string): Record<string, unknown>[];
   parseReply(o: unknown): Record<string, unknown> | null;
@@ -55,6 +55,9 @@ const lib = new Function(
   INPUTS: { method: string; path: string; field: string | null }[];
   settingsHtml(st: unknown, limits?: unknown): string;
   inputsHtml(): string;
+  processSteps(ev: unknown[], s: unknown, o?: unknown): { key: string; state: string; detail: string; seconds?: number | null }[];
+  pdfReportHtml(r: unknown): string;
+  PDF_WARN: Record<string, string>;
   runsOf(ev: Record<string, unknown>[]): Record<string, unknown>[][];
   pagesFrom(ev: unknown[], m?: unknown): { image: string; order: number; drafts: (string | null)[]; verify: string | null; corrected: unknown; prompts: unknown[] }[];
   roundsFrom(ev: unknown[]): { issues: { issue: string }[]; count?: number; patch: unknown; snapshot: unknown }[];
@@ -248,4 +251,76 @@ test("the settings and inputs tables all have column headers, and say the settin
   assert.ok(tables.length >= 3, "the core, specialist and inputs tables");
   for (const t of tables) assert.match(t.slice(0, t.indexOf("</table>")), /<thead><tr><th scope="col">/);
   for (const words of ["Up to 2 review rounds per document.", "Up to 5 pages read at the same time.", "Up to 25 pages per document."]) assert.ok(html.includes(words), words);
+});
+test("the process panel says each step's state, count and time", () => {
+  const t = (s: number) => new Date(Date.UTC(2026, 9, 25, 12, 0, s)).toISOString();
+  const ev = [
+    { type: "run_start", ts: t(0), images: 2 },
+    { type: "agent_call", agent: "page.md", image: "a-p1.png", ts: t(10) },
+  ];
+  const mid = lib.processSteps(ev, { status: "running", phase: "extraction", image_count: 2 }, { maxRounds: 2, now: Date.parse(t(30)) });
+  const by = Object.fromEntries(mid.map((x) => [x.key, x]));
+  assert.equal(by.read.state, "working");
+  assert.equal(by.read.detail, "1 of 2 written");
+  assert.equal(by.read.seconds, 30);
+  assert.equal(by.review.state, "waiting");
+  const done = lib.processSteps([...ev,
+    { type: "page_extraction_failed", page: 2, ts: t(40) },
+    { type: "extraction_complete", ts: t(50) },
+    { type: "assembly", lint_ok: true, violations: 0, ts: t(52) },
+    { type: "phase", phase: "review", ts: t(53) },
+    { type: "reader", ts: t(60) },
+    { type: "run_complete", unresolved: 3, ts: t(70) },
+  ], { status: "ready_for_review", phase: "done", image_count: 2 }, { maxRounds: 2, pdfOn: true });
+  const d = Object.fromEntries(done.map((x) => [x.key, x]));
+  assert.equal(d.read.state, "problem", "a lost page is a problem, said in words");
+  assert.equal(d.review.detail, "round 1 of 2");
+  assert.equal(d.result.detail, "3 left open");
+  assert.equal(d.result.seconds, 70);
+  assert.deepEqual([d.pdf.state, d.pdf.detail], ["waiting", "not asked for"]);
+});
+
+// The report iris-pdf 0.1.0 returned for a one-page document on UIC (2026-10-25).
+const REPORT = {
+  tool: "iris-pdf 0.1.0",
+  source: { pages: 1, encrypted: false, signed: false, acroform: false, xfa: false, hadTextLayer: [1] },
+  pages: [{ page: 1, textSource: "pdf-text", words: 7, matched: 7, addedFromHtml: 0, furniture: 0, lost: 0, redrawn: 0, mcids: 2 }],
+  structure: { elements: 3, byType: { Document: 1, H1: 1, P: 1 } },
+  form: { fields: 0, set: 0, skippedReadOnly: 0, unresolved: [], created: [] },
+  verification: { pixels: "identical-outside-fields", differingPixels: 0, textPreserved: true },
+  pdfua: { checked: false },
+  sizeIncreaseBytes: 1932,
+  warnings: [{ code: "font_not_embedded", detail: "Helvetica; the output does not claim PDF/UA-1." }],
+};
+
+test("iris-pdf's report is shown as its four steps, with warnings in plain words", () => {
+  const h = lib.pdfReportHtml(REPORT);
+  for (const part of ["a. Read the PDF", "b. Match the words", "c. Tag and fill", "d. Check, then save", "identical, apart from form fields", "3 structure elements: Document 1, H1 1, P 1", lib.PDF_WARN.font_not_embedded]) {
+    assert.ok(h.includes(part), part);
+  }
+  assert.ok(!h.includes(">font_not_embedded<"), "a known code is not shown raw");
+  const thin = lib.pdfReportHtml({ warnings: [{ code: "new_code" }] });
+  assert.ok(thin.includes("new_code"), "an unknown code is shown as it is");
+  assert.ok(!/pages|Pixels|word kept|structure element/.test(thin), "a field the report lacks is left out, not shown as a default");
+});
+
+
+test("iris-pdf's detailed report shows the tree, the unmatched words with their reasons, the fields and timing", () => {
+  const h = lib.pdfReportHtml({
+    ...REPORT,
+    detail: {
+      structure: { type: "Document", kids: [{ type: "H1", page: 1, text: "Quarterly Report" }, { type: "Figure", page: 1, alt: "A chart" }, { type: "Form", page: 1, field: "full-name" }] },
+      structureTruncated: true,
+      pages: [{ page: 1, matched: 5, furniture: { count: 2, words: ["Page", "1"] }, added: { count: 0, words: [] }, lost: { count: 51, words: ["x"] }, redrawn: { count: 0, words: [] }, differingPixels: 0, textKept: true }],
+      fields: { created: [{ name: "full-name", type: "text", page: 1, box: [1, 2, 3, 4], label: "Full name" }], unresolved: [{ name: "sig", code: "field_not_placed" }] },
+      timing: { open: 1, match: 3 },
+    },
+  });
+  for (const part of ["open 1 ms, match 3 ms", "Page furniture", "(Page 1)", "Page words not in the HTML", "(x …)", "<code>H1</code>", "alt: “A chart”", "field full-name", "Cut short", "beside “Full name”", lib.PDF_WARN.field_not_placed]) {
+    assert.ok(h.includes(part), part);
+  }
+  assert.ok(!h.includes("Words that could not be tagged in place"), "a kind with no words is left out");
+  const bare = lib.pdfReportHtml({ detail: { structure: null, pages: [{ page: 2, lost: { count: 1, words: ["z"] } }] } });
+  assert.ok(!bare.includes("undefined"), "a page without `matched` leaves it out");
+  assert.ok(bare.includes("Page 2: 1 kind of difference"));
 });

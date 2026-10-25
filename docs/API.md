@@ -1070,6 +1070,12 @@ was already tagged has its old tags replaced, with a `retagged` warning. This ne
 [equalify-iris-pdf#8](https://github.com/EqualifyEverything/equalify-iris-pdf/pull/8). An older one
 answers `422 already_tagged`.
 
+In [audit mode](#audit-off-by-default), `report.detail` adds where and why: the structure tree, the
+words each page could not match (with the reason), the fields added and not matched, and time per
+step. Iris asks for it only from an iris-pdf whose `tag --help` lists `--report-detail`
+([equalify-iris-pdf#52](https://github.com/EqualifyEverything/equalify-iris-pdf/issues/52)). It never
+holds a form value.
+
 The session must have finished (`ready_for_review` or `closed`), or you get `409 invalid_state`. The
 PDF is tagged from the first pass's HTML for each page, before review. A page that failed extraction is
 left out, and the report lists it as `page_not_in_html`. Errors from the tagger keep

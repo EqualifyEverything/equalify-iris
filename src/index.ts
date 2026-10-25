@@ -22,7 +22,7 @@ import { settingsRouter } from "./routes/settings.ts";
 import { howItWorksPage } from "./eventIndex.ts";
 import { statsRouter } from "./routes/stats.ts";
 import { limitsRouter } from "./routes/limits.ts";
-import { clearPdfScratch, taggedPdfStatus } from "./util/taggedPdf.ts";
+import { clearPdfScratch, supportsReportDetail, taggedPdfCommand, taggedPdfStatus } from "./util/taggedPdf.ts";
 import { qualityRouter } from "./routes/quality.ts";
 import { suggestionsRouter } from "./routes/suggestions.ts";
 import { errorHandler, notFound } from "./routes/errors.ts";
@@ -268,6 +268,10 @@ const pdfStatus = taggedPdfStatus(cfg);
 const leftover = clearPdfScratch(join(cfg.storage.data_dir, "tmp"));
 if (leftover > 0) console.log(`Removed ${leftover} tagged-PDF scratch dir(s) left by a previous process.`);
 if (pdfStatus) (pdfStatus.startsWith("WARNING") ? console.warn : console.log)(pdfStatus);
+// Warm the detailed-report check in audit mode, the only mode that asks for it, so the first
+// tagged PDF does not wait on it. Not awaited: a slow iris-pdf must not hold the boot.
+const pdfCommand = taggedPdfCommand(cfg);
+if (pdfCommand && auditOn(cfg)) void supportsReportDetail(pdfCommand);
 const app = express();
 // Whose address `req.ip` is. Off unless a deployment says how many proxies are in front
 // of it, because the rate limits below are only per-caller if this is right: unset behind

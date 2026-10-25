@@ -20,7 +20,7 @@
     body { margin: 0; font: 1.05rem/1.6 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; color: var(--fg); background: var(--bg); }
     .skip-link { position: absolute; left: -999px; top: 0; background: var(--accent); color: var(--accent-fg); padding: .6rem 1rem; z-index: 10; }
     .skip-link:focus { left: 0; }
-    header, main, footer { max-width: 72rem; margin: 0 auto; padding: 0 1.25rem; }
+    header, main, footer { max-width: 84rem; margin: 0 auto; padding: 0 1.25rem; }
     header { padding-top: 2rem; }
     h1 { font-size: 2rem; margin: 0 0 .25rem; }
     h2 { font-size: 1.35rem; margin: 0 0 .75rem; }
@@ -51,6 +51,7 @@
     /* A step lights up while it runs and is ticked when it is done. Shape and text say it too, not colour alone. */
     #diagram .st.active .bx { stroke-width: 5; filter: drop-shadow(0 0 6px #0b4f9c); }
     #diagram .st.done .bx { stroke-width: 3; }
+    ul.tree { list-style: none; padding-left: 1rem; border-left: 1px dashed var(--border); font-size: .9rem; }
     #diagram .state { font: bold 12px system-ui, sans-serif; fill: #14161a; }
     pre { background: var(--bg); border: 1px solid var(--border); padding: .6rem; overflow: auto; max-height: 24rem; font-size: .85rem; white-space: pre-wrap; word-break: break-word; }
     details { margin: .4rem 0; }
@@ -71,103 +72,144 @@
     th, td { border: 1px solid var(--border); padding: .3rem .5rem; text-align: left; vertical-align: top; }
     td code { word-break: break-all; }
     .now { font-weight: 600; }
-    footer { padding: 2rem 1.25rem 3rem; color: var(--muted); }
+    footer { padding: 2rem 1.25rem 3rem; color: var(--muted); max-width: 84rem; }
+    /* Two columns: the process panel stays in view while the page scrolls. One column on a narrow screen. */
+    header { max-width: 84rem; }
+    .layout { display: grid; grid-template-columns: 17rem minmax(0, 1fr); gap: 1.5rem; max-width: 84rem; margin: 0 auto; padding: 0 1.25rem; }
+    .layout main { max-width: none; margin: 0; padding: 0; }
+    .side { position: sticky; top: 1rem; align-self: start; max-height: calc(100vh - 2rem); overflow: auto; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 1rem; margin-top: 1.25rem; }
+    .side-h { font-size: 1rem; margin: 0 0 .4rem; }
+    .side-h + .side-status { margin-top: 0; }
+    .side-status { font-size: .9rem; margin: 0 0 .6rem; }
+    .process { list-style: none; padding: 0; margin: 0 0 1rem; }
+    .process li { display: grid; grid-template-columns: 1.4rem 1fr; gap: 0 .4rem; padding: .35rem .3rem; border-radius: 6px; font-size: .92rem; }
+    .process li[aria-current="step"] { background: var(--bg); outline: 2px solid var(--accent); }
+    .process .icon { font-weight: 700; text-align: center; }
+    .process .done .icon { color: var(--ok); } .process .problem .icon { color: var(--err); } .process .working .icon { color: var(--accent); }
+    .process .waiting, .process .skipped { color: var(--muted); }
+    .process .state { display: block; font-size: .82rem; color: var(--muted); }
+    .side-links { list-style: none; padding: 0; margin: 0; font-size: .92rem; }
+    .side-links li { margin: .2rem 0; }
+    @media (max-width: 60rem) {
+      .layout { grid-template-columns: minmax(0, 1fr); }
+      th, td { overflow-wrap: anywhere; }
+      .side { position: static; max-height: none; }
+    }
   </style>
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to the content</a>
   <header>
     <h1>How Iris works</h1>
-    <p class="tagline">A plain-language look inside Equalify Iris: what happens to a document, step by step, and the API calls behind each step.</p>
-    <p class="not-demo"><strong>This is the technical view.</strong> It is for understanding how Iris works, or finding out what went wrong with a document. To simply convert a document, <a href="/">use the demo</a>.</p>
+    <p class="tagline">Follow one document through Iris, step by step, with every API call.</p>
+    <p class="not-demo"><strong>This is the technical view.</strong> To just convert a document, <a href="/">use the demo</a>.</p>
   </header>
 
-  <main id="main">
-    <div id="live" class="visually-hidden" role="status" aria-live="polite"></div>
-    <div id="error" role="alert"></div>
+  <div class="layout">
+    <nav class="side" aria-label="Process and sections">
+      <h2 class="side-h" id="process-h">Process</h2>
+      <p id="side-status" class="side-status">No document yet.</p>
+      <ol id="process" class="process" aria-labelledby="process-h"></ol>
+      <h2 class="side-h">On this page</h2>
+      <ul class="side-links">
+        <li><a href="#start">Start</a></li>
+        <li><a href="#progress">What Iris did</a></li>
+        <li><a href="#problems">Things to look at</a></li>
+        <li><a href="#calls">API calls</a></li>
+        <li><a href="#log">Run log</a></li>
+        <li><a href="#share">Share</a></li>
+        <li><a href="#overview">How it works</a></li>
+        <li><a href="#settings">Settings</a></li>
+        <li><a href="#inputs">What you can send</a></li>
+      </ul>
+    </nav>
 
-    <section class="box" aria-labelledby="overview-h">
-      <h2 id="overview-h">The short version</h2>
-      <p>Iris turns a PDF or page images into accessible HTML: headings, lists, tables, form labels and image descriptions that a screen reader can use. AI models do the reading and writing. Code prepares what they see, checks what they send back with fixed rules, and throws away replies that would lose content.</p>
-      <p>If a tagged PDF is wanted too, a second tool, <strong>iris-pdf</strong>, puts the HTML's structure onto the original PDF. It is code only, and it refuses to save if the pages would look different.</p>
-      <p><span class="who ai">AI</span> means a model call. <span class="who code">Code</span> means no model: the same input always gives the same result.</p>
-      <svg id="diagram" viewBox="0 0 1180 752" role="img" aria-labelledby="diagram-t diagram-d"><title id="diagram-t">How a document moves through Iris and iris-pdf</title><desc id="diagram-d">Three lanes of steps. The numbered list after the diagram says the same in words.</desc><defs><marker id="hiw-ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#333"/></marker></defs><rect x="4" y="4" width="1172" height="258" rx="10" fill="#f6f6f6" stroke="#ccc"/><text x="1162" y="26" class="lane" text-anchor="end">1  Iris, one page at a time</text><rect x="4" y="266" width="1172" height="206" rx="10" fill="#f6f6f6" stroke="#ccc"/><text x="1162" y="288" class="lane" text-anchor="end">2  Iris, the whole document</text><rect x="4" y="480" width="1172" height="266" rx="10" fill="#f6f6f6" stroke="#ccc"/><text x="1162" y="502" class="lane" text-anchor="end">3  iris-pdf, only if a tagged PDF is asked for</text><g class="st" id="st-upload"><path class="bx" d="M22,82 h110 l22,22 v56 h-132 z" fill="#fff" stroke="#555" stroke-width="2"/><path d="M132,82 v22 h22" fill="none" stroke="#555" stroke-width="2"/><text x="32" y="116" class="b">Your</text><text x="32" y="133" class="b">document</text></g><g class="st" id="st-render"><rect class="bx" x="200" y="44" width="190" height="74" rx="8" fill="#dfe9f7" stroke="#0b3d7a" stroke-width="2"/><rect x="208" y="52" width="46" height="17" rx="8" fill="#fff" stroke="#0b3d7a"/><text x="215" y="65" class="tag" fill="#0b3d7a">Code</text><text x="210" y="88" class="b">Turn each page</text><text x="210" y="105" class="b">into an image</text><text id="n-render" x="295.0" y="134" class="note" text-anchor="middle">150 DPI</text></g><g class="st" id="st-fields"><rect class="bx" x="200" y="160" width="190" height="74" rx="8" fill="#dfe9f7" stroke="#0b3d7a" stroke-width="2"/><rect x="208" y="168" width="46" height="17" rx="8" fill="#fff" stroke="#0b3d7a"/><text x="215" y="181" class="tag" fill="#0b3d7a">Code</text><text x="210" y="204" class="b">Read the form&#x27;s</text><text x="210" y="221" class="b">fields (iris-pdf)</text><text id="n-fields" x="295.0" y="250" class="note" text-anchor="middle">if it is a form</text></g><g class="st" id="st-page"><rect class="bx" x="500" y="100" width="190" height="74" rx="8" fill="#fbe3c8" stroke="#7a3e00" stroke-width="2"/><rect x="508" y="108" width="30" height="17" rx="8" fill="#fff" stroke="#7a3e00"/><text x="515" y="121" class="tag" fill="#7a3e00">AI</text><text x="510" y="144" class="b">Page agent writes</text><text x="510" y="161" class="b">the page&#x27;s HTML</text><text id="n-page" x="595.0" y="190" class="note" text-anchor="middle">one call per page</text></g><g class="st" id="st-verify"><rect class="bx" x="826" y="100" width="190" height="74" rx="8" fill="#fbe3c8" stroke="#7a3e00" stroke-width="2"/><rect x="834" y="108" width="30" height="17" rx="8" fill="#fff" stroke="#7a3e00"/><text x="841" y="121" class="tag" fill="#7a3e00">AI</text><text x="836" y="144" class="b">Check HTML against</text><text x="836" y="161" class="b">the image (+ Code rules)</text><text id="n-verify" x="921.0" y="190" class="note" text-anchor="middle">a second model</text></g><path d="M154,110 H192" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><path d="M154,132 C176,132 176,197 192,197" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><path d="M390,81 C445,81 445,125 492,125" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><rect x="401.5" y="58" width="87.0" height="19" rx="9" fill="#fff" stroke="#888"/><text x="445" y="72" class="data" text-anchor="middle">page image</text><path d="M390,197 C445,197 445,152 492,152" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><rect x="397.85" y="202" width="94.3" height="19" rx="9" fill="#fff" stroke="#888"/><text x="445" y="216" class="data" text-anchor="middle">field names</text><path d="M690,137 H818" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><rect x="714.15" y="125" width="79.7" height="19" rx="9" fill="#fff" stroke="#888"/><text x="754" y="139" class="data" text-anchor="middle">page HTML</text><path d="M921,100 C921,50 595,50 595,92" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><rect x="685.3" y="40" width="145.4" height="19" rx="9" fill="#fff" stroke="#888"/><text x="758" y="54" class="data" text-anchor="middle">problems: fix once</text><path d="M1016,137 H1130 V264 H117 V312" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><rect x="550.95" y="252" width="138.1" height="19" rx="9" fill="#fff" stroke="#888"/><text x="620" y="266" class="data" text-anchor="middle">every page&#x27;s HTML</text><g class="st" id="st-assemble"><rect class="bx" x="22" y="320" width="190" height="74" rx="8" fill="#dfe9f7" stroke="#0b3d7a" stroke-width="2"/><rect x="30" y="328" width="46" height="17" rx="8" fill="#fff" stroke="#0b3d7a"/><text x="37" y="341" class="tag" fill="#0b3d7a">Code</text><text x="32" y="364" class="b">Join pages, fix ids,</text><text x="32" y="381" class="b">axe-core check</text><text id="n-assemble" x="117.0" y="410" class="note" text-anchor="middle">accessibility check</text></g><g class="st" id="st-reader"><rect class="bx" x="290" y="320" width="190" height="74" rx="8" fill="#fbe3c8" stroke="#7a3e00" stroke-width="2"/><rect x="298" y="328" width="30" height="17" rx="8" fill="#fff" stroke="#7a3e00"/><text x="305" y="341" class="tag" fill="#7a3e00">AI</text><text x="300" y="364" class="b">Reader lists</text><text x="300" y="381" class="b">problems</text><text id="n-reader" x="385.0" y="410" class="note" text-anchor="middle">reads text only</text></g><g class="st" id="st-editor"><rect class="bx" x="558" y="320" width="190" height="74" rx="8" fill="#fbe3c8" stroke="#7a3e00" stroke-width="2"/><rect x="566" y="328" width="30" height="17" rx="8" fill="#fff" stroke="#7a3e00"/><text x="573" y="341" class="tag" fill="#7a3e00">AI</text><text x="568" y="364" class="b">Copy editor fixes</text><text x="568" y="381" class="b">(Code refuses losses)</text><text id="n-editor" x="653.0" y="410" class="note" text-anchor="middle">a few rounds at most</text></g><g class="st" id="st-serve"><rect class="bx" x="826" y="320" width="190" height="74" rx="8" fill="#dfe9f7" stroke="#0b3d7a" stroke-width="2"/><rect x="834" y="328" width="46" height="17" rx="8" fill="#fff" stroke="#0b3d7a"/><text x="841" y="341" class="tag" fill="#0b3d7a">Code</text><text x="836" y="364" class="b">Readable names,</text><text x="836" y="381" class="b">unsolved list added</text><text id="n-serve" x="921.0" y="410" class="note" text-anchor="middle">when you download it</text></g><path d="M212,357 H282" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><rect x="210.8" y="336" width="72.4" height="19" rx="9" fill="#fff" stroke="#888"/><text x="247" y="350" class="data" text-anchor="middle">document</text><path d="M480,342 H550" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><rect x="478.8" y="321" width="72.4" height="19" rx="9" fill="#fff" stroke="#888"/><text x="515" y="335" class="data" text-anchor="middle">problems</text><path d="M558,374 H488" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)" stroke-dasharray="5 4"/><rect x="497.75" y="374" width="50.5" height="19" rx="9" fill="#fff" stroke="#888"/><text x="523" y="388" class="data" text-anchor="middle">fixes</text><path d="M748,357 H818" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><rect x="746.8" y="336" width="72.4" height="19" rx="9" fill="#fff" stroke="#888"/><text x="783" y="350" class="data" text-anchor="middle">document</text><g class="st" id="st-html"><path class="bx" d="M1040,318 h110 l22,22 v56 h-132 z" fill="#fff" stroke="#111" stroke-width="3"/><path d="M1150,318 v22 h22" fill="none" stroke="#111" stroke-width="2"/><text x="1050" y="352" class="b">Accessible</text><text x="1050" y="369" class="b">HTML</text></g><path d="M1016,357 H1034" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><path d="M1106,396 V476 H117 V532" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><rect x="523.65" y="464" width="152.7" height="19" rx="9" fill="#fff" stroke="#888"/><text x="600" y="478" class="data" text-anchor="middle">HTML + original PDF</text><g class="st" id="st-pdf-read"><rect class="bx" x="22" y="540" width="190" height="74" rx="8" fill="#dfe9f7" stroke="#0b3d7a" stroke-width="2"/><rect x="30" y="548" width="46" height="17" rx="8" fill="#fff" stroke="#0b3d7a"/><text x="37" y="561" class="tag" fill="#0b3d7a">Code</text><text x="32" y="584" class="b">Read the page&#x27;s</text><text x="32" y="601" class="b">words + positions</text><text id="n-pdf-read" x="117.0" y="630" class="note" text-anchor="middle">OCR for a scan</text></g><g class="st" id="st-pdf-match"><rect class="bx" x="290" y="540" width="190" height="74" rx="8" fill="#dfe9f7" stroke="#0b3d7a" stroke-width="2"/><rect x="298" y="548" width="46" height="17" rx="8" fill="#fff" stroke="#0b3d7a"/><text x="305" y="561" class="tag" fill="#0b3d7a">Code</text><text x="300" y="584" class="b">Match Iris&#x27;s words</text><text x="300" y="601" class="b">to the page&#x27;s</text><text id="n-pdf-match" x="385.0" y="630" class="note" text-anchor="middle">words, not coordinates</text></g><g class="st" id="st-pdf-tag"><rect class="bx" x="558" y="540" width="190" height="74" rx="8" fill="#dfe9f7" stroke="#0b3d7a" stroke-width="2"/><rect x="566" y="548" width="46" height="17" rx="8" fill="#fff" stroke="#0b3d7a"/><text x="573" y="561" class="tag" fill="#0b3d7a">Code</text><text x="568" y="584" class="b">Tag text in place,</text><text x="568" y="601" class="b">add form fields</text><text id="n-pdf-tag" x="653.0" y="630" class="note" text-anchor="middle">structure tree</text></g><g class="st" id="st-pdf-check"><rect class="bx" x="826" y="540" width="190" height="74" rx="8" fill="#dfe9f7" stroke="#0b3d7a" stroke-width="2"/><rect x="834" y="548" width="46" height="17" rx="8" fill="#fff" stroke="#0b3d7a"/><text x="841" y="561" class="tag" fill="#0b3d7a">Code</text><text x="836" y="584" class="b">Check pixels and</text><text x="836" y="601" class="b">words, then save</text><text id="n-pdf-check" x="921.0" y="630" class="note" text-anchor="middle">refuses if changed</text></g><path d="M212,577 H282" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><rect x="221.75" y="556" width="50.5" height="19" rx="9" fill="#fff" stroke="#888"/><text x="247" y="570" class="data" text-anchor="middle">words</text><path d="M480,577 H550" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><rect x="482.45" y="556" width="65.1" height="19" rx="9" fill="#fff" stroke="#888"/><text x="515" y="570" class="data" text-anchor="middle">matches</text><path d="M748,577 H818" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><rect x="761.4" y="556" width="43.2" height="19" rx="9" fill="#fff" stroke="#888"/><text x="783" y="570" class="data" text-anchor="middle">tags</text><g class="st" id="st-pdf"><path class="bx" d="M1040,538 h110 l22,22 v56 h-132 z" fill="#fff" stroke="#111" stroke-width="3"/><path d="M1150,538 v22 h22" fill="none" stroke="#111" stroke-width="2"/><text x="1050" y="572" class="b">Tagged</text><text x="1050" y="589" class="b">PDF</text></g><path d="M1016,577 H1034" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><g class="st" id="st-pdf-review"><rect class="bx" x="826" y="660" width="190" height="74" rx="8" fill="#fbe3c8" stroke="#7a3e00" stroke-width="2" stroke-dasharray="6 4"/><rect x="834" y="668" width="30" height="17" rx="8" fill="#fff" stroke="#7a3e00"/><text x="841" y="681" class="tag" fill="#7a3e00">AI</text><text x="836" y="704" class="b">Optional review:</text><text x="836" y="721" class="b">does it say what it shows?</text></g><path d="M1000,614 V652" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)" stroke-dasharray="5 4"/></svg>
-      <p id="diagram-state" class="hint"></p>
-      <h3>The same in words</h3>
-      <ol>
-        <li><strong>Iris, page by page.</strong> <span class="who code">Code</span> Each page becomes an image, and a form's fields are read. <span class="who ai">AI</span> The page agent writes the page's HTML from the image. <span class="who ai">AI</span> A second model checks it against the image, and <span class="who code">Code</span> fixed rules check its links, image descriptions and ids. A page that fails goes back once to be fixed.</li>
-        <li><strong>Iris, the whole document.</strong> <span class="who code">Code</span> The pages are joined and checked with axe-core, a standard accessibility checker. <span class="who ai">AI</span> A reader lists problems, and <span class="who ai">AI</span> a copy editor fixes them, for a few rounds at most. <span class="who code">Code</span> A fix that would lose content is thrown away. What is still wrong at the end is listed in the HTML.</li>
-        <li><strong>iris-pdf, only if a tagged PDF is asked for.</strong> <span class="who code">Code</span> It matches the HTML's words to the PDF's words, tags the text where it already is, adds form fields, and checks every page before saving.</li>
-      </ol>
-    </section>
+    <main id="main">
+      <div id="live" class="visually-hidden" role="status" aria-live="polite"></div>
+      <div id="error" role="alert"></div>
 
-    <section class="box" id="settings" aria-labelledby="settings-h">
-      <h2 id="settings-h">How this deployment is set up</h2>
-      <p class="hint">Read from <code>GET /v1/settings</code> and <code>GET /v1/limits</code>. Secrets are never shown.</p>
-      <div id="settings-body"><p>Loading…</p></div>
-    </section>
+      <section class="box" id="start" aria-labelledby="start-h">
+        <h2 id="start-h" tabindex="-1">Start</h2>
+        <form id="run-form">
+          <label for="file">Convert a document</label>
+          <p class="hint" id="file-hint">A PDF, or page images in order. A real conversion: a few minutes.</p>
+          <input id="file" type="file" multiple aria-describedby="file-hint" accept="application/pdf,image/png,image/jpeg,image/gif,image/webp">
+          <button id="run-btn" type="submit" disabled>Convert and show each step</button>
+        </form>
+        <form id="open-form">
+          <label for="session-id">Or open one that already ran</label>
+          <p class="hint" id="session-hint">Its session id, starting <code>ses_</code>. Nothing is converted again.</p>
+          <input id="session-id" type="text" aria-describedby="session-hint" autocomplete="off" spellcheck="false">
+          <button id="open-btn" type="submit" class="secondary">Open</button>
+        </form>
+      </section>
 
-    <section class="box" id="inputs" aria-labelledby="inputs-h">
-      <h2 id="inputs-h">What you can send</h2>
-      <p>Everything a caller can give Iris. Nothing else changes a run: the settings above are fixed by the deployment.</p>
-      <div id="inputs-body"></div>
-    </section>
+      <section class="box" id="progress" aria-labelledby="progress-h" hidden>
+        <h2 id="progress-h" tabindex="-1">What Iris did</h2>
+        <p id="now" class="now"></p>
+        <div id="run-pick-box"></div>
+        <div id="run-used"></div>
+        <p id="audit-note" class="hint" hidden>Audit mode is off here, so page images, prompts and in-between documents are not shown.</p>
+        <div id="stage-start"></div>
+        <div id="stage-pages"></div>
+        <div id="stage-join"></div>
+        <div id="stage-review"></div>
+        <div id="stage-result"></div>
+        <div id="stage-pdf"></div>
+      </section>
 
-    <section class="box" id="start" aria-labelledby="start-h">
-      <h2 id="start-h" tabindex="-1">Watch a document go through Iris</h2>
-      <form id="run-form">
-        <label for="file">Your document</label>
-        <p class="hint" id="file-hint">A PDF, or images in reading order. It is converted for real, the same as on the demo, and takes a few minutes.</p>
-        <input id="file" type="file" multiple aria-describedby="file-hint" accept="application/pdf,image/png,image/jpeg,image/gif,image/webp">
-        <button id="run-btn" type="submit" disabled>Convert it and show each step</button>
-      </form>
-      <form id="open-form">
-        <label for="session-id">Or open a document that already ran</label>
-        <p class="hint" id="session-hint">Paste its session id. It starts with <code>ses_</code>. Nothing is converted again.</p>
-        <input id="session-id" type="text" aria-describedby="session-hint" autocomplete="off" spellcheck="false">
-        <button id="open-btn" type="submit" class="secondary">Open it</button>
-      </form>
-    </section>
+      <section class="box" id="problems" aria-labelledby="problems-h" hidden>
+        <h2 id="problems-h">Things to look at</h2>
+        <p class="hint">From the run log. Start here when a document came out wrong.</p>
+        <div id="problem-list"></div>
+      </section>
 
-    <section class="box" id="progress" aria-labelledby="progress-h" hidden>
-      <h2 id="progress-h" tabindex="-1">What Iris did</h2>
-      <p id="now" class="now"></p>
-      <div id="run-pick-box"></div>
-      <div id="run-used"></div>
-      <p id="audit-note" class="hint" hidden>Audit mode is off on this deployment, so page images, prompts and the in-between versions of the document are not shown. Everything else comes from the run log.</p>
-      <div id="stage-start"></div>
-      <div id="stage-pages"></div>
-      <div id="stage-join"></div>
-      <div id="stage-review"></div>
-      <div id="stage-result"></div>
-      <div id="stage-pdf"></div>
-    </section>
+      <section class="box" id="calls" aria-labelledby="calls-h" hidden>
+        <h2 id="calls-h">API calls</h2>
+        <p class="hint">Every request this page sent, with what came back. <a href="https://github.com/EqualifyEverything/equalify-iris/blob/main/docs/API.md">API reference</a>.</p>
+        <ol id="call-list" class="calls"></ol>
+      </section>
 
-    <section class="box" id="problems" aria-labelledby="problems-h" hidden>
-      <h2 id="problems-h">Things to look at</h2>
-      <p class="hint">Found by reading the run log. Start here when a document came out wrong.</p>
-      <div id="problem-list"></div>
-    </section>
+      <section class="box" id="log" aria-labelledby="log-h" hidden>
+        <h2 id="log-h">Run log</h2>
+        <p class="hint">One line per thing Iris did. Each name links to its definition.</p>
+        <div id="log-table"></div>
+      </section>
 
-    <section class="box" id="calls" aria-labelledby="calls-h" hidden>
-      <h2 id="calls-h">The API calls this page made</h2>
-      <p class="hint">Every request this page sent to Iris, in order, with what came back. You can make the same calls with <code>curl</code>. The <a href="https://github.com/EqualifyEverything/equalify-iris/blob/main/docs/API.md">API reference</a> has the details of each.</p>
-      <ol id="call-list" class="calls"></ol>
-    </section>
+      <section class="box" id="share" aria-labelledby="share-h" hidden>
+        <h2 id="share-h">Share</h2>
+        <p>Link to this run: <a id="share-link" href="#"></a></p>
+        <button id="export-btn" type="button" class="secondary">Download the run for an AI agent (JSON)</button>
+      </section>
 
-    <section class="box" id="log" aria-labelledby="log-h" hidden>
-      <h2 id="log-h">Every line of the run log</h2>
-      <p class="hint">Iris writes one line for each thing it does. Each event's name links to its exact definition in the reference.</p>
-      <div id="log-table"></div>
-    </section>
+      <section class="box" id="overview" aria-labelledby="overview-h">
+        <h2 id="overview-h">How it works</h2>
+        <p>Iris turns a PDF into accessible HTML. <span class="who ai">AI</span> Models read and write. <span class="who code">Code</span> Code prepares their input, checks their output and throws away replies that lose content. If asked, <strong>iris-pdf</strong> then tags the original PDF, using code only.</p>
+        <svg id="diagram" viewBox="0 0 1180 752" role="img" aria-labelledby="diagram-t diagram-d"><title id="diagram-t">How a document moves through Iris and iris-pdf</title><desc id="diagram-d">Three lanes of steps. The numbered list after the diagram says the same in words.</desc><defs><marker id="hiw-ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#333"/></marker></defs><rect x="4" y="4" width="1172" height="258" rx="10" fill="#f6f6f6" stroke="#ccc"/><text x="1162" y="26" class="lane" text-anchor="end">1  Iris, one page at a time</text><rect x="4" y="266" width="1172" height="206" rx="10" fill="#f6f6f6" stroke="#ccc"/><text x="1162" y="288" class="lane" text-anchor="end">2  Iris, the whole document</text><rect x="4" y="480" width="1172" height="266" rx="10" fill="#f6f6f6" stroke="#ccc"/><text x="1162" y="502" class="lane" text-anchor="end">3  iris-pdf, only if a tagged PDF is asked for</text><g class="st" id="st-upload"><path class="bx" d="M22,82 h110 l22,22 v56 h-132 z" fill="#fff" stroke="#555" stroke-width="2"/><path d="M132,82 v22 h22" fill="none" stroke="#555" stroke-width="2"/><text x="32" y="116" class="b">Your</text><text x="32" y="133" class="b">document</text></g><g class="st" id="st-render"><rect class="bx" x="200" y="44" width="190" height="74" rx="8" fill="#dfe9f7" stroke="#0b3d7a" stroke-width="2"/><rect x="208" y="52" width="46" height="17" rx="8" fill="#fff" stroke="#0b3d7a"/><text x="215" y="65" class="tag" fill="#0b3d7a">Code</text><text x="210" y="88" class="b">Turn each page</text><text x="210" y="105" class="b">into an image</text><text id="n-render" x="295.0" y="134" class="note" text-anchor="middle">150 DPI</text></g><g class="st" id="st-fields"><rect class="bx" x="200" y="160" width="190" height="74" rx="8" fill="#dfe9f7" stroke="#0b3d7a" stroke-width="2"/><rect x="208" y="168" width="46" height="17" rx="8" fill="#fff" stroke="#0b3d7a"/><text x="215" y="181" class="tag" fill="#0b3d7a">Code</text><text x="210" y="204" class="b">Read the form&#x27;s</text><text x="210" y="221" class="b">fields (iris-pdf)</text><text id="n-fields" x="295.0" y="250" class="note" text-anchor="middle">if it is a form</text></g><g class="st" id="st-page"><rect class="bx" x="500" y="100" width="190" height="74" rx="8" fill="#fbe3c8" stroke="#7a3e00" stroke-width="2"/><rect x="508" y="108" width="30" height="17" rx="8" fill="#fff" stroke="#7a3e00"/><text x="515" y="121" class="tag" fill="#7a3e00">AI</text><text x="510" y="144" class="b">Page agent writes</text><text x="510" y="161" class="b">the page&#x27;s HTML</text><text id="n-page" x="595.0" y="190" class="note" text-anchor="middle">one call per page</text></g><g class="st" id="st-verify"><rect class="bx" x="826" y="100" width="190" height="74" rx="8" fill="#fbe3c8" stroke="#7a3e00" stroke-width="2"/><rect x="834" y="108" width="30" height="17" rx="8" fill="#fff" stroke="#7a3e00"/><text x="841" y="121" class="tag" fill="#7a3e00">AI</text><text x="836" y="144" class="b">Check HTML against</text><text x="836" y="161" class="b">the image (+ Code rules)</text><text id="n-verify" x="921.0" y="190" class="note" text-anchor="middle">a second model</text></g><path d="M154,110 H192" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><path d="M154,132 C176,132 176,197 192,197" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><path d="M390,81 C445,81 445,125 492,125" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><rect x="401.5" y="58" width="87.0" height="19" rx="9" fill="#fff" stroke="#888"/><text x="445" y="72" class="data" text-anchor="middle">page image</text><path d="M390,197 C445,197 445,152 492,152" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><rect x="397.85" y="202" width="94.3" height="19" rx="9" fill="#fff" stroke="#888"/><text x="445" y="216" class="data" text-anchor="middle">field names</text><path d="M690,137 H818" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><rect x="714.15" y="125" width="79.7" height="19" rx="9" fill="#fff" stroke="#888"/><text x="754" y="139" class="data" text-anchor="middle">page HTML</text><path d="M921,100 C921,50 595,50 595,92" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><rect x="685.3" y="40" width="145.4" height="19" rx="9" fill="#fff" stroke="#888"/><text x="758" y="54" class="data" text-anchor="middle">problems: fix once</text><path d="M1016,137 H1130 V264 H117 V312" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><rect x="550.95" y="252" width="138.1" height="19" rx="9" fill="#fff" stroke="#888"/><text x="620" y="266" class="data" text-anchor="middle">every page&#x27;s HTML</text><g class="st" id="st-assemble"><rect class="bx" x="22" y="320" width="190" height="74" rx="8" fill="#dfe9f7" stroke="#0b3d7a" stroke-width="2"/><rect x="30" y="328" width="46" height="17" rx="8" fill="#fff" stroke="#0b3d7a"/><text x="37" y="341" class="tag" fill="#0b3d7a">Code</text><text x="32" y="364" class="b">Join pages, fix ids,</text><text x="32" y="381" class="b">axe-core check</text><text id="n-assemble" x="117.0" y="410" class="note" text-anchor="middle">accessibility check</text></g><g class="st" id="st-reader"><rect class="bx" x="290" y="320" width="190" height="74" rx="8" fill="#fbe3c8" stroke="#7a3e00" stroke-width="2"/><rect x="298" y="328" width="30" height="17" rx="8" fill="#fff" stroke="#7a3e00"/><text x="305" y="341" class="tag" fill="#7a3e00">AI</text><text x="300" y="364" class="b">Reader lists</text><text x="300" y="381" class="b">problems</text><text id="n-reader" x="385.0" y="410" class="note" text-anchor="middle">reads text only</text></g><g class="st" id="st-editor"><rect class="bx" x="558" y="320" width="190" height="74" rx="8" fill="#fbe3c8" stroke="#7a3e00" stroke-width="2"/><rect x="566" y="328" width="30" height="17" rx="8" fill="#fff" stroke="#7a3e00"/><text x="573" y="341" class="tag" fill="#7a3e00">AI</text><text x="568" y="364" class="b">Copy editor fixes</text><text x="568" y="381" class="b">(Code refuses losses)</text><text id="n-editor" x="653.0" y="410" class="note" text-anchor="middle">a few rounds at most</text></g><g class="st" id="st-serve"><rect class="bx" x="826" y="320" width="190" height="74" rx="8" fill="#dfe9f7" stroke="#0b3d7a" stroke-width="2"/><rect x="834" y="328" width="46" height="17" rx="8" fill="#fff" stroke="#0b3d7a"/><text x="841" y="341" class="tag" fill="#0b3d7a">Code</text><text x="836" y="364" class="b">Readable names,</text><text x="836" y="381" class="b">unsolved list added</text><text id="n-serve" x="921.0" y="410" class="note" text-anchor="middle">when you download it</text></g><path d="M212,357 H282" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><rect x="210.8" y="336" width="72.4" height="19" rx="9" fill="#fff" stroke="#888"/><text x="247" y="350" class="data" text-anchor="middle">document</text><path d="M480,342 H550" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><rect x="478.8" y="321" width="72.4" height="19" rx="9" fill="#fff" stroke="#888"/><text x="515" y="335" class="data" text-anchor="middle">problems</text><path d="M558,374 H488" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)" stroke-dasharray="5 4"/><rect x="497.75" y="374" width="50.5" height="19" rx="9" fill="#fff" stroke="#888"/><text x="523" y="388" class="data" text-anchor="middle">fixes</text><path d="M748,357 H818" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><rect x="746.8" y="336" width="72.4" height="19" rx="9" fill="#fff" stroke="#888"/><text x="783" y="350" class="data" text-anchor="middle">document</text><g class="st" id="st-html"><path class="bx" d="M1040,318 h110 l22,22 v56 h-132 z" fill="#fff" stroke="#111" stroke-width="3"/><path d="M1150,318 v22 h22" fill="none" stroke="#111" stroke-width="2"/><text x="1050" y="352" class="b">Accessible</text><text x="1050" y="369" class="b">HTML</text></g><path d="M1016,357 H1034" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><path d="M1106,396 V476 H117 V532" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><rect x="523.65" y="464" width="152.7" height="19" rx="9" fill="#fff" stroke="#888"/><text x="600" y="478" class="data" text-anchor="middle">HTML + original PDF</text><g class="st" id="st-pdf-read"><rect class="bx" x="22" y="540" width="190" height="74" rx="8" fill="#dfe9f7" stroke="#0b3d7a" stroke-width="2"/><rect x="30" y="548" width="46" height="17" rx="8" fill="#fff" stroke="#0b3d7a"/><text x="37" y="561" class="tag" fill="#0b3d7a">Code</text><text x="32" y="584" class="b">Read the page&#x27;s</text><text x="32" y="601" class="b">words + positions</text><text id="n-pdf-read" x="117.0" y="630" class="note" text-anchor="middle">OCR for a scan</text></g><g class="st" id="st-pdf-match"><rect class="bx" x="290" y="540" width="190" height="74" rx="8" fill="#dfe9f7" stroke="#0b3d7a" stroke-width="2"/><rect x="298" y="548" width="46" height="17" rx="8" fill="#fff" stroke="#0b3d7a"/><text x="305" y="561" class="tag" fill="#0b3d7a">Code</text><text x="300" y="584" class="b">Match Iris&#x27;s words</text><text x="300" y="601" class="b">to the page&#x27;s</text><text id="n-pdf-match" x="385.0" y="630" class="note" text-anchor="middle">words, not coordinates</text></g><g class="st" id="st-pdf-tag"><rect class="bx" x="558" y="540" width="190" height="74" rx="8" fill="#dfe9f7" stroke="#0b3d7a" stroke-width="2"/><rect x="566" y="548" width="46" height="17" rx="8" fill="#fff" stroke="#0b3d7a"/><text x="573" y="561" class="tag" fill="#0b3d7a">Code</text><text x="568" y="584" class="b">Tag text in place,</text><text x="568" y="601" class="b">add form fields</text><text id="n-pdf-tag" x="653.0" y="630" class="note" text-anchor="middle">structure tree</text></g><g class="st" id="st-pdf-check"><rect class="bx" x="826" y="540" width="190" height="74" rx="8" fill="#dfe9f7" stroke="#0b3d7a" stroke-width="2"/><rect x="834" y="548" width="46" height="17" rx="8" fill="#fff" stroke="#0b3d7a"/><text x="841" y="561" class="tag" fill="#0b3d7a">Code</text><text x="836" y="584" class="b">Check pixels and</text><text x="836" y="601" class="b">words, then save</text><text id="n-pdf-check" x="921.0" y="630" class="note" text-anchor="middle">refuses if changed</text></g><path d="M212,577 H282" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><rect x="221.75" y="556" width="50.5" height="19" rx="9" fill="#fff" stroke="#888"/><text x="247" y="570" class="data" text-anchor="middle">words</text><path d="M480,577 H550" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><rect x="482.45" y="556" width="65.1" height="19" rx="9" fill="#fff" stroke="#888"/><text x="515" y="570" class="data" text-anchor="middle">matches</text><path d="M748,577 H818" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><rect x="761.4" y="556" width="43.2" height="19" rx="9" fill="#fff" stroke="#888"/><text x="783" y="570" class="data" text-anchor="middle">tags</text><g class="st" id="st-pdf"><path class="bx" d="M1040,538 h110 l22,22 v56 h-132 z" fill="#fff" stroke="#111" stroke-width="3"/><path d="M1150,538 v22 h22" fill="none" stroke="#111" stroke-width="2"/><text x="1050" y="572" class="b">Tagged</text><text x="1050" y="589" class="b">PDF</text></g><path d="M1016,577 H1034" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><g class="st" id="st-pdf-review"><rect class="bx" x="826" y="660" width="190" height="74" rx="8" fill="#fbe3c8" stroke="#7a3e00" stroke-width="2" stroke-dasharray="6 4"/><rect x="834" y="668" width="30" height="17" rx="8" fill="#fff" stroke="#7a3e00"/><text x="841" y="681" class="tag" fill="#7a3e00">AI</text><text x="836" y="704" class="b">Optional review:</text><text x="836" y="721" class="b">does it say what it shows?</text></g><path d="M1000,614 V652" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)" stroke-dasharray="5 4"/></svg>
+        <p id="diagram-state" class="hint"></p>
+        <details>
+          <summary>The same in words</summary>
+          <ol>
+            <li><strong>Each page.</strong> <span class="who code">Code</span> The page becomes an image, and form fields are read. <span class="who ai">AI</span> The page agent writes its HTML. <span class="who ai">AI</span> A second model checks it against the image, and <span class="who code">Code</span> rules check links, image descriptions and ids. A failed page is fixed once.</li>
+            <li><strong>The whole document.</strong> <span class="who code">Code</span> Pages are joined and checked with axe-core. <span class="who ai">AI</span> A reader lists problems and <span class="who ai">AI</span> a copy editor fixes them, for a few rounds. <span class="who code">Code</span> A fix that loses content is thrown away. What is left is listed in the HTML.</li>
+            <li><strong>Tagged PDF, if asked.</strong> <span class="who code">Code</span> iris-pdf matches the HTML's words to the PDF's, tags the text in place, adds form fields, and checks every page before saving.</li>
+          </ol>
+        </details>
+      </section>
 
-    <section class="box" id="share" aria-labelledby="share-h" hidden>
-      <h2 id="share-h">Share this run</h2>
-      <p>A link to this page that opens this run: <a id="share-link" href="#"></a></p>
-      <p>To ask an AI agent what went wrong, give it everything this page read, as one file:</p>
-      <button id="export-btn" type="button" class="secondary">Download the run for an AI agent (JSON)</button>
-    </section>
-  </main>
+      <section class="box" id="settings" aria-labelledby="settings-h">
+        <h2 id="settings-h">Settings</h2>
+        <p class="hint">From <code>GET /v1/settings</code> and <code>/v1/limits</code>. Secrets are never shown.</p>
+        <div id="settings-body"><p>Loading…</p></div>
+      </section>
+
+      <section class="box" id="inputs" aria-labelledby="inputs-h">
+        <h2 id="inputs-h">What you can send</h2>
+        <p>Everything a caller can give Iris. The settings above are fixed by the deployment.</p>
+        <div id="inputs-body"></div>
+      </section>
+    </main>
+  </div>
 
   <footer>
     <p><a href="/">The demo</a> · <a href="https://github.com/EqualifyEverything/equalify-iris/blob/main/docs/API.md">API reference</a> · <a href="https://github.com/EqualifyEverything/equalify-iris">Source on GitHub</a></p>
@@ -401,6 +443,118 @@
 
     // A collapsed section; `k` keeps it open across a re-render (patch).
     const det = (k, summary, body) => '<details data-k="' + esc(k) + '"><summary>' + summary + '</summary>' + body + '</details>';
+    // The process panel: every step in order, its state in words, a short count and how long it took.
+    // `pdf` is null (not asked), 'working', 'done' or 'failed'.
+    function processSteps(ev, session, opts = {}) {
+      const has = (t, f) => ev.some((e) => e.type === t && (!f || f(e)));
+      const at = (t, f) => { const e = ev.find((x) => x.type === t && (!f || f(x))); return e && e.ts ? Date.parse(e.ts) : null; };
+      const secs = (a, b) => (a && b ? Math.max(0, Math.round((b - a) / 1000)) : null);
+      const status = session && session.status;
+      const finished = status === 'ready_for_review' || status === 'closed';
+      const failed = status === 'failed';
+      const phase = session && session.phase;
+      const n = session ? session.image_count : 0;
+      const written = new Set(ev.filter((e) => e.type === 'agent_call' && e.agent === 'page.md' && e.image).map((e) => e.image)).size;
+      const checkedOk = ev.filter((e) => e.type === 'page_verify_ok').length, checkedBad = ev.filter((e) => e.type === 'page_verify_failed').length;
+      const fixed = ev.filter((e) => e.type === 'page_corrected' && e.result === 'kept').length;
+      const lost = ev.filter((e) => e.type === 'page_extraction_failed').length;
+      const asm = ev.find((e) => e.type === 'assembly');
+      const rounds = ev.filter((e) => e.type === 'reader').length;
+      const rc = ev.find((e) => e.type === 'run_complete');
+      const t0 = at('run_start') || at('run_queued');
+      const tExtract = at('extraction_complete'), tAsm = at('phase', (e) => e.phase === 'review') || (asm && at('assembly'));
+      const tEnd = rc ? Date.parse(rc.ts) : null;
+      const now = opts.now || Date.now();
+      const st = (doneCond, workingCond, problemCond) => (problemCond ? 'problem' : doneCond ? 'done' : workingCond ? 'working' : failed ? 'skipped' : 'waiting');
+      const steps = [
+        { key: 'upload', label: 'Upload', state: session ? 'done' : 'waiting', detail: session ? plural(n, 'page') : '', href: '#stage-start' },
+        { key: 'read', label: 'Read each page', state: st(has('extraction_complete'), phase === 'extraction' && !failed, lost > 0), detail: session ? written + ' of ' + n + ' written' + (lost ? ', ' + lost + ' lost' : '') : '', seconds: secs(t0, tExtract || (phase === 'extraction' && !finished ? now : null)), href: '#stage-pages' },
+        { key: 'check', label: 'Check each page', state: st(has('extraction_complete'), checkedOk + checkedBad > 0 && phase === 'extraction', false), detail: checkedOk + checkedBad ? checkedBad + ' failed, ' + fixed + ' fixed' : '', href: '#stage-pages' },
+        { key: 'join', label: 'Join and check', state: st(Boolean(asm), phase === 'assembly', asm && !asm.lint_ok && asm.violations === undefined), detail: asm ? (asm.violations ? 'axe: ' + plural(asm.violations, 'problem') : asm.lint_ok ? 'axe: no problems' : 'axe could not run') : '', seconds: secs(tExtract, tAsm), href: '#stage-join' },
+        { key: 'review', label: 'Review', state: st(Boolean(rc) || finished, phase === 'review' && !failed, false), detail: rounds ? 'round ' + rounds + (opts.maxRounds ? ' of ' + opts.maxRounds : '') : '', seconds: secs(tAsm, tEnd || (phase === 'review' && !finished ? now : null)), href: '#stage-review' },
+        { key: 'result', label: 'Result', state: failed ? 'problem' : finished ? 'done' : 'waiting', detail: rc ? (rc.unresolved ? rc.unresolved + ' left open' : 'nothing left open') : failed ? 'the run failed' : '', seconds: secs(t0, tEnd), href: '#stage-result' },
+        { key: 'pdf', label: 'Tagged PDF (optional)', state: opts.pdf === 'done' ? 'done' : opts.pdf === 'working' ? 'working' : opts.pdf === 'failed' ? 'problem' : finished && opts.pdfOn ? 'waiting' : 'skipped', detail: opts.pdf ? '' : finished && opts.pdfOn ? 'not asked for' : opts.pdfOn === false ? 'off here' : '', href: '#stage-pdf' },
+      ];
+      return steps;
+    }
+    const STATE_WORD = { done: 'Done', working: 'Working now', waiting: 'Waiting', problem: 'Problem', skipped: 'Not run' };
+    const STATE_ICON = { done: '\u2713', working: '\u25CF', waiting: '\u25CB', problem: '!', skipped: '\u2013' };
+
+    // What iris-pdf's report says, in four steps. Its warning codes in plain words (iris-pdf README).
+    const PDF_WARN = {
+      unmatched_text: 'Some page text was not in the HTML, so it was kept as a plain paragraph.',
+      missing_alt: 'An image has no description.',
+      field_not_in_html: 'A form field in the PDF has no control in the HTML.',
+      unmatched_link: 'A link could not be matched to the page.',
+      duplicate_text_layer: 'Some words were drawn again, so plain copy-and-paste tools may show them twice.',
+      in_place_failed: 'Some text could not be tagged where it is, so it was drawn again.',
+      page_not_in_html: 'A page had no HTML.',
+      page_not_tagged: 'A page could not be tagged and was left as it was.',
+      no_text_positions: 'A scanned page\'s text does not line up with its image.',
+      no_title: 'The PDF has no title.',
+      field_not_placed: 'A form control had no blank on the page to put a field on.',
+      font_not_embedded: 'A font is not embedded, so the PDF does not claim PDF/UA-1.',
+      source_marked_content: 'The PDF had marked content left from earlier tags.',
+      figure_without_image: 'The page\'s images did not pair up with the HTML\'s, so figures do not contain their images.',
+      owner_restricted: 'The owner restricts changes, so the form was not given new fields.',
+      alignment_incomplete: 'The page and the HTML differ too much to match every word.',
+      field_without_name: 'A form control in the HTML has no name, so it got no field.',
+    };
+    function pdfReportHtml(r) {
+      if (!r) return '';
+      // Only what the report says: a field it does not carry is left out, never shown as a default.
+      const src = r.source, v = r.verification, f = r.form, st = r.structure;
+      const out = [];
+      if (src) {
+        const kind = src.xfa ? 'an XFA form' : src.acroform ? 'a fillable form' : 'not a fillable form';
+        out.push('<h4>a. Read the PDF</h4><p>' + plural(src.pages, 'page') + ', ' + kind + (src.encrypted ? ', encrypted' : '') + (src.signed ? ', signed' : '')
+          + (Array.isArray(src.hadTextLayer) ? '. Pages with their own text: ' + (src.hadTextLayer.join(', ') || 'none, so text came from OCR') : '') + '.</p>');
+      }
+      if (Array.isArray(r.pages) && r.pages.length) {
+        const rows = r.pages.map((pg) => '<tr><td>' + pg.page + '</td><td>' + esc(pg.textSource === 'pdf-text' ? 'the PDF' : pg.textSource ?? '') + '</td>'
+          + ['words', 'matched', 'addedFromHtml', 'furniture', 'lost', 'redrawn'].map((k) => '<td>' + (pg[k] ?? '') + '</td>').join('') + '</tr>').join('');
+        out.push('<h4>b. Match the words</h4><p>' + CODE + ' Each word in the HTML is matched to a word the page draws: words, not positions.</p>'
+          + '<table><thead><tr><th scope="col">Page</th><th scope="col">Text from</th><th scope="col">Words</th><th scope="col">Matched</th><th scope="col">Added from HTML</th><th scope="col">Page furniture</th><th scope="col">Lost</th><th scope="col">Drawn again</th></tr></thead><tbody>' + rows + '</tbody></table>');
+      }
+      if (st || f) {
+        const types = st ? Object.entries(st.byType || {}).map(([t, c]) => esc(t) + ' ' + c).join(', ') : '';
+        out.push('<h4>c. Tag and fill</h4><p>' + (st ? plural(st.elements, 'structure element') + (types ? ': ' + types : '') + '. ' : '')
+          + (f ? 'Form: ' + plural(f.fields, 'field') + ', ' + f.set + ' filled' + ((f.created || []).length ? ', ' + f.created.length + ' added' : '') + ((f.unresolved || []).length ? ', ' + f.unresolved.length + ' not matched' : '') + '.' : '') + '</p>');
+      }
+      if (v) {
+        out.push('<h4>d. Check, then save</h4><ul>'
+          + (v.pixels ? '<li>Pixels: ' + esc(v.pixels === 'identical-outside-fields' ? 'identical, apart from form fields' : v.pixels) + (v.differingPixels ? ' (' + v.differingPixels + ' differ)' : '') + '.</li>' : '')
+          + (typeof v.textPreserved === 'boolean' ? '<li>Every source word kept: ' + (v.textPreserved ? 'yes' : 'no') + '.</li>' : '')
+          + (r.pdfua ? '<li>PDF/UA check: ' + (r.pdfua.checked ? esc(r.pdfua.result || 'run') : 'not run') + '.</li>' : '')
+          + (typeof r.sizeIncreaseBytes === 'number' ? '<li>Size: ' + (r.sizeIncreaseBytes / 1024).toFixed(1) + ' KB added.</li>' : '') + '</ul>');
+      }
+      // iris-pdf's detailed report (`tag --report-detail`, audit mode only): where and why, not just how many.
+      const d = r.detail;
+      if (d) {
+        if (d.timing) out.push('<p><strong>Time per step:</strong> ' + Object.entries(d.timing).map(([k, ms]) => esc(k) + ' ' + ms + ' ms').join(', ') + '.</p>');
+        const WORDS = [['furniture', 'Page furniture (headers, footers, page numbers), kept out of the reading order'], ['added', 'Words from the HTML the page did not draw, added in a hidden layer'], ['lost', 'Page words not in the HTML, kept as a plain paragraph'], ['redrawn', 'Words that could not be tagged in place, so were drawn again']];
+        for (const pg of d.pages || []) {
+          const lists = WORDS.filter(([k]) => pg[k] && pg[k].count).map(([k, label]) => '<li>' + label + ': ' + pg[k].count + (pg[k].words.length ? ' (' + pg[k].words.map(esc).join(' ') + (pg[k].count > pg[k].words.length ? ' …' : '') + ')' : '') + '</li>');
+          out.push(det('pdfp' + pg.page, 'Page ' + pg.page + ': ' + (typeof pg.matched === 'number' ? plural(pg.matched, 'word') + ' matched, ' : '') + (lists.length ? plural(lists.length, 'kind') + ' of difference' : 'no differences') + (pg.textKept === false ? ', text lost' : ''),
+            (lists.length ? '<ul>' + lists.join('') + '</ul>' : '<p>Every word matched.</p>') + '<p>Pixels that differ: ' + (pg.differingPixels ?? 'not checked') + '.</p>'));
+        }
+        const node = (e) => '<li><code>' + esc(e.type) + '</code>' + (e.page ? ' <span class="hint">p.' + e.page + '</span>' : '') + (e.text ? ' ' + esc(e.text) : '')
+          + (e.alt ? ' <span class="hint">alt: “' + esc(e.alt) + '”</span>' : '') + (e.lang ? ' <span class="hint">lang ' + esc(e.lang) + '</span>' : '')
+          + (e.href ? ' <span class="hint">→ ' + esc(e.href) + '</span>' : '') + (e.field ? ' <span class="hint">field ' + esc(e.field) + '</span>' : '')
+          + (e.kids && e.kids.length ? '<ul>' + e.kids.map(node).join('') + '</ul>' : '') + '</li>';
+        if (d.structure) out.push(det('pdftree', 'The structure tree a screen reader follows', '<ul class="tree">' + node(d.structure) + '</ul>' + (d.structureTruncated ? '<p class="hint">Cut short: the tree is longer than the report keeps.</p>' : '')));
+        const fl = d.fields || {};
+        if ((fl.created || []).length || (fl.unresolved || []).length) {
+          out.push(det('pdff', 'Form fields: ' + (fl.created || []).length + ' added, ' + (fl.unresolved || []).length + ' not matched', '<ul>'
+            + (fl.created || []).map((c) => '<li>Added <code>' + esc(c.name) + '</code> (' + esc(c.type) + ') on page ' + c.page + ', beside “' + esc(c.label) + '”</li>').join('')
+            // `name` is the field's name, or for a control with none, its label (iris-pdf #53).
+            + (fl.unresolved || []).map((u) => '<li>Not matched: <code>' + esc(u.name) + '</code>' + (u.page ? ' on page ' + u.page : '') + ' (' + esc(PDF_WARN[u.code] || u.code) + ')</li>').join('') + '</ul>'));
+        }
+      }
+      const warn = (r.warnings || []).map((w) => '<li>' + esc(PDF_WARN[w.code] || w.code) + (w.detail ? ' <span class="hint">(' + esc(w.detail) + ')</span>' : '') + '</li>').join('');
+      out.push(warn ? '<p><strong>Warnings</strong></p><ul>' + warn + '</ul>' : '<p>No warnings.</p>');
+      return out.join('');
+    }
 
     // Every input the API takes. test/how-it-works.test.ts fails if a route reads a request field
     // that is not listed here.
@@ -537,6 +691,7 @@
 
     async function makePdf() {
       const btn = $('pdf-btn'); btn.disabled = true;
+      state.pdfBusy = true; safeRender();
       try {
         const f = await call('fields', 'GET', '/sessions/' + state.id + '/fields', { plain: 'iris-pdf lists the PDF\'s form fields (for a flat form, the ones it would add).' });
         state.fields = f.data && f.data.fields;
@@ -545,7 +700,8 @@
         // Re-read the log, which now has the tagged_pdf line.
         state.events = parseLog((await call('logs', 'GET', '/sessions/' + state.id + '/logs', { json: false, plain: 'The run log, read again for the tagged PDF\'s line.' })).text);
       } catch (e) { setError('The tagged PDF could not be made: ' + e.message); }
-      btn.disabled = false;
+      state.pdfBusy = false;
+      const b2 = $('pdf-btn'); if (b2) b2.disabled = false;
       safeRender();
     }
 
@@ -622,10 +778,17 @@
       const done1 = ev.find((e) => e.type === 'run_complete');
       setNote('serve', done1 ? done1.unresolved + ' left open' : null);
 
+      // The process panel.
+      const pdfState = state.pdfBusy ? 'working' : state.pdf ? (state.pdf.report ? 'done' : 'failed') : null;
+      const steps = processSteps(ev, latest ? s : { ...(s || {}), status: 'ready_for_review', phase: 'done' }, { maxRounds: s && s.iterations_max, pdf: pdfState, pdfOn: state.limits ? Boolean(state.limits.tagged_pdf) : undefined });
+      // Before a run the step sections are hidden, so every step points at Start.
+      patch($('process'), steps.map((x) => '<li class="' + x.state + '"' + (x.state === 'working' ? ' aria-current="step"' : '') + '><span class="icon" aria-hidden="true">' + STATE_ICON[x.state] + '</span><span><a href="' + (state.id ? x.href : '#start') + '">' + esc(x.label) + '</a><span class="state">' + STATE_WORD[x.state] + (x.detail ? ': ' + esc(x.detail) : '') + (x.seconds != null ? ' · ' + x.seconds + ' s' : '') + '</span></span></li>').join(''));
+
       // Now.
       const phaseWords = { extraction: 'reading each page', assembly: 'joining the pages', review: 'reviewing the whole document', done: 'finished' };
       const now = !s ? '' : s.status === 'failed' ? 'The run failed: ' + (s.error || '') : (s.status === 'ready_for_review' || s.status === 'closed') ? 'Finished.' : s.status === 'queued' ? 'Waiting for a free slot.' : 'Working: ' + (phaseWords[s.phase] || s.phase) + '.';
       $('now').textContent = now + (s ? ' Session ' + s.session_id + '.' : '');
+      $('side-status').textContent = s ? now : 'No document yet.';
       // What this run actually used, from its own log: the round cap and each step's model.
       const used = new Map();
       for (const e of ev) if (e.type === 'model_call' && e.ok) used.set(e.agent + ' (' + stepWords(e.step) + ')', modelName(e.model));
@@ -634,7 +797,7 @@
 
       // 1. Getting ready.
       const startEvents = ev.filter((e) => ['form_fields', 'page_refit', 'run_queued', 'run_dequeued', 'run_start', 'feedback_rerun'].includes(e.type));
-      patch($('stage-start'), '<h3>1. Getting the document ready</h3><p>' + CODE + ' Each page was turned into an image' + (n ? ' (' + plural(n, 'page') + ')' : '') + '.</p><ul>' + startEvents.map((e) => '<li>' + esc(explain(e)) + '</li>').join('') + '</ul>');
+      patch($('stage-start'), '<h3>1. Upload</h3><p>' + CODE + ' Each page became an image' + (n ? ' (' + plural(n, 'page') + ')' : '') + '.</p><ul>' + startEvents.map((e) => '<li>' + esc(explain(e)) + '</li>').join('') + '</ul>');
 
       // 2. Pages.
       const pageHtml = pages.map((p) => {
@@ -657,19 +820,19 @@
       }).join('');
       const ec = ev.find((e) => e.type === 'extraction_complete');
       const reread = pick > 0 ? '<p>This run re-read ' + (pages.length ? plural(pages.length, 'page') : 'no pages') + '. The other pages are as earlier runs left them.</p>' : '';
-      patch($('stage-pages'), pages.length || pick > 0 ? '<h3>2. Reading each page</h3>' + reread + '<p>' + AI + ' The page agent wrote each page\'s HTML from its image. ' + AI + ' A second model checked it. ' + CODE + ' Fixed rules checked links, image descriptions and ids.</p>' + (ec ? '<p>' + esc(explain(ec)) + '</p>' : '') + '<div class="pages">' + pageHtml + '</div>' : '');
+      patch($('stage-pages'), pages.length || pick > 0 ? '<h3>2. Read and check each page</h3>' + reread + '<p>' + AI + ' The page agent wrote each page. ' + AI + ' A second model checked it against the image, with ' + CODE + ' rules for links, image descriptions and ids.</p>' + (ec ? '<p>' + esc(explain(ec)) + '</p>' : '') + '<div class="pages">' + pageHtml + '</div>' : '');
 
       // 3. Join.
       const asm = ev.find((e) => e.type === 'assembly');
       const anchors = ev.find((e) => e.type === 'assembly_anchors');
       const assembled = state.manifest && state.manifest.runs.length && state.manifest.runs[state.manifest.runs.length - 1].snapshots.find((x) => x.name === 'assembled');
-      patch($('stage-join'), asm ? '<h3>3. Joining the pages</h3><p>' + CODE + ' ' + esc(explain(asm)) + (anchors ? ' ' + esc(explain(anchors)) : '') + '</p>'
+      patch($('stage-join'), asm ? '<h3>3. Join and check</h3><p>' + CODE + ' ' + esc(explain(asm)) + (anchors ? ' ' + esc(explain(anchors)) : '') + '</p>'
         + (assembled ? snapshot('The joined document, before review', assembled.url) : '') : '');
 
       // 4. Review.
       const edited = rounds.some((r) => r.editor);
-      patch($('stage-review'), rounds.length ? '<h3>4. Reviewing the whole document</h3><p>' + AI + ' The reader read the document as text and listed problems. '
-        + (edited ? AI + ' The copy editor fixed them, looking at the page images. ' + CODE + ' Each fix was checked, and a round that would lose content was thrown away.' : 'It found nothing to fix, so the copy editor did not run.') + '</p>'
+      patch($('stage-review'), rounds.length ? '<h3>4. Review</h3><p>' + AI + ' A reader listed problems in the whole document. '
+        + (edited ? AI + ' A copy editor fixed them from the page images. ' + CODE + ' A fix that lost content was thrown away.' : 'It found nothing to fix, so the copy editor did not run.') + '</p>'
         + rounds.map((r, i) => '<h4>Round ' + (i + 1) + '</h4><p>' + (r.count !== undefined ? 'The reader listed ' + plural(r.count, 'problem') + '.' : 'The reader is reading…') + (r.patch ? ' ' + esc(explain(r.patch)) : '') + (r.editor ? ' ' + esc(explain(r.editor)) : '') + '</p>'
           + (r.issues.length ? det('r' + i + 'i', AI + ' The problems the reader listed', '<ol>' + r.issues.map((x) => '<li>' + esc(x.issue) + (x.pages ? ' <span class="hint">(page ' + esc(x.pages.join(', ')) + ')</span>' : '') + '</li>').join('') + '</ol>') : '')
           + (r.snapshot && state.manifest ? snapshot('The document after round ' + (i + 1), API + '/sessions/' + state.id + '/audit/runs/' + r.snapshot.run + '/' + r.snapshot.name) : '')).join('') : '');
@@ -677,18 +840,18 @@
       // 5. Result.
       const rc = ev.find((e) => e.type === 'run_complete');
       const un = unresolvedFrom(state.output);
-      patch($('stage-result'), state.output ? '<h3>5. The result</h3><p>' + (rc ? esc(explain(rc)) : '') + '</p>' + frame('The finished accessible HTML', state.output.replace(/^[\s\S]*?<main>/, '').replace(/<\/main>[\s\S]*$/, ''))
+      patch($('stage-result'), state.output ? '<h3>5. Result</h3><p>' + (rc ? esc(explain(rc)) : '') + '</p>' + frame('The finished accessible HTML', state.output.replace(/^[\s\S]*?<main>/, '').replace(/<\/main>[\s\S]*$/, ''))
         + (un.length ? det('un', 'The ' + plural(un.length, 'problem') + ' left open', '<ol>' + un.map((u) => '<li>' + esc(u) + '</li>').join('') + '</ol>') : '')
         + '<p><a href="' + API + '/sessions/' + state.id + '/output">Open the HTML on its own</a></p>' : '');
 
       // 6. Tagged PDF.
       const pdfOn = state.limits && state.limits.tagged_pdf;
       const pdfHtml = !state.output || !pdfOn ? '' : !state.sourceIsPdf && state.manifest ? '' :
-        '<h3>6. The tagged PDF (iris-pdf)</h3><p>' + CODE + ' iris-pdf puts the HTML\'s structure onto the original PDF. It is not run unless you ask, because only some people need the PDF.'
-        + (state.manifest ? '' : ' It works only when the upload was one PDF, which this page cannot see with audit mode off.') + '</p>'
-        + '<button id="pdf-btn" type="button" class="secondary">Make the tagged PDF</button>'
+        '<h3>6. Tagged PDF (optional)</h3><p>' + CODE + ' iris-pdf puts the HTML\'s structure onto the original PDF. It runs only when asked.'
+        + (state.manifest ? '' : ' It needs a single uploaded PDF.') + '</p>'
+        + '<button id="pdf-btn" type="button" class="secondary">' + (state.pdf && state.pdf.report ? 'Make it again' : 'Make the tagged PDF') + '</button>'
         + (state.fields ? '<p>iris-pdf listed ' + plural(state.fields.length, 'form field') + '.</p>' : '')
-        + (state.pdf && state.pdf.report ? det('pdfr', 'What iris-pdf checked', '<pre>' + esc(JSON.stringify(state.pdf.report.verification ?? state.pdf.report, null, 2)) + '</pre>') + '<p><a id="pdf-dl" download="' + esc(state.pdf.filename) + '" href="data:application/pdf;base64,' + state.pdf.pdf + '">Download the tagged PDF</a></p>' : '')
+        + (state.pdf && state.pdf.report ? pdfReportHtml(state.pdf.report) + det('pdfr', 'iris-pdf\'s full report', '<pre>' + esc(JSON.stringify(state.pdf.report, null, 2)) + '</pre>') + '<p><a id="pdf-dl" download="' + esc(state.pdf.filename) + '" href="data:application/pdf;base64,' + state.pdf.pdf + '">Download the tagged PDF</a></p>' : '')
         + (state.pdf && state.pdf.error ? '<p class="status-bad">' + esc(state.pdf.error.message || state.pdf.error.code) + '</p>' : '');
       patch($('stage-pdf'), pdfHtml);
       const pb = $('pdf-btn'); if (pb && !pb.dataset.wired) { pb.dataset.wired = '1'; pb.addEventListener('click', makePdf); }
@@ -761,7 +924,7 @@
     }
     $('inputs-body').innerHTML = inputsHtml();
     Promise.all([loadLimits(), call('settings', 'GET', '/settings', { plain: 'How this deployment is set up: its settings and which model does what. Secrets are never included.' }).then((r) => r.res.ok ? r.data : null).catch(() => null)])
-      .then(([, st]) => { state.settings = st; $('settings-body').innerHTML = settingsHtml(st, state.limits); });
+      .then(([, st]) => { state.settings = st; $('settings-body').innerHTML = settingsHtml(st, state.limits); safeRender(); });
     probe().then(() => {
       const fromHash = /^#session=(ses_[A-Za-z0-9]+)$/.exec(location.hash);
       if (fromHash && !state.gated) { $('session-id').value = fromHash[1]; start(fromHash[1]); }

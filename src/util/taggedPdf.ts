@@ -45,6 +45,23 @@ export function taggedPdfStatus(cfg: IrisConfig): string | null {
     : `WARNING: tagged_pdf.command is "${command}", but "${command} fields --help" did not run. Tagged PDFs are off.`;
 }
 
+// Whether this iris-pdf takes `tag --report-detail` (equalify-iris-pdf #52): its help lists the flag.
+// An older one refuses an unknown flag, so Iris asks first. Not blocking (it runs beside requests),
+// and warmed at boot (index.ts). Only a definite answer is kept: a help that ran and did or did not
+// list the flag. A probe that failed to run is asked again next time.
+const detailed = new Map<string, boolean>();
+export async function supportsReportDetail(command: string): Promise<boolean> {
+  const known = detailed.get(command);
+  if (known !== undefined) return known;
+  try {
+    const { stdout } = await execFileP(command, ["tag", "--help"], { timeout: 30_000 });
+    detailed.set(command, String(stdout).includes("--report-detail"));
+    return detailed.get(command)!;
+  } catch {
+    return false;
+  }
+}
+
 export function tagTimeoutSeconds(cfg: IrisConfig): number {
   const t = Number(cfg.tagged_pdf?.timeout_seconds);
   return Number.isFinite(t) && t > 0 ? t : DEFAULT_TAG_TIMEOUT_SECONDS;
@@ -122,11 +139,15 @@ export type TagInput = { lang?: string; title?: string; pages: { sourcePage: num
 // Tag `pdfPath`. The values are personal data. They go to the child in a file only it and
 // this process can read, in a scratch directory deleted before this returns. Iris keeps
 // neither them nor the tagged PDF.
+//
+// `detail` asks for iris-pdf's detailed report (the structure tree, the words it could not match,
+// timings) where this iris-pdf supports it. It never holds a form value.
 export async function tagPdf(
   command: string,
-  args: { pdfPath: string; input: TagInput; values: Record<string, unknown>; scratchRoot: string; timeoutSeconds: number },
+  args: { pdfPath: string; input: TagInput; values: Record<string, unknown>; scratchRoot: string; timeoutSeconds: number; detail?: boolean },
 ): Promise<{ pdf: Buffer; report: unknown }> {
-  return inScratch(command, args, (out, report) => ({ pdf: readFileSync(out), report: JSON.parse(readFileSync(report, "utf8")) }));
+  const extra = args.detail && (await supportsReportDetail(command)) ? ["--report-detail"] : [];
+  return inScratch(command, args, (out, report) => ({ pdf: readFileSync(out), report: JSON.parse(readFileSync(report, "utf8")) }), extra);
 }
 
 // The fields a flat form gets when tagged: iris-pdf makes them from the HTML's controls, and
@@ -142,6 +163,7 @@ async function inScratch<T>(
   command: string,
   args: { pdfPath: string; input: TagInput; values: Record<string, unknown>; scratchRoot: string; timeoutSeconds: number },
   read: (out: string, report: string) => T | Promise<T>,
+  extra: string[] = [],
 ): Promise<T> {
   mkdirSync(args.scratchRoot, { recursive: true });
   const dir = mkdtempSync(join(args.scratchRoot, "pdf-"));
@@ -149,7 +171,7 @@ async function inScratch<T>(
   try {
     writeFileSync(f("pages.json"), JSON.stringify(args.input));
     writeFileSync(f("values.json"), JSON.stringify(args.values), { mode: 0o600 });
-    const argv = ["tag", "--pdf", args.pdfPath, "--pages", f("pages.json"), "--values", f("values.json"), "--out", f("out.pdf"), "--report", f("report.json")];
+    const argv = ["tag", "--pdf", args.pdfPath, "--pages", f("pages.json"), "--values", f("values.json"), "--out", f("out.pdf"), "--report", f("report.json"), ...extra];
     try {
       await execFileP(command, argv, { maxBuffer: MAX_BUFFER, timeout: args.timeoutSeconds * 1000 });
     } catch (e) {
