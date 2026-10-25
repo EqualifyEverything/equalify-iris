@@ -101,6 +101,18 @@
       </ol>
     </section>
 
+    <section class="box" id="settings" aria-labelledby="settings-h">
+      <h2 id="settings-h">How this deployment is set up</h2>
+      <p class="hint">Read from <code>GET /v1/settings</code> and <code>GET /v1/limits</code>. Secrets are never shown.</p>
+      <div id="settings-body"><p>Loading…</p></div>
+    </section>
+
+    <section class="box" id="inputs" aria-labelledby="inputs-h">
+      <h2 id="inputs-h">What you can send</h2>
+      <p>Everything a caller can give Iris. Nothing else changes a run: the settings above are fixed by the deployment.</p>
+      <div id="inputs-body"></div>
+    </section>
+
     <section class="box" id="start" aria-labelledby="start-h">
       <h2 id="start-h" tabindex="-1">Watch a document go through Iris</h2>
       <form id="run-form">
@@ -121,6 +133,7 @@
       <h2 id="progress-h" tabindex="-1">What Iris did</h2>
       <p id="now" class="now"></p>
       <div id="run-pick-box"></div>
+      <div id="run-used"></div>
       <p id="audit-note" class="hint" hidden>Audit mode is off on this deployment, so page images, prompts and the in-between versions of the document are not shown. Everything else comes from the run log.</p>
       <div id="stage-start"></div>
       <div id="stage-pages"></div>
@@ -386,6 +399,54 @@
       return 'curl -s' + (method !== 'GET' ? ' -X ' + method : '') + (extra ? ' ' + extra : '') + " '" + url + "'";
     }
 
+    // Every input the API takes. test/how-it-works.test.ts fails if a route reads a request field
+    // that is not listed here.
+    const INPUTS = [
+      { method: 'POST', path: '/sessions', field: 'images', where: 'form upload', what: 'The document: one PDF, or page images in reading order. Required.' },
+      { method: 'POST', path: '/sessions/{id}/feedback', field: 'feedback', where: 'JSON body', what: 'What to fix, in words. Iris works on the document again, as a new run.' },
+      { method: 'POST', path: '/sessions/{id}/pdf', field: 'values', where: 'JSON body', what: 'Optional form values for the tagged PDF, by field name. Never stored or logged.' },
+      { method: 'POST', path: '/sessions/{id}/close', field: null, where: '', what: 'Accept the document. Its pages become examples that future changes to the page agent are checked against.' },
+      { method: 'GET', path: '/sessions', field: 'limit', where: 'query', what: 'How many sessions to list at once.' },
+      { method: 'GET', path: '/sessions', field: 'status', where: 'query', what: 'List only sessions with this status.' },
+      { method: 'GET', path: '/sessions', field: 'cursor', where: 'query', what: 'Where the next page of the list starts.' },
+      { method: 'GET', path: '/quality', field: 'days', where: 'query', what: 'How many days the quality tally covers. Needs its own key, and is off unless set.' },
+    ];
+    const modelName = (m) => String(m || '').replace(/^us\./, '');
+    function settingsHtml(st, limits) {
+      if (!st) return '<p>This deployment did not say how it is set up.</p>';
+      const r = st.run, li = [];
+      li.push('Iris ' + esc(st.version) + '.');
+      li.push('Up to ' + plural(r.max_review_iterations, 'review round') + ' per document.');
+      li.push('Up to ' + plural(r.extraction_concurrency, 'page') + ' read at the same time.');
+      li.push('Up to ' + plural(r.max_concurrent_runs, 'document') + ' converted at once. Others wait their turn.');
+      li.push(r.recheck_sample_size ? plural(r.recheck_sample_size, 'fixed page') + ' per run checked again, to measure the checker.' : 'Fixed pages are not checked again.');
+      if (limits) li.push('Up to ' + plural(limits.max_pages, 'page') + ' per document.');
+      li.push(st.retention_days ? 'A document\'s files are deleted ' + plural(st.retention_days, 'day') + ' after it was last used.' : 'Documents are kept until deleted.');
+      li.push(st.tagged_pdf.on ? 'Tagged PDFs: on (' + esc(st.tagged_pdf.version || 'iris-pdf') + ', up to ' + st.tagged_pdf.timeout_seconds + ' s each).' : 'Tagged PDFs: off.');
+      li.push('Audit mode: ' + (st.access.audit ? 'on. Page images, prompts and in-between documents are kept and shown.' : 'off.'));
+      li.push('API key: ' + (st.access.api_key_required ? 'required.' : 'not required. Anyone who can reach this site can use it.'));
+      const caps = [['vision', 'reading images'], ['text', 'text only'], ['structured_output', 'structured answers']];
+      const cell = (m) => m ? esc(modelName(m.model)) + ' <span class="hint">(' + esc(m.provider) + ')</span>' : '—';
+      const row = (a) => '<tr><th scope="row">' + esc(a.agent) + '</th>' + caps.map(([c]) => '<td>' + cell(a.models[c]) + '</td>').join('') + '</tr>';
+      const core = st.agents.filter((a) => a.kind === 'core'), spec = st.agents.filter((a) => a.kind === 'specialist');
+      const blocks = Object.entries(st.providers.blocks).map(([name, b]) => '<li><strong>' + esc(name) + '</strong>' + (name === st.providers.default ? ' (the default)' : '') + ': ' + [
+        b.api ? 'API ' + esc(b.api) : null, b.region ? 'region ' + esc(b.region) : null,
+        'default model ' + esc(modelName(b.default_model)), 'answers up to ' + b.max_tokens.toLocaleString() + ' tokens',
+        b.prompt_cache ? 'prompt caching on (' + esc(b.prompt_cache_ttl) + ')' : 'prompt caching off',
+        b.inference_profiles.length ? 'called through a tagged inference profile for ' + b.inference_profiles.map(modelName).map(esc).join(', ') : null,
+      ].filter(Boolean).join(', ') + '.</li>').join('');
+      return '<ul>' + li.map((x) => '<li>' + x + '</li>').join('') + '</ul>'
+        + '<h3>Which model does what</h3><p class="hint">The model each agent uses for each kind of call. A run\'s log says which it actually used.</p>'
+        + '<table><thead><tr><th scope="col">Agent</th>' + caps.map(([, w]) => '<th scope="col">' + w + '</th>').join('') + '</tr></thead><tbody>' + core.map(row).join('') + '</tbody></table>'
+        + (spec.length ? det('spec', 'Specialist agents (' + spec.length + '), used when a page needs one', '<table><tbody>' + spec.map(row).join('') + '</tbody></table>') : '')
+        + '<h3>Model providers</h3><ul>' + blocks + '</ul>';
+    }
+    function inputsHtml() {
+      return '<table><thead><tr><th scope="col">Call</th><th scope="col">What you send</th><th scope="col">What it does</th></tr></thead><tbody>'
+        + INPUTS.map((i) => '<tr><td><code>' + i.method + ' ' + esc(API + i.path) + '</code></td><td>' + (i.field ? '<code>' + esc(i.field) + '</code> (' + esc(i.where) + ')' : 'nothing') + '</td><td>' + esc(i.what) + '</td></tr>').join('')
+        + '</tbody></table><p class="hint">An upload used to accept its own review-round setting. It no longer does: a <code>config</code> field is ignored, and every document gets the deployment\'s settings.</p>';
+    }
+
     // ----- State and API calls -----
     const state = { id: null, run: null, timer: null, gated: false, events: [], session: null, manifest: null, auditOff: false, limits: null, output: null, diagnostics: null, fields: null, pdf: null, calls: new Map(), done: false, sourceIsPdf: false };
 
@@ -414,11 +475,11 @@
     }
 
     // Before a new upload or a newly opened session: the last one's polling stops, and its cards go.
-    // The two calls about the deployment itself (/limits, /me) stay.
+    // The calls about the deployment itself (/limits, /me, /settings) stay.
     function resetSession() {
       clearTimeout(state.timer);
       Object.assign(state, { id: null, run: null, events: [], session: null, manifest: null, output: null, diagnostics: null, fields: null, pdf: null, done: false, sourceIsPdf: false });
-      for (const k of [...state.calls.keys()]) if (k !== 'limits' && k !== 'me') state.calls.delete(k);
+      for (const k of [...state.calls.keys()]) if (!['limits', 'me', 'settings'].includes(k)) state.calls.delete(k);
       snaps.clear();
     }
 
@@ -562,6 +623,10 @@
       const phaseWords = { extraction: 'reading each page', assembly: 'joining the pages', review: 'reviewing the whole document', done: 'finished' };
       const now = !s ? '' : s.status === 'failed' ? 'The run failed: ' + (s.error || '') : (s.status === 'ready_for_review' || s.status === 'closed') ? 'Finished.' : s.status === 'queued' ? 'Waiting for a free slot.' : 'Working: ' + (phaseWords[s.phase] || s.phase) + '.';
       $('now').textContent = now + (s ? ' Session ' + s.session_id + '.' : '');
+      // What this run actually used, from its own log: the round cap and each step's model.
+      const used = new Map();
+      for (const e of ev) if (e.type === 'model_call' && e.ok) used.set(e.agent + ' (' + stepWords(e.step) + ')', modelName(e.model));
+      patch($('run-used'), s ? '<p><strong>This run used:</strong> up to ' + plural(s.iterations_max, 'review round') + (used.size ? '; ' + [...used].map(([k, m]) => esc(k) + ': ' + esc(m)).join('; ') : '') + '.</p>' : '');
       if (now !== lastNow) { if (lastNow) live(now); lastNow = now; }
 
       // 1. Getting ready.
@@ -691,7 +756,9 @@
         }
       } catch { /* unreachable: the first real call will say so */ }
     }
-    loadLimits();
+    $('inputs-body').innerHTML = inputsHtml();
+    Promise.all([loadLimits(), call('settings', 'GET', '/settings', { plain: 'How this deployment is set up: its settings and which model does what. Secrets are never included.' }).then((r) => r.res.ok ? r.data : null).catch(() => null)])
+      .then(([, st]) => { state.settings = st; $('settings-body').innerHTML = settingsHtml(st, state.limits); });
     probe().then(() => {
       const fromHash = /^#session=(ses_[A-Za-z0-9]+)$/.exec(location.hash);
       if (fromHash && !state.gated) { $('session-id').value = fromHash[1]; start(fromHash[1]); }

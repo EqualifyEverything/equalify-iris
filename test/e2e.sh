@@ -427,6 +427,12 @@ hiw=$(curl -s "http://localhost:$PORT/how-it-works")
 grep -q 'This is the technical view' <<<"$hiw" && ! grep -q 'IRIS_EVENT_INDEX' <<<"$hiw" && grep -q '"audit_snapshot":{"summary"' <<<"$hiw" \
   && pass "/how-it-works is served, with the run log's index filled in" || fail "how-it-works" "$(echo "$hiw" | head -c 300)"
 
+settings=$(curl -s "${AUTH[@]}" "$BASE/settings")
+nokey=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/settings")
+jq -e '.run.max_review_iterations==1 and .access.api_key_required==true and (.agents|length)>=4' <<<"$settings" >/dev/null && [ "$nokey" = 401 ] \
+  && ! grep -q "$API_TOKEN\|test-key\|$QUALITY_TOKEN" <<<"$settings" \
+  && pass "/v1/settings: the effective settings, behind the key, with no secret in them" || fail "settings" "$nokey $settings"
+
 echo "==> 7b. GET /v1/stats (public tally, no token)"
 # Deliberately WITHOUT "${AUTH[@]}": this endpoint is never handed the auth
 # middleware, so the browser app can show the tally on a deployment it holds no token

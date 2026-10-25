@@ -196,7 +196,7 @@ What that costs, which Iris warns about at boot:
   read any document.
 - **Limits per address**, since the only credential a caller can present is shared.
 
-**So decide who may call it.** `server.api_token` gates `/v1/me` and `/v1/sessions` behind a shared
+**So decide who may call it.** `server.api_token` gates `/v1/me`, `/v1/settings` and `/v1/sessions` behind a shared
 secret you hand out; blank leaves them open. Gating also turns off the bundled demo page, which holds
 no credential. Nothing about a caller is stored.
 

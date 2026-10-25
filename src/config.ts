@@ -103,15 +103,15 @@ export interface IrisConfig {
     // the other one — which is why it carries its own guard instead of relying on the gate.
     // What delivers that is index.ts never handing `/v1/quality` to the auth middleware.
     quality_token?: string;
-    // OPTIONAL shared secret that gates `/v1/me` and `/v1/sessions`. Unset by default, which
+    // OPTIONAL shared secret that gates `/v1/me`, `/v1/settings` and `/v1/sessions`. Unset by default, which
     // leaves the deployment open to anyone who can reach it — that is what a public demo
     // needs, and the per-address limits in util/requestLimits.ts are what bound the cost.
     //
-    // It is not the whole of `/v1`: index.ts attaches the auth middleware to those two mounts
+    // It is not the whole of `/v1`: index.ts attaches the auth middleware to those three mounts
     // and to nothing else, so `/v1/health`, `/v1/stats`, `/v1/limits` and `/v1/quality` answer
     // whether this is set or not. Each of those says on its own mount why it may.
     //
-    // Set it and a call to either mount must send `Authorization: Bearer <it>`. The demo
+    // Set it and a call to any of them must send `Authorization: Bearer <it>`. The demo
     // page cannot use a deployment that sets it: the page holds no credential by design,
     // so a gated deployment is an API-only one.
     //
@@ -552,7 +552,7 @@ export function bedrockApiWarning(providers: IrisConfig["providers"]): string | 
 // same set from the `router.complete` call sites in src/ and fails if the two disagree.
 // That is the coupling worth pinning: the list going stale is how the examples this warning
 // exists to catch went wrong in the first place.
-const DISPATCHED_AGENTS = ["page", "reader", "copy_editor", "feedback"] as const;
+export const DISPATCHED_AGENTS = ["page", "reader", "copy_editor", "feedback"] as const;
 
 // A boot-time warning for a `providers.per_agent` key that names no agent Iris dispatches.
 //
