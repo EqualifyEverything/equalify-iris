@@ -668,12 +668,14 @@ shows it in words. It is behind the same key as `/v1/sessions`.
     "blocks": { "bedrock": { "api": "converse", "region": "us-east-2", "default_model": "us.anthropic.claude-sonnet-4-6",
       "per_capability": {}, "max_tokens": 32000, "prompt_cache": true, "prompt_cache_ttl": "5m",
       "inference_profiles": ["us.anthropic.claude-sonnet-4-6"] } } },
-  "agents": [{ "agent": "page", "kind": "core",
+  "agents": [{ "agent": "page", "kind": "core", "purpose": "The Page Agent is the primary extraction agent. …",
     "models": { "vision": { "provider": "bedrock", "model": "us.openai.gpt-5.6-luna" }, "text": { "…": "…" }, "structured_output": { "…": "…" } } }] }
 ```
 
-`agents` lists the four agents Iris always runs, then the specialist agents in `agents/`. An agent's
-`models` names one model per kind of call. Which kinds an agent actually uses depends on the step, so
+`agents` lists the four agents Iris always runs, then the specialist agents in `agents/`. `purpose` is
+the opening of the agent file's "Purpose" section, shortened to whole sentences (`null` for the reader
+and copy editor, whose prompts are in the pipeline code). An agent's `models` names one model per kind
+of call. Which kinds an agent actually uses depends on the step, so
 read a run's `model_call` lines for what ran. It never shows an API key, a token, a provider URL, a
 file path, or an inference profile's ARN: only the model ids that go through one.
 

@@ -517,24 +517,33 @@
         li.querySelector('.state').textContent = STATE_WORD[x.state] + (x.detail ? ': ' + x.detail : '') + (x.seconds != null ? ' · ' + x.seconds + ' s' : '');
       });
       if (!state.id) { lastSteps = null; return; }
-      const said = [];
-      if (!lastSteps) {
-        const now = steps.find((x) => x.state === 'working');
-        const doneN = steps.filter((x) => x.state === 'done').length;
-        said.push((state.uploaded ? 'Uploaded. Session ' : 'Opened session ') + state.id + '. ' + doneN + ' of ' + steps.length + ' steps done.' + (now ? ' Working now: ' + now.label + '.' : ''));
-      } else {
-        for (const x of steps) {
-          const was = lastSteps.get(x.key);
-          if (was === x.state) continue;
-          if (x.state === 'done') said.push(x.label + ': done' + (x.detail ? ', ' + x.detail : '') + '.');
-          else if (x.state === 'working') said.push('Working now: ' + x.label + '.');
-          else if (x.state === 'problem') said.push(x.label + ': problem' + (x.detail ? ', ' + x.detail : '') + '.');
-        }
-        const result = steps.find((x) => x.key === 'result');
-        if (result.state === 'done' && lastSteps.get('result') !== 'done') said.push('See Things to look at for anything that went wrong.');
-      }
+      const said = lastSteps ? changeSummary(lastSteps, steps) : [firstSummary(steps, state.id, state.uploaded)];
       lastSteps = new Map(steps.map((x) => [x.key, x.state]));
       if (said.length) live(said.join(' '));
+    }
+
+    // What the status region says when a session is opened: how far it got, what went wrong, and
+    // whether it finished. Then, on each update, only what changed.
+    function firstSummary(steps, id, uploaded) {
+      const now = steps.find((x) => x.state === 'working');
+      const doneN = steps.filter((x) => x.state === 'done').length;
+      const result = steps.find((x) => x.key === 'result');
+      return (uploaded ? 'Uploaded. Session ' : 'Opened session ') + id + '. ' + doneN + ' of ' + steps.length + ' steps done.'
+        + (now ? ' Working now: ' + now.label + '.' : '')
+        + steps.filter((x) => x.state === 'problem').map((x) => ' ' + x.label + ': problem' + (x.detail ? ', ' + x.detail : '') + '.').join('')
+        + (result && result.state === 'done' ? ' Finished: ' + result.detail + '.' : '');
+    }
+    function changeSummary(prev, steps) {
+      const said = [];
+      for (const x of steps) {
+        if (prev.get(x.key) === x.state) continue;
+        if (x.state === 'done') said.push(x.label + ': done' + (x.detail ? ', ' + x.detail : '') + '.');
+        else if (x.state === 'working') said.push('Working now: ' + x.label + '.');
+        else if (x.state === 'problem') said.push(x.label + ': problem' + (x.detail ? ', ' + x.detail : '') + '.');
+      }
+      const result = steps.find((x) => x.key === 'result');
+      if (result && result.state === 'done' && prev.get('result') !== 'done') said.push('See Things to look at for anything that went wrong.');
+      return said;
     }
 
     const STATE_WORD = { done: 'Done', working: 'Working now', waiting: 'Waiting', problem: 'Problem', skipped: 'Not run' };
@@ -674,7 +683,7 @@
         if (r) items.push('up to ' + plural(r.extraction_concurrency, 'page') + ' at a time');
         items.push(m('page agent', 'page', 'extract', 'vision'), m('checker', 'feedback', 'verify', 'vision'), 'a failed page is fixed once');
         if (r && r.recheck_sample_size) items.push(plural(r.recheck_sample_size, 'fixed page') + ' checked again');
-        if (st) items.push(st.agents.filter((a) => a.kind === 'specialist').length + ' specialist agents available');
+        if (st) items.push(plural(st.agents.filter((a) => a.kind === 'specialist').length, 'specialist agent') + ' available');
       } else if (key === 'join') {
         items.push('axe-core, WCAG 2.2 A and AA rules', 'colour contrast is not checked: the HTML has no styling');
       } else if (key === 'review') {
@@ -876,7 +885,7 @@
     }
     // A preview takes the document's own language, so a screen reader reads it with the right voice.
     const docLang = () => ((/<html[^>]*\slang="([^"]+)"/i.exec(state.output || '') || [])[1]) || 'en';
-    const frame = (title, html) => '<iframe class="render" sandbox title="' + esc(title) + '" srcdoc="' + esc('<!DOCTYPE html><html lang="' + esc(docLang()) + '"><head><meta charset="utf-8"><style>body{font:16px/1.5 system-ui,sans-serif;margin:1rem}img{border:1px dashed #999;min-width:40px;min-height:16px}input,textarea,select{display:block;margin:.2rem 0 .6rem}</style></head><body>' + html + '</body></html>') + '"></iframe>';
+    const frame = (title, html) => '<iframe class="render" sandbox title="' + esc(title) + '" srcdoc="' + esc('<!DOCTYPE html><html lang="' + docLang() + '"><head><meta charset="utf-8"><style>body{font:16px/1.5 system-ui,sans-serif;margin:1rem}img{border:1px dashed #999;min-width:40px;min-height:16px}input,textarea,select{display:block;margin:.2rem 0 .6rem}</style></head><body>' + html + '</body></html>') + '"></iframe>';
     // A saved in-between document, fetched when its section is opened (it is served as text, and
     // shown here in a sandbox that runs no scripts).
     const snaps = new Map();
@@ -922,7 +931,9 @@
       // The diagram is one image to a screen reader, so its state is also said here in words.
       // A step's whole label: its box holds one line per text element ("Turn each page", "into an image").
       const label = (k) => [...document.querySelectorAll('#st-' + k + ' text.b')].map((t) => t.textContent).join(' ') || k;
-      $('diagram-state').textContent = (active ? 'Working now: ' + label(active) + '. ' : '') + 'Done so far: ' + done.filter((k) => document.getElementById('st-' + k)).map(label).join('; ') + '.';
+      const doneLabels = done.filter((k) => document.getElementById('st-' + k)).map(label);
+      $('diagram-state').textContent = !state.id ? 'No document is open, so no step has run. The diagram shows the steps every document goes through.'
+        : (active ? 'Working now: ' + label(active) + '. ' : '') + (doneLabels.length ? 'Done so far: ' + doneLabels.join('; ') + '.' : 'Nothing is done yet.');
       const pages = pagesFrom(ev, state.manifest);
       const n = s ? s.image_count : pages.length;
       const setNote = (k, t) => { const el = document.getElementById('n-' + k); if (el && t) el.textContent = t; };
