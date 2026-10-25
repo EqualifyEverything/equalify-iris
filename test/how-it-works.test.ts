@@ -32,11 +32,13 @@ test("the served page carries the index, and no summary can end its script", () 
   assert.ok(json, "the index is in the page");
   assert.deepEqual(JSON.parse(json), index);
   const hostile = howItWorksPage(page, "## Run log\n\n| [`x`](#x) | ends </script><b> here |\n");
-  assert.ok(!/const EVENT_INDEX = [^\n]*<\/script>/.test(hostile));
+  const line = hostile.split("\n").find((l) => l.includes("const EVENT_INDEX = "))!;
+  assert.ok(line.includes("ends \\u003c/script>"), "the summary is there, escaped");
+  assert.ok(!line.toLowerCase().includes("</script"), "and cannot close the script");
 });
 
 // The page's pure functions: everything between the two markers in its script.
-const script = /<script>([\s\S]*)<\/script>/.exec(page)![1];
+const script = page.slice(page.lastIndexOf("<script>") + 8, page.lastIndexOf("</script>"));
 const pure = script.slice(script.indexOf("// ----- Reading the log"), script.indexOf("// ----- State and API calls"));
 const lib = new Function(
   "EVENT_INDEX",
@@ -44,12 +46,13 @@ const lib = new Function(
    const esc = (s) => String(s); const AI = ''; const CODE = '';
    const plural = (n, one, many) => n + ' ' + (n === 1 ? one : (many || one + 's'));
    ${pure}
-   return { parseLog, parseReply, explain, SAY, pagesFrom, roundsFrom, problems, unresolvedFrom, stagesFrom, curl };`,
+   return { parseLog, parseReply, explain, SAY, runsOf, pagesFrom, roundsFrom, problems, unresolvedFrom, stagesFrom, curl };`,
 )(index) as {
   parseLog(t: string): Record<string, unknown>[];
   parseReply(o: unknown): Record<string, unknown> | null;
   explain(e: Record<string, unknown>): string;
   SAY: Record<string, unknown>;
+  runsOf(ev: Record<string, unknown>[]): Record<string, unknown>[][];
   pagesFrom(ev: unknown[], m?: unknown): { image: string; order: number; drafts: (string | null)[]; verify: string | null; corrected: unknown; prompts: unknown[] }[];
   roundsFrom(ev: unknown[]): { issues: { issue: string }[]; count?: number; patch: unknown; snapshot: unknown }[];
   problems(ev: unknown[], s?: unknown): { level: string; text: string; type: string }[];
@@ -157,4 +160,43 @@ test("the page passes the same axe check Iris gives its own output", async () =>
 
 test("the page says it is the technical view and links to the demo", () => {
   assert.match(page, /This is the technical view\.<\/strong>[^<]*<a href="\/">use the demo<\/a>/);
+});
+
+// A session that took feedback: run 1 lost page 2, run 2 re-read it and got it back.
+const TWO_RUNS = [
+  { type: "form_fields", fields: 0 },
+  { type: "run_queued" },
+  { type: "run_start", images: 2, feedback: null },
+  { type: "page_extraction_failed", page: 2, image: "doc-p2.png", error: "timeout" },
+  { type: "reader_start", iteration: 0 },
+  { type: "reader", iteration: 0, issues: 3 },
+  { type: "run_complete", iterations: 1, unresolved: 3, failed_pages: [2] },
+  { type: "run_queued" },
+  { type: "phase", phase: "extraction" },
+  { type: "feedback_rerun", feedback: "page 2 is missing" },
+  { type: "run_start", images: 2, feedback: "page 2 is missing" },
+  { type: "agent_call", agent: "page.md", image: "doc-p2.png", output: '{"html":"<p>two</p>"}' },
+  { type: "page_verify_ok", image: "doc-p2.png" },
+  { type: "reader_start", iteration: 0 },
+  { type: "reader", iteration: 0, issues: 0 },
+  { type: "run_complete", iterations: 0, unresolved: 0 },
+];
+
+test("a session's log is split into runs, each with the lines that lead into it", () => {
+  const runs = lib.runsOf(TWO_RUNS);
+  assert.equal(runs.length, 2);
+  assert.deepEqual(runs[0].map((e) => e.type), ["form_fields", "run_queued", "run_start", "page_extraction_failed", "reader_start", "reader", "run_complete"]);
+  assert.deepEqual(runs[1].slice(0, 4).map((e) => e.type), ["run_queued", "phase", "feedback_rerun", "run_start"]);
+  assert.deepEqual(lib.runsOf([{ type: "run_queued" }]).length, 1, "a log with no run_start yet is one run");
+});
+
+test("a page an earlier run lost and a later run recovered is not reported as missing", () => {
+  const [first, second] = lib.runsOf(TWO_RUNS);
+  const now = lib.problems(second, { status: "ready_for_review" });
+  assert.deepEqual(now, [], "the latest run delivered every page");
+  assert.deepEqual(lib.pagesFrom(second).map((p) => [p.image, p.verify, p.drafts.length]), [["doc-p2.png", "ok", 1]]);
+  // The first run, read on its own, still says what it delivered.
+  assert.deepEqual(lib.problems(first).map((p) => [p.level, p.type]), [["high", "page_extraction_failed"], ["high", "run_complete"], ["info", "run_complete"]]);
+  // Rounds are counted within a run, not across the session.
+  assert.equal(lib.roundsFrom(second).length, 1);
 });

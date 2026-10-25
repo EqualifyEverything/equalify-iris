@@ -6,8 +6,7 @@ whole document and fix what they find.
 
 **To see how it works**, open `/how-it-works` on any running Iris (after the [Quick start](#quick-start),
 `http://localhost:8080/how-it-works`). It takes one document through the whole system in plain
-language, showing every API call and what each step did. Open a session there when a document comes
-out wrong.
+language, showing every API call and what each step did.
 
 **Where we are.** We're focused on one thing: the most accessible HTML conversion we can deliver.
 With the optional [equalify-iris-pdf](https://github.com/EqualifyEverything/equalify-iris-pdf), that
