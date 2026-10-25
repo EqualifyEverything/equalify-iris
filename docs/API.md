@@ -1053,6 +1053,34 @@ the form, sending any values gets `422 values_not_permitted`. An empty or missin
 the tagged copy. This needs iris-pdf with
 [equalify-iris-pdf#51](https://github.com/EqualifyEverything/equalify-iris-pdf/pull/51).
 
+## Audit (off by default)
+
+With `server.audit: true` (or `iris convert --audit`), each run also keeps the prompts it sent and the
+document after assembly and after each review round. These endpoints then serve them, with the page
+images and the session's working files. They answer while the run is still working. With audit mode
+off, each answers `404 audit_off`.
+
+**Anyone who can read a session can read all of this**, including the page images.
+
+```bash
+curl -s -H "$AUTH" "$BASE/sessions/$SID/audit"
+# {"session_id":"ses_...",
+#  "pages":[{"order":1,"name":"report-p1.png","media_type":"image/png","bytes":245119,"sha256":"…","url":"/v1/sessions/ses_.../audit/pages/1"}],
+#  "files":[{"name":"final.json","bytes":30211,"url":"…/audit/files/final.json"}],
+#  "runs":[{"run":1,"snapshots":[{"name":"assembled","bytes":41105,"url":"…/audit/runs/1/assembled"}]}],
+#  "prompts":{"count":9,"url":"/v1/sessions/ses_.../audit/prompts/{sha256}"}}
+```
+
+| Endpoint | What it returns |
+| --- | --- |
+| `GET /audit/pages/<order>` | The page image the models were sent |
+| `GET /audit/files/<name>` | A working file: `final.json` (the final pages), `lint.json` (the axe result), `links.json`, `fields.json`, `text-layer.json`, `unresolved.md`, `agent-updates.md`, or `source.pdf` |
+| `GET /audit/runs/<run>/<name>` | The document body at that stage, as `text/plain` |
+| `GET /audit/prompts/<sha256>` | One message as sent, named by a `model_call_start` line's `prompt` |
+
+Saved HTML is sent as plain text, so a browser does not run it. Prompts never hold form values: those
+go only to `POST /pdf`, which calls no model.
+
 ## Submit feedback (re-run)
 
 Triggers a new run within the same session, with the feedback injected as a top-level
@@ -1097,8 +1125,8 @@ The events worth grepping for have a section each below, and the index is a link
 the index when you have a `type` off a log line and want to know what it means; read a section when
 you want to know what the field it names is for and what it costs.
 
-**The index is the whole log.** `src/` emits **125** event types and every one of them has a section
-below — **116** sections, because a few cover two or three events that are only read together. So a
+**The index is the whole log.** `src/` emits **126** event types and every one of them has a section
+below — **117** sections, because a few cover two or three events that are only read together. So a
 `type` you cannot find here is not one the index skipped: it is a misread line, or a name `src/` no
 longer emits.
 
@@ -1226,6 +1254,7 @@ emits fails it too.
 | [`tagged_pdf_fields` / `tagged_pdf_fields_failed`](#tagged_pdf_fields--tagged_pdf_fields_failed) | A flat form was tagged to list its fields, or could not be |
 | [`form_fields` / `page_fields` / `page_fields_missing`](#form_fields--page_fields--page_fields_missing) | The PDF's form field names were read, shown to a page, or not used |
 | [`calibrate_call_failed`](#calibrate_call_failed) | One calibration verifier call threw — a tool's line, never a run's |
+| [`audit_snapshot`](#audit_snapshot) | Audit mode saved the document at one stage of the run |
 
 ### `page_refit`
 
@@ -1335,6 +1364,10 @@ from the result where there is one, and otherwise from what the adapter reported
 as the call ran, so a call that **threw** still says what it spent
 ([Diagnostics](#diagnostics-timing--hang-detection) reads these back as `tokens`). One line per
 completion, not per HTTP request.
+
+In [audit mode](#audit-off-by-default) the start line also carries `prompt`: each message sent, as
+`role`, `sha256` and `chars` (fetch its text at `/audit/prompts/<sha256>`), and each image, as
+`media_type`, `bytes` and `sha256`, which matches a page image's hash in the audit list.
 
 `output_ceiling_clamped: true` says this call ran below the output ceiling the deployment
 configured, with `output_ceiling_asked` (what `providers.<provider>.max_tokens` says) and
@@ -4389,6 +4422,13 @@ minus what went unjudged, and the false-positive rate over the clean copies that
 verdict substituted for the dead call reads `ok: true`, and is not counted as a pass either. What the
 line is for is telling a provider to retry apart from a verifier to fix, which is why an unparseable
 reply is counted separately from this.
+
+### `audit_snapshot`
+
+Audit mode only ([Audit](#audit-off-by-default)). The document's body was saved at one stage: `name`
+is `assembled` (the pages joined, before review) or `round-<n>` (after review round `n`'s fixes), `run`
+is which run of the session it belongs to (a feedback re-run is the next), and `chars` its length. Fetch
+it at `/audit/runs/<run>/<name>`.
 
 ## Diagnostics (timing / hang detection)
 

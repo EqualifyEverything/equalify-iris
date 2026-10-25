@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync, writeFileSync, existsSync, copyFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import type { IrisConfig } from "../config.ts";
+import { auditOn, type IrisConfig } from "../config.ts";
 import { ProviderRouter } from "../providers/index.ts";
 import {
   SIGNAL_LINKS_DROPPED,
@@ -27,6 +27,7 @@ import {
 } from "../store/db.ts";
 import { Paths } from "../store/paths.ts";
 import { RunLog } from "../store/runlog.ts";
+import { AuditRecorder } from "../store/audit.ts";
 import type { InputImage, PipelineContext } from "./context.ts";
 import { runExtraction, reExtractPages } from "./extraction.ts";
 import { runAssembly, assembleBody, wrapDocument } from "./assembly.ts";
@@ -111,8 +112,14 @@ export async function runPipeline(args: {
   const { cfg, store, sessionId } = args;
   const paths = new Paths(cfg);
   const log = new RunLog(paths.sessionLog(sessionId));
+  // Audit mode keeps the prompts and the document at each stage (store/audit.ts).
+  const audit = auditOn(cfg) ? new AuditRecorder(paths.sessionAudit(sessionId), log) : undefined;
   // Route every model call's timing into the run log for diagnostics.
-  const router = new ProviderRouter(cfg, (type, data) => log.event(type, data));
+  const router = new ProviderRouter(
+    cfg,
+    (type, data) => log.event(type, data),
+    audit ? (messages, images) => audit.prompt(messages, images) : undefined,
+  );
   const images = enumerateInputs(paths, sessionId);
 
   // Update the session phase and record a phase marker for timing diagnostics.
@@ -133,6 +140,7 @@ export async function runPipeline(args: {
     extractionConcurrency: cfg.defaults.extraction_concurrency,
     recheckSampleSize: cfg.defaults.recheck_sample_size,
     recordSuggestions: (rows) => store.addSuggestions(rows),
+    ...(audit ? { audit } : {}),
   };
 
   try {

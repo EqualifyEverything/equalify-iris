@@ -3229,6 +3229,7 @@ export async function runReview(
     // separates the two populations: a section reply is 0.016–0.379 of the body it belongs to,
     // because it IS one section, and anything reading these numbers as one distribution would
     // read every sectioned round as a catastrophe.
+    ctx.audit?.snapshot(`round-${iterations}`, body);
     ctx.log.event("editor", {
       iteration: iterations,
       changed: body !== before,

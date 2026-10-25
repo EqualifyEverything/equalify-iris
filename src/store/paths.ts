@@ -11,7 +11,7 @@ import type { IrisConfig } from "../config.ts";
 //                   feedback re-run is about to overwrite it — not the review loop's rounds),
 //                   output.html, log.jsonl (the run log), lint.json, unresolved.md,
 //                   agent-updates.md, links.json, text-layer.json, source-name.txt, source.pdf and
-//                   fields.json (only with tagged PDFs on)
+//                   fields.json (only with tagged PDFs on), audit/ (only in audit mode)
 //   fixtures/<agent>/  and  memory/<agent>.json  — keyed by agent, shared by every session
 //   tmp/<id>/       one run's scratch. `tmp/<id>/agents/` holds agents that session BUILT,
 //                   which `loadAgent` prefers over the library for the rest of it.
@@ -97,6 +97,11 @@ export class Paths {
   // the write in pipeline/orchestrator.ts for who it is for.
   sessionLint(id: string): string {
     return join(this.sessionDir(id), "lint.json");
+  }
+  // Audit mode only (config `server.audit`, store/audit.ts): `prompts/<sha256>.txt`, each distinct
+  // message sent to a model, and `runs/<n>/<name>.html`, the document at each stage of run n.
+  sessionAudit(id: string): string {
+    return join(this.sessionDir(id), "audit");
   }
   // Snapshots of prior outputs before feedback re-runs overwrite them.
   sessionHistory(id: string): string {

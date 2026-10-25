@@ -17,6 +17,8 @@ export type { Image, Message, CompletionResult, PipelineStep, ProviderNote, Usag
 // deployment config. Providers are constructed lazily so a
 // deployment only needs credentials for the providers it actually references.
 export type TelemetryFn = (type: string, data: Record<string, unknown>) => void;
+// Audit mode's hook (store/audit.ts): what to add to `model_call_start` about the prompt.
+export type PromptFn = (messages: Message[], images?: Image[]) => Record<string, unknown>;
 
 // Normalize a per_agent entry (string shorthand or object) to its parts.
 function agentOverride(cfg: IrisConfig["providers"], agentName: string): { provider?: string; model?: string } {
@@ -52,10 +54,12 @@ export class ProviderRouter {
   private cfg: IrisConfig["providers"];
   private cache = new Map<string, ModelProvider>();
   private onEvent?: TelemetryFn;
+  private onPrompt?: PromptFn;
 
-  constructor(cfg: IrisConfig, onEvent?: TelemetryFn) {
+  constructor(cfg: IrisConfig, onEvent?: TelemetryFn, onPrompt?: PromptFn) {
     this.cfg = cfg.providers;
     this.onEvent = onEvent;
+    this.onPrompt = onPrompt;
   }
 
   private build(name: string): ModelProvider {
@@ -127,7 +131,9 @@ export class ProviderRouter {
       ...(provider.dialect ? { api: provider.dialect } : {}),
       ...(opts.maxOutputTokens !== undefined ? { max_output_tokens: opts.maxOutputTokens } : {}),
     };
-    this.onEvent?.("model_call_start", meta);
+    // The prompt only on the start line, and only in audit mode. Not on `meta`: the end line
+    // repeats `meta`, and one record of the prompt per call is enough.
+    this.onEvent?.("model_call_start", { ...meta, ...(this.onPrompt?.(messages, opts.images) ?? {}) });
     const startedAt = Date.now();
     // Collected through the callback rather than read off the result, so a call that
     // throws still reports what it spent. The expensive failures are precisely the
