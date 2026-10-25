@@ -680,8 +680,8 @@ of call. Which kinds an agent actually uses depends on the step, so
 read a run's `model_call` lines for what ran. It never shows an API key, a token, a provider URL, a
 file path, or an inference profile's ARN: only the model ids that go through one. `prices` is what the
 operator set in `providers.<name>.prices`, in US dollars per million tokens. `/how-it-works` multiplies
-it by each call's tokens for an estimated cost. Iris reads no price list, so with none set there is no
-cost, and a model with none set is shown as unpriced.
+it by each call's tokens for an estimated cost. With no prices set, the page shows tokens but no cost,
+and a model with no entry is shown as unpriced.
 
 ## Create a session (upload images)
 

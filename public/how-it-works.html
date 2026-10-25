@@ -656,13 +656,15 @@
       return (b && b.prices && b.prices[model]) || null;
     }
     function usageByStage(ev, st) {
-      const zero = () => ({ calls: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, ms: 0, cost: 0, unpriced: new Set() });
+      const zero = () => ({ calls: 0, unreported: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, ms: 0, cost: 0, unpriced: new Set() });
       const out = { pages: zero(), join: zero(), review: zero(), total: zero() };
       const stage = { extraction: 'pages', assembly: 'join', review: 'review' };
       let cur = 'pages';
       for (const e of ev) {
         if (e.type === 'phase' && stage[e.phase]) cur = stage[e.phase];
         if (e.type !== 'model_call') continue;
+        // No token counts at all means the provider did not report them, not that the call was free.
+        const reported = e.input_tokens != null || e.output_tokens != null;
         const t = { input: e.input_tokens || 0, output: e.output_tokens || 0, cacheRead: e.cache_read_input_tokens || 0, cacheWrite: e.cache_creation_input_tokens || 0 };
         const pr = priceOf(st, e.provider, e.model);
         let cost = 0;
@@ -675,7 +677,7 @@
         }
         for (const k of [cur, 'total']) {
           const u = out[k];
-          u.calls++; u.input += t.input; u.output += t.output; u.cacheRead += t.cacheRead; u.cacheWrite += t.cacheWrite; u.ms += e.duration_ms || 0;
+          u.calls++; if (!reported) u.unreported++; u.input += t.input; u.output += t.output; u.cacheRead += t.cacheRead; u.cacheWrite += t.cacheWrite; u.ms += e.duration_ms || 0;
           u.cost += cost; missing.forEach((m) => u.unpriced.add(m));
         }
       }
@@ -686,10 +688,12 @@
       if (!u || !u.calls) return '';
       const n = (x) => x.toLocaleString();
       const unpriced = [...(u.unpriced || [])];
+      const partial = unpriced.length || u.unreported;
       const cost = unpriced.length && !u.cost ? ' · cost unknown: no price set for ' + unpriced.map(esc).join(', ')
-        : ' · ' + dollars(u.cost) + (unpriced.length ? ', not counting ' + unpriced.map(esc).join(', ') + ' (no price set)' : '');
+        : ' · ' + (partial && u.cost >= 0.01 ? 'at least $' + u.cost.toFixed(2) : dollars(u.cost)) + (unpriced.length ? ', not counting ' + unpriced.map(esc).join(', ') + ' (no price set)' : '');
+      const unrep = u.unreported ? ' · ' + plural(u.unreported, 'call') + ' reported no tokens' + (u.unreported === u.calls ? ', so the cost is not known' : ', so the cost is a minimum') : '';
       return '<p class="settings-line"><span class="label">' + (label || 'Usage') + '</span> ' + plural(u.calls, 'model call') + ' · ' + n(u.input) + ' tokens in, ' + n(u.output) + ' out'
-        + (u.cacheRead || u.cacheWrite ? ' · cache: ' + n(u.cacheRead) + ' read, ' + n(u.cacheWrite) + ' written' : '') + ' · ' + Math.round(u.ms / 1000) + ' s of model time' + cost + '</p>';
+        + (u.cacheRead || u.cacheWrite ? ' · cache: ' + n(u.cacheRead) + ' read, ' + n(u.cacheWrite) + ' written' : '') + ' · ' + Math.round(u.ms / 1000) + ' s of model time' + (u.unreported === u.calls ? '' : cost) + unrep + '</p>';
     }
 
     // The settings that shape one step, said where the step is shown, so nobody has to look them up.

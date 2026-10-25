@@ -491,8 +491,6 @@ export function usableProfileArn(v: unknown): v is string {
   return typeof v === "string" && v.startsWith("arn:aws:bedrock:");
 }
 
-// A Bedrock `inference_profiles` value that is not an ARN. The call still works, by the model
-// id, so the only symptom would be cost missing from the profile's tags a month later.
 export type ModelPrice = { input: number; output: number; cache_read?: number; cache_write?: number };
 
 // A block's usable prices: each entry whose `input` and `output` are numbers of 0 or more, and whose
@@ -529,6 +527,8 @@ export function priceWarning(providers: IrisConfig["providers"]): string | undef
     : undefined;
 }
 
+// A Bedrock `inference_profiles` value that is not an ARN. The call still works, by the model
+// id, so the only symptom would be cost missing from the profile's tags a month later.
 export function inferenceProfileWarning(providers: IrisConfig["providers"]): string | undefined {
   const block = providers.bedrock as ProviderBlock | undefined;
   const map = block?.inference_profiles as unknown;
