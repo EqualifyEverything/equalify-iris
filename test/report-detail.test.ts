@@ -30,7 +30,7 @@ async function tag(command: string, detail: boolean) {
 }
 
 test("the detailed report is asked for when wanted and supported, and not otherwise", async () => {
-  assert.equal(supportsReportDetail(fake), true);
+  assert.equal(await supportsReportDetail(fake), true);
   assert.ok((await tag(fake, true)).detail, "detail asked for and returned");
   assert.equal((await tag(fake, false)).detail, undefined, "not asked for when not wanted");
 });
@@ -42,8 +42,22 @@ test("an iris-pdf that does not know the flag is never sent it, so tagging still
     const old = join(dir, "iris-pdf-old");
     writeFileSync(old, `#!/bin/sh\nFAKE_NO_DETAIL=1 exec node "${fake}" "$@"\n`);
     chmodSync(old, 0o755);
-    assert.equal(supportsReportDetail(old), false);
+    assert.equal(await supportsReportDetail(old), false);
     assert.equal((await tag(old, true)).detail, undefined, "tagged without the flag, and did not fail");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a check that could not run is not remembered as a no", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "iris-flaky-pdf-"));
+  try {
+    const flaky = join(dir, "iris-pdf-flaky");
+    // Fails the first time it is asked, then works.
+    writeFileSync(flaky, `#!/bin/sh\nif [ ! -f "${dir}/ran" ]; then touch "${dir}/ran"; exit 9; fi\nexec node "${fake}" "$@"\n`);
+    chmodSync(flaky, 0o755);
+    assert.equal(await supportsReportDetail(flaky), false, "it failed to run");
+    assert.equal(await supportsReportDetail(flaky), true, "and is asked again");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

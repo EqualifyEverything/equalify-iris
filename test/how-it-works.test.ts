@@ -320,4 +320,7 @@ test("iris-pdf's detailed report shows the tree, the unmatched words with their 
     assert.ok(h.includes(part), part);
   }
   assert.ok(!h.includes("Words that could not be tagged in place"), "a kind with no words is left out");
+  const bare = lib.pdfReportHtml({ detail: { structure: null, pages: [{ page: 2, lost: { count: 1, words: ["z"] } }] } });
+  assert.ok(!bare.includes("undefined"), "a page without `matched` leaves it out");
+  assert.ok(bare.includes("Page 2: 1 kind of difference"));
 });

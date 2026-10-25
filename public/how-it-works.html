@@ -498,6 +498,7 @@
       figure_without_image: 'The page\'s images did not pair up with the HTML\'s, so figures do not contain their images.',
       owner_restricted: 'The owner restricts changes, so the form was not given new fields.',
       alignment_incomplete: 'The page and the HTML differ too much to match every word.',
+      field_without_name: 'A form control in the HTML has no name, so it got no field.',
     };
     function pdfReportHtml(r) {
       if (!r) return '';
@@ -534,7 +535,7 @@
         const WORDS = [['furniture', 'Page furniture (headers, footers, page numbers), kept out of the reading order'], ['added', 'Words from the HTML the page did not draw, added in a hidden layer'], ['lost', 'Page words not in the HTML, kept as a plain paragraph'], ['redrawn', 'Words that could not be tagged in place, so were drawn again']];
         for (const pg of d.pages || []) {
           const lists = WORDS.filter(([k]) => pg[k] && pg[k].count).map(([k, label]) => '<li>' + label + ': ' + pg[k].count + (pg[k].words.length ? ' (' + pg[k].words.map(esc).join(' ') + (pg[k].count > pg[k].words.length ? ' …' : '') + ')' : '') + '</li>');
-          out.push(det('pdfp' + pg.page, 'Page ' + pg.page + ': ' + plural(pg.matched, 'word') + ' matched' + (lists.length ? ', ' + lists.length + ' kinds of difference' : ', no differences') + (pg.textKept === false ? ', text lost' : ''),
+          out.push(det('pdfp' + pg.page, 'Page ' + pg.page + ': ' + (typeof pg.matched === 'number' ? plural(pg.matched, 'word') + ' matched, ' : '') + (lists.length ? plural(lists.length, 'kind') + ' of difference' : 'no differences') + (pg.textKept === false ? ', text lost' : ''),
             (lists.length ? '<ul>' + lists.join('') + '</ul>' : '<p>Every word matched.</p>') + '<p>Pixels that differ: ' + (pg.differingPixels ?? 'not checked') + '.</p>'));
         }
         const node = (e) => '<li><code>' + esc(e.type) + '</code>' + (e.page ? ' <span class="hint">p.' + e.page + '</span>' : '') + (e.text ? ' ' + esc(e.text) : '')
@@ -546,6 +547,7 @@
         if ((fl.created || []).length || (fl.unresolved || []).length) {
           out.push(det('pdff', 'Form fields: ' + (fl.created || []).length + ' added, ' + (fl.unresolved || []).length + ' not matched', '<ul>'
             + (fl.created || []).map((c) => '<li>Added <code>' + esc(c.name) + '</code> (' + esc(c.type) + ') on page ' + c.page + ', beside “' + esc(c.label) + '”</li>').join('')
+            // `name` is the field's name, or for a control with none, its label (iris-pdf #53).
             + (fl.unresolved || []).map((u) => '<li>Not matched: <code>' + esc(u.name) + '</code>' + (u.page ? ' on page ' + u.page : '') + ' (' + esc(PDF_WARN[u.code] || u.code) + ')</li>').join('') + '</ul>'));
         }
       }
@@ -779,7 +781,8 @@
       // The process panel.
       const pdfState = state.pdfBusy ? 'working' : state.pdf ? (state.pdf.report ? 'done' : 'failed') : null;
       const steps = processSteps(ev, latest ? s : { ...(s || {}), status: 'ready_for_review', phase: 'done' }, { maxRounds: s && s.iterations_max, pdf: pdfState, pdfOn: state.limits ? Boolean(state.limits.tagged_pdf) : undefined });
-      patch($('process'), steps.map((x) => '<li class="' + x.state + '"' + (x.state === 'working' ? ' aria-current="step"' : '') + '><span class="icon" aria-hidden="true">' + STATE_ICON[x.state] + '</span><span><a href="' + x.href + '">' + esc(x.label) + '</a><span class="state">' + STATE_WORD[x.state] + (x.detail ? ': ' + esc(x.detail) : '') + (x.seconds != null ? ' · ' + x.seconds + ' s' : '') + '</span></span></li>').join(''));
+      // Before a run the step sections are hidden, so every step points at Start.
+      patch($('process'), steps.map((x) => '<li class="' + x.state + '"' + (x.state === 'working' ? ' aria-current="step"' : '') + '><span class="icon" aria-hidden="true">' + STATE_ICON[x.state] + '</span><span><a href="' + (state.id ? x.href : '#start') + '">' + esc(x.label) + '</a><span class="state">' + STATE_WORD[x.state] + (x.detail ? ': ' + esc(x.detail) : '') + (x.seconds != null ? ' · ' + x.seconds + ' s' : '') + '</span></span></li>').join(''));
 
       // Now.
       const phaseWords = { extraction: 'reading each page', assembly: 'joining the pages', review: 'reviewing the whole document', done: 'finished' };

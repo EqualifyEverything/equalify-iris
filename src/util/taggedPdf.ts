@@ -46,14 +46,20 @@ export function taggedPdfStatus(cfg: IrisConfig): string | null {
 }
 
 // Whether this iris-pdf takes `tag --report-detail` (equalify-iris-pdf #52): its help lists the flag.
-// An older one refuses an unknown flag, so Iris asks first. Asked once per command.
+// An older one refuses an unknown flag, so Iris asks first. Not blocking (it runs beside requests),
+// and warmed at boot (index.ts). Only a definite answer is kept: a help that ran and did or did not
+// list the flag. A probe that failed to run is asked again next time.
 const detailed = new Map<string, boolean>();
-export function supportsReportDetail(command: string): boolean {
-  if (!detailed.has(command)) {
-    const r = spawnSync(command, ["tag", "--help"], { encoding: "utf8", timeout: 30_000 });
-    detailed.set(command, r.status === 0 && (r.stdout ?? "").includes("--report-detail"));
+export async function supportsReportDetail(command: string): Promise<boolean> {
+  const known = detailed.get(command);
+  if (known !== undefined) return known;
+  try {
+    const { stdout } = await execFileP(command, ["tag", "--help"], { timeout: 30_000 });
+    detailed.set(command, String(stdout).includes("--report-detail"));
+    return detailed.get(command)!;
+  } catch {
+    return false;
   }
-  return detailed.get(command)!;
 }
 
 export function tagTimeoutSeconds(cfg: IrisConfig): number {
@@ -140,7 +146,7 @@ export async function tagPdf(
   command: string,
   args: { pdfPath: string; input: TagInput; values: Record<string, unknown>; scratchRoot: string; timeoutSeconds: number; detail?: boolean },
 ): Promise<{ pdf: Buffer; report: unknown }> {
-  const extra = args.detail && supportsReportDetail(command) ? ["--report-detail"] : [];
+  const extra = args.detail && (await supportsReportDetail(command)) ? ["--report-detail"] : [];
   return inScratch(command, args, (out, report) => ({ pdf: readFileSync(out), report: JSON.parse(readFileSync(report, "utf8")) }), extra);
 }
 
