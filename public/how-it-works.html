@@ -535,7 +535,9 @@
         const WORDS = [['furniture', 'Page furniture (headers, footers, page numbers), kept out of the reading order'], ['added', 'Words from the HTML the page did not draw, added in a hidden layer'], ['lost', 'Page words not in the HTML, kept as a plain paragraph'], ['redrawn', 'Words that could not be tagged in place, so were drawn again']];
         for (const pg of d.pages || []) {
           const lists = WORDS.filter(([k]) => pg[k] && pg[k].count).map(([k, label]) => '<li>' + label + ': ' + pg[k].count + (pg[k].words.length ? ' (' + pg[k].words.map(esc).join(' ') + (pg[k].count > pg[k].words.length ? ' …' : '') + ')' : '') + '</li>');
-          out.push(det('pdfp' + pg.page, 'Page ' + pg.page + ': ' + (typeof pg.matched === 'number' ? plural(pg.matched, 'word') + ' matched, ' : '') + (lists.length ? plural(lists.length, 'kind') + ' of difference' : 'no differences') + (pg.textKept === false ? ', text lost' : ''),
+          // `matched` is `{count, words}` like the other lists (iris-pdf 03b0d1b).
+          const matched = typeof pg.matched === 'number' ? pg.matched : pg.matched && pg.matched.count;
+          out.push(det('pdfp' + pg.page, 'Page ' + pg.page + ': ' + (typeof matched === 'number' ? plural(matched, 'word') + ' matched, ' : '') + (lists.length ? plural(lists.length, 'kind') + ' of difference' : 'no differences') + (pg.textKept === false ? ', text lost' : ''),
             (lists.length ? '<ul>' + lists.join('') + '</ul>' : '<p>Every word matched.</p>') + '<p>Pixels that differ: ' + (pg.differingPixels ?? 'not checked') + '.</p>'));
         }
         const node = (e) => '<li><code>' + esc(e.type) + '</code>' + (e.page ? ' <span class="hint">p.' + e.page + '</span>' : '') + (e.text ? ' ' + esc(e.text) : '')

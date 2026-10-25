@@ -55,7 +55,7 @@ if (command === "fields" && pdf.includes("FLAT")) {
   const detail = a["report-detail"]
     ? {
         structure: { type: "Document", kids: [{ type: "H1", page: 1, text: "Quarterly Report" }, { type: "P", page: 1, text: "Revenue grew." }] },
-        pages: [{ page: 1, matched: 5, furniture: { count: 1, words: ["Page", "1"] }, added: { count: 0, words: [] }, lost: { count: 0, words: [] }, redrawn: { count: 1, words: ["grew."] }, differingPixels: 0, textKept: true }],
+        pages: [{ page: 1, matched: { count: 5, words: ["Quarterly", "Report", "Revenue", "grew.", "1"] }, furniture: { count: 1, words: ["Page", "1"] }, added: { count: 0, words: [] }, lost: { count: 0, words: [] }, redrawn: { count: 1, words: ["grew."] }, differingPixels: 0, textKept: true }],
         fields: { created: [], unresolved: [] },
         timing: { open: 1, form: 0, read: 2, match: 3, tag: 4, save: 5, check: 6 },
       }
