@@ -15,6 +15,7 @@ import {
   apiToken,
   auditOn,
   DISPATCHED_AGENTS,
+  modelPrices,
   normalizeMaxTokens,
   type Capability,
   type IrisConfig,
@@ -118,6 +119,8 @@ export function deploymentSettings(cfg: IrisConfig): Record<string, unknown> {
             prompt_cache_ttl: promptCacheTtl(b),
             // Which models are called through a tagged inference profile. The ARNs are not shown.
             inference_profiles: Object.keys(b.inference_profiles ?? {}),
+            // US dollars per million tokens, as the operator set them. Not secret.
+            prices: modelPrices(b),
           },
         ]),
       ),

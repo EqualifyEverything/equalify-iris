@@ -8,6 +8,7 @@ import {
   auditOn,
   bedrockApiWarning,
   inferenceProfileWarning,
+  priceWarning,
   accessWarning,
   loadConfig,
   perAgentKeyWarning,
@@ -50,6 +51,8 @@ const apiWarning = bedrockApiWarning(cfg.providers);
 if (apiWarning) console.warn(`WARNING: ${apiWarning}`);
 const profileWarning = inferenceProfileWarning(cfg.providers);
 if (profileWarning) console.warn(`WARNING: ${profileWarning}`);
+const pricesWarning = priceWarning(cfg.providers);
+if (pricesWarning) console.warn(`WARNING: ${pricesWarning}`);
 // Said at boot because it changes what any reader of a session can see.
 if (auditOn(cfg)) {
   console.warn(

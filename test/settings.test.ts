@@ -30,6 +30,7 @@ function cfg(): IrisConfig {
         api: "converse",
         default_model: "us.anthropic.claude-sonnet-4-6",
         inference_profiles: { "us.anthropic.claude-sonnet-4-6": `arn:aws:bedrock:us-east-2:111122223333:application-inference-profile/${SECRET}` },
+        prices: { "us.anthropic.claude-sonnet-4-6": { input: 3.3, output: 16.5, cache_read: 0.33, cache_write: 4.125 }, "us.bad": { input: "3", output: 1 } } as never,
       },
       openrouter: { api_key: SECRET, base_url: `https://${SECRET}.example`, default_model: "anthropic/claude-sonnet-4.6", max_tokens: 0 },
     },
@@ -68,4 +69,13 @@ test("the settings are the values Iris uses, and each agent's model is resolved 
   assert.match(purpose("chartDataAgent")!, /^Convert charts and graphs/, "an agent's purpose comes from its file");
   assert.ok(s.agents.every((a) => !(a as unknown as { purpose: string | null }).purpose || (a as unknown as { purpose: string }).purpose.length <= 250), "each purpose is short");
   assert.equal(purpose("reader"), null, "an agent with no file in agents/ has none");
+});
+
+test("prices are shown as set, a price that is not a number is left out and named at boot", async () => {
+  const { priceWarning } = await import("../src/config.ts");
+  const s = deploymentSettings(cfg()) as { providers: { blocks: Record<string, { prices: Record<string, unknown> }> } };
+  assert.deepEqual(s.providers.blocks.bedrock.prices, { "us.anthropic.claude-sonnet-4-6": { input: 3.3, output: 16.5, cache_read: 0.33, cache_write: 4.125 } });
+  assert.deepEqual(s.providers.blocks.openrouter.prices, {});
+  assert.match(priceWarning(cfg().providers)!, /^providers\.bedrock\.prices\.us\.bad is not usable/);
+  assert.equal(priceWarning({ default: "x", x: { default_model: "m" } } as never), undefined);
 });

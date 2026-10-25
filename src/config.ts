@@ -60,6 +60,10 @@ export interface ProviderBlock {
   // the model id. A model not listed is called by its id, and so is any value that is not a
   // Bedrock ARN (warned at boot, `inferenceProfileWarning`).
   inference_profiles?: Record<string, string>;
+  // OPTIONAL. US dollars per million tokens, by model id, for the cost estimates /how-it-works shows
+  // (`modelPrices`). Iris bills nothing and reads no price list: these are the operator's numbers. A
+  // model without an entry is shown as unpriced, never as free.
+  prices?: Record<string, ModelPrice>;
 }
 
 // How much one caller may ask of this deployment per minute, and how many uploads it
@@ -485,6 +489,42 @@ export function auditOn(cfg: IrisConfig): boolean {
 // Which `inference_profiles` values are used (providers/bedrock.ts).
 export function usableProfileArn(v: unknown): v is string {
   return typeof v === "string" && v.startsWith("arn:aws:bedrock:");
+}
+
+export type ModelPrice = { input: number; output: number; cache_read?: number; cache_write?: number };
+
+// A block's usable prices: each entry whose `input` and `output` are numbers of 0 or more, and whose
+// cache prices, when given, are too. Anything else is left out (and named at boot, `priceWarning`).
+export function modelPrices(block: ProviderBlock | undefined): Record<string, ModelPrice> {
+  const raw = block?.prices as unknown;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const ok = (v: unknown) => typeof v === "number" && Number.isFinite(v) && v >= 0;
+  const out: Record<string, ModelPrice> = {};
+  for (const [model, p] of Object.entries(raw as Record<string, Record<string, unknown>>)) {
+    if (!p || typeof p !== "object" || !ok(p.input) || !ok(p.output)) continue;
+    if ((p.cache_read !== undefined && !ok(p.cache_read)) || (p.cache_write !== undefined && !ok(p.cache_write))) continue;
+    out[model] = { input: p.input as number, output: p.output as number, ...(p.cache_read !== undefined ? { cache_read: p.cache_read as number } : {}), ...(p.cache_write !== undefined ? { cache_write: p.cache_write as number } : {}) };
+  }
+  return out;
+}
+
+// Prices that cannot be used, named, so a typo does not quietly make a model "unpriced".
+export function priceWarning(providers: IrisConfig["providers"]): string | undefined {
+  const bad: string[] = [];
+  for (const [name, block] of Object.entries(providers)) {
+    if (name === "default" || name === "per_agent" || !block || typeof block !== "object") continue;
+    const raw = (block as ProviderBlock).prices as unknown;
+    if (raw === undefined || raw === null) continue;
+    if (typeof raw !== "object" || Array.isArray(raw)) {
+      bad.push(`providers.${name}.prices`);
+      continue;
+    }
+    const good = modelPrices(block as ProviderBlock);
+    for (const model of Object.keys(raw)) if (!good[model]) bad.push(`providers.${name}.prices.${model}`);
+  }
+  return bad.length
+    ? `${bad.join(", ")} ${bad.length === 1 ? "is" : "are"} not usable: input and output must be numbers of 0 or more (US dollars per million tokens), and so must cache_read and cache_write when given. Those models are shown as unpriced.`
+    : undefined;
 }
 
 // A Bedrock `inference_profiles` value that is not an ARN. The call still works, by the model
