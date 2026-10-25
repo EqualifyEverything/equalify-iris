@@ -206,7 +206,7 @@ The details, including what to do with a database from an earlier build, are in
 ## API
 
 All endpoints are under `/v1`. Where `server.api_token` is set,
-`/v1/me` and everything under `/v1/sessions` need `Authorization: Bearer <server.api_token>`; where it
+`/v1/me`, `/v1/settings` and everything under `/v1/sessions` need `Authorization: Bearer <server.api_token>`; where it
 is blank they need no header at all. Health, limits and stats never do. `/v1/quality` is the exception
 in the other direction: it has its own shared secret and 404s unless you set it.
 
@@ -218,6 +218,7 @@ in the other direction: it has its own shared secret and 404s unless you set it.
 | `GET  /v1/suggestions` | Saved agent suggestions, grouped, for the filing workflow (quality token, off by default) |
 | `GET  /v1/limits` | What an upload may be — formats, per-image size, page cap (never gated) |
 | `GET  /v1/me` | This deployment's defaults. Also the probe for whether it is gated |
+| `GET  /v1/settings` | Every non-secret setting, and the model each agent uses |
 | `GET  /v1/sessions` | List every session — see the note above on isolation |
 | `POST /v1/sessions` | Create a session, upload images and/or PDFs (`multipart/form-data`) |
 | `GET  /v1/sessions/{id}` | Poll status |
@@ -227,6 +228,7 @@ in the other direction: it has its own shared secret and 404s unless you set it.
 | `POST /v1/sessions/{id}/feedback` | Submit feedback, trigger a re-run |
 | `POST /v1/sessions/{id}/close` | Finalize the session and clean tmp |
 | `GET  /v1/sessions/{id}/logs` | Fetch the run log (ndjson) |
+| `GET  /v1/sessions/{id}/audit` | Audit mode only: page images, prompts and the document between steps |
 | `GET  /v1/sessions/{id}/diagnostics` | Cost/timing/health summary (token counts per run and per agent, phase + per-call durations, in-flight/hung call) |
 
 Example — create a session (order of `images` parts is the processing order):

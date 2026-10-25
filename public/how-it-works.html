@@ -399,6 +399,9 @@
       return 'curl -s' + (method !== 'GET' ? ' -X ' + method : '') + (extra ? ' ' + extra : '') + " '" + url + "'";
     }
 
+    // A collapsed section; `k` keeps it open across a re-render (patch).
+    const det = (k, summary, body) => '<details data-k="' + esc(k) + '"><summary>' + summary + '</summary>' + body + '</details>';
+
     // Every input the API takes. test/how-it-works.test.ts fails if a route reads a request field
     // that is not listed here.
     const INPUTS = [
@@ -428,6 +431,7 @@
       const caps = [['vision', 'reading images'], ['text', 'text only'], ['structured_output', 'structured answers']];
       const cell = (m) => m ? esc(modelName(m.model)) + ' <span class="hint">(' + esc(m.provider) + ')</span>' : '—';
       const row = (a) => '<tr><th scope="row">' + esc(a.agent) + '</th>' + caps.map(([c]) => '<td>' + cell(a.models[c]) + '</td>').join('') + '</tr>';
+      const head = '<table><thead><tr><th scope="col">Agent</th>' + caps.map(([, w]) => '<th scope="col">' + w + '</th>').join('') + '</tr></thead><tbody>';
       const core = st.agents.filter((a) => a.kind === 'core'), spec = st.agents.filter((a) => a.kind === 'specialist');
       const blocks = Object.entries(st.providers.blocks).map(([name, b]) => '<li><strong>' + esc(name) + '</strong>' + (name === st.providers.default ? ' (the default)' : '') + ': ' + [
         b.api ? 'API ' + esc(b.api) : null, b.region ? 'region ' + esc(b.region) : null,
@@ -437,8 +441,8 @@
       ].filter(Boolean).join(', ') + '.</li>').join('');
       return '<ul>' + li.map((x) => '<li>' + x + '</li>').join('') + '</ul>'
         + '<h3>Which model does what</h3><p class="hint">The model each agent uses for each kind of call. A run\'s log says which it actually used.</p>'
-        + '<table><thead><tr><th scope="col">Agent</th>' + caps.map(([, w]) => '<th scope="col">' + w + '</th>').join('') + '</tr></thead><tbody>' + core.map(row).join('') + '</tbody></table>'
-        + (spec.length ? det('spec', 'Specialist agents (' + spec.length + '), used when a page needs one', '<table><tbody>' + spec.map(row).join('') + '</tbody></table>') : '')
+        + head + core.map(row).join('') + '</tbody></table>'
+        + (spec.length ? det('spec', 'Specialist agents (' + spec.length + '), used when a page needs one', head + spec.map(row).join('') + '</tbody></table>') : '')
         + '<h3>Model providers</h3><ul>' + blocks + '</ul>';
     }
     function inputsHtml() {
@@ -573,7 +577,6 @@
       snaps.set(d.dataset.src, r.res.ok ? r.text : '<p>Could not load it.</p>');
       render();
     }, true);
-    const det = (k, summary, body) => '<details data-k="' + esc(k) + '"><summary>' + summary + '</summary>' + body + '</details>';
     const promptLink = (m) => state.manifest ? '<a href="' + API + '/sessions/' + state.id + '/audit/prompts/' + m.sha256 + '">' + esc(m.role) + ' message, ' + m.chars.toLocaleString() + ' characters</a>' : esc(m.role) + ' message, ' + m.chars.toLocaleString() + ' characters';
 
     function render() {
