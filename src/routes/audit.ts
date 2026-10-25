@@ -9,7 +9,7 @@
 import { Router } from "express";
 import type { Response } from "express";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { extname, join } from "node:path";
+import { join } from "node:path";
 import { auditOn, type IrisConfig } from "../config.ts";
 import type { Store } from "../store/db.ts";
 import { Paths } from "../store/paths.ts";
@@ -127,8 +127,10 @@ export function auditRouter(cfg: IrisConfig, store: Store): Router {
   r.get("/:id/audit/prompts/:hash", (req, res) => {
     const id = session(req.params.id, res);
     if (!id) return;
-    const file = join(paths.sessionAudit(id), "prompts", `${req.params.hash}.txt`);
-    if (!/^[0-9a-f]{64}$/.test(req.params.hash) || !existsSync(file)) {
+    // Checked before any path is built from it.
+    const hash = /^[0-9a-f]{64}$/.exec(req.params.hash)?.[0];
+    const file = hash ? join(paths.sessionAudit(id), "prompts", `${hash}.txt`) : undefined;
+    if (!file || !existsSync(file)) {
       sendError(res, 404, "not_found", "No such prompt");
       return;
     }
@@ -138,9 +140,11 @@ export function auditRouter(cfg: IrisConfig, store: Store): Router {
   r.get("/:id/audit/runs/:run/:name", (req, res) => {
     const id = session(req.params.id, res);
     if (!id) return;
-    const { run, name } = req.params;
-    const file = join(runsDir(id), run, `${name}.html`);
-    if (!/^\d+$/.test(run) || !/^(assembled|round-\d+)$/.test(name) || extname(file) !== ".html" || !existsSync(file)) {
+    // Both checked before any path is built from them.
+    const run = /^\d+$/.exec(req.params.run)?.[0];
+    const name = /^(?:assembled|round-\d+)$/.exec(req.params.name)?.[0];
+    const file = run && name ? join(runsDir(id), run, `${name}.html`) : undefined;
+    if (!file || !existsSync(file)) {
       sendError(res, 404, "not_found", "No such snapshot");
       return;
     }
