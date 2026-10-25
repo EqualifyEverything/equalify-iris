@@ -531,7 +531,7 @@
       return (uploaded ? 'Uploaded. Session ' : 'Opened session ') + id + '. ' + doneN + ' of ' + steps.length + ' steps done.'
         + (now ? ' Working now: ' + now.label + '.' : '')
         + steps.filter((x) => x.state === 'problem').map((x) => ' ' + x.label + ': problem' + (x.detail ? ', ' + x.detail : '') + '.').join('')
-        + (result && result.state === 'done' ? ' Finished: ' + result.detail + '.' : '');
+        + (result && result.state === 'done' && result.detail ? ' Finished: ' + result.detail + '.' : '');
     }
     function changeSummary(prev, steps) {
       const said = [];
@@ -951,7 +951,7 @@
 
       // The process panel.
       const pdfState = state.pdfBusy ? 'working' : state.pdf ? (state.pdf.report ? 'done' : 'failed') : null;
-      const steps = processSteps(ev, latest ? s : { ...(s || {}), status: 'ready_for_review', phase: 'done' }, { maxRounds: s && s.iterations_max, pdf: pdfState, pdfOn: state.limits ? Boolean(state.limits.tagged_pdf) : undefined });
+      const steps = processSteps(ev, latest ? s : { ...(s || {}), status: ev.some((e) => e.type === 'run_failed') ? 'failed' : 'ready_for_review', phase: 'done' }, { maxRounds: s && s.iterations_max, pdf: pdfState, pdfOn: state.limits ? Boolean(state.limits.tagged_pdf) : undefined });
       updateProcess(steps);
 
       // Now.

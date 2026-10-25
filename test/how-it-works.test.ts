@@ -373,6 +373,9 @@ test("the status region says when a session opens failed, finished or working, a
   assert.match(lib.firstSummary(done, "ses_Y", true), /^Uploaded\. Session ses_Y\. .* Finished: 3 left open\.$/);
   const mid = lib.processSteps([{ type: "run_start" }], { status: "running", phase: "extraction", image_count: 2 }, {});
   assert.match(lib.firstSummary(mid, "ses_Z", false), /Working now: Read each page\./);
+  // Ready, but the run's last line is not written yet: no dangling "Finished: ."
+  const early = lib.processSteps([{ type: "run_start" }, { type: "extraction_complete" }], { status: "ready_for_review", phase: "done", image_count: 2 }, {});
+  assert.ok(!lib.firstSummary(early, "ses_W", false).includes("Finished"));
   // An update says only the steps that changed.
   const prev = new Map(mid.map((x) => [x.key, x.state]));
   const next = lib.processSteps([{ type: "run_start" }, { type: "extraction_complete" }], { status: "running", phase: "assembly", image_count: 2 }, {});
