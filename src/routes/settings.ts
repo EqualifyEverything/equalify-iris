@@ -9,8 +9,8 @@
 //
 // Built once: the config is read at boot and does not change while the process runs.
 import { Router } from "express";
-import { readdirSync } from "node:fs";
-import { basename } from "node:path";
+import { readdirSync, readFileSync } from "node:fs";
+import { basename, join } from "node:path";
 import {
   apiToken,
   auditOn,
@@ -27,6 +27,34 @@ import { taggedPdfStatus, tagTimeoutSeconds } from "../util/taggedPdf.ts";
 import { VERSION } from "../version.ts";
 
 const CAPABILITIES: Capability[] = ["vision", "text", "structured_output"];
+
+// An agent file's "## Purpose" paragraph, as one line: what the agent is for, in its own words.
+function purposeOf(agentsDir: string, agent: string): string | null {
+  try {
+    const md = readFileSync(join(agentsDir, `${agent}.md`), "utf8");
+    const m = /##\s*Purpose\s*\n+([\s\S]*?)(?:\n\s*\n|\n##)/.exec(md);
+    if (!m) return null;
+    // Whole sentences up to about 240 characters, never cut mid-sentence; at least the first one.
+    // A sentence ends at a stop followed by a space and a capital, so "etc." and "2.2" do not end one.
+    const sentences = m[1].replace(/\s+/g, " ").trim().split(/(?<=[.!?])\s+(?=[A-Z])/);
+    let out = "";
+    for (const x of sentences) {
+      if (out && (out + " " + x).length > 240) break;
+      out = out ? out + " " + x : x;
+    }
+    // One long sentence, as the specialists' files have: keep what it converts, the part that says
+    // what the agent is for, and leave how it is done to the file.
+    if (out.length > 240) {
+      // Drop the lists of examples first, "(bar, line, pie)" and "— a, b, c —".
+      out = out.replace(/\s*\([^()]*\)/g, "").replace(/\s+—[^—]*—/g, "");
+      const into = out.indexOf(" into accessible HTML");
+      out = into > 0 ? out.slice(0, into + " into accessible HTML".length) + "." : out.slice(0, out.lastIndexOf(" ", 237)) + "…";
+    }
+    return out || null;
+  } catch {
+    return null;
+  }
+}
 
 export function deploymentSettings(cfg: IrisConfig): Record<string, unknown> {
   const p = cfg.providers;
@@ -95,8 +123,8 @@ export function deploymentSettings(cfg: IrisConfig): Record<string, unknown> {
       ),
     },
     agents: [
-      ...DISPATCHED_AGENTS.map((a) => ({ agent: a, kind: "core", models: route(a) })),
-      ...specialists.map((a) => ({ agent: a, kind: "specialist", models: route(a) })),
+      ...DISPATCHED_AGENTS.map((a) => ({ agent: a, kind: "core", purpose: purposeOf(cfg.storage.agents_dir, a), models: route(a) })),
+      ...specialists.map((a) => ({ agent: a, kind: "specialist", purpose: purposeOf(cfg.storage.agents_dir, a), models: route(a) })),
     ],
   };
 }

@@ -43,17 +43,19 @@ const pure = script.slice(script.indexOf("// ----- Reading the log"), script.ind
 const lib = new Function(
   "EVENT_INDEX",
   `const REF = 'https://x/API.md'; const API = '/v1'; const location = { origin: 'https://iris.test' };
-   const esc = (s) => String(s); const AI = ''; const CODE = '';
+   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]); const AI = ''; const CODE = '';
    const plural = (n, one, many) => n + ' ' + (n === 1 ? one : (many || one + 's'));
    ${pure}
-   return { settingsHtml, inputsHtml, processSteps, pdfReportHtml, PDF_WARN, INPUTS, parseLog, parseReply, explain, SAY, runsOf, pagesFrom, roundsFrom, problems, unresolvedFrom, stagesFrom, curl };`,
+   return { usageByStage, usageLine, settingsHtml, inputsHtml, processSteps, pdfReportHtml, PDF_WARN, INPUTS, parseLog, parseReply, explain, SAY, runsOf, pagesFrom, roundsFrom, problems, unresolvedFrom, stagesFrom, curl };`,
 )(index) as {
   parseLog(t: string): Record<string, unknown>[];
   parseReply(o: unknown): Record<string, unknown> | null;
   explain(e: Record<string, unknown>): string;
   SAY: Record<string, unknown>;
   INPUTS: { method: string; path: string; field: string | null }[];
-  settingsHtml(st: unknown, limits?: unknown): string;
+  settingsHtml(st: unknown, limits?: unknown, stats?: unknown): string;
+  usageByStage(ev: unknown[]): Record<string, { calls: number; input: number; output: number; cacheRead: number; cacheWrite: number; ms: number }>;
+  usageLine(u: unknown, label?: string): string;
   inputsHtml(): string;
   processSteps(ev: unknown[], s: unknown, o?: unknown): { key: string; state: string; detail: string; seconds?: number | null }[];
   pdfReportHtml(r: unknown): string;
@@ -324,4 +326,16 @@ test("iris-pdf's detailed report shows the tree, the unmatched words with their 
   const bare = lib.pdfReportHtml({ detail: { structure: null, pages: [{ page: 2, lost: { count: 1, words: ["z"] } }] } });
   assert.ok(!bare.includes("undefined"), "a page without `matched` leaves it out");
   assert.ok(bare.includes("Page 2: 1 kind of difference"));
+});
+
+test("tokens and model time are counted per step, from the step that was running", () => {
+  const call = (input: number, output: number, ms: number) => ({ type: "model_call", ok: true, input_tokens: input, output_tokens: output, cache_read_input_tokens: 10, cache_creation_input_tokens: 0, duration_ms: ms });
+  const u = lib.usageByStage([
+    { type: "phase", phase: "extraction" }, call(100, 50, 1000), call(100, 50, 1000),
+    { type: "phase", phase: "assembly" }, call(5, 5, 500),
+    { type: "phase", phase: "review" }, call(1000, 200, 3000),
+  ]);
+  assert.deepEqual([u.pages.calls, u.pages.input, u.pages.output, u.join.calls, u.review.output, u.total.calls, u.total.cacheRead], [2, 200, 100, 1, 200, 4, 40]);
+  assert.match(lib.usageLine(u.total), /4 model calls · 1,205 tokens in, 305 out · cache: 40 read, 0 written · 6 s of model time/);
+  assert.equal(lib.usageLine(u.join && { ...u.join, calls: 0 }), "", "a step with no calls shows nothing");
 });
