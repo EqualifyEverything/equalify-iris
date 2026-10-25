@@ -2934,6 +2934,17 @@ These are the rules both adapters enforce on a model call. The README states the
   (before the review loop) and any form values to `iris-pdf`, a separate program, and returns the
   result (`src/util/taggedPdf.ts`). The values and the filled PDF live in a scratch folder that is
   deleted when `iris-pdf` exits.
+- **`/how-it-works` reads the API, not the server's insides.** It makes the same calls a client
+  would and explains them, so it shows the API as it is and works on any deployment. What the run
+  log cannot hold (page images, prompts as sent, the document between stages) comes from audit mode
+  (`server.audit`), which is off by default because it serves all of that to anyone who can read a
+  session. The page does not replace docs/API.md: a walkthrough explains one run, and the reference
+  holds each field's exact contract, which the log's readers (diagnostics, the quality tally, the
+  bench) depend on. Each event's one-line meaning comes from API.md's index at boot
+  (`src/eventIndex.ts`), so the page cannot describe an event the reference does not.
+- **Audit files are named by what is in them.** A prompt is stored once per distinct text, by
+  sha256: a run sends the same agent contract on every page. Every write is best-effort, because an
+  audit file that cannot be written must not fail the run it describes.
 
 ## Designed for, and not built
 
