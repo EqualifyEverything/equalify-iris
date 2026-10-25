@@ -18,6 +18,7 @@ import { makeAuthMiddleware } from "./auth/middleware.ts";
 import { meRouter } from "./routes/me.ts";
 import { sessionsRouter } from "./routes/sessions.ts";
 import { auditRouter } from "./routes/audit.ts";
+import { howItWorksPage } from "./eventIndex.ts";
 import { statsRouter } from "./routes/stats.ts";
 import { limitsRouter } from "./routes/limits.ts";
 import { clearPdfScratch, taggedPdfStatus } from "./util/taggedPdf.ts";
@@ -345,6 +346,18 @@ if (brand.logo) {
 }
 // Keep the old /demo path working for any shared links.
 app.get("/demo", (_req, res) => res.redirect(302, "/"));
+// The technical walkthrough (public/how-it-works.html): the same API, explained step by step. Each run
+// log event's meaning comes from docs/API.md's index (eventIndex.ts), so the page and the reference
+// cannot disagree.
+const apiMd = fileURLToPath(new URL("../docs/API.md", import.meta.url));
+const howItWorksHtml = howItWorksPage(
+  readFileSync(fileURLToPath(new URL("../public/how-it-works.html", import.meta.url)), "utf8"),
+  existsSync(apiMd) ? readFileSync(apiMd, "utf8") : "",
+);
+app.get("/how-it-works", (_req, res) => {
+  res.set("Cache-Control", "no-store");
+  res.type("html").send(howItWorksHtml);
+});
 
 // Everything else needs `server.api_token`, when it is set (auth/middleware.ts).
 //

@@ -423,6 +423,10 @@ snap=$(curl -s -D - "${AUTH[@]}" "$BASE/sessions/$SID/audit/runs/1/assembled")
 echo "$snap" | grep -qi '^content-type: text/plain' && echo "$snap" | grep -q 'Page marker 1' \
   && pass "a snapshot is served as plain text and holds the document" || fail "audit snapshot" "$(echo "$snap" | head -5)"
 
+hiw=$(curl -s "http://localhost:$PORT/how-it-works")
+grep -q 'This is the technical view' <<<"$hiw" && ! grep -q 'IRIS_EVENT_INDEX' <<<"$hiw" && grep -q '"audit_snapshot":{"summary"' <<<"$hiw" \
+  && pass "/how-it-works is served, with the run log's index filled in" || fail "how-it-works" "$(echo "$hiw" | head -c 300)"
+
 echo "==> 7b. GET /v1/stats (public tally, no token)"
 # Deliberately WITHOUT "${AUTH[@]}": this endpoint is never handed the auth
 # middleware, so the browser app can show the tally on a deployment it holds no token
