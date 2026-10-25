@@ -200,3 +200,15 @@ test("a page an earlier run lost and a later run recovered is not reported as mi
   // Rounds are counted within a run, not across the session.
   assert.equal(lib.roundsFrom(second).length, 1);
 });
+
+test("a run's last line that lands after the next run starts still belongs to its own run", () => {
+  const runs = lib.runsOf([
+    { type: "run_start", feedback: null },
+    { type: "reader", issues: 2 },
+    { type: "run_start", feedback: "again" },
+    { type: "run_complete", unresolved: 2, failed_pages: [3] },
+    { type: "reader", issues: 0 },
+  ]);
+  assert.deepEqual(runs.map((r) => r.map((e) => e.type)), [["run_start", "reader", "run_complete"], ["run_start", "reader"]]);
+  assert.deepEqual(lib.problems(runs[1]), [], "run 2 is still working and has no last line yet");
+});

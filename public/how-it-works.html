@@ -257,11 +257,16 @@
 
     // A session's log holds every run it has had (a feedback re-run is the next), so each view reads
     // one run. A run starts at its run_start, with the queue and feedback lines just before it; the
-    // first run also has the upload's lines. The same boundary /v1/sessions/{id}/diagnostics uses.
-    function runsOf(events) {
+    // first run also has the upload's lines. A run's last line (run_complete or run_failed) can come
+    // after the next run_start, when feedback arrives during a run's last step, so the n-th last line
+    // is given to the n-th run, as /v1/sessions/{id}/diagnostics counts them.
+    function runsOf(all) {
+      const terminal = (e) => e.type === 'run_complete' || e.type === 'run_failed';
+      const ends = all.filter(terminal);
+      const events = all.filter((e) => !terminal(e));
       const starts = [];
       events.forEach((e, i) => { if (e.type === 'run_start') starts.push(i); });
-      if (!starts.length) return [events];
+      if (!starts.length) return [all];
       const lead = new Set(['run_queued', 'run_dequeued', 'feedback_rerun', 'feedback_scoped']);
       const from = starts.map((i, k) => {
         if (k === 0) return 0;
@@ -269,7 +274,9 @@
         while (j > starts[k - 1] + 1 && (lead.has(events[j - 1].type) || (events[j - 1].type === 'phase' && events[j - 1].phase === 'extraction'))) j--;
         return j;
       });
-      return from.map((f, k) => events.slice(f, k + 1 < from.length ? from[k + 1] : events.length));
+      const runs = from.map((f, k) => events.slice(f, k + 1 < from.length ? from[k + 1] : events.length));
+      ends.forEach((e, k) => runs[Math.min(k, runs.length - 1)].push(e));
+      return runs;
     }
 
     // What happened to each page, from the log.
@@ -513,7 +520,7 @@
       const pick = state.run === null ? runs.length - 1 : Math.min(state.run, runs.length - 1);
       const ev = runs[pick], s = state.session;
       const latest = pick === runs.length - 1;
-      patch($('run-pick-box'), runs.length > 1 ? '<label for="run-pick">Which run to show</label><p class="hint" id="run-pick-hint">This document was worked on ' + runs.length + ' times. Each feedback re-run is the next run.</p><select id="run-pick" aria-describedby="run-pick-hint">'
+      patch($('run-pick-box'), runs.length > 1 ? '<label for="run-pick">Which run to show</label><p class="hint" id="run-pick-hint">This document was worked on ' + runs.length + ' times. Each feedback re-run is the next run.</p><select id="run-pick" data-k="run-pick" aria-describedby="run-pick-hint">'
         + runs.map((r, i) => { const st = r.find((e) => e.type === 'run_start'); return '<option value="' + i + '"' + (i === pick ? ' selected' : '') + '>Run ' + (i + 1) + (st && st.feedback ? ', feedback: ' + esc(st.feedback) : ', the first conversion') + '</option>'; }).join('') + '</select>' : '');
       const sel = $('run-pick'); if (sel && !sel.dataset.wired) { sel.dataset.wired = '1'; sel.addEventListener('change', () => { state.run = Number(sel.value); safeRender(); }); }
       // The diagram.
