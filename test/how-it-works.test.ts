@@ -311,11 +311,12 @@ test("iris-pdf's detailed report shows the tree, the unmatched words with their 
     detail: {
       structure: { type: "Document", kids: [{ type: "H1", page: 1, text: "Quarterly Report" }, { type: "Figure", page: 1, alt: "A chart" }, { type: "Form", page: 1, field: "full-name" }] },
       structureTruncated: true,
-      pages: [{ page: 1, matched: 5, furniture: { count: 2, words: ["Page", "1"] }, added: { count: 0, words: [] }, lost: { count: 51, words: ["x"] }, redrawn: { count: 0, words: [] }, differingPixels: 0, textKept: true }],
+      pages: [{ page: 1, matched: { count: 5, words: ["Quarterly", "Report"] }, furniture: { count: 2, words: ["Page", "1"] }, added: { count: 0, words: [] }, lost: { count: 51, words: ["x"] }, redrawn: { count: 0, words: [] }, differingPixels: 0, textKept: true }],
       fields: { created: [{ name: "full-name", type: "text", page: 1, box: [1, 2, 3, 4], label: "Full name" }], unresolved: [{ name: "sig", code: "field_not_placed" }] },
       timing: { open: 1, match: 3 },
     },
   });
+  assert.ok(h.includes("Page 1: 5 words matched"), "the matched count, from iris-pdf's {count, words}");
   for (const part of ["open 1 ms, match 3 ms", "Page furniture", "(Page 1)", "Page words not in the HTML", "(x …)", "<code>H1</code>", "alt: “A chart”", "field full-name", "Cut short", "beside “Full name”", lib.PDF_WARN.field_not_placed]) {
     assert.ok(h.includes(part), part);
   }
