@@ -117,7 +117,9 @@ export async function runPipeline(args: {
   let audit: AuditRecorder | undefined;
   try {
     audit = auditOn(cfg) ? new AuditRecorder(paths.sessionAudit(sessionId), log) : undefined;
-  } catch {
+  } catch (e) {
+    // Said in the log, or the run would look like one that has not reached assembly yet.
+    log.event("audit_unavailable", { reason: (e as Error).message });
     audit = undefined;
   }
   // Route every model call's timing into the run log for diagnostics.

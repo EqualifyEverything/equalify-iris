@@ -1125,8 +1125,8 @@ The events worth grepping for have a section each below, and the index is a link
 the index when you have a `type` off a log line and want to know what it means; read a section when
 you want to know what the field it names is for and what it costs.
 
-**The index is the whole log.** `src/` emits **126** event types and every one of them has a section
-below — **117** sections, because a few cover two or three events that are only read together. So a
+**The index is the whole log.** `src/` emits **127** event types and every one of them has a section
+below — **118** sections, because a few cover two or three events that are only read together. So a
 `type` you cannot find here is not one the index skipped: it is a misread line, or a name `src/` no
 longer emits.
 
@@ -1255,6 +1255,7 @@ emits fails it too.
 | [`form_fields` / `page_fields` / `page_fields_missing`](#form_fields--page_fields--page_fields_missing) | The PDF's form field names were read, shown to a page, or not used |
 | [`calibrate_call_failed`](#calibrate_call_failed) | One calibration verifier call threw — a tool's line, never a run's |
 | [`audit_snapshot`](#audit_snapshot) | Audit mode saved the document at one stage of the run |
+| [`audit_unavailable`](#audit_unavailable) | Audit mode is on, but this run could not keep its audit files |
 
 ### `page_refit`
 
@@ -4429,6 +4430,12 @@ Audit mode only ([Audit](#audit-off-by-default)). The document's body was saved 
 is `assembled` (the pages joined, before review) or `round-<n>` (after review round `n`'s fixes), `run`
 is which run of the session it belongs to (a feedback re-run is the next), and `chars` its length. Fetch
 it at `/audit/runs/<run>/<name>`.
+
+### `audit_unavailable`
+
+Audit mode is on, but its folders for this session could not be made (`reason`, the error), so the
+run keeps no prompts or snapshots. The run itself goes on. Expect a full disk or a permissions problem
+under `storage.data_dir`.
 
 ## Diagnostics (timing / hang detection)
 
