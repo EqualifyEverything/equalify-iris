@@ -58,7 +58,7 @@ const lib = new Function(
   changeSummary(prev: Map<string, string>, steps: unknown[]): string[];
   stageSettings(key: string, ev: unknown[], st: unknown, limits: unknown, session: unknown): string;
   modelFor(ev: unknown[], st: unknown, agent: string, step: string, cap: string): string | null;
-  usageByStage(ev: unknown[]): Record<string, { calls: number; input: number; output: number; cacheRead: number; cacheWrite: number; ms: number }>;
+  usageByStage(ev: unknown[], st?: unknown): Record<string, { calls: number; input: number; output: number; cacheRead: number; cacheWrite: number; ms: number; cost: number; unpriced: Set<string> }>;
   usageLine(u: unknown, label?: string): string;
   inputsHtml(): string;
   processSteps(ev: unknown[], s: unknown, o?: unknown): { key: string; state: string; detail: string; seconds?: number | null }[];
@@ -381,4 +381,29 @@ test("the status region says when a session opens failed, finished or working, a
   const next = lib.processSteps([{ type: "run_start" }, { type: "extraction_complete" }], { status: "running", phase: "assembly", image_count: 2 }, {});
   assert.deepEqual(lib.changeSummary(prev, next), ["Read each page: done, 0 of 2 written.", "Check each page: done.", "Working now: Join and check."]);
   assert.deepEqual(lib.changeSummary(new Map(next.map((x) => [x.key, x.state])), next), [], "nothing changed, nothing said");
+});
+
+test("cost is estimated from each call's model price, and an unpriced model or cache kind is named, not counted free", () => {
+  const st = { providers: { blocks: { bedrock: { prices: { "us.sonnet": { input: 3.3, output: 16.5, cache_read: 0.33, cache_write: 4.125 }, "us.luna": { input: 0.22, output: 1.32 } } } } } };
+  const call = (model: string, i: number, o: number, cr = 0, cw = 0) => ({ type: "model_call", provider: "bedrock", model, input_tokens: i, output_tokens: o, cache_read_input_tokens: cr, cache_creation_input_tokens: cw, duration_ms: 1000 });
+  const u = lib.usageByStage([
+    { type: "phase", phase: "extraction" }, call("us.luna", 1_000_000, 1_000_000),
+    { type: "phase", phase: "review" }, call("us.sonnet", 1_000_000, 0, 1_000_000, 1_000_000), call("us.other", 5, 5),
+  ], st);
+  assert.ok(Math.abs(u.pages.cost - 1.54) < 1e-9, "luna: $0.22 in + $1.32 out");
+  assert.ok(Math.abs(u.review.cost - (3.3 + 0.33 + 4.125)) < 1e-9, "sonnet with both cache prices");
+  assert.deepEqual([...u.review.unpriced], ["other"], "a model with no price is named");
+  assert.match(lib.usageLine(u.pages), /about \$1\.54$|about \$1\.54</);
+  assert.match(lib.usageLine(u.review), /about \$7\.75, not counting other \(no price set\)/);
+  // Luna has no cache prices, so its cache tokens are named rather than costed as zero.
+  const c = lib.usageByStage([call("us.luna", 0, 0, 10, 10)], st);
+  assert.deepEqual([...c.total.unpriced], ["luna cache reads", "luna cache writes"]);
+  // No prices at all: tokens, and a plain "cost unknown".
+  assert.match(lib.usageLine(lib.usageByStage([call("us.x", 1, 1)], null).total), /cost unknown: no price set for x/);
+});
+
+test("a cost under a cent says so plainly", () => {
+  const st = { providers: { blocks: { p: { prices: { m: { input: 1, output: 1 } } } } } };
+  const u = lib.usageByStage([{ type: "model_call", provider: "p", model: "m", input_tokens: 10, output_tokens: 10, duration_ms: 1 }], st);
+  assert.match(lib.usageLine(u.total), / · under \$0\.01<\/p>$/);
 });

@@ -109,6 +109,11 @@ providers:
     # everywhere else):
     # inference_profiles:
     #   us.anthropic.claude-sonnet-4-6: arn:aws:bedrock:us-east-1:111122223333:application-inference-profile/example
+    # US dollars per million tokens, for the cost estimates on /how-it-works. Iris reads no price
+    # list: copy these from your bill or the provider's price page. A model with no entry is shown
+    # as unpriced.
+    # prices:
+    #   us.anthropic.claude-sonnet-4-6: { input: 3.3, output: 16.5, cache_read: 0.33, cache_write: 4.125 }
 
 defaults:
   # Review rounds per document. Read once, when the database is created. Set it before the

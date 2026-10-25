@@ -108,16 +108,16 @@
   </header>
 
   <div class="layout">
-    <nav class="side" aria-label="Process and sections">
-      <h2 class="side-h" id="process-h">Process</h2>
-      <p id="side-status" class="side-status">No document yet.</p>
-      <ol id="process" class="process" aria-labelledby="process-h"></ol>
-      <h2 class="side-h">About Iris here</h2>
+    <nav class="side" aria-label="On this page">
+      <h2 class="side-h">Before you start</h2>
       <ul class="side-links">
         <li><a href="#overview">How it works</a></li>
         <li><a href="#settings">This deployment</a></li>
         <li><a href="#inputs">What you can send</a></li>
       </ul>
+      <h2 class="side-h" id="process-h">Process</h2>
+      <p id="side-status" class="side-status">No document yet.</p>
+      <ol id="process" class="process" aria-labelledby="process-h"></ol>
       <h2 class="side-h">This run</h2>
       <ul class="side-links">
         <li><a href="#start">Start</a></li>
@@ -647,29 +647,49 @@
       const a = st && st.agents.find((x) => x.agent === agent);
       return a && a.models[cap] ? modelName(a.models[cap].model) : null;
     }
-    // Tokens and model time per step, from the run's own model_call lines. A call belongs to the step
-    // (phase) that was running when it was made. Iris records no prices, so there is no cost here.
-    function usageByStage(ev) {
-      const zero = () => ({ calls: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, ms: 0 });
+    // Tokens, model time and estimated cost per step, from the run's own model_call lines. A call
+    // belongs to the step (phase) that was running when it was made. Cost uses the prices this
+    // deployment set (`providers.<name>.prices`, US dollars per million tokens); a model or a token
+    // kind with no price is named as unpriced, never counted as free.
+    function priceOf(st, provider, model) {
+      const b = st && st.providers && st.providers.blocks[provider];
+      return (b && b.prices && b.prices[model]) || null;
+    }
+    function usageByStage(ev, st) {
+      const zero = () => ({ calls: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, ms: 0, cost: 0, unpriced: new Set() });
       const out = { pages: zero(), join: zero(), review: zero(), total: zero() };
       const stage = { extraction: 'pages', assembly: 'join', review: 'review' };
       let cur = 'pages';
       for (const e of ev) {
         if (e.type === 'phase' && stage[e.phase]) cur = stage[e.phase];
         if (e.type !== 'model_call') continue;
+        const t = { input: e.input_tokens || 0, output: e.output_tokens || 0, cacheRead: e.cache_read_input_tokens || 0, cacheWrite: e.cache_creation_input_tokens || 0 };
+        const pr = priceOf(st, e.provider, e.model);
+        let cost = 0;
+        const missing = [];
+        if (!pr) missing.push(modelName(e.model));
+        else {
+          cost = (t.input * pr.input + t.output * pr.output) / 1e6;
+          if (t.cacheRead) { if (pr.cache_read != null) cost += t.cacheRead * pr.cache_read / 1e6; else missing.push(modelName(e.model) + ' cache reads'); }
+          if (t.cacheWrite) { if (pr.cache_write != null) cost += t.cacheWrite * pr.cache_write / 1e6; else missing.push(modelName(e.model) + ' cache writes'); }
+        }
         for (const k of [cur, 'total']) {
           const u = out[k];
-          u.calls++; u.input += e.input_tokens || 0; u.output += e.output_tokens || 0;
-          u.cacheRead += e.cache_read_input_tokens || 0; u.cacheWrite += e.cache_creation_input_tokens || 0; u.ms += e.duration_ms || 0;
+          u.calls++; u.input += t.input; u.output += t.output; u.cacheRead += t.cacheRead; u.cacheWrite += t.cacheWrite; u.ms += e.duration_ms || 0;
+          u.cost += cost; missing.forEach((m) => u.unpriced.add(m));
         }
       }
       return out;
     }
+    const dollars = (x) => (x >= 0.01 ? 'about $' + x.toFixed(2) : 'under $0.01');
     function usageLine(u, label) {
       if (!u || !u.calls) return '';
       const n = (x) => x.toLocaleString();
+      const unpriced = [...(u.unpriced || [])];
+      const cost = unpriced.length && !u.cost ? ' · cost unknown: no price set for ' + unpriced.map(esc).join(', ')
+        : ' · ' + dollars(u.cost) + (unpriced.length ? ', not counting ' + unpriced.map(esc).join(', ') + ' (no price set)' : '');
       return '<p class="settings-line"><span class="label">' + (label || 'Usage') + '</span> ' + plural(u.calls, 'model call') + ' · ' + n(u.input) + ' tokens in, ' + n(u.output) + ' out'
-        + (u.cacheRead || u.cacheWrite ? ' · cache: ' + n(u.cacheRead) + ' read, ' + n(u.cacheWrite) + ' written' : '') + ' · ' + Math.round(u.ms / 1000) + ' s of model time</p>';
+        + (u.cacheRead || u.cacheWrite ? ' · cache: ' + n(u.cacheRead) + ' read, ' + n(u.cacheWrite) + ' written' : '') + ' · ' + Math.round(u.ms / 1000) + ' s of model time' + cost + '</p>';
     }
 
     // The settings that shape one step, said where the step is shown, so nobody has to look them up.
@@ -750,11 +770,16 @@
         'default model ' + esc(modelName(b.default_model)), 'answers up to ' + b.max_tokens.toLocaleString() + ' tokens',
         b.prompt_cache ? 'prompt caching on (' + esc(b.prompt_cache_ttl) + ')' : 'prompt caching off',
         b.inference_profiles.length ? 'called through a tagged inference profile for ' + b.inference_profiles.map(modelName).map(esc).join(', ') : null,
-      ].filter(Boolean).join(', ') + '.</li>').join('');
+      ].filter(Boolean).join(', ') + '.'
+        + (b.prices && Object.keys(b.prices).length ? '<ul>' + Object.entries(b.prices).map(([model, pr]) => '<li>' + esc(modelName(model)) + ': $' + pr.input + ' in, $' + pr.output + ' out'
+          + (pr.cache_read != null ? ', $' + pr.cache_read + ' cache read' : '') + (pr.cache_write != null ? ', $' + pr.cache_write + ' cache write' : '') + ' per million tokens</li>').join('') + '</ul>' : '')
+        + '</li>').join('');
+      const priced = Object.values(st.providers.blocks).some((b) => b.prices && Object.keys(b.prices).length);
       out.push('<h3>Which model does what</h3><p class="hint">A run\'s log says which it actually used.</p>'
         + head + core.map(row).join('') + '</tbody></table>'
         + (spec.length ? det('spec', 'Specialist agents (' + spec.length + '), used when a page needs one', head + spec.map(row).join('') + '</tbody></table>') : '')
-        + '<h3>Model providers</h3><ul>' + blocks + '</ul>');
+        + '<h3>Model providers</h3><ul>' + blocks + '</ul>'
+        + '<p class="hint">' + (priced ? 'Costs on this page are estimates from the prices above, set by this deployment. They are not a bill.' : 'No prices are set, so this page shows tokens but not cost.') + '</p>');
       return out.join('');
     }
     function inputsHtml() {
@@ -945,7 +970,7 @@
       const cap = s && s.iterations_max != null ? s.iterations_max : st0 && st0.run.max_review_iterations;
       setNote('editor', modelFor(ev, st0, 'copy_editor', 'edit', 'vision') ? modelFor(ev, st0, 'copy_editor', 'edit', 'vision') + (cap != null ? ', up to ' + plural(cap, 'round') : '') : null);
       const rounds = roundsFrom(ev);
-      const usage = usageByStage(ev);
+      const usage = usageByStage(ev, state.settings);
       const done1 = ev.find((e) => e.type === 'run_complete');
       setNote('serve', done1 ? done1.unresolved + ' left open' : null);
 

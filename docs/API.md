@@ -667,7 +667,8 @@ shows it in words. It is behind the same key as `/v1/sessions`.
   "providers": { "default": "bedrock",
     "blocks": { "bedrock": { "api": "converse", "region": "us-east-2", "default_model": "us.anthropic.claude-sonnet-4-6",
       "per_capability": {}, "max_tokens": 32000, "prompt_cache": true, "prompt_cache_ttl": "5m",
-      "inference_profiles": ["us.anthropic.claude-sonnet-4-6"] } } },
+      "inference_profiles": ["us.anthropic.claude-sonnet-4-6"],
+      "prices": { "us.anthropic.claude-sonnet-4-6": { "input": 3.3, "output": 16.5, "cache_read": 0.33, "cache_write": 4.125 } } } } },
   "agents": [{ "agent": "page", "kind": "core", "purpose": "The Page Agent is the primary extraction agent. …",
     "models": { "vision": { "provider": "bedrock", "model": "us.openai.gpt-5.6-luna" }, "text": { "…": "…" }, "structured_output": { "…": "…" } } }] }
 ```
@@ -677,7 +678,10 @@ the opening of the agent file's "Purpose" section, shortened to whole sentences 
 and copy editor, whose prompts are in the pipeline code). An agent's `models` names one model per kind
 of call. Which kinds an agent actually uses depends on the step, so
 read a run's `model_call` lines for what ran. It never shows an API key, a token, a provider URL, a
-file path, or an inference profile's ARN: only the model ids that go through one.
+file path, or an inference profile's ARN: only the model ids that go through one. `prices` is what the
+operator set in `providers.<name>.prices`, in US dollars per million tokens. `/how-it-works` multiplies
+it by each call's tokens for an estimated cost. Iris reads no price list, so with none set there is no
+cost, and a model with none set is shown as unpriced.
 
 ## Create a session (upload images)
 
