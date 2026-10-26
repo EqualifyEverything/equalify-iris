@@ -411,26 +411,27 @@ test("GET /v1/health reports the running build, and package.json is the one plac
 });
 
 test("a version printed in the docs is the version this repo is at", () => {
-  // README.md and docs/API.md show the probe's reply with a real version number in it, because a
+  // README.md shows the probe's reply with a real version number in it, because a
   // reader comparing their own curl output needs something to compare it to. That makes the docs a
   // second copy of the version — the kind that goes stale at the next release with nothing
-  // complaining. This is the complaint: bump package.json and these two lines have to move too.
+  // complaining. This is the complaint: bump package.json and README and docs/openapi.yaml move too.
   //
   // Anchored on the probe's own reply rather than on any `"version"` in the file. Some other
   // component's version in some future JSON example — axe-core's, a provider's, a schema's — is not
   // this fact, and a check that read it would fail naming the wrong defect.
   const pkg = JSON.parse(read("package.json")) as { version: string };
   let found = 0;
-  for (const rel of ["README.md", "docs/API.md"] as const) {
-    for (const shown of read(rel).matchAll(/"service"\s*:\s*"equalify-iris"\s*,\s*"version"\s*:\s*"([^"]+)"/g)) {
-      found++;
-      assert.equal(shown[1], pkg.version, `${rel} prints version "${shown[1]}" and package.json is at "${pkg.version}"`);
-    }
+  for (const shown of read("README.md").matchAll(/"service"\s*:\s*"equalify-iris"\s*,\s*"version"\s*:\s*"([^"]+)"/g)) {
+    found++;
+    assert.equal(shown[1], pkg.version, `README.md prints version "${shown[1]}" and package.json is at "${pkg.version}"`);
   }
+  // docs/openapi.yaml's info.version is the third copy (the served one is replaced at boot, the file's is not).
+  const spec = read("docs/openapi.yaml").match(/^  version: (\S+)$/m);
+  assert.ok(spec, "docs/openapi.yaml has no info.version line");
+  assert.equal(spec[1], pkg.version, `docs/openapi.yaml says version ${spec[1]} and package.json is at ${pkg.version}`);
   // Anchoring narrows what matches, so it can also match nothing — at which point the test passes
-  // by reading no version at all. Both files show the reply today; if one stops, say so here rather
-  // than going quiet.
-  assert.equal(found, 2, `expected the health reply in README.md and docs/API.md, found ${found}`);
+  // by reading no version at all. README shows the reply today; if it stops, say so here.
+  assert.equal(found, 1, `expected the health reply in README.md, found ${found}`);
 });
 
 test("package.json says where this package lives", () => {
