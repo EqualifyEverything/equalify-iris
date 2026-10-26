@@ -46,22 +46,24 @@ const lib = new Function(
    const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]); const AI = ''; const CODE = '';
    const plural = (n, one, many) => n + ' ' + (n === 1 ? one : (many || one + 's'));
    ${pure}
-   return { feedbackFormHtml, firstSummary, changeSummary, stageSettings, modelFor, usageByStage, usageLine, settingsHtml, inputsHtml, processSteps, pdfReportHtml, PDF_WARN, INPUTS, parseLog, parseReply, explain, SAY, runsOf, pagesFrom, roundsFrom, problems, unresolvedFrom, stagesFrom, curl };`,
+   return { md, apiGroups, fieldRows, apiHtml, feedbackFormHtml, firstSummary, changeSummary, stageSettings, modelFor, usageByStage, usageLine, settingsHtml, processSteps, pdfReportHtml, PDF_WARN, parseLog, parseReply, explain, SAY, runsOf, pagesFrom, roundsFrom, problems, unresolvedFrom, stagesFrom, curl };`,
 )(index) as {
   parseLog(t: string): Record<string, unknown>[];
   parseReply(o: unknown): Record<string, unknown> | null;
   explain(e: Record<string, unknown>): string;
   SAY: Record<string, unknown>;
-  INPUTS: { method: string; path: string; field: string | null }[];
   settingsHtml(st: unknown, limits?: unknown, stats?: unknown): string;
   feedbackFormHtml(): string;
+  apiGroups(spec: unknown): { tag: string; ops: { method: string; path: string; auth: string; params: { name: string }[]; body: { name: string }[] }[] }[];
+  fieldRows(spec: unknown, schema: unknown, value: unknown): { path: string; value: string; meaning: string }[];
+  apiHtml(spec: unknown): string;
+  md(t: string): string;
   firstSummary(steps: unknown[], id: string, uploaded: boolean): string;
   changeSummary(prev: Map<string, string>, steps: unknown[]): string[];
   stageSettings(key: string, ev: unknown[], st: unknown, limits: unknown, session: unknown): string;
   modelFor(ev: unknown[], st: unknown, agent: string, step: string, cap: string): string | null;
   usageByStage(ev: unknown[], st?: unknown): Record<string, { calls: number; input: number; output: number; cacheRead: number; cacheWrite: number; ms: number; cost: number; unpriced: Set<string> }>;
   usageLine(u: unknown, label?: string): string;
-  inputsHtml(): string;
   processSteps(ev: unknown[], s: unknown, o?: unknown): { key: string; state: string; detail: string; seconds?: number | null }[];
   pdfReportHtml(r: unknown): string;
   PDF_WARN: Record<string, string>;
@@ -226,8 +228,9 @@ test("a run's last line that lands after the next run starts still belongs to it
   assert.deepEqual(lib.problems(runs[1]), [], "run 2 is still working and has no last line yet");
 });
 
-// "What you can send" is the API's whole input surface: every field a route reads from a request.
-test("every request field a route reads is listed under What you can send", () => {
+// The API section is built from docs/openapi.yaml, so every input a route reads must be in it.
+const spec = (await import("yaml")).parse(readFileSync(join(root, "docs", "openapi.yaml"), "utf8"));
+test("every request field a route reads is an input in the OpenAPI document the API section shows", () => {
   const found = new Set<string>();
   for (const f of readdirSync(join(root, "src", "routes")).filter((n) => n.endsWith(".ts"))) {
     const src = readFileSync(join(root, "src", "routes", f), "utf8");
@@ -240,8 +243,8 @@ test("every request field a route reads is listed under What you can send", () =
     }
   }
   assert.ok(found.size >= 7, `only ${found.size} inputs found; the patterns above stopped matching`);
-  const listed = new Set(lib.INPUTS.map((i) => i.field).filter(Boolean));
-  assert.deepEqual([...found].filter((f) => !listed.has(f)).sort(), [], "a route reads an input the page does not list");
+  const listed = new Set(lib.apiGroups(spec).flatMap((g) => g.ops.flatMap((o) => [...o.params.map((p) => p.name), ...o.body.map((b) => b.name)])));
+  assert.deepEqual([...found].filter((f) => !listed.has(f)).sort(), [], "a route reads an input the API section does not show");
 });
 
 // axe has no rule for a data table without column headers, so this checks it directly.
@@ -253,9 +256,9 @@ test("the settings and inputs tables all have column headers, and say the settin
     providers: { default: "openrouter", openrouter: { default_model: "m-1" } },
     defaults: { max_review_iterations: 2, extraction_concurrency: 5, max_concurrent_runs: 2, recheck_sample_size: 1 },
   } as never);
-  const html = lib.settingsHtml(st, { max_pages: 25 }) + lib.inputsHtml();
+  const html = lib.settingsHtml(st, { max_pages: 25 });
   const tables = html.split("<table>").slice(1);
-  assert.ok(tables.length >= 3, "the core, specialist and inputs tables");
+  assert.ok(tables.length >= 2, "the core and specialist tables");
   for (const t of tables) assert.match(t.slice(0, t.indexOf("</table>")), /<thead><tr><th scope="col">/);
   for (const words of ["Up to 2 review rounds per document.", "Up to 5 pages read at the same time.", "Up to 25 pages per document."]) assert.ok(html.includes(words), words);
 });
@@ -481,4 +484,31 @@ test("while feedback is being routed, the panel says so and nothing else runs ye
   const steps = lib.processSteps([], { status: "running", phase: "extraction", image_count: 6 }, { pendingFeedback: true });
   assert.deepEqual(steps.map((x) => [x.key, x.state]), [["upload", "working"], ["read", "waiting"], ["check", "waiting"], ["join", "waiting"], ["review", "waiting"], ["result", "waiting"], ["pdf", "skipped"]]);
   assert.equal(steps[0].detail, "deciding what to redo");
+});
+
+test("the API section shows every operation in the document, grouped, with who may call it", () => {
+  const groups = lib.apiGroups(spec);
+  const shown = groups.flatMap((g) => g.ops.map((o) => o.method + " " + o.path));
+  const inDoc = Object.entries(spec.paths as Record<string, object>).flatMap(([p, ops]) => Object.keys(ops).map((m) => m.toUpperCase() + " " + p));
+  assert.deepEqual(shown.sort(), inDoc.sort());
+  const op = (m: string, p: string) => groups.flatMap((g) => g.ops).find((o) => o.method === m && o.path === p)!;
+  assert.deepEqual([op("GET", "/v1/stats").auth, op("GET", "/v1/sessions").auth, op("GET", "/v1/quality").auth], ["open", "key", "quality"]);
+  const h = lib.apiHtml(spec);
+  assert.equal((h.match(/<details data-k="api/g) || []).length, inDoc.length, "one card per operation");
+  assert.match(h, /<label for="quality-token">[^<]+<\/label><p class="hint" id="qt-hint">[^<]*never stored, logged or shown/);
+  assert.ok(!/Bearer (?!YOUR_QUALITY_TOKEN)/.test(h), "a curl never holds a real token");
+});
+
+test("an answer is explained field by field from the document's descriptions", () => {
+  const schema = spec.paths["/v1/stats"].get.responses["200"].content["application/json"].schema;
+  const rows = lib.fieldRows(spec, schema, { pages_processed: 40125, documents_processed: 6723, since: "2026-08-12T00:00:00Z", quality: { window_days: 30, clean_rate: 0.37 } });
+  const by = Object.fromEntries(rows.map((r) => [r.path, r]));
+  assert.equal(by.pages_processed.value, "40125");
+  assert.match(by.pages_processed.meaning, /Pages delivered/);
+  assert.match(by["quality.clean_rate"].meaning, /nothing left open/);
+  assert.equal(lib.apiHtml(null), "<p>This deployment did not serve its API description.</p>");
+});
+
+test("backticked code in the document's descriptions shows as code, and nothing else becomes markup", () => {
+  assert.equal(lib.md("`null` on the <b>last</b> page"), "<code>null</code> on the &lt;b&gt;last&lt;/b&gt; page");
 });

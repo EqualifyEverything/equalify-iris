@@ -303,7 +303,8 @@ change:
 | If you change… | Update | Which holds |
 | --- | --- | --- |
 | behaviour, or the reason for it | [docs/design-notes.md](docs/design-notes.md) | the reasoning, the benchmark evidence, superseded behaviour, and what a rule cost before it existed |
-| an endpoint, response field, or run-log event | [docs/API.md](docs/API.md) | what fires a line, what its fields hold, and the remedy — a reference for API consumers, not the rationale |
+| an endpoint, a parameter or a response field | [docs/openapi.yaml](docs/openapi.yaml) | the exact contract, which `/how-it-works` builds its API section from; tests fail if a route or error code is missing |
+| a run-log event | [docs/API.md](docs/API.md) | what fires a line and what its fields hold |
 | which model runs an agent | [docs/models.md](docs/models.md) | **suggested** models. Every model is declared in config, never in the code, so no doc may say Iris "uses" one |
 | the price of a step | [docs/cost.md](docs/cost.md) | prices with the round each came from. Iris costs nothing per token on self-hosted open-weight models; only a suggested config has a price |
 | accessibility reporting, testing, or support information | [ACCESSIBILITY.md](ACCESSIBILITY.md) | reporting and triage guidance, contributor checks, and testing limitations |

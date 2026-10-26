@@ -113,7 +113,7 @@
       <ul class="side-links">
         <li><a href="#overview">How it works</a></li>
         <li><a href="#settings">This deployment</a></li>
-        <li><a href="#inputs">What you can send</a></li>
+        <li><a href="#api">The API</a></li>
       </ul>
       <h2 class="side-h" id="process-h">Process</h2>
       <p id="side-status" class="side-status">No document yet.</p>
@@ -166,10 +166,10 @@
         <div id="settings-body"><p>Loading…</p></div>
       </section>
 
-      <section class="box" id="inputs" aria-labelledby="inputs-h">
-        <h2 id="inputs-h">What you can send</h2>
-        <p>Everything a caller can give Iris. The settings above are fixed by the deployment.</p>
-        <div id="inputs-body"></div>
+      <section class="box" id="api" aria-labelledby="api-h">
+        <h2 id="api-h">The API</h2>
+        <p>Every endpoint, from <code>GET /v1/openapi.json</code>, the exact contract. Open one to see what it does, try it on real data, and read its answer explained.</p>
+        <div id="api-body"><p>Loading…</p></div>
       </section>
 
       <section class="box" id="start" aria-labelledby="start-h">
@@ -673,18 +673,6 @@
         + '<button id="feedback-btn" type="submit" class="secondary">Re-run with this feedback</button></form>';
     }
 
-    // Every input the API takes. test/how-it-works.test.ts fails if a route reads a request field
-    // that is not listed here.
-    const INPUTS = [
-      { method: 'POST', path: '/sessions', field: 'images', where: 'form upload', what: 'The document: one PDF, or page images in reading order. Required.' },
-      { method: 'POST', path: '/sessions/{id}/feedback', field: 'feedback', where: 'JSON body', what: 'What to fix, in words. Iris works on the document again, as a new run.' },
-      { method: 'POST', path: '/sessions/{id}/pdf', field: 'values', where: 'JSON body', what: 'Optional form values for the tagged PDF, by field name. Never stored or logged.' },
-      { method: 'POST', path: '/sessions/{id}/close', field: null, where: '', what: 'Accept the document. Its pages become examples that future changes to the page agent are checked against.' },
-      { method: 'GET', path: '/sessions', field: 'limit', where: 'query', what: 'How many sessions to list at once.' },
-      { method: 'GET', path: '/sessions', field: 'status', where: 'query', what: 'List only sessions with this status.' },
-      { method: 'GET', path: '/sessions', field: 'cursor', where: 'query', what: 'Where the next page of the list starts.' },
-      { method: 'GET', path: '/quality', field: 'days', where: 'query', what: 'How many days the quality tally covers. Needs its own key, and is off unless set.' },
-    ];
     const modelName = (m) => String(m || '').replace(/^us\./, '');
     // The model an agent used in this run (from its log), or the one it is set to use before then.
     function modelFor(ev, st, agent, step, cap) {
@@ -832,10 +820,65 @@
         + '<p class="hint">' + (priced ? 'Costs on this page are estimates from the prices above, set by this deployment. They are not a bill.' : 'No prices are set, so this page shows tokens but not cost.') + '</p>');
       return out.join('');
     }
-    function inputsHtml() {
-      return '<table><thead><tr><th scope="col">Call</th><th scope="col">What you send</th><th scope="col">What it does</th></tr></thead><tbody>'
-        + INPUTS.map((i) => '<tr><td><code>' + i.method + ' ' + esc(API + i.path) + '</code></td><td>' + (i.field ? '<code>' + esc(i.field) + '</code> (' + esc(i.where) + ')' : 'nothing') + '</td><td>' + esc(i.what) + '</td></tr>').join('')
-        + '</tbody></table><p class="hint">An upload used to accept its own review-round setting. It no longer does: a <code>config</code> field is ignored, and every document gets the deployment\'s settings.</p>';
+    // ----- The API section, built from the OpenAPI document (docs/openapi.yaml) -----
+    const deref = (spec, o) => (o && o.$ref ? o.$ref.replace(/^#\//, '').split('/').reduce((x, k) => x && x[k], spec) : o);
+    // Endpoints by group, in the document's order, with who may call each.
+    function apiGroups(spec) {
+      const groups = (spec.tags || []).map((t) => ({ tag: t.name, description: t.description || '', ops: [] }));
+      const byTag = new Map(groups.map((g) => [g.tag, g]));
+      for (const [path, ops] of Object.entries(spec.paths || {})) {
+        for (const [method, op] of Object.entries(ops)) {
+          const sec = op.security || [];
+          const auth = sec.some((x) => 'qualityToken' in x) ? 'quality' : sec.some((x) => 'apiKey' in x) ? 'key' : 'open';
+          const params = (op.parameters || []).map((x) => deref(spec, x));
+          const bodySchema = op.requestBody && Object.values(op.requestBody.content || {})[0];
+          const body = bodySchema && bodySchema.schema ? Object.entries(deref(spec, bodySchema.schema).properties || {}).map(([name, sc]) => ({ name, description: sc.description || '', required: (deref(spec, bodySchema.schema).required || []).includes(name) })) : [];
+          const responses = Object.entries(op.responses || {}).map(([code, r]) => ({ code, description: (deref(spec, r) || {}).description || '' }));
+          const g = byTag.get((op.tags || [])[0]) || groups[0];
+          g.ops.push({ method: method.toUpperCase(), path, summary: op.summary || '', description: op.description || '', auth, params, body, responses, op });
+        }
+      }
+      return groups.filter((g) => g.ops.length);
+    }
+    // An answer, field by field: its value beside what the document says the field means.
+    function fieldRows(spec, schema, value, prefix = '', depth = 0, rows = []) {
+      schema = deref(spec, schema) || {};
+      if (rows.length >= 80) return rows;
+      const show = (v) => v === null ? 'null' : Array.isArray(v) ? plural(v.length, 'item') : typeof v === 'object' ? '' : String(v).length > 80 ? String(v).slice(0, 80) + '…' : String(v);
+      if (value && typeof value === 'object' && !Array.isArray(value)) {
+        for (const [k, v] of Object.entries(value)) {
+          const sub = deref(spec, (schema.properties || {})[k] || (typeof schema.additionalProperties === 'object' ? schema.additionalProperties : {}));
+          rows.push({ path: prefix + k, value: show(v), meaning: (sub && sub.description) || '' });
+          if (depth < 2 && v && typeof v === 'object') fieldRows(spec, sub, Array.isArray(v) ? v[0] : v, prefix + k + (Array.isArray(v) ? '[0]' : '') + '.', depth + 1, rows);
+        }
+      }
+      return rows;
+    }
+    // The document's descriptions mark code with backticks; show it as code, escaped first.
+    const md = (t) => esc(t).replace(/`([^`]+)`/g, '<code>$1</code>');
+    const AUTH_WORDS = { open: 'Open to anyone.', key: 'Needs the API key where this deployment sets one.', quality: 'Needs the quality token.' };
+    function apiCardHtml(o, i) {
+      const k = 'api' + i;
+      const tryable = o.method === 'GET' && o.path !== '/v1/openapi.json';
+      const action = o.method === 'POST' ? (o.path === '/v1/sessions' ? 'Use <a href="#start">Start</a> to send one.' : o.path.endsWith('/feedback') ? 'Use the feedback box in step 5 of a finished run.' : o.path.endsWith('/pdf') ? 'Use “Make the tagged PDF” in step 6.' : o.path.endsWith('/close') ? '<button type="button" class="secondary" data-close="1">Accept the open document</button> <span class="hint">Accepting adds its pages to the examples Iris checks future page-agent changes against. It cannot be undone.</span>' : '') : '';
+      return '<details data-k="' + k + '"><summary><span class="method">' + o.method + ' ' + esc(o.path) + '</span> ' + esc(o.summary) + '</summary>'
+        + (o.description ? '<p>' + md(o.description) + '</p>' : '')
+        + '<p class="hint">' + AUTH_WORDS[o.auth] + '</p>'
+        + (o.params.length ? '<p><strong>You can send</strong></p><ul>' + o.params.map((x) => '<li><code>' + esc(x.name) + '</code> (' + esc(x.in) + ')' + (x.description ? ': ' + md(x.description) : '') + '</li>').join('') + '</ul>' : '')
+        + (o.body.length ? '<p><strong>Body</strong></p><ul>' + o.body.map((x) => '<li><code>' + esc(x.name) + '</code>' + (x.required ? ' (required)' : '') + (x.description ? ': ' + md(x.description) : '') + '</li>').join('') + '</ul>' : '')
+        + '<p><strong>Answers</strong></p><ul>' + o.responses.filter((r) => r.code !== '429' && !(r.code === '401' && o.auth === 'key')).map((r) => '<li><code>' + esc(r.code) + '</code> ' + md(r.description) + '</li>').join('') + '</ul>'
+        // The two every gated or limited endpoint shares, said once rather than as a row on each card.
+        + (o.responses.some((r) => r.code === '429') || o.auth === 'key' ? '<p class="hint">' + (o.auth === 'key' ? 'It answers <code>401</code> without the key, where one is needed. ' : '') + (o.responses.some((r) => r.code === '429') ? 'It answers <code>429</code> when too many requests come from one address.' : '') + '</p>' : '')
+        + '<pre tabindex="0">' + esc(curl(o.method, o.path.replace(/^\/v1/, ''), o.auth === 'quality' ? "-H 'Authorization: Bearer YOUR_QUALITY_TOKEN'" : o.method === 'POST' && o.body.length ? "-H 'Content-Type: application/json' -d '{…}'" : '')) + '</pre>'
+        + (tryable ? '<button type="button" class="secondary" data-try="' + i + '">Try it</button>' : '') + (action ? '<p>' + action + '</p>' : '')
+        + '<div class="api-answer" id="api-answer-' + i + '"></div></details>';
+    }
+    function apiHtml(spec) {
+      if (!spec) return '<p>This deployment did not serve its API description.</p>';
+      let i = 0;
+      return apiGroups(spec).map((g) => '<h3>' + esc(g.tag) + '</h3><p class="hint">' + md(g.description) + '</p>'
+        + (g.tag === 'Operators' ? '<label for="quality-token">Quality token, to try these</label><p class="hint" id="qt-hint">Only for this page and only for these calls. It is never stored, logged or shown.</p><input id="quality-token" type="password" autocomplete="off" aria-describedby="qt-hint">' : '')
+        + g.ops.map((o) => apiCardHtml(o, i++)).join('')).join('');
     }
 
     // ----- State and API calls -----
@@ -853,8 +896,9 @@
       if (type && type.includes('html')) return text.length.toLocaleString() + ' characters of HTML.';
       try { return JSON.stringify(JSON.parse(text), null, 2).slice(0, 4000); } catch { return text.slice(0, 4000); }
     }
-    async function call(key, method, path, { body, extra, plain, json = true } = {}) {
-      const res = await fetch(API + path, { method, body, headers: body && !(body instanceof FormData) ? { 'Content-Type': 'application/json' } : undefined });
+    // `headers` carries a token for one call. It is sent and never recorded: the card shows only the answer.
+    async function call(key, method, path, { body, extra, plain, json = true, headers } = {}) {
+      const res = await fetch(API + path, { method, body, headers: { ...(body && !(body instanceof FormData) ? { 'Content-Type': 'application/json' } : {}), ...(headers || {}) } });
       const type = res.headers.get('content-type') || '';
       const text = await res.text();
       record(key, { method, path, extra, status: res.status, body: summarise(text, type), plain });
@@ -870,7 +914,7 @@
     function resetSession() {
       clearTimeout(state.timer);
       Object.assign(state, { id: null, uploaded: false, run: null, events: [], session: null, manifest: null, output: null, diagnostics: null, fields: null, pdf: null, done: false, sourceIsPdf: false });
-      for (const k of [...state.calls.keys()]) if (!['limits', 'me', 'settings', 'stats'].includes(k)) state.calls.delete(k);
+      for (const k of [...state.calls.keys()]) if (!['limits', 'me', 'settings', 'stats', 'openapi'].includes(k) && !k.startsWith('try-')) state.calls.delete(k);
       lastSteps = null;
       snaps.clear();
     }
@@ -1198,7 +1242,54 @@
         }
       } catch { /* unreachable: the first real call will say so */ }
     }
-    $('inputs-body').innerHTML = inputsHtml();
+    let apiOps = [];
+    call('openapi', 'GET', '/openapi.json', { plain: 'The API\'s exact contract, which the section on every endpoint is built from.' }).then((r) => {
+      state.spec = r.res.ok ? r.data : null;
+      apiOps = state.spec ? apiGroups(state.spec).flatMap((g) => g.ops) : [];
+      $('api-body').innerHTML = apiHtml(state.spec);
+    }).catch(() => { $('api-body').innerHTML = apiHtml(null); });
+    // Fill a path from what is open: the session, and for audit items the first one it has.
+    function tryPath(o) {
+      if (o.path.includes('{id}') && !state.id) return null;
+      const m = state.manifest || { pages: [], files: [], runs: [] };
+      const prompt = state.events.find((e) => e.type === 'model_call_start' && e.prompt);
+      const snap = (m.runs || []).flatMap((r) => r.snapshots.map((x) => [r.run, x.name]))[0];
+      const fill = { id: state.id, order: m.pages[0] && m.pages[0].order, name: o.path.includes('/runs/') ? snap && snap[1] : m.files[0] && m.files[0].name, hash: prompt && prompt.prompt.messages[0].sha256, run: snap && snap[0] };
+      let missing = false;
+      const path = o.path.replace(/\{(\w+)\}/g, (_, k) => { if (fill[k] == null) missing = true; return encodeURIComponent(fill[k]); });
+      return missing ? null : path.replace(/^\/v1/, '') + (o.path === '/v1/sessions' ? '?limit=5' : '');
+    }
+    document.addEventListener('click', async (ev) => {
+      const t = ev.target.closest('button[data-try], button[data-close]');
+      if (!t) return;
+      if (t.dataset.close) {
+        if (!state.id) { setError('Open or convert a document first.'); return; }
+        const r = await call('close', 'POST', '/sessions/' + state.id + '/close', { plain: 'Accepting the document. Its pages become examples for checking future page-agent changes.' });
+        live(r.res.ok ? 'The document was accepted.' : 'It could not be accepted: ' + ((r.data && r.data.error && r.data.error.message) || r.res.status) + '.');
+        return;
+      }
+      const i = Number(t.dataset.try), o = apiOps[i], out = $('api-answer-' + i);
+      const path = tryPath(o);
+      if (!path) { out.innerHTML = '<p>Open or convert a document first: this needs a session' + (o.path.includes('audit/') ? ' with audit items' : '') + '.</p>'; return; }
+      const token = o.auth === 'quality' ? $('quality-token').value.trim() : '';
+      t.disabled = true; out.setAttribute('aria-busy', 'true'); $('calls').hidden = false;
+      try {
+        const r = await call('try-' + i, 'GET', path, { json: true, headers: token ? { Authorization: 'Bearer ' + token } : undefined, plain: o.summary + '.' });
+        const type = r.res.headers.get('content-type') || '';
+        const resp = deref(state.spec, (o.op.responses || {})[String(r.res.status)]) || {};
+        const schema = resp.content && resp.content['application/json'] && resp.content['application/json'].schema;
+        const rows = r.data ? fieldRows(state.spec, schema, r.data) : [];
+        const body = type.startsWith('image/') ? '<img src="' + API + esc(path) + '" alt="The page image this call returned" style="max-width:20rem">'
+          : rows.length ? '<table><thead><tr><th scope="col">Field</th><th scope="col">Value</th><th scope="col">What it means</th></tr></thead><tbody>' + rows.map((x) => '<tr><td><code>' + esc(x.path) + '</code></td><td>' + esc(x.value) + '</td><td>' + md(x.meaning) + '</td></tr>').join('') + '</tbody></table>'
+          : '<p>' + esc(type.includes('ndjson') ? r.text.split('\n').filter(Boolean).length + ' lines of the run log.' : type.includes('html') || type.includes('text') ? r.text.length.toLocaleString() + ' characters of text.' : '') + '</p>';
+        out.innerHTML = '<p><strong>' + r.res.status + '</strong> ' + md(resp.description || '') + '</p>' + body
+          + (type.startsWith('image/') || type.includes('pdf') ? '' : det('raw' + i, 'The answer itself', '<pre tabindex="0">' + esc(r.text.slice(0, 6000)) + '</pre>'));
+        live('Answer ' + r.res.status + ' from ' + o.method + ' ' + o.path + '.');
+      } catch (e) {
+        out.innerHTML = '<p class="status-bad">The call failed: ' + esc(e.message) + '</p>';
+      }
+      t.disabled = false; out.removeAttribute('aria-busy');
+    });
     Promise.all([loadLimits(), call('stats', 'GET', '/stats', { plain: 'How much this deployment has converted, and how often a document came back with nothing left open.' }).then((r) => r.res.ok ? r.data : null).catch(() => null), call('settings', 'GET', '/settings', { plain: 'How this deployment is set up: its settings and which model does what. Secrets are never included.' }).then((r) => r.res.ok ? r.data : null).catch(() => null)])
       .then(([, stats, st]) => { state.settings = st; $('settings-body').innerHTML = settingsHtml(st, state.limits, stats); safeRender(); });
     probe().then(() => {
