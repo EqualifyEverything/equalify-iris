@@ -1221,6 +1221,22 @@ obtained is [above](#extraction-verdicts-and-empty-pages).
   four until #334. So a share taken over [`trigger`](API.md#page_corrected) across rounds is taken
   over a population that changed under it — the older rounds had fewer sources to fire on.
 
+### Why a correction may refuse a problem
+
+- **A correction can say a problem is untrue, but only about the HTML it was shown** (#373,
+  [`page_correction_declined`](API.md#page_correction_declined)). Before, compliance was its only
+  move, so a problem the HTML itself refuted ("an id used twice" that is used once) was answered by
+  editing a page that was right, and the edit looked like a repair in the log. A claim about the image
+  is still never refusable: that is the check's own judgement.
+- **The problems are numbered, and code-checked ones are marked.** A refusal cites a number, because
+  matching a paraphrase back to the list would credit the wrong entry. `links`, `alt` and `ids`
+  problems carry "(Iris checked this one in code.)" and are excluded from the licence by name. A
+  split word carries a different mark, "(Iris checked in code that both spellings are on this page,
+  not which one is right.)", and the request adds that if the image shows both, nothing should change:
+  forms like `non-farm` and `co-operation` are what a 1962 report prints, so "fix it" there would join
+  a word the page does not print. That is the one place the request treats the image as a reason not to
+  act, which is why `words` refusals are counted apart from the code-checked ones.
+
 ### What a correction's alt fields can and cannot see
 
 A correction re-emits the image description entire, so new WORDS are ordinary and a rewritten clause
