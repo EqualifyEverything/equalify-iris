@@ -1968,87 +1968,51 @@ polices](design-notes.md#the-flattened-view-and-the-one-conversion-it-polices).
 
 ### `editor_truncated`
 
-A correction round's response hit the model's output ceiling (`max_tokens`, `chars` returned, plus
-`attached`/`of` images and `after: "images_refused"` when it was the retry that truncated). The
-review loop stops after this round either way, but the round itself is not given up on: what the
-reply already said is read (`editor_salvaged`), and only the part it never reached is re-made a
-section at a time (`editor_sections` below). The whole ceiling of output was billed, so this is
-the log's most expensive line. Since #250 the round asks only for the blocks the editor changed,
-so a ceiling hit here is no longer what a long document costs: it is either a document whose
-changed blocks really do fill a response, or — read `editor_patch` and `editor_whole_body` on the
-rounds around it — a model returning the whole document when it was asked for a few blocks of it.
+A correction round's reply hit the output ceiling. The whole ceiling was billed, so this is the log's
+most expensive line. The loop stops after this round, but the round is not given up: what the reply
+said is read ([`editor_salvaged`](#editor_salvaged)) and only the rest is re-made a section at a time
+([`editor_sections`](#editor_sections)).
 
-**Which of those two it was is on this line** (#277): `reply_head` is the first 240 characters of
-what the model did emit, `reply_tail` the last 240, and `blocks_named` counts the `"block"` keys
-it managed. One budget of the user's text, spent one of two ways: a fragment longer than both
-excerpts together is quoted at each end, and a shorter one is quoted **entire** under `reply_head`
-with no `reply_tail` at all — rather than reported as a head whose middle and end are missing
-while `chars` says there was more.
+- `max_tokens`, `chars` returned, `error`, and `attached` / `of` images. `after: "images_refused"`
+  when it was the retry without images that truncated.
+- An error recognized as a truncation by its message only (it lost its type on the way) carries just
+  `attached`, `of` and `error`: no `max_tokens`, `chars` or excerpts.
+- `reply_head` / `reply_tail` (#277): the first and last 240 characters. A reply under 480
+  characters is all in `reply_head`, with no `reply_tail`. Absent on a reply of no text.
+- `blocks_named`: how many `"block"` keys the reply wrote. A count of a key, not a parse, so a
+  document quoting `"block":` counts its own prose; the excerpts are there to check it. It is an
+  upper bound on `editor_salvaged`'s `edits`.
 
-`blocks_named` is a count of a key and not a parse, so a document quoting `"block":` in its own
-text counts its own prose; the excerpts are logged beside the count for that reason and not only
-for colour. Between them, an `edits` array that genuinely did not fit is distinguishable from a
-whole document returned out of habit — a block-size problem and a prompt problem respectively.
-Recorded because the round **cannot be asked again**, so the fragment is the only evidence that
-will ever exist about why it did not fit, and the round was billed in full; the count is the
-answer and the excerpts are how a person checks the count.
-
-`blocks_named` is also the closest thing here to a prediction of what the next line will say: it
-counts a key rather than parsing, so it is an upper bound on the edits `editor_salvaged` could
-recover, and a `blocks_named` well above that line's `edits` means most of the count was the
-model's own prose or an entry the ceiling cut. This is the user's own document coming back, so
-like `prose_joined`'s `word_split_examples` it stays in the run log on the deployment and never
-reaches `GET /v1/quality`, which gets `editor_truncated_rate` and no text.
+Since #250 the round asks only for changed blocks, so a ceiling hit means either the changed blocks
+really fill a reply, or the model returned the whole document (read `editor_patch` and
+`editor_whole_body` on nearby rounds). The excerpts are the user's own text: they stay in the run log
+and never reach `/v1/quality`.
 
 ### `editor_salvaged`
 
-The truncated reply was read as far as it got, and this is what it turned out to have said (#295).
-The contract makes the answer a list of independent block edits, so an entry that arrived complete
-is a whole correction to a whole top-level node:
+The truncated reply was read as far as it got (#295). Each complete entry is a whole correction to a
+whole block.
 
-`edits` is how many were used, `applied` how many changed their block, `unchanged` how many named
-a block and returned it as it was, `refused` how many could not be used (a duplicate, or a
-replacement that ends inside an element — each costs its own block, exactly as on `editor_patch`),
-and `markers` / `navigation_lost` read as they do there.
+- `edits` used, `applied` (changed their block), `unchanged`, `refused` (a duplicate, or a
+  replacement ending inside an element, each costing its block), `markers`, `navigation_lost`: as on
+  [`editor_patch`](#editor_patch). The last four only when non-zero.
+- `reached` of `of`: the blocks this covers. **Read it first.** Blocks before it carry this round's
+  own corrections; the `rest` characters after it go to section calls.
+- `chars`: the same number as `editor_truncated`'s `chars` on the line before.
+- `closed: true`: the edits list finished, and the ceiling hit on the way out. Unless cut back,
+  `reached` is the whole document, `rest` is 0, and no section call is made.
+- `edits: 0` with `closed: true`: the list closed empty. The editor had nothing to change, which is
+  convergence, not failure. (An unclosed empty list is the `no_complete_edit` decline; all refused is
+  `all_refused`.)
+- `lost_at` and `dropped` (#317), only when the claim was cut back: the block the reply emptied or
+  gave content up from, where `reached` now stops, and how many edits were left unapplied because
+  they named that block or a later one. Can appear with `closed: true`, and then `rest` is above 0.
 
-`reached` of `of` is the share of the document this covers, and it is the number to read first:
-the blocks before it carry this round's own corrections, made by a call that saw the whole
-document and the page images, and the `rest` characters after it are what the section calls are
-then asked for.
-
-`closed: true` says the edits list itself finished — the ceiling was reached on the way *out* of
-the envelope, in `fidelity_observed` or in trailing prose — so every block was considered, and
-unless the claim was then cut back (`lost_at` below) `reached` is the whole document and no
-section call is made at all: the one truncation that costs a reader nothing.
-
-`edits: 0` with `closed: true` is that same answer with nothing in it: the list closed **empty**,
-meaning the editor considered every block and had no change to make, which is a round that
-converges rather than a round that failed — the document is delivered as it entered, unsectioned,
-and its marker says it was passed rather than lost. (`edits: 0` cannot appear without `closed`: an
-unclosed empty list is `no_complete_edit` below, and a list whose every edit was refused is
-`all_refused`.) `lost_at` and `dropped` are a claim that was **cut back** (#317), and are on the
-line only when one was: the block the reply emptied or handed back with less content in it than it
-had, which is where `reached` now stops, and how many of the reply's edits were left unapplied
-because they named that block or a block behind it.
-
-A cut-back claim is the case that used to be refused outright, and the change is a cost decision —
-refusing it re-requested every block of the document in section calls to avoid applying one edit,
-which on the round that filed it was 6 and 5 calls at $0.2243 each against replies holding 6 and 7
-usable edits. What it trades is named on that issue: a move carrying content *backwards* leaves it
-in the document twice rather than losing it — and **that duplicate is delivered**, because a
-truncated round is the review loop's last round and the section calls see only the remainder, so
-nothing later in the run removes it (a feedback re-run is the pass that can).
-
-Which is why the count is here to be read rather than assumed to be zero: a deployment seeing
-`lost_at` often is a deployment whose delivered documents may hold duplicated content, and the
-remedy for the ceiling itself is still `providers.<name>.max_tokens` or fewer pages per session.
-
-`lost_at` may appear beside `closed: true`, which reads oddly and is real — the patch was complete
-and part of it is being re-asked for anyway — and then `rest` is non-zero where a `closed` line
-otherwise has none. Read `chars` against `editor_truncated`'s `chars` on the line above (they are
-the same number) and against `blocks_named` there. The waste this line exists to end was the
-largest measured in the pipeline: 24 truncated editor calls across 10 deployment rounds, $17.23 of
-a $158.67 bill, every dollar of it on a response nothing looked at.
+**A cut-back claim can deliver duplicated content.** An edit that moved content backwards across the
+cut leaves it in the document twice, and a truncated round is the last, so nothing removes it except
+a feedback re-run. Frequent `lost_at` means delivered documents may hold duplicates. The ceiling's
+remedy is still `max_tokens` or fewer pages per session. Why it is accepted: [design notes —
+salvaging a truncated round](design-notes.md#salvaging-a-truncated-round).
 
 ### `editor_salvage_declined`
 
@@ -2271,104 +2235,68 @@ gone (#535). The document that ships keeps every byte.
 
 ### `editor_patch`
 
-What one ordinary correction round's reply actually did to the body, block by block (#250). The editor
-is shown the body as numbered top-level blocks and answers with the blocks it changed, so this line is
-the whole accounting.
+What one ordinary correction round's reply did to the body, block by block (#250). The editor sees
+the body as numbered top-level blocks and answers with the blocks it changed.
 
-**Four fields are always there**, so a round that named nothing is still on the record: `blocks` in the
-body, `edits` named in the reply, and how many were `applied` and `deleted` (a block emptied with
-`"html": ""`). `applied` means applied to the body that goes on, so a block that was refused, or held
-back for dropping a heading, is not in it.
+Always present, so a round that named nothing is still on record: `blocks` in the body, `edits` in
+the reply, and how many were `applied` and `deleted` (emptied with `"html": ""`). `applied` counts
+only what the body goes on with, so a refused or held-back block is not in it.
 
-**Six more appear only when non-zero**, and a line carrying any of them is a reply that did not follow
-the contract in some way:
+Present only when non-zero, each a way the reply did not follow the contract:
 
-| Field | What it counts | Effect |
+| Field | What it holds | Effect |
 | --- | --- | --- |
-| `unchanged` | Blocks returned byte-identical to the one they replace | Delivered as it stood — output paid for to say nothing |
-| `markers` | `<!-- @block N -->` comments copied back into a replacement | Stripped out, then applied like any other |
-| `unknown` | Block numbers the body does not have: out of range, negative, or not whole | Refused |
-| `duplicate` | A second edit for a block already named — the first is kept | Refused |
-| `incomplete` | A replacement whose markup does not close what it opens, or that carries an end tag closing nothing | Refused |
-| `unreadable` | Entries in the array that are not an edit at all | Refused |
+| `unchanged` | Count of blocks returned byte-identical | Delivered as they stood: output paid for to say nothing |
+| `markers` | Count of `<!-- @block N -->` comments copied into a replacement | Stripped, then applied |
+| `unknown` | **List** of block numbers the body does not have (out of range, negative, or not whole) | Refused |
+| `duplicate` | Count of second edits for a block already named; the first is kept | Refused |
+| `incomplete` | Count of replacements that do not close what they open, or close what they never opened | Refused |
+| `unreadable` | Count of array entries that are not an edit | Refused |
 
-A refusal costs that block and nothing else: it keeps its original text and the rest of the reply is
-still applied. `unchanged` and `markers` are on the record as costs rather than rejections, which is
-why they are named apart.
+A refusal costs that block only: it keeps its text and the rest of the reply is applied.
 
-**Two readings of what the round took away, at two grains.**
+What the round took away, at two grains:
 
-`shrunk` counts applied replacements carrying less of the document than the block they replace, and is
-on the line whenever it happened, because that is one of the ordinary ways this contract removes
-content the document printed twice. It is read as the **prose**, plus the two things a block holds
-that carry no words — `<img>` and `<a>` — plus `headings`, folded across `h1`-`h6`.
+- `shrunk`: applied replacements carrying less than the block they replace, read as prose plus
+  `<img>`, `<a>` and headings. Present whenever it happened; it is one ordinary way the contract
+  removes content the document printed twice.
+- `navigation_lost`, such as `{"headings": 1, "items": 2, "rows": 1}`: how many of each stopped
+  existing, read on the **joined** body, and only where its prose did not shorten. Joined, because a
+  move is two edits, so per-block falls would report a kept heading as lost. Limits:
+  - One sanctioned deletion anywhere in the reply silences it for the whole round.
+  - `items` and `rows` do not gate: a `<ul>` rewritten as a `<dl>` takes `items` to 0 legitimately.
+  - It covers block-patch rounds only. The other two apply paths log
+    [`editor_navigation`](#editor_navigation).
 
-`navigation_lost` is `{ "headings": 1, "items": 2, "rows": 1 }`: how many of each stopped existing,
-read on the **joined body** rather than block by block, and present only where that body's prose did
-**not** shorten. The grain differs because a reorder is a pair of edits under this contract — a heading
-moved down past a paragraph is one block giving it up and another taking it — so a sum of per-block
-falls would report a document that kept every heading as having lost one.
-
-**Three limits before counting a corpus off `navigation_lost`.**
-
-- **One sanctioned deletion anywhere in the reply silences it for the whole round.** A round that drops
-  a reprinted title in one block and demotes a real heading in another logs nothing here. It
-  under-collects on purpose.
-- **`items` and `rows` do not gate**, because content leaving one of those can land in a different
-  structure a reader can still navigate: a `<ul>` rewritten as the `<dl>` the page rules ask for takes
-  `items` to 0, and a list mis-extracted as a single-column table, corrected, takes `rows` to 0.
-- **A rate quoted off this field alone is a rate over block-patch rounds.** The same reading is
-  collected on the other two apply paths — a whole-body reply and the section fallback — under its own
-  line ([`editor_navigation`](#editor_navigation), #375); before that it was computed here and only
-  here.
-
-**`discarded` names the case where the reply is not applied in part**, and which of three it was:
+`discarded`, when the reply is not applied at all. The body is handed back untouched and the next
+round retries (see [`editor_no_output`](#editor_no_output)):
 
 | `discarded` | What it means |
 | --- | --- |
-| `all_refused` | Edits were sent and not one could be used |
-| `refusal_with_loss` | A refusal in the same reply as a block that gave content up — `deleted` or `shrunk` |
-| `headings_lost` | The body this round would have delivered has fewer headings than the body it was given, with its prose no shorter and nothing refused anywhere — and handing back the blocks that dropped them could not be shown to fix it (#331) |
+| `all_refused` | Edits were sent and none could be used |
+| `refusal_with_loss` | A refusal in the same reply as a block that gave content up (`deleted` or `shrunk`) |
+| `headings_lost` | The round would deliver fewer headings than it was given, with prose no shorter and nothing refused, and handing back the blocks that dropped them could not be shown to fix it (#331) |
 
-Either way the body is handed back untouched and the next round is a retry (see
-[`editor_no_output`](#editor_no_output) for why that is not convergence).
+The heading fall is held back **per block**:
 
-**The heading fall is held back per block, not per round.** `headings_reverted` lists, in ascending
-order, the block numbers whose own heading count fell **and** that gave nothing to another edit in the
-reply; those blocks keep their original text, the reply is re-applied without them, and the round is
-delivered with everything else it corrected. So a line carrying `headings_reverted` with no `discarded`
-beside it reads as *`applied` shipped and `headings_reverted` did not* — it is the only place that
-difference is visible.
-
-Where the revert was not available, one of these says which attribution failed, since `headings_lost`
-has three reasons behind it:
+- `headings_reverted`: the block numbers, ascending, whose own heading count fell and that gave
+  nothing to another edit. They keep their text and the rest of the reply is applied. Without
+  `discarded`, `applied` shipped and these did not. With `discarded`, nothing was left to apply.
+- When the revert was not possible, one of these says why:
 
 | Field | Why the blocks could not be handed back |
 | --- | --- |
-| `headings_gained` | A heading arrived somewhere it was not, so a departure cannot be matched to an arrival. Counted, because one arrival beside one fall is a move and eleven is a restructure |
-| `headings_dropped` | No heading arrived, but a block that dropped one gave content to another edit in the same reply, so re-seating it would print those words twice. **Every** block whose own count fell, which is the reading of what the model did |
-| `headings_abandoned` | Beside `headings_dropped`: the blocks that COULD have been handed back and were refused with the round anyway. Subtracting it leaves the blocks that could not be, so both readings come off one line |
-| `headings_recheck: true` | Beside `headings_dropped`: a fall survived the revert that no block still dropping a heading explains. Unreachable by construction, so its firing at all is the finding |
+| `headings_gained` | A heading arrived elsewhere, so a departure cannot be matched to an arrival. A count: one beside one fall is a move, eleven a restructure |
+| `headings_dropped` | No heading arrived, but a block that dropped one gave content to another edit, so re-seating it would print those words twice. Every block whose own count fell |
+| `headings_abandoned` | With `headings_dropped`: the blocks that could have been handed back and were refused with the round. Subtract it to get the ones that could not |
+| `headings_recheck: true` | With `headings_dropped`: a fall survived the revert that no block explains. Unreachable by construction, so its firing is the finding |
 
-`headings_gained` and `headings_dropped` are mutually exclusive on a line, and `headings_reverted`
-present *with* `discarded` is the fourth shape — blocks were handed back and nothing was left to
-apply. What is worth reading off a `navigation_lost` `headings` count is its magnitude: one heading
-gone is a repeated title resolved a little too thoroughly and 84 is a document flattened.
-
-**One case the headings reading counts and should not**, named rather than compensated for:
-`EDITOR_SYSTEM` sanctions "correct labels and table headers", so a field label the extractor emitted as
-`<h4>Name</h4>` corrected into a `<label>` inside the same `<form>` block keeps every word and takes
-`headings` down. `<label>` and `<legend>` are not counted at all, so no discount reaches it. Since #331
-the cost is one block on one round: that `<form>` block is handed back with its `<h4>` intact and every
-other correction in the reply is applied and delivered.
-
-[`editor_headings_gated_rate`](#quality-tally-shared-secret-off-by-default) is what says how often it
-happens.
-
-Why the gate acts on a reply with nothing else wrong with it, why an arrival is counted at word grain
-rather than looked up, why size cannot license the re-seat, and why the re-check is per block, is in
-[design notes — a heading fall with nothing else
-wrong](design-notes.md#a-heading-fall-with-nothing-else-wrong).
+`headings_gained` and `headings_dropped` never appear together. Read a `headings` count by size: one
+is a repeated title removed a little too eagerly, 84 is a flattened document. One known false
+positive: `EDITOR_SYSTEM` allows "correct labels and table headers", so `<h4>Name</h4>` corrected
+into a `<label>` in the same `<form>` block takes `headings` down. That costs the one block for that
+round. [`editor_headings_gated_rate`](#quality-tally-shared-secret-off-by-default) says how often.
+Why: [design notes — a heading fall with nothing else wrong](design-notes.md#a-heading-fall-with-nothing-else-wrong).
 
 ### `editor_whole_body`
 
@@ -2423,52 +2351,25 @@ so on a short body the floor would fire on the editor doing its job.
 
 ### `editor_navigation`
 
-The structures a reader navigates by, counted on a reply that was **adopted**, for the two apply
-paths that do not gate on the count (#375). `stage: "whole_body"` is the pre-#250 contract's reply
-taken as the whole corrected document (`editor_whole_body` above); `stage: "section"` is one
-section of a sectioned round, with `section` of `of` — and `covers: "remainder"` where those are
-the sections of the **tail** a truncated reply never reached rather than of the document
-(`editor_sections`, `editor_section_failed`, and `editor_salvaged`'s `covers` are the same marker;
-a rate grouped per round off a line without it would read `of: 3` as "the document was cut in
-three").
+The structures a reader navigates by, counted on an **adopted** reply on the two apply paths that do
+not gate on them (#375). It is `editor_patch`'s `navigation_lost` reading for those paths.
 
-The reading is `navigation_lost` on `editor_patch`, and until #375 it was computed there and
-nowhere else — so a `<h2>` rewritten as `<p><strong>` fell silently on both of these paths, and
-the only check either had cannot see it by construction:
+- `stage`: `whole_body` (the pre-#250 reply taken as the whole document, `editor_whole_body`) or
+  `section` (one section of a sectioned round, with `section` of `of`).
+- `covers: "remainder"`: these are sections of the tail a truncated reply never reached, not of the
+  document. Same marker as on [`editor_sections`](#editor_sections),
+  [`editor_section_failed`](#editor_section_failed) and the round's [`editor`](#reader--editor) line.
+  Without it, `of: 3` reads as "the document was cut in three".
+- `headings`, `items`, `rows`: only where each fell and the reply's prose did not shorten. Where it
+  did, `shortened: true` appears **instead**, meaning "not read", not "nothing fell".
+- **On every adopted reply**, counts or not, so a clean round (`{"stage": "whole_body"}`) is in the
+  denominator.
 
-`editor_shrank`'s floor is a prose floor at half the document, and a demotion keeps every word and
-grows the bytes. On the sectioned path that matters most, because a sectioned round is the loop's
-**last** round (`editor_sections`), so what falls there ships with no retry behind it. **Nothing
-is refused on this line, and that is deliberate rather than pending.** #331's remedy is a block
-handed back, and neither path has blocks: a whole-body reply is one string and a section reply
-*is* the section, so the only refusal expressible is the whole thing — which is what #331 did in
-its first version on the patch path and what it was changed away from, because on the commonest
-false positive (a stray `<h4>Name</h4>` corrected into the `<label>` axe's `label` rule asks for)
-it threw away every other correction in the reply, every round, until the budget ran out.
-
-Doing that here would be worse: it would cost a whole section's corrections, on the round that has
-no successor. What has to come first is the rate, and this line is the rate. **It prints on every
-delivered reply**, counts or no counts, because a rate needs its denominator on the record and a
-line that appeared only when something fell could not tell a round nothing fell on from a round
-that never took this path — so a clean whole-body round is `{"stage": "whole_body"}` and that is a
-row in the denominator.
-
-`headings`, `items` and `rows` appear only where each fell, and only where the reply's prose did
-**not** shorten; where it did, `shortened: true` is on the line **instead** of the counts, because
-the reading is silenced there — a deletion the prompt sanctions takes its own words with it, which
-is the ordinary shape of a correction rather than damage — and an empty reading would otherwise
-read as "nothing fell" when it means "not asked". The grain is the unit the reply was about, so
-the sectioned path reads each section rather than the joined body.
-
-That is sound here and finer than the patch path can manage: sections are corrected independently
-and joined, so no heading can move *between* them, and the reorder hazard that forces
-`navigation_lost` to be read on a whole body does not exist. It is also cheaper in the one way the
-patch path's grain is expensive — there, one sanctioned deletion anywhere in a reply silences the
-reading for the whole round; here it silences that section, so a demotion in section 3 is still on
-the record. Not folded into `editor_headings_gated_rate` in the
-[quality tally](#quality-tally-shared-secret-off-by-default): that rate counts documents where
-something **was** handed back, and adding rounds where nothing was would make a signal about a
-working guard into a mixture of that and a reading nobody acted on.
+Nothing is refused on this line. A section is read on its own, so one sanctioned deletion silences
+only that section, and no heading can move between sections. It is not part of
+`editor_headings_gated_rate`, which counts documents where at least one round had blocks handed
+back; adding these rounds would mix a guard that acted with a reading nobody acted on. Why there is no refusal:
+[design notes — salvaging a truncated round](design-notes.md#salvaging-a-truncated-round).
 
 ### `assembly`
 

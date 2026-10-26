@@ -2403,6 +2403,31 @@ the one gate in the loop that refuses part of a reply with no defect anywhere in
   `ReviewIssue` attributes an issue to the source **pages** it was found on. So the coarse condition is
   what there is.
 
+### Salvaging a truncated round
+
+A correction round whose reply hits the output ceiling is the loop's most expensive accident. Before
+the salvage, 24 truncated editor calls across 10 deployment rounds cost $17.23 of a $158.67 bill,
+every dollar on a reply nothing read (#295).
+
+- **The truncated reply is read as far as it got,** because the contract makes it a list of
+  independent block edits, so a complete entry is a whole correction. Only the rest is asked for
+  again, a section at a time.
+- **The reply's two ends are logged (#277)** because the round cannot be asked again, so the
+  fragment is the only evidence of why it did not fit. `blocks_named` tells an `edits` list that
+  really did not fit (a block-size problem) from a whole document returned out of habit (a prompt
+  problem).
+- **A cut-back claim is applied, not refused (#317).** Refusing it re-requested every block in
+  section calls to avoid applying one edit: on the round that filed it, 6 and 5 calls at $0.2243
+  each, against replies holding 6 and 7 usable edits. The cost is a possible duplicate, which is
+  delivered, because the section calls see only the remainder.
+- **The whole-body and sectioned paths refuse nothing on a heading fall (#375).** #331's remedy is
+  a block handed back, and these paths have no blocks: the only refusal possible is the whole reply.
+  That was #331's first version on the patch path, and it was changed because on the commonest false
+  positive (a stray `<h4>Name</h4>` corrected into the `<label>` axe asks for) it threw away every
+  other correction, every round. On a sectioned round, the last round, it would cost a whole
+  section's corrections with no retry. So the rate comes first, and `editor_navigation` is the rate.
+  The prose floor (`editor_shrank`) cannot see a demotion, which keeps every word.
+
 ### The flattened view, and the one conversion it polices
 
 - **The flattened screen-reader view must never lose text.** `flatten.ts` has two consumers, and both
