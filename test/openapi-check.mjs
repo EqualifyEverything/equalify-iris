@@ -39,8 +39,12 @@ let bad = 0;
 // The upload's own 201 is one: asked again here, the upload rate limit would answer 429 instead.
 const recorded = (process.env.OPENAPI_RECORDED || "").split(";").filter(Boolean).map((x) => x.split(","));
 for (const [path, method, status, file] of recorded) {
-  const resp = spec.paths[path]?.[method]?.responses?.[status];
-  const problems = resp ? validate(resp.content?.["application/json"]?.schema, JSON.parse(readFileSync(file, "utf8")), spec) : [`no response ${status} in the spec`];
+  // The status is the one e2e asserted when it received the answer (its own checks pin the body too);
+  // only the body is validated here.
+  let resp = spec.paths[path]?.[method]?.responses?.[status];
+  if (resp?.$ref) resp = resp.$ref.replace(/^#\//, "").split("/").reduce((o, k) => o[k], spec);
+  const schema = resp?.content?.["application/json"]?.schema;
+  const problems = !resp ? [`no response ${status} in the spec`] : !schema ? [`response ${status} has no JSON schema to check against`] : validate(schema, JSON.parse(readFileSync(file, "utf8")), spec);
   if (problems.length) { bad++; console.log(`  ✗ ${method.toUpperCase()} ${path} (recorded ${status}): ${problems.slice(0, 5).join("; ")}`); }
 }
 for (const [path, url, headers, want, method = "get", body] of cases) {
