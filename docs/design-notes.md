@@ -529,6 +529,16 @@ Places where a decision was left open, and where v1 intentionally stops:
   broken across a line are settled by the same pass, and the hyphen
   [`prose_joined`](API.md#prose_joined)'s `word_splits` records as kept is this pass's input.
 
+### Style attributes in page replies
+
+`agents/page.md` forbids styling in so many words, and #374 still found 52 `style` attributes shipped
+on one 91-page arm. 46 of them were `padding-left`, 40 on one page's row headings: a table's row
+hierarchy shown by indentation instead of markup. That is why
+[`page_style_attributes`](API.md#page_style_attributes) logs the property names: removing the
+attribute makes the page look clean, while the structure it stood for is still missing. The repeated
+removal of nested empty spans guards a shape no one has seen written (0 of 69 styled spans over 1,741
+kept bench files); it keeps the counts honest, not a measured need.
+
 ### A page label naming the image's position rather than the page's number
 
 - **The number is checkable because Iris supplied it** (#333). The page agent is handed

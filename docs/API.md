@@ -631,40 +631,24 @@ Written by `src/pipeline/extraction.ts`.
 
 ### `page_redrawn`
 
-A draw carried no page **and claimed nothing about the page**, so the same call was made once more
-(`page`, `image`, `chars` of the discarded reply, its `shape`, `dropped` where markup arrived, and
-`reextract: true` on a feedback round). The fields are `page_no_output`'s, because the triage
-question does not change — the draw that lost is the one worth reading — and this line is where a
-recovered page's losing draw is recorded. **A page that recovers has this line and no
-`page_no_output`; a page that loses twice has this line and then that one.** So every count taken
-off `page_no_output`, here and in `pages_failed`, still counts pages given up on rather than draws
-discarded.
+A draw carried no page **and claimed nothing about the page**, so the same call was made once more.
+Fields are `page_no_output`'s: `image`, `page`, `chars` of the discarded reply, `shape`, `dropped`
+where markup arrived, and `reextract: true` on a feedback round.
 
-**Once, and never twice.** The failure this is for is a draw the model can lose, and a page that
-loses two in a row is not that page.
+- A page that recovers has this line and no `page_no_output`. One that loses twice has this line,
+  then that one. So `page_no_output` and `pages_failed` count pages given up, not draws discarded.
+- **Once, never twice.** A page that loses two draws in a row is not a lucky-draw problem.
+- The gate is that the reply asserted nothing, not that it was short: a correctly declared blank page
+  has no HTML either. About 1% of pages reach it.
+- The second draw re-runs the repair steps, so `page_soft_hyphens`, `page_style_attributes`,
+  `page_digit_groups` and `page_links` can fire twice for one page. The second draw's lines carry
+  `redrawn: true`; discount them when counting page content.
+- A provider failure (throttle, stall, refusal) never reaches this line. A reply the model cut short
+  does, as `truncated_envelope`, and is redrawn; a page that really exceeds the ceiling loses again,
+  and the remedy is `providers.*.max_tokens`.
 
-**The gate is that the reply asserted nothing, not that it was short.** A reply Iris refused whole is
-0 characters of HTML however much page it was carrying, so a character floor would redraw every page
-that correctly declared itself blank. Reaching this branch at all is rare: about **1%** of pages
-drawn at least once, over every bench round on disk.
-
-A redrawn page's second draw re-runs the four repair seams, so `page_soft_hyphens`,
-`page_style_attributes`, `page_digit_groups` and `page_links` can fire twice for one page. The second
-draw's lines carry **`redrawn: true`**, because `where` attributes a count to the call it was billed
-under and a redraw makes two calls at the same seam: an offline per-occurrence census discounts the
-flagged lines rather than counting a discarded draw's markup as page content.
-
-**A provider failure never reaches this line:** a throttle, a stall and a refusal all throw before a
-reply exists to read, and that boundary is deliberate.
-
-**A reply the model itself cut short does reach it**, as `truncated_envelope`, and is redrawn — where
-a truncated *correction* is not, because a correction's page survives its failure and a first
-render's does not. A page that genuinely exceeds the ceiling loses the second draw as well, and its
-remedy is `providers.*.max_tokens`.
-
-Two shapes of blank-page declaration this gate cannot read are redrawn anyway, each costing one call
-and changing no outcome. Why the gate reads a declaration rather than a size, what the corpus behind
-the rule is, and what those two shapes are, is in [design notes — a draw that claimed
+Two blank-declaration shapes the gate cannot read are redrawn anyway, at one call each and no change
+in outcome. Why: [design notes — a draw that claimed
 nothing](design-notes.md#a-draw-that-claimed-nothing-and-the-corpus-behind-redrawing-once).
 
 ### `page_no_output`
@@ -1024,61 +1008,30 @@ the log would have left no way to take that measurement or any future one.
 
 ### `page_style_attributes`
 
-`style` attributes were taken out of a page reply before it became markup Iris keeps (`page`, `image`,
-`where` — the same four steps as above — `stripped`: how many attributes, `spans`: how many `<span>`
-elements this strip left holding nothing but whitespace and so removed whole, `cells_emptied`: how many
-`<td>`/`<th>` cells were left holding nothing by those removals, and `props`: the CSS property names
-those attributes set, deduped and sorted).
+`style` attributes were taken out of a page reply before Iris kept it (#374). `agents/page.md`
+forbids styling: it is not announced, not read aloud, and lost on reformatting, so removing it loses
+nothing a reader was getting.
 
-`agents/page.md` forbids all styling in as many words — a `style` attribute is not announced, does not
-survive being read aloud, and is dropped by anything that reformats the document — and #374 measured 52
-of them shipped anyway on one 91-page arm. The strip cannot lose anything a reader was getting, which
-is what makes it a repair rather than a re-ask: whatever the declaration was doing, it was doing it
-only for someone who could see it.
+- `image`, `page`, `where` (as on `page_soft_hyphens`), and `redrawn: true` on a second draw.
+- `stripped`: attributes removed.
+- `props`: the CSS property names they set, deduped and sorted. **The field to read.**
+  `padding-left` means a table's row groups were written in ink and need `<tbody>` /
+  `scope="rowgroup"`; `background-color` means a legend swatch that showed nothing. Rebuilding either
+  needs the image, which the strip cannot do.
+- `spans`: `<span>` elements removed because the strip left them holding only whitespace. Only spans
+  whose attributes were all `style`; a span the model wrote empty, or one keeping another attribute,
+  stays. Repeated until nothing changes, so nested styled spans go too. The element goes, never its
+  content: a span holding one space hands the space back, so `Ohio<span style="…"> </span>5%` is not
+  delivered as `Ohio5%`.
+- `cells_emptied`: `<td>`/`<th>` cells left empty by those removals, such as a legend swatch
+  `<td><span style="background:#ccc"></span></td>`. Above zero, the page had a mark there that is now
+  unrecoverable without the image. Cells already empty are not counted.
 
-**`props` is the field to read.** 46 of those 52 are `padding-left`, 40 of them on a single page's row
-headings, and that is a table's row groups written in ink instead of in markup — information the page
-HAS and the delivered document does not. Removing the attribute does not lose that, but it does make
-the page look clean, so the properties are logged: a line saying `padding-left` names a page whose
-hierarchy needs the `<tbody>`/`scope="rowgroup"` treatment the prompt asks for, and one saying
-`background-color` names a legend swatch that painted nothing and announced nothing. Rebuilding either
-is a re-ask against the image and is not something the strip can do — the stated limit of the repair.
-
-`spans` is counted apart from `stripped` because it is a different edit: an element removed rather than
-an attribute. It covers only the residue THIS strip creates — a `<span>` whose attributes were all
-`style` and whose content is nothing but whitespace — so a `<span></span>` the model wrote empty of its
-own accord is left alone, and a `<span class="…" style="…">` keeps its element because it still has an
-attribute afterwards. The removal is repeated until it stops changing anything, because a styled span
-whose only content is another styled span is invisible to a single pass — the outer one would survive as
-the bare `<span></span>` the rule exists to prevent, with `spans` and `cells_emptied` both short by one on
-a mark that is just as gone. That nesting is not a shape anything has been seen to write (0 of 69 styled
-spans over 1,741 of the bench's kept HTML files), so the repeat is there to keep the counts honest on a
-shape they were not looking at, not because it was measured. **What goes is the element, never content:**
-a span holding one space hands that
-space back, because the same markup is a legend swatch's width in one place and a word boundary in
-another, and only one of those two mistakes is visible in the delivered text (`Ohio<span
-style="…"> </span>5%` would otherwise be delivered as `Ohio5%`, which the page prints nowhere).
-
-**`cells_emptied` is the one number here that names work rather than housekeeping.** A legend swatch
-written as `<td><span style="background:#ccc"></span></td>` leaves `<td></td>`, and `agents/page.md`
-calls an empty cell the one encoding a reader cannot undo, because the cell then claims the paper printed
-nothing there. The strip does not create that defect — the cell held no text before it either, so a
-screen reader announced an empty cell both ways — but it removes the last trace that the page had a mark
-there, so a page with this above zero is a page whose mark is unrecoverable without the image. Cells that
-were already empty are not counted; the number is what these removals added.
-
-The strip does not read inside an element whose content the parser reads as text (`script`, `style`,
-`textarea`, `title`, `xmp`, `iframe`, `noembed`, `noframes`, `plaintext`), because a `<` in there opens
-nothing and a page transcribing a report on markup can print a tag's source unescaped. That list is
-narrower than `src/pipeline/anchors.ts`'s for the same shape of skip, on purpose: a `<template>` or a
-`<select>` interior IS parsed as markup, so a `style` attribute in one is a real attribute and skipping
-them would leave a hole rather than close a false positive.
-
-Scoped to the extraction phase like the strip above, but WITHOUT that clause's argument, and the
-difference is worth stating. A soft hyphen is an artefact of reading a printing; a `style` attribute is
-a model reaching for CSS to hold a shape, which any agent writing markup can do, and the review-phase
-agents write markup. #374 measured the page agent because that is what #374 looked at, so what is known
-is that it happens there — not that it happens nowhere else. `where` is what would say otherwise.
+The strip does not look inside elements the parser reads as text (`script`, `style`, `textarea`,
+`title`, `xmp`, `iframe`, `noembed`, `noframes`, `plaintext`). It does look inside `<template>` and
+`<select>`, whose content is markup. It runs in the extraction phase only. Whether review-phase
+agents write `style` too is not measured; `where` would show it. How often: [design notes — style
+attributes in page replies](design-notes.md#style-attributes-in-page-replies).
 
 ### `page_digit_groups`
 
@@ -1089,69 +1042,31 @@ Written by `src/pipeline/extraction.ts`.
 
 ### `page_split_words`
 
-A page wrote one word two ways (`page`, `image`, and `words` — one entry per word, `"Compos-ite /
-Composite"`, each spelling as the page wrote that one, in the order the hyphenated form first
-appears). The other half of the hyphen family above, and the half a strip cannot do: this is the
-**visible** break (U+002D), where `page_soft_hyphens` is the invisible one.
+A page wrote one word two ways (#334): `image`, `page`, and `words`, one entry per word as
+`"Compos-ite / Composite"`, each spelling as the page wrote it, in the order the hyphenated form
+first appears. This is the **visible** break (U+002D); [`page_soft_hyphens`](#page_soft_hyphens) is
+the invisible one, and is stripped first, since `Govern<U+00AD>ment` would otherwise read as the
+whole word and hide the contradiction.
 
-A page that writes both `Compos-ite` and `Composite` has certainly got one of them wrong, whichever
-the paper prints, and that is the whole finding. It needs no word list — the evidence is the page's
-own two spellings, so English is never consulted, and #334 measured what happens when it is
-(`/usr/share/dict/words` scored `totals`, `states` and `populations` as non-words while failing to
-match `manu-facturing` against `manufacturing`, wrong in both directions) — no second model, no
-second arm and not the image. So it is free and exact on the same terms as a dropped link.
+The evidence is the page's own two spellings: no word list, no second model, no image. One of them
+is wrong, but the problem raised does **not** say which: forms like `inter-state` and `non-farm` are
+really printed, and on half of one model's measured cases the hyphen was right. Only the agent with the image
+can settle it (`agents/page.md`: "Where you cannot tell whose hyphen it is, keep it").
 
-It also fires where the strip does not, and on **every** arm rather than one. On #334's 100-page
-three-arm census the soft-hyphen column is 63 occurrences on 9 pages from `claude-sonnet-4-6` and
-zero from `kimi-k2.5`, the page model of the day; this check's own column there — one word written
-both ways on one page, the predicate above, not the wider count of retained visible hyphens beside it
-— is `kimi-k2.5` **6 words on 4 pages**, `claude-sonnet-4-6` 3 on 3, `gpt-5.6-luna` 2 on 2.
+**A lower bound, not a rate.** It misses:
 
-The problem it raises does **not** say which spelling to keep, and that is deliberate to a degree
-the census measures: three of Kimi's six are `inter-state` and `non-farm`, forms a 1962
-report genuinely prints, so on half the measured cases the hyphen is right and the joined spelling
-is the defect. "Join them" would have been the wrong instruction there, and on a page that
-legitimately prints both forms it is how a defect gets introduced. Only the agent holding the image
-can settle it, and `agents/page.md`'s hyphen rule already tells it how: "Where you cannot tell whose
-hyphen it is, keep it".
+- a page that breaks a word and never writes it whole
+- attribute text, `alt` included (`id="non-tax"` beside `nontax` is not a contradiction)
+- a word whose only whole form is in a longer compound (`Commu-nications` beside
+  `communications-related`)
+- a word with more than one hyphen (`Con-struc-tion`), in **both** roles: it is neither a candidate
+  nor evidence, so `up-to-date` does not supply a bare `date`. It still counts in
+  `extraction_complete`'s [`words_checked`](#extraction_complete)
+- a break followed by whitespace (`Compos-` ending a line), since allowing it would also fire across
+  table cells and report a `split` string the document does not contain
 
-Read **after** the soft-hyphen strip, and that order is load-bearing rather than tidy:
-`Govern<U+00AD>ment` has contiguous letters, so a page carrying the invisible break writes the word
-whole as far as any text comparison can tell and the contradiction is hidden (#334 measured this on
-the page this rule comes from).
-
-**A lower bound, not a rate.** A page that breaks a word and never writes it whole is invisible
-here, since it is the second spelling that makes the first a contradiction. #334's cross-arm
-version of this test asks whether *another* arm delivered the word whole, and that is not available
-at run time with one arm running. Three further limits, each narrowing in the same direction:
-attribute text is not examined at all, `alt` included (`href`, `id` and `class` carry hyphens by
-convention, and `id="non-tax"` beside the word `nontax` is not a contradiction about anything a
-reader is shown); only unhyphenated words corroborate, so a page writing `Commu-nications` and
-`communications-related` and never the bare word finds nothing; and only one internal hyphen counts,
-so `Con-struc-tion` and `Trans-porta-tion` — two breaks each, on `p032` of the same census, and
-missed by #334's first detector for this same reason — are skipped. That last one is a limit and not
-a proof: neither of those words is written whole anywhere on its own page, so admitting them would
-have added nothing to this count on **that** corpus, which is a fact about the corpus. One hyphen is
-kept because it is the shape of the common case and because it keeps a printed compound like
-`state-by-state` from being compared against a `statebystate` nothing writes.
-
-A fifth limit, of a different kind from those four: they are about which tokens get compared, this
-one is about a break that never becomes a token. The hyphen must be followed by a letter
-immediately, so a fragment that soft-wraps its own source at the break (`Compos-` ending a line,
-`ite` beginning the next) is read as two whole words and nothing is a candidate. Under-detection
-again, and deliberately not widened to allow whitespace after the hyphen: that needs whitespace out
-of the lookup key too, and the same widening then fires across an element boundary
-(`<td>Total-</td><td>farm</td>` beside a `Totalfarm`, since every tag renders as a space here), and
-it reports a `split` string the document does not contain, which is the one thing a corrector is
-asked to go and find. Such a fragment also shows the reader `Compos- ite`, hyphen and space — a
-defect on its own terms rather than the contradiction this rule is about.
-
-Skipped means skipped in **both** roles: a word carrying more than one hyphen is neither a candidate
-nor evidence that some other word was broken. Both halves matter, and the second is the one a reader
-would not assume. The tokeniser consumes a whole hyphen chain as one word, so `up-to-date` does not
-contribute a bare `date`, and a page writing `up-to-date` beside `dat-e` reports nothing — the
-`joined` spelling in every finding is one the page writes on its own. Such a word still counts
-toward `words_checked`, since that field is how many words were looked at.
+Per-run counts: `words_checked` / `words_split` on [`extraction_complete`](#extraction_complete).
+Expected rates: [design notes — reading diagnostics](design-notes.md#reading-diagnostics).
 
 ### `page_split_words_unrecovered`
 
