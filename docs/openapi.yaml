@@ -401,45 +401,97 @@ paths:
     get:
       tags: [Operators]
       summary: How good the output has been
-      description: Rates over recent documents, for the weekly quality report. Cached for 60 seconds.
+      description: |
+        Rates over recent documents, for the weekly quality report. Field meanings in full: docs/API.md,
+        "Quality tally".
+
+        - Off unless `server.quality_token` (`IRIS_QUALITY_TOKEN`) is set: then 404, not 401.
+        - Its own token, not `server.api_token`, and `api_token` does not gate it.
+        - No field carries document content; the report copies these values into a public issue.
+        - `Cache-Control: no-store`, but each window's answer is cached in the process for 5 minutes.
+        - `documents` counts sessions: a file uploaded three times is three. Every rate is a share of
+          `documents`, 0 when there are none.
       security: [{qualityToken: []}]
       parameters:
         - name: days
           in: query
           schema: {type: integer, minimum: 1, maximum: 365, default: 30}
-          description: The window, in days. Out-of-range values are clamped.
+          description: The window, in days. Clamped to 1-365; a value that is not a number means 30.
       responses:
         "200":
-          description: The tally. A rate is a share of `documents`, from 0 to 1.
+          description: The tally.
           content:
             application/json:
               schema:
                 type: object
+                required: [window_days, documents, files, documents_unhashed, since, mean_rounds, unresolved_rate, first_read, unresolved_severity, review_stopped, links_dropped_rate, links_unresolved_rate, markup_unbalanced_rate, table_no_body_rate, structural_defect_rate, lint_error_rate, lint_error_where, documents_linted, editor_truncated_rate, editor_truncated_lost_rate, editor_headings_gated_rate, review_unread_rate, unfinished_page_rate, rules]
                 properties:
                   window_days: {type: integer, description: The window used.}
-                  documents: {type: integer, description: Documents delivered in the window.}
+                  documents: {type: integer, description: Documents delivered in the window, flawless ones included.}
                   files: {type: integer, description: Distinct uploads they came from.}
                   documents_unhashed: {type: integer, description: Documents too old to have an upload hash.}
-                  since: {type: [string, "null"], format: date-time}
-                  mean_rounds: {type: number, description: Average copy-editor rounds per document.}
-                  unresolved_rate: {type: number, description: Finished with problems left open.}
-                  first_read: {type: object, description: What the reader found before anything was fixed.}
-                  unresolved_severity: {type: array, items: {type: object}, description: Problems left open, by severity.}
-                  review_stopped: {type: array, items: {type: object}, description: Why the review ended, by reason.}
-                  links_dropped_rate: {type: number, description: A link was lost by the copy editor.}
+                  since: {type: [string, "null"], format: date-time, description: The earliest document in the window.}
+                  mean_rounds: {type: [number, "null"], description: Mean Copy Editor rounds per document; `null` when none ran.}
+                  unresolved_rate: {type: number, description: Finished with issues left open.}
+                  first_read:
+                    type: object
+                    description: What the reviewer found before anything was fixed.
+                    required: [documents, mean_issues, unread_documents]
+                    properties:
+                      documents: {type: integer, description: Documents that recorded a first read.}
+                      mean_issues: {type: [number, "null"], description: Mean issues the first read raised.}
+                      unread_documents: {type: integer, description: Of those, part of the first read was unusable.}
+                  unresolved_severity:
+                    type: array
+                    description: Documents with an open issue at each severity. Not a partition.
+                    items:
+                      type: object
+                      required: [severity, documents]
+                      properties:
+                        severity: {type: string, enum: [high, medium, low, unrated]}
+                        documents: {type: integer}
+                  review_stopped:
+                    type: array
+                    description: Which exit ended each document. A partition of the documents that recorded an exit.
+                    items:
+                      type: object
+                      required: [where, documents]
+                      properties:
+                        where: {type: string, enum: [clean, unread, converged, truncated, cap]}
+                        documents: {type: integer}
+                  links_dropped_rate: {type: number, description: A link was lost by the Copy Editor.}
                   links_unresolved_rate: {type: number, description: A link points nowhere in the document.}
                   markup_unbalanced_rate: {type: number, description: An element is left unclosed.}
                   table_no_body_rate: {type: number, description: A table has no content rows.}
                   structural_defect_rate: {type: number, description: A label or reference names something missing.}
                   lint_error_rate: {type: number, description: The accessibility check could not run.}
-                  lint_error_where: {type: array, items: {type: object}}
+                  lint_error_where:
+                    type: array
+                    description: Which lint step failed.
+                    items:
+                      type: object
+                      required: [where, documents]
+                      properties:
+                        where: {type: string, enum: [parse, inject, run]}
+                        documents: {type: integer}
                   documents_linted: {type: integer, description: Documents the check examined.}
-                  editor_truncated_rate: {type: number, description: A copy-editor answer was cut off.}
-                  editor_truncated_lost_rate: {type: number, description: Part of the document got no copy-editor pass.}
+                  editor_truncated_rate: {type: number, description: A Copy Editor reply was cut off.}
+                  editor_truncated_lost_rate: {type: number, description: Part of the document got no Copy Editor pass.}
                   editor_headings_gated_rate: {type: number, description: Edits were refused for losing headings.}
                   review_unread_rate: {type: number, description: Part of the last read came back unusable.}
                   unfinished_page_rate: {type: number, description: A page is marked as not fully transcribed.}
-                  rules: {type: array, items: {type: object}, description: Accessibility rules still failing, most common first.}
+                  rules:
+                    type: array
+                    description: Accessibility rules still failing, most documents first.
+                    items:
+                      type: object
+                      required: [id, impact, documents, share, nodes]
+                      properties:
+                        id: {type: string, description: The axe-core rule.}
+                        impact: {type: [string, "null"]}
+                        documents: {type: integer}
+                        share: {type: number, description: Of `documents_linted`.}
+                        nodes: {type: integer, description: Offending elements, in total.}
         "401": {$ref: "#/components/responses/TokenError"}
         "404": {$ref: "#/components/responses/TokenError"}
         "429": {$ref: "#/components/responses/Error"}

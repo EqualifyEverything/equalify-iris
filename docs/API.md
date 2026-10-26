@@ -56,412 +56,137 @@ curl -s "$BASE/stats"
 
 ## Quality tally (shared secret, off by default)
 
-How *good* the output has been, as opposed to how much of it there was. Iris already measures
-itself on every run — how many reader/editor rounds a document needed, which axe-core rules its
-HTML still violates, whether a link from the source went missing — and this is the only place
-those measurements are readable across sessions.
-
-It exists for one caller: `.github/workflows/quality-report.yml`, which reads it weekly, compares
-the rates against thresholds held in that workflow, and files a GitHub issue when one is crossed.
+`GET /v1/quality`: how good the output has been over recent documents. It has one caller,
+`.github/workflows/quality-report.yml`, which reads it weekly and files an issue when a rate crosses
+a threshold in that workflow. Access and field types: [`docs/openapi.yaml`](openapi.yaml). Why the
+fields are as they are: [design notes](design-notes.md#reading-the-quality-tally). Setting up the
+workflow: [ci.md](ci.md), "Weekly quality report".
 
 ```bash
 curl -s -H "Authorization: Bearer $IRIS_QUALITY_TOKEN" "$BASE/quality?days=30"
 ```
-```json
-{
-  "window_days": 30,
-  "documents": 212,
-  "files": 180,
-  "documents_unhashed": 0,
-  "since": "2026-07-14T00:00:00.000Z",
-  "mean_rounds": 1.8,
-  "unresolved_rate": 0.061,
-  "first_read": { "documents": 212, "mean_issues": 2.4, "unread_documents": 2 },
-  "unresolved_severity": [
-    { "severity": "high", "documents": 1 },
-    { "severity": "medium", "documents": 4 },
-    { "severity": "low", "documents": 12 },
-    { "severity": "unrated", "documents": 0 }
-  ],
-  "review_stopped": [
-    { "where": "clean", "documents": 197 },
-    { "where": "unread", "documents": 2 },
-    { "where": "converged", "documents": 11 },
-    { "where": "truncated", "documents": 2 },
-    { "where": "cap", "documents": 0 }
-  ],
-  "links_dropped_rate": 0.02,
-  "links_unresolved_rate": 0.11,
-  "markup_unbalanced_rate": 0.01,
-  "table_no_body_rate": 0.005,
-  "structural_defect_rate": 0.09,
-  "lint_error_rate": 0.01,
-  "lint_error_where": [
-    { "where": "parse", "documents": 0 },
-    { "where": "inject", "documents": 0 },
-    { "where": "run", "documents": 2 }
-  ],
-  "documents_linted": 210,
-  "editor_truncated_rate": 0.01,
-  "editor_truncated_lost_rate": 0.002,
-  "editor_headings_gated_rate": 0.014,
-  "review_unread_rate": 0.01,
-  "unfinished_page_rate": 0.03,
-  "rules": [
-    { "id": "heading-order", "impact": "moderate", "documents": 81, "share": 0.382, "nodes": 240 }
-  ]
-}
-```
 
-* `documents` — delivered documents in the window, **including flawless ones**. This is the
-  denominator for every `_rate` below (the rule table divides by `documents_linted` instead, for the
-  reason given there), and it is the whole reason the tally is stored the way it is: a
-  clean run produces no violation rows, so counting "documents that had a problem" would divide by
-  the bad documents alone and report every rate near 100%.
-* `files` — how many distinct uploads those documents came from. Each upload's sha256 is stored, so
-  one file uploaded three times is 3 documents and 1 upload. For one file, the hash is the file's own
-  sha256. For several, it is the sha256 of their hex hashes joined by newlines, in upload order, so the
-  same images in another order or another grouping count as a different upload.
-* `documents_unhashed` — documents whose session predates the hash, so they are in `documents` but
-  not in `files`.
-* `mean_rounds` — mean **editor** passes per document, against `defaults.max_review_iterations`. The
-  loop stops as soon as the Reader finds nothing, so a document that reads clean on the first look
-  contributes `0`: low is good, and `0.0` across the window means nothing needed fixing. `null`,
-  not `0`, when nothing has run — otherwise an empty deployment reports the best possible score.
-  It also stops as soon as a round changes nothing: an editor that answers and returns the document
-  it was given has said what it would say to the same request next round, so the remaining rounds
-  would rewrite the document into itself. That means a low `mean_rounds` beside a non-zero
-  `unresolved_rate` is now an ordinary reading rather than a contradiction — the document stopped
-  early *because* what was left could not be fixed here, not because it was fixed.
-* `unresolved_rate` — share of documents that finished with issues the review loop could not
-  resolve. Only the **count** of those issues is used, never their text — see below. One class of
-  issue is deliberately never resolved and so always lands here: two headings the document labels
-  alike where nothing the copy editor was given says whether they are one section or two. It is
-  reported and left standing rather than guessed at, because merging two real sections cannot be
-  undone — so a document whose only remaining issue is one of these raises this rate while its
-  `mean_rounds` stays low: the first round that leaves it alone changes nothing and the loop stops
-  there. That is the honest reading — it shipped with an ambiguity a reader meets, and the rounds it
-  did not spend would each have rewritten the document into itself.
-  A `[not legible]` marker can end the same way: the copy editor is usually given that page's image
-  and may well read what the extractor could not — usually, because the per-round image budget
-  (`capEditorImages`) and a provider that refuses a request for size both leave it with fewer images
-  than the issues named, or none. Where the image is absent, or the marks do not resolve for it
-  either, the marker stays and the issue is reported unresolved every round. That is the source page being
-  unreadable, not the pipeline failing to try, and the alternative — a plausible word, or a quiet
-  deletion — is the one outcome a reader cannot detect. A `[page not fully transcribed]` marker
-  always ends this way, by design: no pass in the review loop can resolve it, because finishing a
-  page means transcribing that page from its image, which is a re-extraction — a pass with a whole
-  response for one page and its own gates on what came back — and not a correction to the markup
-  around it. What the copy editor would produce instead is a paragraph written while looking at a
-  page, delivered where nothing downstream can tell the two apart. So it is reported
-  and left standing, and it
-  raises this rate for a document that is otherwise sound — but only for as many rounds as it takes
-  the editor to leave the document alone once, which is what now ends the loop. Read it as what it is — one page
-  arrived short, and the document says where.
-  Everything in the two paragraphs above is a claim about a **floor** under this rate, and the two
-  fields that follow, plus `unfinished_page_rate` below, are what measure it. Until #264 nothing did,
-  which is how a threshold of 15% came to be compared against a rate of 84% with no way to tell
-  which part was inherent.
-* `first_read` — what the reviewer **found**, before any of it was fixed. Every other number in this
-  tally is taken after the editor has run, which makes the two facts a reviewer change most needs to
-  be told apart arrive identically: an editor that fixed everything and a reviewer that faulted
-  nothing both deliver an empty `@unresolved` list and a `clean` exit, and both *lower*
-  `unresolved_rate`. This is the one field that separates them.
-  * `mean_issues` — mean issues raised by the **first** read of a document, averaged over the
-    documents that recorded one. The first read specifically, and not a sum over rounds: every later
-    round reads a body the editor has already rewritten, so a total would measure how many rounds
-    ran as much as what the reviewer saw, and the first read is the only one taken on extraction's
-    own output. A document the reviewer cleared contributes `0` — that is the observation, not a
-    missing one — and the field is `null`, not `0`, when no document in the window recorded a read.
-    A feedback re-run ([Submit feedback](#submit-feedback-re-run)) does **not** replace it, unlike
-    every other value in this tally: a document-level re-run re-reviews the body already delivered,
-    so its first read is on bytes the copy editor has rewritten and would land here as a smaller
-    number for a reason that is not the reviewer's. A re-run that re-extracts does replace it,
-    because that read *is* on fresh extraction output. One consequence worth knowing when reading
-    this across a model change, which is its stated use: a carried-forward count is **re-dated** to
-    the re-run, like every other row for that session, so a document converted before the change and
-    given document-level feedback after it contributes the old reviewer's number to the new window.
-    The alternative is worse — keeping the original date would drop the row out of the window while
-    the document itself stays in it, and `first_read.documents` would fall short for a reason that
-    is not a missing measurement. [`first_read_carried`](#first_read_carried) in the run log names
-    every document this happened to.
-  * `documents` — how many documents recorded a first read, which is the denominator `mean_issues`
-    was divided by. Compare it with `documents` at the top of the response: it is the same on a
-    window whose runs all pass through the review loop, and short of it otherwise.
-  * `unread_documents` — of those, how many had at least one window of that first read come back
-    unusable. This is the error bar on `mean_issues` rather than a defect rate: on those documents the
-    count is a floor, so a fall in `mean_issues` with this number rising is a reviewer that could not
-    answer, and a fall with it flat is a reviewer that found less. Distinct from
-    `review_unread_rate` below, which is about the **last** read — the one taken on the bytes that
-    shipped. A document can be counted here and not there, and the reverse.
-* `unresolved_severity` — how the Reader rated what was left open, one entry per severity and always
-  all four including the zeroes. **Per document, and not a partition of `unresolved_rate`**: a
-  document with three `low` issues and one `high` is one entry in each of those two, so the counts
-  can sum to more than `unresolved_rate × documents`. This is the field that says whether the rate
-  above describes a defect — it counts documents that shipped with *anything* open, and `high` is
-  the part of it a reader of the document would call a barrier. `unrated` is not a fifth severity
-  but the Reader having written something outside the three, or nothing; the severities are
-  model-written and unvalidated, so anything unrecognised is bucketed there rather than published
-  as found.
-* `review_stopped` — which of the review loop's exits ended each document, one entry per reason and
-  always all five. Recorded for **every** delivered document, so unlike `unresolved_severity` these
-  *are* a partition: on a window where every run recorded one, the counts sum to `documents`.
-  `clean` is the only exit that re-read the
-  finished document and found nothing. `converged`, `truncated` and `cap` each deliver an
-  `@unresolved` list, so those three are the documents `unresolved_rate` counts — in the example
-  above, 11 + 2 + 0 of 212, which is the 0.061 beside them. `unread` is the one exit that stops with
-  an EMPTY list and is still not clean, which is why it has a rate of its own
-  (`review_unread_rate`) and why the document says so under `@review-unread`. Which exit it was is
-  which fix is being asked for — `cap` is a config number
-  (`defaults.max_review_iterations`), `converged` is a prompt, `truncated` is an output ceiling,
-  `unread` is a reviewer that could not read part of what it was judging. The `cap`/`converged`
-  split is the one that could not be had before: from outside the loop they are the same shape, and
-  only `cap` is something more rounds would help. A sum **below** `documents` means either
-  documents delivered before this was recorded or an exit added to the loop with no reason attached
-  — never a sixth kind of exit. Where they differ, this breakdown describes the documents it sums
-  to and **not** the window: a rate read against `documents` and a split read against the attributed
-  subset are two denominators, and the split does not scale up to the rate.
-  * **And it is the split of `unresolved_rate` #264 asked for.** That rate counts a document that
-    was re-read and still had problems, and a document whose open list may predate the bytes that
-    shipped, as the same thing. On `cap` and `converged` the `@unresolved` list was read on the
-    delivered bytes — the loop re-reads at the top of every round and both exits are taken before
-    the next editor call — so an open issue there is an open issue in the delivered document.
-    `truncated` is the one exit where the list may be older than the document: the editor's reply
-    was cut off, what the reply had already said and the sectioned retry may between them have
-    corrected most of the body afterwards, and the round that would have re-read it is the one that
-    could not be made (`src/pipeline/review.ts`). So it over-reports there on purpose, and a
-    truncation that rescued nothing over-reports not at
-    all — a distinction this tally cannot draw and the delivered document can
-    (`@editor-truncated blocks B of T`, `sections N of M`). Those are a claim about the document and a claim about
-    the round: read `cap` + `converged` as the part of the rate that is about the document, and
-    `truncated` beside `editor_truncated_rate` and the output ceiling. One threshold over both
-    cannot be set honestly, which is why the weekly report's is still on the mixture and says so.
-* `links_dropped_rate` — share of documents where an `href` present before the copy editor was
-  missing after it. A URL the editor lengthened to the link's printed URL is not counted (see
-  [`editor_links_completed`](#editor_links_completed)).
-* `links_unresolved_rate` — share of documents that shipped with an in-document reference that
-  lands nowhere: an `href="#"`, or a fragment naming an `id` the delivered document does not
-  contain. Counted per document; the per-reference numbers, and *which* ids failed, are on the
-  deployment's `internal_links` log line and stay there, because a fragment is text the model chose
-  out of the document. This is a different defect from `links_dropped_rate` — nothing was lost, the
-  target was never there — and a document can have either without the other. Neither shape is an
-  axe violation, which is why it needed measuring at all: a table of contents where every entry is
-  `href="#"` lints clean, reads as finished, and does nothing when a reader activates it. `#` and
-  `#top` are excluded, being the two fragments a browser resolves without an element.
-* `markup_unbalanced_rate` — share of documents delivered with markup that does not balance: an
-  element whose end tag HTML **requires** (`table`, `ul`, `a`, `section`, … — never `<li>` or
-  `<tr>`, whose end tags are optional and legally omitted) appearing a different number of times as
-  a start tag and as an end tag. The only rate here measured on the delivered **bytes**, and it has
-  to be: an HTML parser repairs malformed markup before axe is given the document, so a document
-  delivered with an unclosed `<table>` lints clean and reports `ready_for_review`. Which element,
-  and the two counts, are on the deployment's `delivered_markup` log line — what the imbalance costs
-  a reader depends entirely on which element it was.
-* `table_no_body_rate` — share of documents delivered with at least one table holding no row a
-  reader receives as content: no rows at all, no row outside a declared `<thead>`, or — where no
-  header block was declared — no row that is anything but column headers. A screen reader
-  announces the table, reads its caption and every column header, and there is nothing in it. A
-  table whose body cells are all `<th scope="row">` is content and is not counted. Measured on the **parsed** tree, unlike the rate above,
-  because this is a question about what a reader receives and parser recovery is part of that. No
-  axe rule covers it — `empty-table-header` is about a header *cell* with no text — and the captions
-  stay on the deployment's log line, a caption being text out of the user's own document.
-* `structural_defect_rate` — share of documents that shipped promising a reader something the
-  document does not contain: an `aria-labelledby`, `aria-describedby` or `label[for]` naming an
-  absent `id`; a `<dl>` with terms and no definitions; or a `<nav>`, `<aside>` or named `<section>`
-  holding nothing a reader receives. Three checks under one rate because they fail identically from
-  the outside — nothing is malformed, so the gate returns clean and the run reaches
-  `ready_for_review` anyway. axe reports the dangling ARIA reference as `incomplete` and never as a
-  violation (`aria-valid-attr-value` is `reviewOnFail`), `<dl><div><dt>Term</dt></div></dl>` passes
-  `definition-list` outright because the wrapper is legal HTML, and an empty `<nav>` breaks no rule
-  at all. Which class fired, and the elements it fired on, are on the deployment's
-  `delivered_structure` log line — as is `lang_on_void`, a language tag on an element with no text,
-  which is measured there but is deliberately **not** in this rate: it is wasted output rather than
-  something a reader loses.
-* `lint_error_rate` — share of documents whose lint pass **errored** instead of running. Recorded
-  explicitly rather than inferred, because a linter that cannot run has no violations to report and
-  a broken one would otherwise read as a deployment that got better. Those documents are delivered
-  with **no accessibility verdict at all**: the run's log line carries `lint_ok: false` and *no*
-  `violations` figure (the count in a check that did not happen is unknown, not zero), and the
-  delivered document carries an `@lint-unavailable` comment saying so to whoever opens it. The
-  `assembly` line — and `lint_unavailable`, if a later correction round's re-lint is the one that
-  failed — carries `lint_error` with `lint_error_where` (`parse`, `inject` or `run`),
-  `lint_error_name` and the first frames of `lint_error_stack`, which is what makes one occurrence
-  chaseable; `axe-core` and `jsdom` are pinned to exact versions so the linter's behaviour changes
-  only when someone changes it. Up to jsdom 25, an attribute name beginning with a digit
-  could take the whole rule set offline (#257); jsdom 30 fixed that (#535).
-* `lint_error_where` — which of the three steps failed on those documents: `parse` (jsdom refused
-  the assembled HTML), `inject` (axe's own source would not evaluate, which is a dependency problem
-  and cannot depend on the document) or `run` (the rule pass threw while walking the document).
-  Always all three entries, including the zeroes, so "measured and none of these" is distinguishable
-  from a deployment too old to record it — the same distinction `documents_linted` preserves for the
-  rule shares. Published because the per-step detail otherwise exists **only** in one session's run
-  log, and a run log cannot answer a question about the deployment: it belongs to a single user's
-  document. #263 reported six documents with no verdict and no way to tell whether the cause was the
-  one #257 had just fixed or a new one, which is how a fixed cause and a live one come to look the
-  same in a weekly report. The counts may sum to **less** than `lint_error_rate × documents`, and the
-  shortfall is documents linted before this was recorded — not a fourth kind of failure. The error
-  message and stack stay out of this endpoint on purpose: a parse failure quotes the markup it choked
-  on, and this response is copied into a public issue.
-* `documents_linted` — how many of `documents` the linter actually examined, i.e. `documents` minus
-  the `lint_error_rate` ones. This is the denominator for `rules[].share`, and it is published
-  because otherwise that share cannot be read: an unexamined document looks exactly like one where
-  the rule did not fire, so a spell of failing lints would make every rule appear to be getting
-  fixed. When it is well below `documents`, the rule table is a measurement of a subset — fix that
-  before reading the rules.
-* `editor_truncated_rate` — share of documents where a correction round's **response** hit the
-  model's output-token ceiling. The editor answers with the blocks it changed, so its output
-  length follows how much of the document is wrong rather than how long the document is (#250);
-  what remains is a model that returns more than it was asked for. Under the contract this rate
-  was defined against — the whole corrected body, every round — output length followed document
-  length alone, so at a large `max_pages` an ordinary document doing exactly what it was told
-  could exceed a fixed `max_tokens`. Such a round is not thrown away. What the reply had already
-  said is **read**: the contract makes it a list of independent block edits, so every edit that
-  finished arriving is applied, and the round covers the document up to the last block it named — or
-  up to the first block the reply handed back with less content in it than it had, whichever comes
-  first (`editor_salvaged`, `lost_at`). Only the part it never reached, or the part behind that
-  block, is asked for again, **a section at a time** —
-  cut at top-level boundaries into pieces sized from what the truncated response actually returned —
-  and the loop then stops either way. So the document may carry that round's own corrections for
-  part of it, section corrections for the rest (from requests that each saw one section, so a
-  problem spanning two of them may be untouched), or none at all where neither route worked; the
-  delivered `@editor-truncated` comment says which, and `editor_salvaged` / `editor_sections` in the
-  run log say how much each covered. This rate counts the ceiling being hit, whatever was rescued afterwards,
-  and those documents are also counted in `unresolved_rate` — the issues in the `@unresolved`
-  block are the reading that preceded the truncated round and were never looked for again.
-  A non-zero value is a statement about the **deployment**, not about the documents: either
-  `providers.<name>.max_tokens` is too low for the pages allowed per session, or `max_pages` is
-  too high for it. It is deliberately the one rate here with **no threshold** in
-  `.github/workflows/quality-report.yml`, and the rate below is why: a reply too long for the
-  ceiling is a property of the document and of what the model chose to return, not of whether
-  anything was lost, so a rise in it can be a rise in nothing but document length — under the
-  whole-body contract it went 1/4 → 2/4 → 3/4 across three bench rounds in which every section
-  came back — and an alarm on it would fire on a pipeline that lost nothing (#159).
-* `editor_truncated_lost_rate` — share of documents where neither route covered the whole body. The
-  reply's own prefix covers the blocks it reached, so what this counts is the **remainder**: a reply
-  whose edits list closed, or that named the document's last block, leaves none and costs a reader
-  nothing (`editor_salvaged`, `closed`/`reached`) — unless it gave content up on the way, in which
-  case the claim was cut back to that block and the remainder starts there however far the reply got
-  (`lost_at` on the same line). Where there is a remainder, either the prefix
-  itself was refused — the run log says why on an `editor_salvage_declined` line, `reason` one of
-  `no_edits_list`, `no_complete_edit`, `unknown_block`, `unreadable_edit`, `out_of_order`,
-  `all_refused` or `loss_before_cut` — or the sections over that remainder
-  were declined or came back with nothing — an
-  `editor_sections_declined` line, whose `reason` is one of `unmeasured`, `budget_too_small`,
-  `budget_exceeds_body`, `indivisible` or `too_many_sections` — or a section truncated in its turn
-  and kept the text it went in with, or a section that came back complete but with under half the
-  prose it was given (`editor_section_failed`, `reason: "shrank"`). That last cause is why this
-  rate is no longer only about the output ceiling: it also fires on the SHAPE of a reply — one
-  section answered with a sentence about itself rather than with the section — and the remedy for
-  that is not more `max_tokens`. The log line says which, and the two differ in what they cost a
-  reader only in that the shrunk one had a reply and declined to trust it. This is
-  the truncation number that carries a threshold, because it is the one that costs a reader
-  something: those parts of the document had no editor pass at all, and a truncation is the loop's
-  last round, so nothing looks for their issues again. A strict subset of `editor_truncated_rate`
-  above and of `unresolved_rate` — it adds no documents to this tally, it says *why* those
-  documents ended where they did, and the remedy it points at is a `max_tokens` or `max_pages`
-  number rather than a prompt.
-* `editor_headings_gated_rate` — share of documents where at least one correction round had **blocks
-  handed back** because applying them would have left the delivered body with **fewer headings than it
-  had**, every word still there (`headings_reverted` on an `editor_patch` line, or `discarded:
-  "headings_lost"` where the whole round went; #331). The one number in this tally that goes **up**
-  when a guard is working: what it counts did not ship, so the document it is counted on kept its
-  outline. It is a rate of *attempts*, not of damage, and per
-  **document** rather than per round — a document whose editor demotes a heading on three rounds
-  counts once, and how many headings each of those rounds would have taken is on that session's run
-  log rather than here, deliberately, because a count of a document's own structure is a description
-  of the document. Read it against `review_stopped`: gated rounds are retried, so a document can
-  carry this signal and still stop at `clean`, and that pairing is this rate working as intended. The
-  shape to worry about is a rise in this rate beside a rise in `cap` — an editor demoting headings
-  every round, with nothing else in its replies, spends the whole budget and the document is delivered
-  as it entered, with its issues in `@unresolved`. That is a statement about the Copy Editor's
-  system prompt (`EDITOR_SYSTEM` in `src/pipeline/review.ts`) or the model behind it, not about the budget: raising `max_review_iterations` buys more of the same
-  round. A rise with no `cap` beside it is the cheap case — the demoted blocks were handed back and the
-  rest of each reply was delivered — and can also be the two known false positives: a heading correctly
-  re-expressed as a `<label>`, `<caption>`, `<dt>` or `<th>`, or a reprinted title dropped in a way that
-  left the prose no shorter. Neither costs the document its other corrections; each costs the one block
-  it happened in, for the round it happened on — with one exception, which is when the re-expression
-  lands in a **different** block from the heading it replaces (the stray `<h4>` emptied, the `<label>`
-  seated inside the form). Re-seating that block would print those words twice, so that round is refused
-  whole and logs `discarded: "headings_lost"` with `headings_dropped` and no `headings_reverted` beside
-  it. Until #376 the exception was wider and covered a block that dropped a heading and corrected **any**
-  of its own words — a typo fixed in the same `<div>` — which is an ordinary round, moved nothing
-  anywhere, and was refused entire. What is read now is where the words went, not whether they changed.
+**Nothing here may carry document content.** The workflow copies these values into a public issue,
+and the documents are user uploads. Rule ids are axe-core's fixed vocabulary. Unresolved issues and
+dropped links appear only as counts. A new field must not quote a document.
 
-  **What a 0 here does not mean.** It is not evidence that no round demotes a heading, so it is not
-  on its own a reason to retire the guard. The guard is on **one of the three paths a reply is
-  applied through** — the block patch, where a fall can be attributed to the block that dropped it
-  and that block alone handed back. The other two adopt a reply whole: the whole-body branch and
-  each section of a sectioned round (the loop's **last** round, so nothing looks at its output
-  again). Both check only the size floor, which a demotion cannot move — it keeps every word and
-  grows the bytes — so a demotion on either is applied and delivered, and this rate stays 0. That is
-  still true and is now **measurable rather than only stated** (#375): both paths compute the same
-  reading and log it as [`editor_navigation`](#editor_navigation) in the run log, refusing nothing,
-  with a line on every delivered reply so the denominator is there too. So a 0 here paired with
-  `editor_navigation` lines carrying no `headings` is a guard that has nothing to fire on; a 0 here
-  paired with `headings` falls on those lines is a guard looking where the demotions are not. Which
-  of the two it is is not answerable from this number, before #375 or after it — it is answerable
-  from that line, which is the point of having it. **And only where there are such lines**: a
-  deployment whose rounds are all block patches writes none at all, and their absence is an empty
-  population rather than evidence about the guard — the same mistake as reading a 0 here as
-  evidence, one step along. What #375 changed is that the population can be collected, not that it
-  has been.
-* `review_unread_rate` — share of documents where part of the reviewer's last read of them came back
-  **unusable**, so some of the document has no review verdict at all. The document is read in
-  windows (long ones in several), and a reply that carries no issue list this code can read — prose,
-  an apology, `{"issues": "none"}` — is a window nobody got an answer about. It is recorded because
-  without it that outcome is invisible in every other number here *and reads as the best one*: no
-  issues were found, so there is no `iris:unresolved` row, so the document was being counted clean.
-  This is the same principle as `lint_error_rate` above — an absent verdict must not count as a good
-  one — and it is why `clean_rate` in the [public tally](#public-tally-unauthenticated) subtracts
-  both. Not disjoint from `unresolved_rate`: the windows that *did* answer may have found issues.
-  The delivered document carries a `@review-unread` comment saying how many windows of how many, and
-  `reader_no_output` in the run log carries the reply's size and which of the two ways it failed. A
-  non-zero value is a statement about the reader model or its prompt, and that call's
-  [`agent_call`](#agent_call) `output` in the run log — the reply itself — is where to start. The
-  **last** read is the one this counts, because what ships is one reading of the body that shipped;
-  `first_read.unread_documents` above is the same failure on the first read, where it is an error
-  bar on that read's count rather than a gap in the delivered document's verdict.
-* `unfinished_page_rate` — share of documents delivered with a `[page not fully transcribed]` marker
-  still in the body, i.e. documents that **could not** have finished the review loop clean whatever
-  budget they were given. Not a defect rate of its own: the Reader is instructed to report every one
-  of those markers with its page, and nothing in the loop is allowed to resolve one, so each of these
-  documents is a guaranteed member of `unresolved_rate`. This is the measured floor under that rate
-  — subtract it before asking whether a threshold on it is being met. The cause is upstream of
-  everything else here (a page the extractor could not return in full), so a high value is a question
-  about extraction and `max_pages` rather than about review.
-* `rules[]` — axe-core rule ids, **per document**: `documents` is how many documents violated the
-  rule and `share` is that over `documents_linted`, with `nodes` (total offending elements) alongside
-  rather than folded in. One pathological scan with 400 bad headings is a worse `nodes` and the same
-  `documents` as any other single failure — "fails on 40% of documents" names a prompt defect,
-  while "is 90% of our violations" moves when an unrelated rule is fixed.
-* `window_days` — the window actually used, echoed back. `?days=N` is clamped to 1–365 and a
-  garbled value falls back to 30, so read this rather than assuming what you asked for. Windowed
-  rather than all-time on purpose: an all-time rate converges and stops responding to a fix.
+Every count is per session: a file uploaded three times is three documents.
 
-**Nothing here can carry document content, and that is a hard constraint rather than a
-convention.** The consumer copies these values into a *public* GitHub issue, and the documents
-behind them are user uploads — at the reference deployment, student records. Rule ids come from
-axe-core's fixed vocabulary and are safe to publish; the review loop's unresolved-issue
-descriptions are model-written prose about one person's document, which is why only their count
-appears, and dropped `href`s came from the user's own PDF, which is why only their count appears.
-A field added here that quoted a document would leak it through a path no reviewer of the workflow
-would think to check.
+**Denominators and window**
 
-**Off unless configured**, and unset means **404**, not 401: a deployment that has not opted in
-does not acknowledge the endpoint at all. Set `server.quality_token`
-(`IRIS_QUALITY_TOKEN`) to a long random value — `openssl rand -hex 32` — and restart. This token is
-its own, deliberately not `server.api_token`: the caller is a scheduled workflow that needs a page
-tally, and `api_token` would also give it every session's document. So **setting `api_token` does
-not gate this endpoint**: it is one of the four that stay reachable on a closed deployment
-([Authenticate](#authenticate)). That is deliberate — closing a deployment must not silently stop
-its own quality report. Responses carry
-`Cache-Control: no-store` and are cached in-process for five minutes.
+- `documents`: documents delivered in the window, flawless ones included. Every `_rate` divides by
+  it, and is 0 when it is 0.
+- `documents_linted`: documents the linter examined (`documents` minus the lint errors). `rules[].share`
+  divides by it. When it is well below `documents`, the rule table describes a subset.
+- `files`: distinct uploads, by sha256. For one file, the file's own hash; for several, the sha256 of
+  their hex hashes joined by newlines, in upload order, so another order or grouping is another
+  upload. `documents_unhashed`: sessions from before the hash, counted in `documents` but not `files`.
+- `window_days`: the window used. `?days=` is clamped to 1-365 and a garbled value means 30, so read
+  this rather than assume. `since`: the earliest document in the window, or `null`.
 
-Two more values live in the repo that reads it — the `QUALITY_URL` **variable** (the deployment's
-**origin**, no `/v1`: the job appends the path, and a value carrying one produces a 404 that looks
-exactly like a deployment which never opted in) and the `QUALITY_TOKEN` **secret**, byte-for-byte the
-token above. Verify the pair with `gh workflow run quality-report.yml -f dry_run=true` rather than
-waiting for the weekly schedule; [ci.md](ci.md)'s "Weekly quality report" section has the full procedure,
-including why a green run that declines to file is the expected result on a young deployment.
+**The review loop**
+
+- `mean_rounds`: mean Copy Editor passes per document, against `defaults.max_review_iterations`. 0
+  means the first reading found nothing. `null` when nothing ran. The loop also stops when a round
+  changes nothing, so a low `mean_rounds` beside a non-zero `unresolved_rate` is ordinary.
+- `unresolved_rate`: documents that finished with issues still open, at the `cap`, `converged` or
+  `truncated` exit. Only the count of issues is stored, never their text. Three kinds are never
+  resolved, by design, so always land here:
+  - two headings labelled alike, where nothing the Copy Editor has says whether they are one section
+    or two
+  - a `[not legible]` marker the Copy Editor could not read either, often because it had no image
+    for that page (`capEditorImages`, or a provider refusing a large request)
+  - a `[page not fully transcribed]` marker, which only a re-extraction can fix
+    (`unfinished_page_rate` counts these)
+- `first_read`: what the reviewer found before anything was fixed. Every other number is taken after
+  the Copy Editor ran, so this is the one that tells "the editor fixed it" from "the reviewer found
+  nothing".
+  - `mean_issues`: mean issues raised by each document's first read. A cleared document counts 0;
+    `null` when no document recorded a read.
+  - `documents`: how many recorded a first read, the denominator of `mean_issues`.
+  - `unread_documents`: of those, how many had part of the first read come back unusable. On them
+    the count is a floor.
+  - A document-level feedback re-run keeps the earlier first read, re-dated to the re-run, so it can
+    carry an older reviewer's number into a new window ([`first_read_carried`](#first_read_carried)).
+    A re-run that re-extracts replaces it.
+- `unresolved_severity`: documents with at least one open issue at each severity. Always all four
+  entries, zeroes included. Not a partition: one document can be in several, so the counts can sum
+  to more than `unresolved_rate × documents`. `high` is what a reader would call a barrier.
+  `unrated` means the Reader wrote another severity or none.
+- `review_stopped`: which exit ended each document. Always all five entries. A partition: the counts
+  sum to `documents` when every run recorded one. A smaller sum means older documents, never a sixth
+  exit.
+  - `clean`: re-read the finished document and found nothing.
+  - `converged`, `truncated`, `cap`: delivered an `@unresolved` list. Together they are the documents
+    in `unresolved_rate`.
+  - `unread`: an empty list that is still not clean (`review_unread_rate`).
+  - Each points at a different fix: `cap` at `max_review_iterations`, `converged` at a prompt,
+    `truncated` at the output ceiling, `unread` at the reviewer.
+  - On `cap` and `converged` the open list was read on the delivered bytes. On `truncated` it may be
+    older than them, so that exit over-reports.
+- `review_unread_rate`: part of the reviewer's **last** read came back unusable (prose, an apology,
+  `{"issues": "none"}`), so part of the document has no verdict. Not counted clean. Can overlap
+  `unresolved_rate`. The document carries `@review-unread`; the run log has
+  [`reader_no_output`](#reader_no_output), and that call's [`agent_call`](#agent_call) `output` is the
+  reply.
+- `unfinished_page_rate`: documents delivered with a `[page not fully transcribed]` marker. Each is
+  in `unresolved_rate`, so subtract this before comparing that rate to a threshold. The cause is
+  extraction or `max_pages`.
+
+**The Copy Editor**
+
+- `links_dropped_rate`: an `href` present before the Copy Editor was missing after it. A URL completed
+  to the link's printed text is not counted ([`editor_links_completed`](#editor_links_completed)).
+- `editor_truncated_rate`: a correction round's reply hit the output ceiling, whatever was rescued.
+  What the reply finished is applied ([`editor_salvaged`](#editor_salvaged)), the rest is redone a
+  section at a time, and the loop stops. `@editor-truncated` in the document says which. These
+  documents are also in `unresolved_rate`. A non-zero value means `max_tokens` is low for
+  `max_pages`. The weekly workflow sets no threshold on it.
+- `editor_truncated_lost_rate`: neither route covered the whole body. The run log says why:
+  [`editor_salvage_declined`](#editor_salvage_declined), [`editor_sections_declined`](#editor_sections_declined),
+  a section that truncated in turn, or a section that came back with under half its prose
+  ([`editor_section_failed`](#editor_section_failed), `reason: "shrank"`, which `max_tokens` does
+  not fix). A subset of `editor_truncated_rate` and of `unresolved_rate`. This one has a threshold.
+- `editor_headings_gated_rate`: at least one round had blocks handed back because applying them would
+  leave fewer headings with every word still there (`headings_reverted` on `editor_patch`, or
+  `discarded: "headings_lost"`). It rises when the guard works. Per document.
+  - Gated rounds are retried, so a document can count here and still stop `clean`.
+  - A rise beside a rise in `cap` points at the Copy Editor's prompt (`EDITOR_SYSTEM` in
+    `src/pipeline/review.ts`) or model. More rounds buy more of the same.
+  - Known false positives: a heading correctly turned into a `<label>`, `<caption>`, `<dt>` or `<th>`,
+    or a repeated title dropped. When the replacement lands in a different block, the whole round is
+    refused (`discarded: "headings_lost"`, `headings_dropped`, no `headings_reverted`).
+  - 0 does not mean no round demotes a heading. The guard is only on the block-patch path. The
+    whole-body and sectioned paths log [`editor_navigation`](#editor_navigation) instead and refuse
+    nothing, so read those lines where there are any.
+
+**The delivered document**
+
+- `links_unresolved_rate`: shipped with an `href="#"` or a fragment naming an `id` the document does
+  not have. `#` and `#top` are excluded. Which ones: [`internal_links`](#internal_links).
+- `markup_unbalanced_rate`: an element whose end tag HTML requires (`table`, `ul`, `a`, `section`,
+  ...; never `li` or `tr`) has unequal start and end tags. Measured on the delivered bytes. Which
+  element: [`delivered_markup`](#delivered_markup).
+- `table_no_body_rate`: at least one table with no content row: no rows, none outside `<thead>`, or,
+  with no `<thead>`, only header rows. Row headers (`<th scope="row">`) are content. Measured on the
+  parsed tree.
+- `structural_defect_rate`: an `aria-labelledby`, `aria-describedby` or `label[for]` naming a missing
+  `id`; a `<dl>` with terms and no definitions; or a `<nav>`, `<aside>` or named `<section>` holding
+  nothing a reader receives. Which: [`delivered_structure`](#delivered_structure), which also reports
+  `lang_on_void`, not counted here.
+
+**The accessibility check**
+
+- `lint_error_rate`: the lint pass errored instead of running. Those documents have no accessibility
+  verdict: `lint_ok: false` and no `violations` figure, and an `@lint-unavailable` comment in the
+  document. The `assembly` line (or [`lint_unavailable`](#lint_unavailable)) carries `lint_error`,
+  `lint_error_where`, `lint_error_name` and the first frames of `lint_error_stack`.
+- `lint_error_where`: which step failed. `parse` (jsdom refused the HTML), `inject` (axe's own source
+  would not run, a dependency problem) or `run` (the rule pass threw). Always all three entries. A
+  sum below `lint_error_rate × documents` means older documents. No message or stack, because they
+  can quote markup.
+- `rules[]`: per axe rule id, `documents` that violated it, `share` of `documents_linted`, total
+  offending `nodes`, and `impact`. Sorted by `documents`, then `nodes`, then id.
 
 ## Agent suggestions (shared secret, off by default)
 
