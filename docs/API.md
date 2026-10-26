@@ -691,7 +691,7 @@ page, rather than shipping a JSON envelope or an apology as content.
 | `truncated_envelope` | The output ceiling cut it off | Raise `providers.*.max_tokens` |
 | `envelope` | Complete, and its escaping defeated the parser | Rare, since a page's own unescaped punctuation is repaired first. Report it |
 | `prose` | A conversational answer | A prompt problem |
-| `empty_html` | An envelope with no `html`, or HTML holding nothing a reader receives (a comment, an empty wrapper, a bare page-break marker all count as nothing), and a `log` that does not say the page is blank | A prompt problem |
+| `empty_html` | An envelope with no `html`, or HTML holding nothing a reader receives (a comment, an empty wrapper, a bare page-break marker all count as nothing). Either the `log` does not say the page is blank, or it does and the claim was refused (the `blank_` fields above) | A prompt problem; for a refused claim, read `blank_vetoed` and `blank_contradicted` |
 | `empty` | Nothing at all | A prompt problem |
 | `bare_html` | The page's markup, not the envelope | Read `dropped`: either an unclosed fence made the parser refuse a real page, or the markup carried nothing, a prompt problem like `prose` |
 
@@ -740,9 +740,10 @@ visible text, and no picture, grid or form control), and a declaration, in the `
 without it, in a `log` that says so plainly. Prose is content: `<p>This page is blank.</p>` is
 delivered as the page's words.
 
-- No verify call is bought, except for the `blank_contradicted` case. Its verify line says
-  `skipped: "blank"` and `unjudged`. So this line counts declarations made, not pages that ended up
-  empty, and `pages_blank - pages_skipped_blank` is the ones that cost a call.
+- No verify call is bought: the page's verify line says `skipped: "blank"` and `unjudged`. The
+  exception is the `blank_contradicted` case, which is verified and has no `skipped`. So this line
+  counts declarations made, not pages that ended up empty, and `pages_blank - pages_skipped_blank`
+  is the ones that cost a call.
 - No page-break marker is delivered for a blank page; one that arrives goes to `dropped`. A page
   whose only content is its page number is blank by decision.
 - **A confident wrong declaration about a page whose file says nothing is not caught.** This line is
