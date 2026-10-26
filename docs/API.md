@@ -1046,46 +1046,27 @@ Written by `src/pipeline/extraction.ts`.
 
 ### `page_links_correction_rejected`
 
-A correction bought for a page that had already passed its fidelity check was refused by the second
-verdict, so the page shipped as it was: `image`; `trigger`, what the correction had been asked to fix;
-`links`, the hrefs that were missing; `alts`, `ids` or `words` where those were part of the same
-call; and `problems`, what the **second** verdict objected to — the field that says why the billed
-rewrite lost.
+A correction of a page that had already passed its fidelity check was refused by the second verdict
+(the binding recheck), so the page shipped as it was. The correction was billed.
 
-`problems` is that verdict's objections **as prose**, an array of the strings it wrote. That is not
-what the field of the same name carries on [`page_corrected`](#page_corrected), which is a count of the
-problems the correction was *given*; the two lines can appear for the same `image` in one round, so a
-reader summing "problems" across the log without checking which line it came off is adding a list to a
-number.
+- `image`.
+- `trigger`: what the correction was for. `links`, `alt`, `ids`, `words`, `numbers` or `both` (more
+  than one; which ones are on that page's [`page_links_missing`](#page_links_missing),
+  [`page_generic_alt`](#page_generic_alt), [`page_duplicate_ids`](#page_duplicate_ids) and
+  [`page_split_words`](#page_split_words) and [`text_layer_numbers`](#text_layer_numbers) lines,
+  keyed by `image`; this line has no field for the numbers, so that is the only place they are).
+  Never `verify`: a page that failed has no standing to protect.
+- `links`: the missing hrefs. Always present, `[]` when no link was involved, so read `trigger`, not
+  this, for what the call was for.
+- `alts`, `ids`, `words` (as `split / joined`): present when those were part of the call.
+- `problems`: the second verdict's objections, as an **array of strings**. On
+  [`page_corrected`](#page_corrected), `problems` is a **count**, and both lines can appear for one
+  `image`, so never sum them together.
 
-`links` is always present and is `[]` where the refused correction was bought for a placeholder
-`alt`, a duplicate `id` or a word written two ways alone, so the field to read for what the call was
-for is `trigger`, not this one.
-
-The name is older than the rest of the line, and keeping it is deliberate. It began as the links-only
-case, and renaming it now would split one measurement across two event names in a log that is read
-across rounds. `trigger` is what says which repair was refused: `links`, `alt`, `ids`, `words`, or
-`both`. It cannot read `verify` here, though that value exists on
-[`page_corrected`](#page_corrected) — this recheck is only bought for a page whose fidelity check
-**passed**, since a page that failed has no standing to protect.
-
-`both` means more than one source fired, and deliberately not which combination. That collapse is a
-property of the shared `trigger`, computed once for this line and [`page_corrected`](#page_corrected)
-from five sources — where naming the combination would be thirty-one buckets — and only four of the
-five can reach *this* line, since `verify` cannot. The per-source detail is already exact on
-[`page_links_missing`](#page_links_missing), [`page_generic_alt`](#page_generic_alt),
-[`page_duplicate_ids`](#page_duplicate_ids) and [`page_split_words`](#page_split_words), all keyed by
-the same `image`. `alts`, `ids` and `words` are on the line anyway, and that is the reason: `both`
-cannot say the alt, the duplicate id or the split word was part of what the refused call was asked to
-fix. `words` carries one further reading the others do not: a refused correction bought for a split
-word may be a rewrite that lost, or a model that declined the problem — which on that check is a
-legitimate answer — and was overruled by the recheck.
-
-The correction is billed either way, so this is a line about money that bought nothing — a page that
-was known to be good was re-rendered, the rewrite was judged in turn, and the rewrite lost. A verdict
-that could not be **obtained** lands on [`page_verify_error`](#page_verify_error) with
-`correction_discarded` instead, so no verdict and a failed verdict are the same outcome for the page
-and two different lines in the log.
+On `words`, the refusal may be a rewrite that lost, or a model that correctly declined the split word
+and was overruled. The name predates the non-link triggers and is kept so the measurement stays under
+one name across rounds. A verdict that could not be obtained is
+[`page_verify_error`](#page_verify_error) with `correction_discarded` instead.
 
 ### `page_soft_hyphens`
 
@@ -1400,98 +1381,61 @@ Written by `src/pipeline/extraction.ts`.
 
 ### `page_verify_ok` / `page_verify_failed`
 
-The Feedback Agent's fidelity verdict on one page, checked against its source image. A failure
-names its `problems` and buys that page one self-correction pass. A page that passes can still be
-re-rendered (a dropped link), so a run's `page` call count is `pages + corrections`, not
-`pages + failures`. A failure also carries `kinds`: the distinct kinds of problem the verdict
-named, out of `content_missing`, `content_wrong`, `structure_wrong`, `a11y_only` and `alt_quality`
-(defined in `agents/feedback.md`, in the order the agent is told to prefer them — content that is
-absent is `content_missing` even though it is also a WCAG failure).
+The Feedback Agent's fidelity verdict on one page, against its source image. A failure buys the page
+one correction. A page that passes can still be re-rendered (for a dropped link, say), so a run's
+`page` call count is `pages + corrections`, not `pages + failures`.
 
-It is a **set**, not one label per problem: two missing rows are one page that lost content.
-Without it a page that lost three table rows and a page whose alt text was refined from "orange
-kayak" to "orange-yellow kayak" wrote the same line, which made `verify_failed` a count of pages
-the verifier had an opinion about and nothing more.
+`page_verify_failed` carries `image`, `problems` (the verdict's strings), `kinds` and `untagged`:
 
-`untagged` is how many of that page's `problems` — a count of problems, where the diagnostics
-fold's `untagged_pages` counts pages — carried no kind this version recognizes — an agent file
-whose VERIFY contract predates the kinds, a session-built or trained one that dropped the field,
-or a kind the agent invented. Read it beside `kinds` or a split reads as covering pages it never
-saw. A problem is never dropped for being untagged or unrecognizably shaped: a lost label costs a
-label, and a lost problem ships the page.
+- `kinds`: the set of kinds the problems named, out of `content_missing`, `content_wrong`,
+  `structure_wrong`, `a11y_only` and `alt_quality` (defined in `agents/feedback.md`, in the order the
+  agent prefers them: absent content is `content_missing` even though it is also a WCAG failure). A
+  set, not one per problem: two missing rows are one page that lost content.
+- `untagged`: how many **problems** carried no kind this version knows (an older agent file, a
+  dropped field, or an invented kind). The diagnostics `untagged_pages` counts pages. A problem is
+  never dropped for being untagged.
 
-A `page_verify_ok` line carries `unjudged: true` when nothing actually judged the page — no
-Feedback Agent loaded, nothing to verify, a reply that would not parse. Verification is
-non-blocking, so all three answer "faithful" and the page ships; the field is what separates "the
-verifier looked and was satisfied" from "nobody looked", which is otherwise the same line. Omitted
-rather than false on a real verdict, and absent from every log written before it existed. The
-diagnostics fold counts them as `pages_unjudged`. A fourth case joins those three and is the one
-that saves money:
+`page_verify_ok` carries `image`, and:
 
-`skipped: "blank"`, a page the agent declared blank, which is not sent to the verifier at all
-because an empty fragment has no content to be unfaithful with (issue #294). Not every blank page:
-a declaration the reply **stated** in its `blank` field whose own log names something on the page
-is judged, and its line carries no `skipped` at all — it is the one blank page a verdict is bought
-for, and `blank_contradicted` on its [`page_blank`](#page_blank) line is why (issue #371). It
-carries `unjudged: true` too — both are pages nothing looked at and neither may enter a pass rate
-— and the extra field is what separates a call that could not be made from one that was not
-bought, which is the difference between a broken run and a saving.
-
-Counted as `pages_skipped_blank`, a subset of `pages_unjudged`. The free checks still run on that
-page, so a blank page carrying link annotations still fails the link comparison and still buys a
-correction. A fifth case is `skipped: "error"`, the second value that same distinction always
-described and nothing had ever emitted: the call that could **not be made**, as against the one
-that was not bought (issue #364, and `page_verify_error` below for what went wrong). It is
-`unjudged` too and stays out of every pass rate for the same reason, but it is the opposite of a
-saving — that page was billed for a full ceiling of output and got no verdict for it — so
-`pages_skipped_blank` and `pages_verify_error` are counted separately and must not be added.
+- `unjudged: true` when nothing judged the page: no Feedback Agent, nothing to verify, a reply that
+  would not parse, or one of the two `skipped` cases. Such a page ships as if faithful, so this field
+  keeps it out of pass rates (`pages_unjudged`). Absent on a real verdict and on older logs.
+- `skipped: "blank"`: a page declared blank, not sent to the verifier (#294;
+  `pages_skipped_blank`). Not every blank page: a declaration stated in the reply's `blank` field
+  whose own log names something on the page is judged, with no `skipped`
+  (`blank_contradicted` on [`page_blank`](#page_blank), #371). The free checks still run, so a blank
+  page with link annotations still buys a correction.
+- `skipped: "error"`: the verify call was made and failed ([`page_verify_error`](#page_verify_error);
+  `pages_verify_error`). The opposite of a saving: billed and unanswered. Never add it to
+  `pages_skipped_blank`.
 
 ### `page_verify_error`
 
-A page's fidelity check could not be obtained: the call was made and the provider errored, was
-throttled, stalled, or the reply overran its output ceiling. Carries `image`, `page`, the `step`
-that failed (`verify`, the check that decides whether a correction is bought, or
-`recheck_binding`, the gate on keeping one), the `error` message, and for a truncation the same
-evidence `page_correction_failed` carries — `truncated`, `reply_chars`, and both ends of the
-reply, which is what separates a verifier that needed the room from one that wrote an essay about
-a page it had already judged.
+A page's fidelity check was bought and could not be obtained: the provider errored, throttled,
+stalled, or the reply overran its ceiling (#364).
 
-**A verdict that cannot be obtained is not a page that cannot be extracted**, and until issue #364
-this pipeline could not say so on the first check:
+- `image`, `page`, `error`.
+- `step`: `verify` (the check that decides whether a correction is bought) or `recheck_binding` (the
+  gate on keeping a correction of a page that passed).
+- On a truncation: `truncated: true`, `reply_chars`, and `reply_head` / `reply_tail` (the first and
+  last 240 characters, whitespace folded; a reply under 480 characters is all in `reply_head`). A tail
+  that keeps going about a page already judged is a verifier writing an essay, not one that needed
+  the room.
+- On `recheck_binding`: `trigger` and `correction_discarded: true`. With no verdict, a correction
+  of a page that had passed is not kept. It was billed anyway.
 
-`verifyAgentOutput` is non-blocking for an absent Feedback Agent and for an unparseable reply, but
-a provider error is rethrown, and that first call had nothing to catch it — so a throttled or
-over-long *check* propagated out of the page's extraction and shipped a `@page-failed` marker for
-a page that had rendered fine. Measured once on a 100-page bench arm: a page extracted as 8,855
-characters of HTML, a complete statistical table of 568 words, was delivered as a 156-byte
-comment, and $0.5051 of that page's $0.6634 was the call that deleted it.
+What happens to the page:
 
-Three things it cost besides the page, which is why this is its own event rather than a silent
-`catch`: the delivered document asserted "the source pages above could not be extracted", which
-was false; `pages_failed` and every triage of *why* pages fail recorded a vision failure, so
-anyone tuning the page agent on that signal was tuning the wrong agent; and the marker advised
-raising `providers.*.max_tokens`, which buys the verifier room to write more about a page it has
-already judged — the wrong lever, pushed the wrong way.
+- On `verify`, no correction is bought and the page ships as extracted. It is not a failed page:
+  before #364 this error shipped a `@page-failed` marker for a page that had rendered fine.
+- This is not the same as having no Feedback Agent. With none loaded, every check returns a passing
+  unjudged verdict, so a link- or alt-triggered correction passes its binding recheck and is kept.
+  Under a provider failure that recheck throws and the correction is discarded, so a page with a
+  dropped `href` ships without it here.
+- The sampled recheck's failure is [`page_correction_recheck_failed`](#page_correction_recheck_failed),
+  not this line. It decides nothing either way.
 
-The policy it is fixed to is this pipeline's own: a specialist that fails leaves the page as the
-general pass wrote it, and a fidelity check that cannot run is nothing to correct, so no
-correction is bought and the page ships as extracted. That matches an unconfigured deployment on
-any page whose only route to a repair was the verdict, and **not** on a page the link comparison
-would have repaired: with no Feedback Agent loaded every call site returns a passing unjudged
-verdict, so a links- or alt-triggered correction reaches the binding recheck and is **kept**,
-while under a provider failure that recheck throws too and the correction is discarded.
-
-A page with a dropped `href` therefore ships without it here and with it there — the discard
-decision below, stated rather than folded into a claim of equivalence. On `recheck_binding` the
-line also carries `trigger` and `correction_discarded: true`: that recheck exists to stop a
-correction bought for one link or one placeholder alt from damaging a page that had already
-**passed**, so where its verdict cannot be obtained the correction is not kept — no verdict is no
-licence, and the status quo is a page that passed.
-
-The correction is billed either way, and that field is what puts the discard on the record rather
-than leaving it inferred from an absent rejection line. The third verify call, the sampled
-recheck, keeps its own older `page_correction_recheck_failed` and is not folded in here: it
-decides nothing whether it answers or not, and it has been read across rounds under that name.
+Why: [design notes — extraction: verdicts and empty pages](design-notes.md#extraction-verdicts-and-empty-pages).
 
 ### `page_verify_inconsistent`
 
@@ -1519,9 +1463,10 @@ The diagnostics fold counts them as `verification.verify_inconsistent`.
 
 One self-correction pass on a page.
 
-- `trigger`: what asked for it. `verify` is the checking model; `links`, `alt`, `ids` and `words` are
-  code checks; `both` means more than one source (which ones: that page's `page_links_missing`,
-  `page_generic_alt`, `page_duplicate_ids` and `page_split_words` lines, keyed by the same `image`).
+- `trigger`: what asked for it. `verify` is the checking model; `links`, `alt`, `ids`, `words` and
+  `numbers` are code checks; `both` means more than one source (which ones: that page's
+  `page_links_missing`, `page_generic_alt`, `page_duplicate_ids`, `page_split_words` and
+  `text_layer_numbers` lines, keyed by the same `image`).
 - `problems`: how many it was given. `kinds`: what the verdict said was wrong, the same set as
   `page_verify_failed`'s; empty on the code triggers, where no verdict named anything.
 - `result`:
