@@ -6,7 +6,7 @@ Each endpoint's exact request and response is in [openapi.yaml](openapi.yaml), s
 `GET /v1/openapi.json`. The sections below point at it.
 
 Every endpoint is under `/v1`. All responses are JSON unless noted. Which ones need a token:
-[Authenticate](#authenticate).
+the description at the top of [openapi.yaml](openapi.yaml).
 
 These commands are copy-pasteable. They are the same calls exercised by `test/e2e.sh`, which
 runs the whole lifecycle against mock GitHub + mock model services and asserts every response.

@@ -123,7 +123,8 @@ curl http://localhost:8080/v1/health
 ```
 
 Or just open the **accessible browser app** at `http://localhost:8080/` for a no-API walkthrough — no
-sign-in, no token (upload page images → convert → view the accessible HTML).
+sign-in, no token, and off once you set `server.api_token` (upload page images → convert → view the
+accessible HTML).
 
 ## Command line interface (CLI)
 
@@ -194,8 +195,7 @@ corrections.
 ## API
 
 All endpoints are under `/v1`. Every endpoint, who may call it, and its exact request and answer:
-[docs/openapi.yaml](docs/openapi.yaml), served as `GET /v1/openapi.json`. To watch each one work on
-a real document, open `/how-it-works` on a running Iris.
+[docs/openapi.yaml](docs/openapi.yaml), served as `GET /v1/openapi.json`.
 
 The basic flow:
 
