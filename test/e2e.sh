@@ -57,7 +57,7 @@ dump_server_log() {
 PIDS=()
 cleanup() {
   for pid in "${PIDS[@]:-}"; do kill "$pid" 2>/dev/null || true; done
-  rm -rf "$DATA" "$CFG" "$OPEN_DATA" "$OPEN_CFG"
+  rm -rf "$DATA" "$CFG" "$OPEN_DATA" "$OPEN_CFG" /tmp/iris-e2e-ans-*.json
 }
 trap cleanup EXIT
 
@@ -359,6 +359,7 @@ create=$(curl -s -X POST "${AUTH[@]}" "$BASE/sessions" \
   -F "images=@$png;filename=page-003.png" \
   -F 'config={"max_review_iterations":5}')
 SID=$(echo "$create" | jq -r '.session_id')
+printf '%s' "$create" > /tmp/iris-e2e-ans-create.json
 echo "$create" | jq -e '.status=="queued" and .image_count==3' >/dev/null \
   && pass "session created: $SID" || fail "create" "$create"
 capped=$(curl -s "${AUTH[@]}" "$BASE/sessions/$SID")
@@ -651,6 +652,7 @@ log_json() {
 echo "==> 9. POST /v1/sessions/{id}/feedback (document-level => review only)"
 fb=$(curl -s -X POST "${AUTH[@]}" "$BASE/sessions/$SID/feedback" -H 'content-type: application/json' \
   -d '{"feedback":"Keep headings distinct from body text."}')
+printf '%s' "$fb" > /tmp/iris-e2e-ans-feedback.json
 echo "$fb" | jq -e '.status=="running"' >/dev/null && pass "feedback re-run accepted" || fail "feedback" "$fb"
 await_ready "re-run"
 # Document-level feedback must NOT re-extract: no page should be marked Revised.
@@ -1560,6 +1562,7 @@ curl -si "${QAUTH[@]}" "$BASE/quality" | grep -qi '^cache-control: no-store' \
 
 echo "==> 12. POST /v1/sessions/{id}/close (finalize + clean tmp; no PRs)"
 close=$(curl -s -X POST "${AUTH[@]}" "$BASE/sessions/$SID/close")
+printf '%s' "$close" > /tmp/iris-e2e-ans-close.json
 echo "$close" | jq -e '.status=="closed"' >/dev/null && pass "session closed" || fail "close" "$close"
 [ ! -d "$DATA/tmp/$SID" ] && pass "tmp/ cleaned on close" || fail "tmp cleanup" "tmp dir still present"
 
@@ -1616,4 +1619,13 @@ echo "$refusal" | grep -qi '^retry-after:' \
   || fail "upload limit shape" "expected Retry-After and an Iris rate_limited body, got: $refusal"
 
 echo ""
+# Last, because /v1/quality caches its answer for 60s: asked earlier, it would hand the quality
+# steps above a stale tally.
+echo "==> 99. every answer matches docs/openapi.yaml"
+oa=$(OPENAPI_RECORDED="/v1/sessions,post,201,/tmp/iris-e2e-ans-create.json;/v1/sessions/{id}/feedback,post,202,/tmp/iris-e2e-ans-feedback.json;/v1/sessions/{id}/close,post,200,/tmp/iris-e2e-ans-close.json" node test/openapi-check.mjs "http://localhost:$PORT" "$API_TOKEN" "$QUALITY_TOKEN" "$SID" 2>&1) \
+  && pass "$(tail -1 <<<"$oa")" || fail "openapi" "$oa"
+spec=$(curl -s "http://localhost:$PORT/v1/openapi.json")
+jq -e '.openapi=="3.1.0" and (.paths|has("/v1/sessions/{id}/logs"))' <<<"$spec" >/dev/null \
+  && pass "/v1/openapi.json serves the spec" || fail "openapi.json" "$(head -c 200 <<<"$spec")"
+
 echo "ALL ENDPOINTS PASSED ✅"

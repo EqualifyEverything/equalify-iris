@@ -1,4 +1,5 @@
 import express from "express";
+import { parse as parseYaml } from "yaml";
 import { accessSync, constants, existsSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -26,7 +27,7 @@ import { limitsRouter } from "./routes/limits.ts";
 import { clearPdfScratch, supportsReportDetail, taggedPdfCommand, taggedPdfStatus } from "./util/taggedPdf.ts";
 import { qualityRouter } from "./routes/quality.ts";
 import { suggestionsRouter } from "./routes/suggestions.ts";
-import { errorHandler, notFound } from "./routes/errors.ts";
+import { errorHandler, notFound, sendError } from "./routes/errors.ts";
 import { visionModelWarning } from "./providers/imageLimits.ts";
 import { generalRateLimit } from "./util/requestLimits.ts";
 import { VERSION } from "./version.ts";
@@ -306,6 +307,21 @@ app.get("/v1/health", (_req, res) => res.json({ status: "ok", service: "equalify
 // is a later and narrower question: nothing in it stops a polling loop from occupying
 // the event loop with synchronous SQLite reads.
 app.use("/v1", generalRateLimit(cfg));
+
+// The API's exact contract (docs/openapi.yaml), as JSON. Open like /v1/limits: it describes the API,
+// not a document. test/openapi.test.ts keeps it in step with the routes.
+// A missing or broken file must not stop Iris: it is documentation, so the route answers 404.
+const openapiDoc = (() => {
+  try {
+    const doc = parseYaml(readFileSync(fileURLToPath(new URL("../docs/openapi.yaml", import.meta.url)), "utf8"));
+    doc.info.version = VERSION;
+    return doc;
+  } catch (e) {
+    console.warn(`WARNING: docs/openapi.yaml could not be read (${(e as Error).message}), so /v1/openapi.json answers 404.`);
+    return null;
+  }
+})();
+app.get("/v1/openapi.json", (_req, res) => (openapiDoc ? res.json(openapiDoc) : sendError(res, 404, "not_found", "This deployment has no API description.")));
 
 // The public tally of pages converted (aggregate-only, no per-session detail). The browser
 // app reads it to report how many pages Iris has made accessible, and it is not handed the
