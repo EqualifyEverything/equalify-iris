@@ -1,8 +1,9 @@
 # Equalify Iris — API Guide (bash / curl)
 
 For how the system works, in plain language, open `/how-it-works` on a running Iris. It makes these
-calls on a real document and explains each. Each endpoint's exact request and response is in
-[openapi.yaml](openapi.yaml), served as `GET /v1/openapi.json`.
+calls on a real document and explains each; every endpoint is under The API there, with Try it.
+Each endpoint's exact request and response is in [openapi.yaml](openapi.yaml), served as
+`GET /v1/openapi.json`. The sections below point at it.
 
 Every endpoint is under `/v1`. All responses are JSON unless noted. There is no sign-in
 ([Authenticate](#authenticate)). Whether you send anything at all depends on the deployment: where the operator set `server.api_token`, `/v1/me` and
@@ -39,7 +40,7 @@ export BASE=http://localhost:8080/v1
 
 ## Health (unauthenticated)
 
-`GET /v1/health` says Iris is up, and which version. Exact contract: [`docs/openapi.yaml`](openapi.yaml). To see it work, open `/how-it-works` and find it under The API.
+`GET /v1/health` says Iris is up, and which version. Exact contract: [`docs/openapi.yaml`](openapi.yaml).
 
 ## Public tally (unauthenticated)
 
@@ -552,15 +553,15 @@ including why a green run that declines to file is the expected result on a youn
 
 ## Agent suggestions (shared secret, off by default)
 
-`GET /v1/suggestions`: the agents Iris suggested, behind the quality token. Exact contract: [`docs/openapi.yaml`](openapi.yaml). To see it work, open `/how-it-works` and find it under The API.
+`GET /v1/suggestions`: the agents Iris suggested, behind the quality token. Exact contract: [`docs/openapi.yaml`](openapi.yaml).
 
 ## Authenticate
 
-There is no sign-in. A deployment is open (send no header) or gated (send `Authorization: Bearer <token>`); `GET /v1/me` with no header answers 200 or 401. What the token covers, and why some endpoints stay open, is in the spec's description. Exact contract: [`docs/openapi.yaml`](openapi.yaml). To see it work, open `/how-it-works` and find it under The API.
+There is no sign-in. A deployment is open (send no header) or gated (send `Authorization: Bearer <token>`); `GET /v1/me` with no header answers 200 or 401. What the token covers, and why some endpoints stay open, is in the spec's description. Exact contract: [`docs/openapi.yaml`](openapi.yaml).
 
 ## Deployment defaults
 
-`GET /v1/me`: call it first. It says whether you can use the deployment, and the review cap. Exact contract: [`docs/openapi.yaml`](openapi.yaml). To see it work, open `/how-it-works` and find it under The API.
+`GET /v1/me`: call it first. It says whether you can use the deployment, and the review cap. Exact contract: [`docs/openapi.yaml`](openapi.yaml).
 
 ## Create a session (upload images)
 
@@ -811,11 +812,11 @@ or every request looks like it came from the proxy.
 
 ## Poll status
 
-`GET /v1/sessions/{id}`: poll until `status` is `ready_for_review` or `failed`. Exact contract: [`docs/openapi.yaml`](openapi.yaml). To see it work, open `/how-it-works` and find it under The API.
+`GET /v1/sessions/{id}`: poll until `status` is `ready_for_review` or `failed`. Exact contract: [`docs/openapi.yaml`](openapi.yaml).
 
 ## Fetch the HTML output
 
-`GET /v1/sessions/{id}/output`: the accessible HTML, and the comments it can end with (`@unresolved`, `@editor-truncated`, `@lint-unavailable`). Exact contract: [`docs/openapi.yaml`](openapi.yaml). To see it work, open `/how-it-works` and find it under The API.
+`GET /v1/sessions/{id}/output`: the accessible HTML, and the comments it can end with (`@unresolved`, `@editor-truncated`, `@lint-unavailable`). Exact contract: [`docs/openapi.yaml`](openapi.yaml).
 
 ## Get a tagged PDF (optional)
 
@@ -895,11 +896,11 @@ the tagged copy. This needs iris-pdf with
 
 ## Audit (off by default)
 
-`GET /v1/sessions/{id}/audit` and the routes under it serve page images, prompts and the document between steps, when `server.audit` is on. Anyone who can read a session can read all of this. Exact contract: [`docs/openapi.yaml`](openapi.yaml). To see it work, open `/how-it-works` and find it under The API.
+`GET /v1/sessions/{id}/audit` and the routes under it serve page images, prompts and the document between steps, when `server.audit` is on. Anyone who can read a session can read all of this. Exact contract: [`docs/openapi.yaml`](openapi.yaml).
 
 ## Submit feedback (re-run)
 
-`POST /v1/sessions/{id}/feedback`: a new run of the same document with your feedback, routed to a re-review or a re-read of named pages. Exact contract: [`docs/openapi.yaml`](openapi.yaml). To see it work, open `/how-it-works` and find it under The API.
+`POST /v1/sessions/{id}/feedback`: a new run of the same document with your feedback, routed to a re-review or a re-read of named pages. Exact contract: [`docs/openapi.yaml`](openapi.yaml).
 
 ## Run log
 
@@ -4821,7 +4822,7 @@ had already declared wrong.
 
 ## Contributions (automatic)
 
-Every run saves suggestions for new or better agents, with no opt-out, and a workflow files them as public issues. How, and what that means for private documents, is in `GET /v1/suggestions`'s description. Exact contract: [`docs/openapi.yaml`](openapi.yaml). To see it work, open `/how-it-works` and find it under The API.
+Every run saves suggestions for new or better agents, with no opt-out, and a workflow files them as public issues. How, and what that means for private documents, is in `GET /v1/suggestions`'s description. Exact contract: [`docs/openapi.yaml`](openapi.yaml).
 
 ## Errors
 

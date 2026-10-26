@@ -860,15 +860,22 @@
     // A longer description: paragraphs split by a blank line, and "- " items (with indented
     // continuation lines) as a list. Escaped first, like md.
     function mdBlock(t) {
-      return String(t || '').trim().split(/\n\s*\n/).map((para) => {
-        const lines = para.split('\n');
-        if (/^- /.test(lines[0])) {
-          const items = [];
-          for (const l of lines) { if (/^- /.test(l)) items.push(l.slice(2)); else if (items.length) items[items.length - 1] += ' ' + l.trim(); }
-          return '<ul>' + items.map((x) => '<li>' + md(x) + '</li>').join('') + '</ul>';
+      // Each line is read: a "- " line starts a list item wherever it falls, so a list with no blank
+      // line before it still renders as a list.
+      const out = [];
+      for (const para of String(t || '').trim().split(/\n\s*\n/)) {
+        let text = [], items = null;
+        const flush = () => { if (text.length) out.push('<p>' + md(text.join(' ')) + '</p>'); text = []; };
+        for (const raw of para.split('\n')) {
+          const l = raw.trim();
+          if (/^- /.test(raw)) { flush(); (items = items || []).push(l.slice(2)); }
+          else if (items && /^\s/.test(raw)) items[items.length - 1] += ' ' + l;
+          else { if (items) { out.push('<ul>' + items.map((x) => '<li>' + md(x) + '</li>').join('') + '</ul>'); items = null; } text.push(l); }
         }
-        return '<p>' + md(lines.map((l) => l.trim()).join(' ')) + '</p>';
-      }).join('');
+        flush();
+        if (items) out.push('<ul>' + items.map((x) => '<li>' + md(x) + '</li>').join('') + '</ul>');
+      }
+      return out.join('');
     }
     const AUTH_WORDS = { open: 'Open to anyone.', key: 'Needs the API key where this deployment sets one.', quality: 'Needs the quality token.' };
     function apiCardHtml(o, i) {

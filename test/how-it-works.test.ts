@@ -545,4 +545,5 @@ test("the API section, rendered, passes the same axe check", async () => {
 
 test("a longer description renders as paragraphs and lists, escaped", () => {
   assert.equal(lib.mdBlock("One `a`.\nStill one.\n\n- first\n  goes on\n- <b>second</b>"), "<p>One <code>a</code>. Still one.</p><ul><li>first goes on</li><li>&lt;b&gt;second&lt;/b&gt;</li></ul>");
+  assert.equal(lib.mdBlock("Iris routes it:\n- `document`: kept\n- `extraction`: re-read"), "<p>Iris routes it:</p><ul><li><code>document</code>: kept</li><li><code>extraction</code>: re-read</li></ul>", "a list straight after a sentence");
 });

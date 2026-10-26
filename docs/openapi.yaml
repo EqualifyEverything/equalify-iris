@@ -395,7 +395,7 @@ paths:
       tags: [Operators]
       summary: Agents Iris suggested, for maintainers
       description: |
-        Every suggestion this deployment saved, grouped. Every run gives back, with no opt-out:
+        Every suggestion this deployment saved, grouped. Every run saves suggestions, with no opt-out:
 
         - a new-agent suggestion when a page holds content a specialist would handle better (name, page,
           reason)
@@ -430,7 +430,7 @@ paths:
       tags: [Sessions]
       summary: List sessions, newest first
       description: |
-        Newest first. This lists every session, not just yours: with no sign-in, anyone who can call it sees
+        Newest first. This lists every session, not just yours. There is no sign-in, so any caller sees
         every session's id, status, page count and times, and an id is all `/output` needs. Gate a
         deployment that handles anything private. To follow your own work, keep the `session_id` the upload
         returned.
@@ -438,6 +438,9 @@ paths:
         - `limit`: 20 by default, at most 100. Anything that is not an integer of 1 or more is the default.
         - `cursor`: pass `next_cursor` back byte for byte, percent-encoded in the URL (`%7C` for its `|`).
           It is checked against the exact format Iris writes, so anything else is 400, never a silent restart.
+          One exception: a bare timestamp with no `|` (a cursor from before the compound one) is still
+          accepted, and that one request skips sessions created in the same millisecond. The next cursor is
+          compound, so it clears itself; if a client reports a gap during an upgrade, this is why.
           Stop when `next_cursor` is `null`, not when a page comes back short.
       security: [{}, {apiKey: []}]
       parameters:
@@ -535,7 +538,7 @@ paths:
         - `<!-- @unresolved -->` at the end lists problems the review left open.
         - `<!-- @editor-truncated -->` means a correction round's answer hit the model's output ceiling. Its
           form says what got corrected: `blocks B of T` (the first B of T blocks, the rest asked again by
-          section or left), `sections C of N` (the whole body redone section by section), or bare (nothing
+          section or left; a passage moved backwards across that point may now appear twice), `sections C of N` (the whole body redone section by section), or bare (nothing
           rescued, so none of the listed problems was worked on).
         - `<!-- @lint-unavailable -->` means axe could not run, so nothing was checked.
         - Images are `<img>` with a description and a placeholder `src` naming the page and the graphic.
@@ -749,9 +752,10 @@ paths:
         "429": {$ref: "#/components/responses/Error"}
       description: |
         Audit mode only (`server.audit`, or `iris convert --audit`); otherwise 404 `audit_off`. Each run then
-        keeps the prompts it sent and the document after joining and after each review round, served with
+        keeps the prompts it sent and the document after assembly (`assembled`) and after each review round (`round-<n>`), served with
         the page images and working files. Answers while the run works. Anyone who can read a session can
         read all of this.
+        Prompts never hold form values: those go only to `POST /pdf`, which calls no model.
 
   /v1/sessions/{id}/audit/pages/{order}:
     get:
@@ -788,7 +792,8 @@ paths:
     get:
       tags: [Audit]
       summary: One message as sent to a model
-      description: Named by a `model_call_start` line's `prompt`.
+      description: |
+        Named by a `model_call_start` line's `prompt`. Never holds a form value: those go only to `POST /pdf`, which calls no model.
       security: [{}, {apiKey: []}]
       parameters:
         - {$ref: "#/components/parameters/SessionId"}
