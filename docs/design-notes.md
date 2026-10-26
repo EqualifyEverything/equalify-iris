@@ -3133,6 +3133,109 @@ read as they do.
   uploaded when. An operator for whom that matters should keep the endpoint off the public internet.
   The 60-second cache coarsens when a change shows up, not its size.
 
+
+### Reading the quality tally
+
+The fields are in [API.md, Quality tally](API.md#quality-tally-shared-secret-off-by-default). This
+is why they are as they are.
+
+**Access**
+
+- **Its own token, not `server.api_token`.** The caller is a scheduled workflow that needs a tally,
+  and `api_token` would also give it every document. So `api_token` does not gate it: closing a
+  deployment must not silently stop its quality report.
+- **Unset means 404, not 401.** A deployment that has not opted in does not acknowledge the endpoint.
+- **No document content, ever.** At the reference deployment the documents are student records, and
+  the values go into a public issue. A field that quoted a document would leak it through a path no
+  reviewer of the workflow would think to check.
+- **Windowed.** An all-time rate converges and stops responding to a fix.
+
+**Denominators**
+
+- **`documents` includes flawless documents.** A clean run writes no violation rows, so counting
+  only documents with a problem would divide the bad documents by themselves and report every rate
+  near 100%.
+- **`documents_linted` is published** because an unexamined document looks like one where no rule
+  fired, so a spell of failing lints would make every rule look fixed.
+- **`rules[]` counts documents, not violations.** One scan with 400 bad headings is a worse `nodes`
+  and the same `documents` as any other failure. "Fails on 40% of documents" names a prompt defect;
+  "is 90% of our violations" moves when an unrelated rule is fixed.
+- **`mean_rounds` is `null`, not 0, when nothing ran,** or an empty deployment would report the best
+  score.
+
+**Issues left open on purpose**
+
+- **Alike headings are reported, not merged,** because merging two real sections cannot be undone.
+  The first round that leaves them alone changes nothing, so the loop stops with `mean_rounds` low.
+- **`[not legible]` stays when the image does not resolve it.** A plausible word or a quiet deletion
+  is the one outcome a reader cannot detect.
+- **`[page not fully transcribed]` always stays.** Finishing a page means transcribing it from its
+  image, which is a re-extraction with its own gates, not a markup fix. A paragraph the Copy Editor
+  wrote while looking at a page would be indistinguishable from a transcription.
+- These are a floor under `unresolved_rate`, and `first_read`, `review_stopped` and
+  `unfinished_page_rate` measure it. Until #264 nothing did, so a 15% threshold was compared with
+  an 84% rate with no way to tell which part was inherent.
+
+**The review loop**
+
+- **`first_read` is the first read only.** Later rounds read a body the editor rewrote, so a sum
+  would measure how many rounds ran. A document-level re-run re-reviews delivered bytes, so its
+  first read would land as a smaller number for a reason that is not the reviewer's; it is carried
+  forward instead. It is re-dated with the rest of the session's rows, because keeping the old date
+  would drop the row from a window the document is still in.
+- **`unresolved_severity` is model-written and unvalidated,** so anything outside the three
+  severities goes to `unrated` rather than being published as found.
+- **`review_stopped` splits `unresolved_rate` (#264).** From outside the loop, `cap` and `converged`
+  look the same, and only `cap` is something more rounds would help. On `truncated` the editor's
+  reply was cut off, the salvage and sections may have corrected most of the body, and the round
+  that would have re-read it could not be made. So it over-reports on purpose. `@editor-truncated
+  blocks B of T` and `sections N of M` in the document say how much was rescued. One threshold over
+  both shapes cannot be set honestly, which is why the weekly report's is on the mixture and says
+  so.
+- **`review_unread_rate` exists because silence read as the best result.** An unreadable reply
+  raised no issues, so there was no unresolved row, so the document counted clean. It is counted on
+  the last read because what ships is that reading.
+
+**The Copy Editor**
+
+- **`editor_truncated_rate` has no threshold.** The editor answers with the blocks it changed, so
+  its output follows how much is wrong (#250). A reply too long for the ceiling says nothing about
+  loss: under the earlier whole-body contract this rate went 1/4, 2/4, 3/4 over three bench rounds in
+  which every section came back (#159).
+- **`editor_truncated_lost_rate` has one,** because those parts had no editor pass at all, and a
+  truncation is the last round, so nothing looks again.
+- **`editor_headings_gated_rate` counts attempts, not damage** (#331), and documents, not rounds: how
+  many headings a round would have taken is a description of the document and stays in its run log.
+  Until #376 a block that dropped a heading and also fixed any of its own words was refused whole;
+  now what is read is where the words went. Since #375 the unguarded paths log `editor_navigation`,
+  so a 0 here can be checked. A deployment whose rounds are all block patches writes no such lines,
+  and their absence is an empty population, not evidence about the guard.
+
+**The delivered document**
+
+- **None of these four is an axe violation**, which is why they needed measuring. A table of
+  contents where every entry is `href="#"` lints clean and does nothing.
+- **`markup_unbalanced_rate` is measured on bytes** because a parser repairs markup before axe sees
+  it, so an unclosed `<table>` lints clean.
+- **`table_no_body_rate` is measured on the parsed tree** because it is about what a reader
+  receives. `empty-table-header` is about a header cell with no text, not this.
+- **`structural_defect_rate` covers three checks that fail alike:** nothing is malformed, so the
+  run reaches `ready_for_review`. axe reports a dangling ARIA reference as `incomplete`
+  (`aria-valid-attr-value` is `reviewOnFail`), `<dl><div><dt>Term</dt></div></dl>` passes
+  `definition-list`, and an empty `<nav>` breaks no rule. `lang_on_void` is wasted output, not
+  something a reader loses, so it is not counted.
+- **Ids, captions and fragments stay on the log lines,** because they are text from the document.
+
+**The accessibility check**
+
+- **`lint_error_rate` is recorded, not inferred.** A linter that cannot run has no violations, so a
+  broken one would look like a deployment that got better. `axe-core` and `jsdom` are pinned to
+  exact versions so the linter changes only when someone changes it. Up to jsdom 25, an attribute
+  name starting with a digit could take the whole rule set offline (#257); jsdom 30 fixed it (#535).
+- **`lint_error_where` is published** because a run log belongs to one user's document and cannot
+  answer a question about the deployment. #263 reported six documents with no verdict and no way to
+  tell #257's fixed cause from a new one.
+
 ## Designed for, and not built
 
 Designed for and intentionally **not** built in v1: PostgreSQL and S3 backends (SQLite + local
