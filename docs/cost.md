@@ -47,10 +47,9 @@ Three things worth more than the total:
 
 ### The last model swap did not change the price
 
-Moving the `page` agent to luna cut what that agent does itself by **39%** — $1.5835 against
-$2.5968 for `extract` + `correct`. Both arms are in the one round run 2026-09-03, on the same 100
-pages at the same commit, so no prompt change is inside that figure. It was applied to the reference
-deployment 2026-09-10.
+Moving the `page` agent to luna cut what that agent does itself by **39%**
+([models.md](models.md#what-each-suggestion-was-measured-on) has the figures). It was applied to the
+reference deployment 2026-09-10.
 
 Then something that is not a model gave it back. Between the 2026-09-02 round and the 2026-09-03 one,
 verifier and page-prompt fixes made `verify` **36% more expensive** on identical input — $2.5499 to
@@ -95,8 +94,7 @@ a measurement attached — not defaults. The per-agent table, and what each sugg
 
 The part of that which is about money: three of the four working agents run the expensive model, and
 together they are **85% of the bill**. The unapplied swap that would move it most is `copy_editor` to
-luna — 9.5% of the incumbent's cost and ahead on both quality measures, worth about −26% of the bill
-([#329](https://github.com/EqualifyEverything/equalify-iris/issues/329)).
+luna, worth about −26% of the bill.
 
 ## Scope
 

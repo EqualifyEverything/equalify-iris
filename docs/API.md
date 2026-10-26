@@ -5,12 +5,8 @@ calls on a real document and explains each; every endpoint is under The API ther
 Each endpoint's exact request and response is in [openapi.yaml](openapi.yaml), served as
 `GET /v1/openapi.json`. The sections below point at it.
 
-Every endpoint is under `/v1`. All responses are JSON unless noted. There is no sign-in
-([Authenticate](#authenticate)). Whether you send anything at all depends on the deployment: where the operator set `server.api_token`, `/v1/me` and
-`/v1/sessions` need `Authorization: Bearer <that shared secret>`; where they did not, send no header.
-`/v1/health`, `/v1/stats` and `/v1/limits` never need one. `/v1/quality` is the exception in the other
-direction: it has its own separate secret
-([Quality tally](#quality-tally-shared-secret-off-by-default)).
+Every endpoint is under `/v1`. All responses are JSON unless noted. Which ones need a token:
+the description at the top of [openapi.yaml](openapi.yaml).
 
 These commands are copy-pasteable. They are the same calls exercised by `test/e2e.sh`, which
 runs the whole lifecycle against mock GitHub + mock model services and asserts every response.

@@ -13,9 +13,8 @@ info:
     deployment. `GET /v1/me` with no header answers 200 when open and 401 when gated.
 
     The token covers `/v1/me`, `/v1/settings` and everything under `/v1/sessions`. The rest stays
-    reachable on a gated deployment, on purpose: none of it touches a document. `/v1/health` is for
-    load balancers, `/v1/limits` lets someone check a file before sending it, `/v1/stats` is a
-    deployment-wide tally, and `/v1/quality` and `/v1/suggestions` have their own token.
+    open on a gated deployment, because none of it touches a document (docs/access.md says why for
+    each). `/v1/quality` and `/v1/suggestions` have their own token instead.
 
     Errors share one shape, `{"error": {"code", "message", "details"}}`, except the two endpoints
     behind the quality token, which answer `{"error", "message"}`.
