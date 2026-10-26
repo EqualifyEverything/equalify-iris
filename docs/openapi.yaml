@@ -409,7 +409,8 @@ paths:
         - Its own token, not `server.api_token`, and `api_token` does not gate it.
         - No field carries document content; the report copies these values into a public issue.
         - `Cache-Control: no-store`, but each window's answer is cached in the process for 5 minutes.
-        - Every count is per session. Every rate is a share of `documents`, 0 when there are none.
+        - `documents` counts sessions: a file uploaded three times is three. Every rate is a share of
+          `documents`, 0 when there are none.
       security: [{qualityToken: []}]
       parameters:
         - name: days
@@ -445,14 +446,16 @@ paths:
                     description: Documents with an open issue at each severity. Not a partition.
                     items:
                       type: object
+                      required: [severity, documents]
                       properties:
                         severity: {type: string, enum: [high, medium, low, unrated]}
                         documents: {type: integer}
                   review_stopped:
                     type: array
-                    description: Which exit ended each document. A partition of `documents`.
+                    description: Which exit ended each document. A partition of the documents that recorded an exit.
                     items:
                       type: object
+                      required: [where, documents]
                       properties:
                         where: {type: string, enum: [clean, unread, converged, truncated, cap]}
                         documents: {type: integer}
@@ -467,6 +470,7 @@ paths:
                     description: Which lint step failed.
                     items:
                       type: object
+                      required: [where, documents]
                       properties:
                         where: {type: string, enum: [parse, inject, run]}
                         documents: {type: integer}
@@ -481,6 +485,7 @@ paths:
                     description: Accessibility rules still failing, most documents first.
                     items:
                       type: object
+                      required: [id, impact, documents, share, nodes]
                       properties:
                         id: {type: string, description: The axe-core rule.}
                         impact: {type: [string, "null"]}
