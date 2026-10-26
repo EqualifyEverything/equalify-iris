@@ -1309,20 +1309,7 @@ large to send: `pdf` and `page` name it (the PDF's own page number, 1-based), `f
 first render produced (`8334x8334`), and `long_edge_px` is what the second one was fitted to. One line
 per page refitted, so a document of fold-outs writes several.
 
-This is the only event the upload route writes, and it is written before the run is queued —
-rasterizing is what measures a page, so the pages have to be too big before there is a session to
-record it against. A log that opens with `page_refit` rather than
-[`run_queued`](#run_queued--run_dequeued) is therefore reading correctly.
-
-The line exists because the page it names is read at a lower resolution than the rest of the document,
-and nothing else in the log would say so. Rasterizing runs at a fixed DPI, so pixel count follows the
-physical page: a letter page lands near 1275x1650 and a 55-inch drawing past 8000 px, above which the
-vision model errors instead of downscaling. Those pixels are Iris's choice, not the caller's, so Iris
-renders the page again instead of refusing the upload — nothing is cropped, only resolution is given
-up. When a fold-out's findings read thinner than the letter pages around it, this is the line that
-explains why, and re-exporting that page at a smaller trim size is the fix that gets it back. A page
-still over the limit after the second render fails the upload instead, with a `400` that names the size
-it was retried at.
+Written by `src/pipeline/stage.ts`.
 
 ### `run_queued` / `run_dequeued`
 
@@ -1490,14 +1477,7 @@ pages could have answered and not merely how many.
 Lessons learned from earlier feedback were added to the page agent's prompt, so the agent improves
 without `agents/page.md` being rewritten (issue #1). `chars` is how much text was added.
 
-This is a per-**run** line rather than a per-page one. It is written once at the top of the page pass,
-before any page call, and once more at the top of a re-extraction round — which is why it carries no
-`image` and no `page`. What it says is that every page in that round paid for those characters in its
-prompt.
-
-`chars` is a size and not a count: it does not say how many lessons were injected, and the lessons
-themselves are not on the line. A run with nothing to inject writes no line here at all, so the
-absence of this line means the pages were rendered with the shipped prompt.
+Written by `src/pipeline/extraction.ts`.
 
 ### `feedback_rerun`
 
@@ -1515,19 +1495,19 @@ this line, and not `mode`, is what says feedback was submitted at all.
 
 How a feedback re-run was routed (`document` vs `extraction`, and which pages)
 
+Fields: `pages`, `reason`, `target`.
+
+Written by `src/pipeline/orchestrator.ts`.
+
 ### `first_read_carried`
 
 A document-level feedback re-run kept the document's earlier first-read count for the quality tally
 instead of recording its own (the [quality tally](#quality-tally-shared-secret-off-by-default)'s
 `first_read`, issue #313).
 
-`carried` is the number kept, `unread` its window count, and `found` what this round's own first
-read came to — which is the one this round's `reader` events describe, so without this line a
-session's log and `/v1/quality` disagree about it with nothing to say why.
+Fields: `carried`, `found`, `unread`.
 
-`carried: null` means the session had no first read on record — one delivered before the field
-existed — and contributes none. Written on the review-only path only: a re-run that re-extracts
-reads fresh extraction output and records it.
+Written by `src/pipeline/orchestrator.ts`.
 
 ### `reextract_start` / `reextract_complete`
 
@@ -1560,16 +1540,7 @@ describes it.
 Pages this round meant to re-extract and could not: `pages`, the orders it gave up on, and `reason`,
 which is `no source image or prior fragment` — the only value the line carries today.
 
-Re-extracting a page needs both of those. The image is what the agent reads, and the prior fragment is
-what it is shown as its own previous answer, so a page missing either is dropped from the round rather
-than rendered from nothing. Every page named here keeps the status it arrived with: its prior content,
-its prior verdict, and its place in `uncorrected` if it had one.
-
-It is the difference between what the round was asked for and what it ran.
-[`reextract_start`](#reextract_start--reextract_complete)'s `pages` is what went to the agent, this
-line is the remainder, and the two are disjoint — together they are the set feedback pointed at. This
-line is written **above** `reextract_start`, so a reader scanning a round from its start finds the
-skips first.
+Written by `src/pipeline/extraction.ts`.
 
 ### `page_redrawn`
 
@@ -1933,20 +1904,9 @@ to touch it. Only logged where the correction was bought for a duplicate id in t
 The source file's own link annotations were listed in this page's prompt: `image`, `links` — how many
 were shown — and `dropped`, how many the page had beyond the cap of 40.
 
-They are in the prompt because the image cannot carry them. A PDF link is an annotation over the page
-rather than part of the picture, so a page's targets are given to the agent as text beside it. The URLs
-in that list are exact; the anchor text is approximate, since it comes from a separate text extraction
-and can be split across lines, clipped short, or differ in spacing from what the image shows.
+Fields: `dropped`, `image`, `links`, `redrawn`.
 
-`dropped` is also the width of a blind spot in the two checks that follow, and both err in the same
-direction. [`page_links_missing`](#page_links_missing) compares only the links that were shown, so a
-link past the cap is never reported missing. [`page_links_unexpected`](#page_links_unexpected) compares
-against **all** of the page's annotations, so one past the cap is never reported as fabricated either.
-Neither check blames the agent for a link it was never given.
-
-A page with no annotations writes no line here, and a source that has none at all — images uploaded
-directly rather than a PDF — writes none on any page. So the absence of this line is not a page whose
-links came out right; it is a page with nothing to be right or wrong about.
+Written by `src/pipeline/extraction.ts`.
 
 ### `page_links_missing`
 
@@ -1995,19 +1955,7 @@ With one, a repair was bought and did not take; without one, the correction lost
 Absolute URLs the delivered fragment links to that no annotation on this page accounts for: `image`,
 and `hrefs`.
 
-**Logged, never corrected**, because two of the three ways to land here are legitimate. A URL printed
-visibly in the text may link to itself, which the page prompt explicitly permits. A link the extractor
-could not attribute to any text — one over an image, say — is real and simply unmatched. The third is a
-model that invented a URL, and that is why the list is kept at all: a fabricated href looks exactly
-like a real one in the delivered document, so without this line the failure this feature introduces
-has no symptom.
-
-Checked last, on the fragment that actually ships, because a correction pass rewrites anchors and an
-href invented there is the one worth seeing. Only hrefs with a scheme count. An in-document reference
-like `#fn-1` is the page's own anchor and is reported by [`internal_links`](#internal_links) when it
-lands nowhere, and a relative href is not something an annotation could have supplied either way —
-counting one here would dilute the single signal this line is for. Only pages that **had** annotations
-are checked, since only there is there a ground truth to be outside of.
+Written by `src/pipeline/extraction.ts`.
 
 ### `page_links_correction_rejected`
 
@@ -2141,20 +2089,7 @@ is that it happens there — not that it happens nowhere else. `where` is what w
 A thousands separator the page reply split with the printer's alignment space — `4, 271` — was closed
 up (`page`, `image`, `where`, and `tightened`: how many separators, not how many cells).
 
-The gap is the column being aligned rather than part of the figure, `agents/page.md` says so, and the
-models do it anyway: 549 separated groups on 6 pages of one arm, 166 on another, none on a third. What
-ships is a number no reader can find and no tool can add up — a search for `4,271` does not match `4,
-271`, and a total written that way is two numbers to anything that sums a column. `p028` and `p029` are
-the same table transcribed twice, 174 groups spaced on one page and 39 tight on the other, which is
-what says this is a per-cell coin flip rather than a page's considered style.
-
-**Scoped to a table cell whose whole content is one figure**, never to the document, and that scope is
-the difference between a repair and a corruption: the same pattern loose in prose turns `In 1954, 105
-cases were filed` into `In 1954,105 cases`. 546 of the 549 sit in such a cell. The other 3 have a
-footnote marker beside the figure, so the cell carries a tag, and they are left exactly as written —
-the stated limit, rather than a second looser pattern nothing has measured. A list of years (`1954,
-1955`) and a list of short numbers (`1, 2, 3`) are untouched inside a numeric cell too: the group after
-the separator has to be exactly three digits.
+Written by `src/pipeline/extraction.ts`.
 
 ### `page_split_words`
 
@@ -2271,62 +2206,9 @@ covers are already rules in both prompts — a count the page PRINTS against the
 description's list (issue #353), and a region the caption calls highest or lowest against the
 bands the description sorts places into (v1.12) — and this line is not a third rule.
 
-**Nothing here refuses, corrects, reaches a verdict or reaches the model**: it is the record that
-a free check had a subject on this page, and the reason it had no answer. That is what was
-missing. v1.12's clause ends by refusing the comparison where the caption's named group is not one
-the page itself sorts — supplying "which states are New England" out of a model's own knowledge is
-how that check invents the problem it then reports — so a round reporting no region contradiction
-was either a round with none or a round in which every subject was refused, and from outside those
-two are the same silence (#356).
+Fields: `band`, `caption`, `declined`, `enumerations`, `figure`, `image`, `named`, `page`, `quantifier`, `share`.
 
-`quantifier` is the caption's own words where it quantifies a category as a fraction ("About
-Half", hedge kept as printed) and `share` is the value those words name (`0.5`); `band` is the
-band word a verb asserts of a group (`highest`, `lowest`, `high`, `low` — bare `high` and `low`
-only after a ranking verb, since "Unemployment Is High Throughout" sorts no places, while a
-superlative counts after a copula too because nothing separates that wording from the plate this
-was written for); `enumerations` is how many lists the description sorts anything into; `named` is
-up to 6 members of those lists that the caption names, matched case-sensitively and on word
-boundaries.
-
-`declined` is why nothing was compared, and each reason belongs to one axis: `proportion` wherever
-a caption quantifies in words, `no_enumeration` where the description sorts nothing at all,
-`membership` where a band claim's group is nowhere among the bands.
-
-`no_enumeration` and `membership` are exclusive — where there are no bands there is no band for a
-region's members to be missing from — and a line with no `declined` at all is a check that was
-decidable.
-
-**`share` is the fraction the caption states and not a proportion of anything measured, and no
-ratio between the two strings is on this line.** That is the finding rather than a gap: both terms
-of such a ratio are readings of the ink rather than transcriptions of the page, `p092` is the
-corpus's only subject, and its five reads put the quantified category at 34.7%, 35.6%, 41.7%,
-41.9% and 50.0% of the states enumerated — no tolerance separates a miss from an exact hit on the
-one plate a tolerance could be fitted to.
-
-The member parse says the same thing independently: over 16 reads of that plate's one unchanged
-legend it answers 1, 2 or 3 lists, and on the read yielding "30 and 16" two of the 46 members are
-fragments of prose while one state's name is lost to a length bound. So `enumerations` is a shape
-and not a denominator, and the arithmetic is left to whoever regrades the log at whatever
-tolerance a later corpus can justify. Over 1,302 delivered pages of the rounds on disk this fires
-on 66 figures across four plates, and 47 of the 50 region claims among them are subjects the
-clause must decline (44 `membership`, 3 `no_enumeration`); the 3 that are decidable are all one
-arm describing the map BY region, which is the shape that puts the membership on the page.
-
-Its limits, before a corpus is counted off it: a figure's own title asserting a band with a verb
-("Figure 7. Where Tax Effort Is Highest") is a `membership` decline here, since no wording
-separates it from a caption's real claim, so the declined counts are an upper bound on how often
-the clause had a page to refuse on; it reads a `<figcaption>` and nothing else, so a claim in a
-`<p>` beside the figure or in a `<table><caption>` — v1.12's subject too, since the prompts say "a
-`<figcaption>` or a sentence in the fragment" — is a decline this cannot count; the members come
-from the same enumeration parse `alt_relocated` uses and are tokens rather than necessarily
-places; "most", "a majority", "many", "few" and "nearly all" are deliberately not subjects, since
-each names an inequality rather than a value and a report that turned one into a number would be
-inventing the number it compared; and a group the caption re-typed in another case goes uncounted,
-so it reads as declined — the conservative direction for a field whose whole job is to say the
-check had nothing to work with.
-
-**Logged only where a claim was found**, so 3 or 4 lines per 91-page arm, and a run with none is a
-run whose captions claimed nothing of the kind.
+Written by `src/pipeline/extraction.ts`.
 
 ### `specialist_unresolved`
 
@@ -2381,9 +2263,7 @@ it would buy nothing measured: of the 7 requests behind #353, 0 named a standard
 
 A specialist loaded, ran, and returned nothing of its type: `agent` (its filename) and `image`.
 
-The page ships as the general pass wrote it. Non-blocking, like every failure on this path, so the run
-does not stop — but the request went unmet, and the verifier is told that in those words rather than
-told no agent existed.
+Written by `src/pipeline/extraction.ts`.
 
 ### `specialist_dispatched`
 
@@ -2409,11 +2289,7 @@ So a count of `specialist_dispatched` lines is not a count of pages that got spe
 
 The specialist call threw: `agent` (its filename), `image`, and `error`.
 
-Non-blocking — the page is delivered as the general pass wrote it and the run continues, so this is a
-line about content the pipeline knows it did not get rather than about a stopped round. The verifier is
-told the specialist call failed, which is a different statement from no such agent existing, and the
-distinction is kept because telling it "no agent of that name was available" about a specialist that
-ran and threw is simply false.
+Written by `src/pipeline/extraction.ts`.
 
 ### `page_recovered`
 
@@ -2430,6 +2306,10 @@ words in it (`pages`: how many failed, `blank`: how many were reported blank). W
 diagnosis. Otherwise the source itself was empty — one blank scan uploaded alone, a rasterization
 that yielded white pages — and the error says how many of its pages were blank, which an empty
 document could not.
+
+Fields: `blank`, `pages`, `reason`.
+
+Written by `src/pipeline/extraction.ts`.
 
 ### `page_verify_ok` / `page_verify_failed`
 
@@ -3233,6 +3113,8 @@ link printed (`iteration`, and `links`, each `{from, to}`). The longer URL must 
 printed URL wraps onto a second line. It is a repair, so it is not in `editor_links_dropped` or
 `links_dropped_rate`.
 
+Written by `src/pipeline/review.ts`.
+
 ### `internal_links`
 
 The delivered document contains an in-document reference that lands nowhere (`refs` fragment links
@@ -3369,50 +3251,9 @@ loop allows.
 Half of the one list conversion the Copy Editor is licensed to make (`iteration`, `shape`, plus
 `before` and `after`, each `{ items, lettered, printed, printed_lettered, doubled }`).
 
-The licence is atomic: a bare `<ol>` whose every item's text opens with one sequence's marker —
-`(a)`, `(b)`, `(c)` — may have the `type` those markers show set **and** the markers stripped from
-the text. That is one change, and this line fires on either half of it alone:
+Written by `src/pipeline/review.ts`.
 
-| `shape` | What happened |
-| --- | --- |
-| `marker_announced_twice` | An item prints **the marker the list announces**, so a reader hears "a" and then "(a)" — the same defect an extraction can produce, arriving from the review loop instead |
-| `text_markers_gone` | **Lettered** markers left the items and the list did not gain them, so a list the page printed `(a)`, `(b)`, `(c)` now prints 1, 2, 3 and no copy of the letters is left in the document. This is the loss |
-
-A complete conversion logs nothing: the markers leaving the text are balanced by the list announcing
-them, and no item ends up holding both.
-
-The five counts, all read off the flattened view because that is where a `type` and a transcribed
-marker are visible at once:
-
-| Count | Items it counts |
-| --- | --- |
-| `items` | Every item in the block |
-| `lettered` | Those whose **announced** marker is not a digit |
-| `printed` | Those whose own text opens with a marker of any shape |
-| `printed_lettered` | Those of `printed` whose marker is not a digit |
-| `doubled` | Those printing **the marker they are announced with**, compared by value, token against token, case-insensitively |
-
-**`doubled` is decided per item**, so a round that sets the `type` and strips only some of the items is
-caught — the item that kept its own marker is the one a reader meets. And
-`text_markers_gone` reads `printed_lettered` rather than `printed`, because a digit leaving an item's
-text is a repair: an `<ol>` announces 1, 2, 3 by itself, so a digit the text repeats is a second copy
-of what the list already says.
-
-**Three limits before counting a corpus off this.** Two are silences about edits the editor may make.
-It is **silent where the round changed `items`**, since a deleted item takes its printed marker out
-of the count with it. And every count is a **block total**, so one list's correct conversion pays for
-another's destruction in the same reply: converting the first `<ol>` properly and stripping the
-second one's letters leaves `lettered` risen and `printed_lettered` fallen, which is what a single
-correct conversion looks like. The third is the shape of a printed marker — up to three digits, a
-roman **number**, or a single letter **closed by** `)` or `]` — so a marker genuinely printed `a.`
-with no bracket, or `(aa)` on a list past its twenty-sixth item, is invisible to **both** branches.
-
-This is also the line that says which kind of shrink a `refusal_with_loss` was looking at. The
-licensed strip removes visible text, so the block lands in `shrunk` exactly as a real loss does, and
-neither that report nor the flattened coverage comparison can tell the two apart on its own.
-
-Why the licence is scoped the way it is, why `doubled` compares values rather than kinds, and what
-the marker shape costs, is in [design notes — the flattened view and the one conversion it
+Why: [design notes — the flattened view and the one conversion it
 polices](design-notes.md#the-flattened-view-and-the-one-conversion-it-polices).
 
 ### `editor_truncated`
@@ -3590,15 +3431,7 @@ that round's issues unresolved.
 The Reader is about to read the document: which `iteration`, how many `chunks` it goes out in, and
 the `concurrency` those run at.
 
-`concurrency` is `defaults.extraction_concurrency` — the same knob page extraction is bounded by,
-because a Reader chunk is the same kind of model call: a run's peak stays where the operator set it
-in this phase as in the other, and a deployment that lowered it for a rate-limited provider gets its
-reviews bounded too. It falls back to 1 for a directly-constructed context that never set it, which
-is what this step did before it ran chunks in parallel at all.
-
-`chunks` is the denominator behind the `window` / `of` pair on the two lines below, and behind the
-`@review-unread` comment's "how many windows of how many" in the delivered document: one round can
-lose part of a document and read the rest.
+Written by `src/pipeline/review.ts`.
 
 ### `reader` / `editor`
 
@@ -3838,12 +3671,7 @@ costs one thing the old contract could not, and `markers` is that cost measured:
 model was SHOWN carries a `<!-- @block N -->` line above every top-level element, so the likeliest
 whole-body reply is that document retyped, markers and all.
 
-They are stripped before the body is taken and counted here. Adopting them would write Iris's own
-request scaffolding into the delivered HTML, and it compounds — a comment is a top-level node, so
-the next round would be shown the markers as blocks in their own right, the body would double
-every round, and a document that never stops changing never converges. A run where this line
-appears on most rounds is a model not following the block contract, which is worth knowing about a
-deployment even though the document is fine.
+Written by `src/pipeline/review.ts`.
 
 ### `editor_no_output`
 
@@ -4042,49 +3870,9 @@ reports that as `aria-roles` at **critical** — the most severe thing this gate
 document Iris produces — and it has reached a delivered `output.html`, on a round where the lint
 had degraded to *did not run*.
 
-**This line is the only trace**, on the same argument as the row above, and it is the harder
-evidence of the two: `doc-endnotes` is a real role reached for in the wrong place, while a name
-like `doc-footnotes` was never in any specification. Unlike the deprecated strip this one is not
-narrow, and does not need to be — assistive technology already ignores an invalid role and
-announces the element's own, which is exactly what it announces with the attribute gone, so no
-element can lose anything by the removal. **That argument holds of a role token and of nothing
-else, so the attribute has to be located as a parser locates it** — by walking the start tag's
-attributes as `name(=value)?` pairs — and not by searching the tag for something shaped like
-`role=`.
+Fields: `iteration`, `nodes`, `roles`, `stage`.
 
-A search matches inside another attribute's *value*, and the values on these elements are prose:
-an `alt` reading "each user and role = admin, editor or viewer" put `admin,` where a role name
-goes and the word was cut out of the accessible name. Nothing can report that loss — the name is
-still non-empty and not generic, so the gate sees a clean element — and this very line would have
-named the eaten word as an invented role, blaming the page agent for it. The row above shares the
-locator and was reachable the same way, on `<ul aria-label="the role=directory column">`, because
-`directory` is an ordinary English word and `<ul>` is one of its hosts.
-
-What the removal does not do is NAME the block: a stripped `<section role="doc-footnotes">` is an
-anonymous `<section>`, which is compliant, and the page agent's FOOTNOTES rule is the half that
-says what to write instead (`<aside>`, `<footer>`, a bare `<ol>`, or
-`<section aria-label="Footnotes">`). Which names count as real is asked of axe rather than listed
-in Iris, so this strip and the gate are one judgement, and asked case-folded, because the rule
-folds a role token and the underlying predicate does not — `role="DOC-ENDNOTES"` is a document the
-gate passes and is left alone.
-
-**One shape is declined rather than stripped**, and there the document is passed through untouched
-and the gate goes on reporting the role: a `role` whose unquoted value runs into a quote, which is
-what the JSON-escaping leak (`<hr role=\"doc-pagebreak\" …>`) delivers. Editing that would cut one
-character out of the middle of an attribute; `lint`'s `malformed_attributes` still counts and
-names the debris. **A second shape is edited but not deleted: a repeated `role`, where the
-attribute is left in place with an empty value.** Deleting it would *promote the second copy* —
-`<div role="doc-footnotes" role="main">` computes to generic today, since the parser keeps the
-invalid first value and discards the duplicate, and deleting the attribute would leave
-`<div role="main">`, an element handed a landmark it never had (`aria-roles` at critical traded
-for `landmark-main-is-top-level` and `landmark-no-duplicate-main`).
-
-A removal that puts the next attribute into effect is not the removal this row's argument is
-about. `role=""` avoids it without giving the strip up: ARIA treats a value with no valid token as
-no role at all, so the element computes to exactly what it computed to before and the gate reads
-it clean, while the attribute stays in the position the parser reads. Measured on all four shapes
-rather than argued, including `<ol><li role="doc-endnote" role="listitem">` and
-`<ul role="directory" role="list">`, which the row above delivers clean by the same mechanism.
+Written by `src/pipeline/assembly.ts`, `src/pipeline/orchestrator.ts`, `src/pipeline/review.ts`.
 
 ### `page_main_stripped`
 
@@ -4118,35 +3906,11 @@ all and goes straight to the gate, for the reason the role strip stays narrow.
 Page-break markers were checked against the document's own numbering, and any label naming the
 **position of the image in the file** instead of the number the page prints was removed (issue #333).
 
-A label is touched only when it repeats the last integer of its own filename, AND its numbering
-system's own modal offset says the folio is something else, AND the markers holding that offset do not
-repeat their own filenames. **The label is removed, not corrected, and the `id` stays.**
+Fields: `departures`, `markers`, `off_mode`, `readable`, `stage`, `stripped`, `systems`, `unchecked`, `undecided`, `unreadable`.
 
-| Field | Reads |
-| --- | --- |
-| `markers` | How many page-break markers were found |
-| `readable` | Labels that parse as a numeral |
-| `unreadable` | A sectioned folio — `A-3`, `M-16` — plus markers carrying no label at all |
-| `systems` | One entry per numbering system that produced at least three markers. `arabic: offset -11 on 22 of 23` where an offset was acted on, or one of the two ways nothing was: `arabic: no offset holds 8 markers (best: 3)` where no offset held both a run of three and a majority, and `arabic: offset 0 on 8 of 10, 8 of them repeating their own filename` where the check refused this document |
-| `stripped` | One entry per label removed, `page 52: "Page 52" → 38`, cut at 40 characters, with the derived folio omitted where the derivation computes below 1 |
-| `departures` | The shape those removals form, one entry per offset they sat at: `arabic: 1 removed at offset -50, page 2` against `arabic: 6 removed at offset 0, pages 1-6 (every marker in that span)` |
-| `off_mode` | Readable labels that disagree with their system's offset and were left alone because they repeat no positional number — a page printing `ix` labelled `Page 9` |
-| `undecided` | Labels that DO repeat one where nothing could be concluded: too few markers, no offset holding a run of them, or a document the check refused. This check's blind spot, with a size on it |
-| `unchecked` | Readable labels on a page whose filename carries no number at all, so `readable: 25, stripped: []` cannot read as agreement when nothing could be checked |
-| `stage` | Only ever `"assembly"` |
+Written by `src/pipeline/assembly.ts`.
 
-**This line prints on clean documents too**, unlike [`assembly_anchors`](#assembly_anchors):
-`stripped: []` beside `arabic: offset 14 on 23 of 25` is a document this checked and agreed with, while
-no line at all is one it could not decide — and a round measuring whether the defect is fixed cannot
-tell those apart from silence.
-
-The labels are text out of the caller's own document, so like [`prose_joined`](#prose_joined)'s
-`word_split_examples` this line stays in the run log on the deployment and never reaches
-`GET /v1/quality`.
-
-Why the filename's last integer is the only number tested, what the third condition refuses a whole
-document on, why `page N of M` is left alone, the three blind spots that read as a clean document, and
-why this runs at assembly only, are in [design notes — a page label naming the image's position rather
+Why: [design notes — a page label naming the image's position rather
 than the page's
 number](design-notes.md#a-page-label-naming-the-images-position-rather-than-the-pages-number).
 
@@ -4191,34 +3955,14 @@ The deployment-wide quality tally could not be written for this document (`error
 ships: recording is soft, on the same argument the agent-suggestion filing at the end of a run is —
 a tally is not worth failing a document someone has already waited for.
 
-Logged loudly for the one reason the tally itself cannot show it: **fewer signals recorded looks
-exactly like fewer problems found**, so the silent version of this failure is a quality tally that
-reads better over time as recording breaks. The row that goes missing is `iris:rounds`, written for
-every delivered document including a flawless one because it is the document count the
-[public tally](#public-tally-unauthenticated) and the
-[quality tally](#quality-tally-shared-secret-off-by-default) divide by — so a window with these
-lines under it is short by however many documents they cover, with those documents' defects gone
-from the numerators along with them.
+Written by `src/pipeline/orchestrator.ts`.
 
 ### `feedback_classified`
 
 The classify pass read a correction and **nothing was recorded**: `kind` is what it called the lesson,
 and `recorded` is `false`.
 
-There is no line for the other outcome. A lesson that was recorded writes
-[`feedback_learned`](#feedback_learned) instead, so `recorded` is `false` on every line of this type —
-the line's presence is already the negative case, and the field is not one to filter on.
-
-`kind` is the classifier's own word, or `"unknown"` when the reply could not be read as JSON or named
-no kind at all. A `kind` of `generalizable` or `a11y_policy` here is **not** a rejection of the
-lesson: those are the two values that qualify for recording, so a line carrying one of them means the
-reply named a kind worth keeping and left the `instruction` empty. Any other word is the one-off case:
-the correction was judged specific to this document, which is the outcome this path exists for.
-`"unknown"` is neither of those — it is a reply that could not be read, reaching the same branch.
-
-Recording is not what gates training. The update-proposal path runs on the same correction either
-way; with no recorded lesson, the proposal is grouped by the model's one-line summary instead
-([Contributions](#contributions-automatic)).
+Written by `src/pipeline/feedback.ts`.
 
 ### `feedback_learned`
 
@@ -4227,52 +3971,28 @@ A correction was distilled into a reusable instruction and recorded to the agent
 is the sentence stored, and `count` is how many **distinct sessions** have now reported this same
 lesson.
 
-`count` is a session count, not a report count. It is the length of the lesson's session list, so one
-session submitting the same feedback twice leaves it at 1.
-
-**Recorded is not in use.** A `generalizable` lesson is injected into later runs only once `count`
-reaches **2**; an `a11y_policy` lesson is eligible from the first report. So a line with `kind:
-"generalizable"` and `count: 1` is a lesson that is stored and changing nothing yet, and
-[`page_lessons_injected`](#page_lessons_injected) is where it starts to cost anything. Eligibility is
-not injection either: the bank keeps 20 lessons per agent and injects at most 6, highest `count`
-first.
-
-`instruction` is the **stored** wording, which for a `count` above 1 is the wording of the first
-session that reported it: a repeat is matched on a normalized form of the instruction, and keeps the
-instruction it matched while updating the example around it.
+Written by `src/pipeline/feedback.ts`.
 
 ### `feedback_agent_missing`
 
 `agents/feedback.md` could not be loaded, so no agent-update proposal was made this round. `note`
 carries the whole of that; there is no other field, and no `agent`.
 
-It says nothing about the lesson bank, and the absence of a lesson has no line of its own: the
-classify pass reads the same file and returns silently when it is missing. So a run with this line
-recorded nothing either, and this is the only line saying why.
+Written by `src/pipeline/feedback.ts`.
 
 ### `feedback_target_missing`
 
 The agent the correction was about could not be loaded: `agent` is the file that was asked for, not
 one that was found.
 
-Every run asks for `page.md` — it is the one agent file the orchestrator names — so that is the value
-on every line of this type today.
+Written by `src/pipeline/feedback.ts`.
 
 ### `agent_trained`
 
 A **session-built** agent was improved in place: `agent` is its file, and `scope` is `session_built`,
 the only value.
 
-Neither gate ran, and none of the lines they write are in this round. The regression and eval gates
-guard changes to the shared agent library, and this agent is not in it: its file lives in the
-session's own `tmp/<id>/agents`, and it is overwritten there. A round with this line has no
-[`regression_gate`](#regression_gate), no [`eval_gate`](#eval_gate), no
-[`agent_updates_proposed`](#agent_updates_proposed) and no issue.
-
-No run writes this line today, and the reason is a loop — the same one
-[`agent_call`](#agent_call) describes for `agent_content`. The branch is taken only for an agent
-loaded from that tmp directory in preference to the library, and the only line in `src/` that writes a
-file there is this branch. Something outside the pipeline has to seed the directory first.
+Written by `src/pipeline/feedback.ts`.
 
 ### `regression_gate`
 
@@ -4344,14 +4064,7 @@ delivered before the training step began.
 A proposal cleared both gates and was written to the session's `agent-updates.md` — JSON, despite the
 extension: `agents` is a one-element list and `count` is always 1.
 
-The shape reads like a batch and there is never one. A feedback round proposes for the single agent its
-correction was about. `count` is not the number of proposals on disk either — the file is merged with
-any earlier round's proposals and deduped by agent — so a session that proposed twice writes two of
-these lines, each saying 1, over a file holding one entry per agent. Today that entry count is always
-1 as well: every proposal is for `page.md`.
-
-The proposal is also saved for the maintainers, and served by
-[`GET /v1/suggestions`](#agent-suggestions-shared-secret-off-by-default).
+Written by `src/pipeline/feedback.ts`.
 
 ### `feedback_training_failed`
 
@@ -4398,8 +4111,7 @@ New-agent suggestions from this run were saved for the maintainers: `agents` lis
 `count` the rows (one per agent and page). They are served by
 [`GET /v1/suggestions`](#agent-suggestions-shared-secret-off-by-default).
 
-A suggestion naming a standard type, or an agent the library or the session already has, is dropped
-first and leaves no trace. With nothing left, this line is not written.
+Written by `src/pipeline/contribute.ts`.
 
 ### `contribution_failed`
 
@@ -4436,6 +4148,8 @@ message is left out, because it may quote a value.
 `tagged_pdf_fields` has `created`, how many fields were made. `tagged_pdf_fields_failed` has the
 tagger's `code`. A made list is reused until the extracted pages change. A failure is reused for a
 minute after it ends, so a failing form writes at most one line a minute while it is asked.
+
+Written by `src/routes/sessions.ts`.
 
 ### `form_fields` / `page_fields` / `page_fields_missing`
 
@@ -4481,6 +4195,8 @@ it at `/audit/runs/<run>/<name>`.
 Audit mode is on, but its folders for this session could not be made (`reason`, the error), so the
 run keeps no prompts or snapshots. The run itself goes on. Expect a full disk or a permissions problem
 under `storage.data_dir`.
+
+Written by `src/pipeline/orchestrator.ts`.
 
 ## Diagnostics (timing / hang detection)
 
