@@ -210,8 +210,12 @@ All endpoints are under `/v1`. Where `server.api_token` is set,
 is blank they need no header at all. Health, limits and stats never do. `/v1/quality` is the exception
 in the other direction: it has its own shared secret and 404s unless you set it.
 
+The exact contract for every endpoint is [docs/openapi.yaml](docs/openapi.yaml), served as
+`GET /v1/openapi.json`; tests keep it in step with the routes and with real answers.
+
 | Method & path | Purpose |
 | --- | --- |
+| `GET  /v1/openapi.json` | This API's OpenAPI document (never gated) |
 | `GET  /v1/health` | Liveness probe (never gated) |
 | `GET  /v1/stats` | Public tally of pages converted, plus a two-number quality summary (never gated; aggregate only) |
 | `GET  /v1/quality` | Deployment-wide tally of output *quality* (own shared secret, off by default; aggregate only) |

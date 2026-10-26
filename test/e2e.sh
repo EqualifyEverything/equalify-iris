@@ -1616,4 +1616,13 @@ echo "$refusal" | grep -qi '^retry-after:' \
   || fail "upload limit shape" "expected Retry-After and an Iris rate_limited body, got: $refusal"
 
 echo ""
+# Last, because /v1/quality caches its answer for 60s: asked earlier, it would hand the quality
+# steps above a stale tally.
+echo "==> 99. every answer matches docs/openapi.yaml"
+oa=$(node test/openapi-check.mjs "http://localhost:$PORT" "$API_TOKEN" "$QUALITY_TOKEN" "$SID" 2>&1) \
+  && pass "$(tail -1 <<<"$oa")" || fail "openapi" "$oa"
+spec=$(curl -s "http://localhost:$PORT/v1/openapi.json")
+jq -e '.openapi=="3.1.0" and (.paths|has("/v1/sessions/{id}/logs"))' <<<"$spec" >/dev/null \
+  && pass "/v1/openapi.json serves the spec" || fail "openapi.json" "$(head -c 200 <<<"$spec")"
+
 echo "ALL ENDPOINTS PASSED ✅"
