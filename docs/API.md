@@ -1713,7 +1713,8 @@ Two halves of a table split across a page were merged into one.
 
 - `by`: `"code"` (no model call) or `"editor"` (a Copy Editor call). Read this, not the agent
   ledger: a code join never reaches the ledger.
-- `caption` (up to 200 characters), `rows_first`, `rows_second`, `rows_joined`, `chars_before` (both
+- `caption`: the merged table's (up to 200 characters). `rows_first`, `rows_second`, `rows_joined`,
+  `chars_before` (both
   halves), `chars_after` (the merged table).
 - `editor_log`: on `by: "editor"`, when the editor wrote one.
 - On `by: "code"` only: the halves' own bytes (`halves`, `chars_first`, `chars_second`, `html_first`,
@@ -1839,7 +1840,8 @@ checks:
 - ASCII and fullwidth brackets are read; parentheses are not (`(continued` must be dropped). A
   parenthesised or undelimited note can go missing unseen.
 - Every bracketed run in either caption is owed, such as `[Sheet 2 of 3]`. Two captions with
-  different runs, such as `[In millions of dollars]` and `[In thousands]`, can never join.
+  different runs, such as `[In millions of dollars]` and `[In thousands]`, can never join, and the
+  pair reports a lost note, not the units disagreement that actually happened.
 
 Why: [design notes, the bracketed unit note](design-notes.md#the-bracketed-unit-note).
 
