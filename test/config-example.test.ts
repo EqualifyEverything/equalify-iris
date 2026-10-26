@@ -122,14 +122,15 @@ test("both provider blocks in the example name the same model", () => {
 
 // The one number the example's model choice publishes. `GET /v1/limits` works out `max_long_edge_px`
 // from the configured model, so a doc that prints the number goes stale when the model changes. The
-// docs now avoid printing it (docs/openapi.yaml points at `GET /v1/limits` instead); any copy that
-// does appear, as a JSON sample or as "(N px on <model>", must still be the configured model's.
+// docs now avoid printing it (docs/openapi.yaml points at `GET /v1/limits` instead), so today this
+// finds nothing and passes. Any copy that does appear, as a JSON or YAML sample or as
+// "(N px on <model>", must still be the configured model's.
 test("any long edge the docs print is the one the example config publishes", () => {
   credentials();
   const resolved = resolveImageLimits(loadConfig(EXAMPLE)).max_long_edge_px;
   for (const rel of ["../docs/API.md", "../docs/openapi.yaml", "../docs/design-notes.md"]) {
     const docs = readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
-    for (const m of docs.matchAll(/"max_long_edge_px":\s*(\d+)|long-edge limit \((\d+) px on /g)) {
+    for (const m of docs.matchAll(/"?max_long_edge_px"?:\s*(?:\{[^}]*example:\s*)?(\d+)|long-edge limit \((\d+) px on /g)) {
       assert.equal(Number(m[1] ?? m[2]), resolved, `${rel} prints a long edge of ${m[1] ?? m[2]}, and the example config resolves ${resolved}`);
     }
   }

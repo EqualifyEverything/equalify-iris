@@ -16,7 +16,7 @@ These commands are copy-pasteable. They are the same calls exercised by `test/e2
 runs the whole lifecycle against mock GitHub + mock model services and asserts every response.
 
 Requests are rate limited per client, and every response says how much of the budget is left:
-[Rate limits](#rate-limits-how-often-you-may-ask) has the numbers, the headers, and what a `429` looks like.
+[Rate limits](#rate-limits-how-often-you-may-ask) says where to find the numbers, the headers and the `429`.
 
 `fragment`, `block`, `verdict`, `declaration` and `round` all mean something specific here, and
 [README § Terms](../README.md#terms) defines them. These ones appear below in both of their senses:
@@ -573,7 +573,7 @@ There is no sign-in. A deployment is open (send no header) or gated (send `Autho
 
 ### Rate limits (how often you may ask)
 
-Per address, per minute, with `ratelimit` headers on every answer and 429 with `Retry-After` when over. Exact contract: the description at the top of [`docs/openapi.yaml`](openapi.yaml).
+Per address, per minute, with `ratelimit` headers on every answer except `/v1/health`, and 429 with `Retry-After` when over. Exact contract: the description at the top of [`docs/openapi.yaml`](openapi.yaml).
 
 ## Poll status
 

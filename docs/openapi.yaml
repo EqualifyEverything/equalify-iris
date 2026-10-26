@@ -22,11 +22,18 @@ info:
 
     Requests are limited per address, per minute: `general_per_minute` (default 240) for all of `/v1`
     except `/v1/health`, and `upload_per_minute` (default 12) for uploads (`GET /v1/limits` has the
-    numbers). Every answer carries `ratelimit` and `ratelimit-policy` headers. Over budget is 429 with
-    `Retry-After` in seconds: wait that long. Poll a session every 2 to 5 seconds. Two upload refusals,
-    both normally before the body is read: 413 `upload_too_large` (over `upload.max_request_bytes`; split
-    the batch), and 429 with `max_upload_memory_bytes` in `details` when too much upload is arriving at
-    once across all callers (retry in a few seconds). Behind NAT or a shared proxy you share a budget;
+    numbers). Every answer except `/v1/health` carries `ratelimit` and `ratelimit-policy` headers. Over
+    budget is 429 with `Retry-After` in seconds: wait that long. Poll a session every 2 to 5 seconds.
+
+    Two upload refusals, both normally answered before the body is read:
+
+    - 413 `upload_too_large`: over `upload.max_request_bytes`. Split the batch. `details` has
+      `declared_bytes`, or `received_bytes` when the request has no declared length and is cut off as
+      it arrives.
+    - 429: too much upload in flight across all callers (`max_upload_memory_bytes` in `details`). Retry
+      in a few seconds.
+
+    Behind NAT or a shared proxy you share a budget;
     operators must set `server.trust_proxy`, or every request looks like the proxy's.
     `test/e2e.sh` makes these calls against mocks and checks each answer against this document.
 servers:
@@ -238,7 +245,7 @@ paths:
         - `upload` is what one request may be. The byte total is checked before the body is read (or as it
           arrives, without a declared length); the part count is refused during parsing.
         - `rate_limits` is `null` where the app does not limit requests, meaning "not limiting", not "unknown".
-        - The model and provider are not named here: see `GET /v1/settings`.
+        - The model and provider are not named here: see `GET /v1/settings`, which needs the token.
       responses:
         "200":
           description: The limits.
