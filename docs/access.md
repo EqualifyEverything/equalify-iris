@@ -39,10 +39,11 @@ Iris prints which of the two you chose at every boot.
 
 ## What the gate does not cover
 
-The gate covers `/v1/me`, `/v1/settings` and `/v1/sessions`. These answer without it, and none touches a document:
+These answer without the token, and none touches a document:
 
 | Endpoint | Why |
 | --- | --- |
+| `GET /v1/openapi.json` | The API's description. It holds no data. |
 | `GET /v1/health` | A load balancer's probe can't hold a secret. |
 | `GET /v1/limits` | Anyone should be able to check whether a scan is small enough. |
 | `GET /v1/stats` | A deployment-wide tally with no per-session detail. |

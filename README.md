@@ -182,60 +182,22 @@ key inline** — this section is the decisions an operator has to make, not the 
 
 ### No sign-in
 
-Callers don't sign in, and Iris holds no GitHub credential. Every session belongs to the
-deployment. Suggestions are saved on the deployment and filed upstream by a maintainer workflow
-([Contributions](docs/API.md#contributions-automatic)).
-**Contributing back is the sustainability model, not an implementation detail:** the
-agents in `agents/` get better because sessions run against real documents and real corrections, and a
-deployment that consumed the service without contributing would be taking from a library nobody was
-refilling.
+Callers don't sign in, and Iris holds no GitHub credential. Every session belongs to the deployment,
+so anyone who can call it can list and read every document. `server.api_token` gates it behind one
+shared secret. What to choose, and what the gate leaves open: **[docs/access.md](docs/access.md)**.
 
-What that costs, which Iris warns about at boot:
-
-- **No session isolation.** `GET /v1/sessions` lists every session, so anyone who can call it can
-  read any document.
-- **Limits per address**, since the only credential a caller can present is shared.
-
-**So decide who may call it.** `server.api_token` gates `/v1/me`, `/v1/settings` and `/v1/sessions` behind a shared
-secret you hand out; blank leaves them open. Gating also turns off the bundled demo page, which holds
-no credential. Nothing about a caller is stored.
-
-The details, including what to do with a database from an earlier build, are in
-**[docs/access.md](docs/access.md)**.
+Suggestions from every run are saved and filed upstream by a maintainer workflow
+([Contributions](docs/API.md#contributions-automatic)). **Contributing back is the sustainability
+model:** the agents in `agents/` improve because sessions run against real documents and real
+corrections.
 
 ## API
 
-All endpoints are under `/v1`. Where `server.api_token` is set,
-`/v1/me`, `/v1/settings` and everything under `/v1/sessions` need `Authorization: Bearer <server.api_token>`; where it
-is blank they need no header at all. Health, limits and stats never do. `/v1/quality` is the exception
-in the other direction: it has its own shared secret and 404s unless you set it.
+All endpoints are under `/v1`. Every endpoint, who may call it, and its exact request and answer:
+[docs/openapi.yaml](docs/openapi.yaml), served as `GET /v1/openapi.json`. To watch each one work on
+a real document, open `/how-it-works` on a running Iris.
 
-The exact contract for every endpoint is [docs/openapi.yaml](docs/openapi.yaml), served as
-`GET /v1/openapi.json`; tests keep it in step with the routes and with real answers.
-
-| Method & path | Purpose |
-| --- | --- |
-| `GET  /v1/openapi.json` | This API's OpenAPI document (never gated) |
-| `GET  /v1/health` | Liveness probe (never gated) |
-| `GET  /v1/stats` | Public tally of pages converted, plus a two-number quality summary (never gated; aggregate only) |
-| `GET  /v1/quality` | Deployment-wide tally of output *quality* (own shared secret, off by default; aggregate only) |
-| `GET  /v1/suggestions` | Saved agent suggestions, grouped, for the filing workflow (quality token, off by default) |
-| `GET  /v1/limits` | What an upload may be — formats, per-image size, page cap (never gated) |
-| `GET  /v1/me` | This deployment's defaults. Also the probe for whether it is gated |
-| `GET  /v1/settings` | Every non-secret setting, and the model each agent uses |
-| `GET  /v1/sessions` | List every session — see the note above on isolation |
-| `POST /v1/sessions` | Create a session, upload images and/or PDFs (`multipart/form-data`) |
-| `GET  /v1/sessions/{id}` | Poll status |
-| `GET  /v1/sessions/{id}/output` | Fetch the HTML when ready |
-| `GET  /v1/sessions/{id}/fields` | The uploaded PDF's form fields (only with tagged PDFs on) |
-| `POST /v1/sessions/{id}/pdf` | The uploaded PDF back, tagged, with its form filled in (only with tagged PDFs on) |
-| `POST /v1/sessions/{id}/feedback` | Submit feedback, trigger a re-run |
-| `POST /v1/sessions/{id}/close` | Finalize the session and clean tmp |
-| `GET  /v1/sessions/{id}/logs` | Fetch the run log (ndjson) |
-| `GET  /v1/sessions/{id}/audit` | Audit mode only: page images, prompts and the document between steps |
-| `GET  /v1/sessions/{id}/diagnostics` | Cost/timing/health summary (token counts per run and per agent, phase + per-call durations, in-flight/hung call) |
-
-Example — create a session (order of `images` parts is the processing order):
+The basic flow:
 
 ```bash
 curl -X POST http://localhost:8080/v1/sessions \
@@ -244,18 +206,15 @@ curl -X POST http://localhost:8080/v1/sessions \
   -F "images=@page-002.png"
 ```
 
-Then poll `GET /v1/sessions/{id}` until `status` is `ready_for_review`, fetch
-`GET /v1/sessions/{id}/output`, and `POST /v1/sessions/{id}/close` to finalize.
+The order of the `images` parts is the processing order. Then poll `GET /v1/sessions/{id}` until
+`status` is `ready_for_review`, fetch `GET /v1/sessions/{id}/output`, and
+`POST /v1/sessions/{id}/close`. Leave out the `Authorization` header on an open deployment.
 
-Copy-pasteable `curl` for every endpoint, and every run-log event's fields:
-**[docs/API.md](docs/API.md)**. To prove the endpoints work end to end with no credentials (mock
-GitHub, mock model): `./test/e2e.sh`.
+Copy-pasteable `curl` and every run-log event's fields: **[docs/API.md](docs/API.md)**. To run every
+endpoint end to end with mock services and no credentials: `./test/e2e.sh`.
 
-**What it costs is a config choice, because every model is named in your config and never in Iris's
-code:** nothing per token against a self-hosted open-weight model, or about **10.7 cents a page** for
-the suggested setup, measured over 100 scanned pages. Which model to run each agent on, and how a
-swap fails quietly: **[docs/models.md](docs/models.md)**. The price per step, and why cost per page
-is a worse number than it looks: **[docs/cost.md](docs/cost.md)**.
+What it costs is a config choice: **[docs/cost.md](docs/cost.md)**. Which model to run each agent
+on: **[docs/models.md](docs/models.md)**.
 
 ## Layout
 
