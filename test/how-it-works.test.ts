@@ -512,7 +512,7 @@ test("an answer is explained field by field from the document's descriptions", (
   const by = Object.fromEntries(rows.map((r) => [r.path, r]));
   assert.equal(by.pages_processed.value, "40125");
   assert.match(by.pages_processed.meaning, /Pages delivered/);
-  assert.match(by["quality.clean_rate"].meaning, /nothing left open/);
+  assert.match(by["quality.clean_rate"].meaning, /left nothing open/);
   assert.equal(lib.apiHtml(null), "<p>This deployment did not serve its API description.</p>");
 });
 

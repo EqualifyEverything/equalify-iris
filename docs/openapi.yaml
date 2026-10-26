@@ -215,7 +215,21 @@ paths:
     get:
       tags: [Deployment]
       summary: How much this deployment has converted
-      description: A public tally, cached for 60 seconds. No per-session detail.
+      description: |
+        A public, deployment-wide tally: no session ids, file names or content. Cached for 60 seconds
+        (`Cache-Control: public, max-age=60`), so a new document can take a minute to appear.
+
+        - A session counts once it first reaches `ready_for_review`, and stays counted if a later
+          re-run fails. A re-run does not count its pages again. Queued, running and never-finished
+          sessions are not counted.
+        - `quality` covers the last 30 days and is always present. It is `null` until that window holds
+          20 documents, a privacy floor.
+        - `clean_rate` is the Reader Agent's verdict, not the final axe result. A document part of
+          which the reviewer never answered about is not clean.
+        - `mean_rounds` is 0 when the first reading found nothing, but the loop also stops when a round
+          changes nothing, so read it beside `clean_rate`.
+        - The difference between two reads is per-upload (one more document, 40 more pages), so a
+          deployment that treats document sizes as private should not expose this endpoint.
       responses:
         "200":
           description: The tally.
@@ -223,19 +237,19 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [pages_processed, documents_processed, since]
+                required: [pages_processed, documents_processed, since, quality]
                 properties:
-                  pages_processed: {type: integer, description: Pages delivered, counting each document's first run.}
-                  documents_processed: {type: integer}
-                  since: {type: [string, "null"], format: date-time, description: When the earliest counted document finished.}
+                  pages_processed: {type: integer, description: Pages delivered, all time, counting each document's first run.}
+                  documents_processed: {type: integer, description: Documents delivered, all time. A 40-page PDF is one.}
+                  since: {type: [string, "null"], format: date-time, description: When the earliest counted document finished; `null` before any.}
                   quality:
                     type: [object, "null"]
-                    description: "`null` until the last 30 days hold enough documents to say."
+                    description: "Last 30 days. `null` until the window holds 20 documents."
                     properties:
-                      window_days: {type: integer}
-                      documents: {type: integer}
-                      clean_rate: {type: number, description: Share of documents finished with nothing left open.}
-                      mean_rounds: {type: number, description: Average review rounds per document.}
+                      window_days: {type: integer, description: "Always 30."}
+                      documents: {type: integer, description: Documents delivered in the window.}
+                      clean_rate: {type: number, description: "Share (0-1) the reviewer read in full and left nothing open on."}
+                      mean_rounds: {type: number, description: Mean review rounds per document.}
         "429": {$ref: "#/components/responses/Error"}
 
   /v1/limits:

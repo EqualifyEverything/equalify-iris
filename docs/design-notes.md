@@ -589,6 +589,38 @@ Places where a decision was left open, and where v1 intentionally stops:
   and 5 of `claude-sonnet-4-6`'s 90, on the same two pages, against 0 of 88 for `gpt-5.6-luna` — the
   page model deployed since 2026-09-10 (#344).
 
+
+### Why a partial document says so
+
+The rules are in [API.md, Partial documents](API.md#partial-documents). This is why.
+
+- **One page short, and saying so, beats no document.** But a run where no page produced content is
+  not a partial success: an error says more than an empty file. A source whose every page is blank is
+  a fact about the source, and delivering `<main></main>` from a run reporting success would hide it.
+- **Two `@page-failed` markers, for two jobs.** The one inside `<main>` says where the hole is, but
+  the Copy Editor sees it each round and may drop it. The one after `</main>` is added once review
+  is over, so the document cannot end up claiming to be whole.
+- **Comments, not visible text,** for the same reason as `@unresolved`: everything visible is meant
+  to be text from the page. Comments are invisible to a reader, ignored by axe and by screen-reader
+  flattening, and easy for tooling to find.
+- **A failed re-extraction keeps the old page.** A page Iris could not improve is not a page it
+  lost.
+- **The missing set belongs to the document, not the run,** so round 3's `failed_pages` still names
+  a page lost in round 1.
+- **`@page-uncorrected` is the more useful marker.** A page with no content is obviously incomplete.
+  A page whose table lost its six total rows looks finished and no longer adds up. No later step
+  answers the fidelity check: the Copy Editor, the only later step that sees a source image, is told
+  to report a mismatch, not edit from it ([`editor_fidelity_observed`](API.md#editor_fidelity_observed)).
+  So the rejection stands whatever the markup became.
+- **It does not mark "this page might be wrong".** Replaying the check over 57 corrected pages
+  passed 26% of them (#288), and the verifier rejects 71-74% of first renders. A marker on most
+  pages would tell a reader nothing. The five ways a correction can fail are one fact for the
+  reader, so the marker does not tell them apart; the log does.
+- **Neither kind of page becomes a regression fixture.** A fixture says some HTML is the right output
+  for a page image. Closing a session says the document is good enough, not that this page is right,
+  and filing it would make every future page-agent change reproduce markup this run had already
+  declared wrong.
+
 ## Joining a table split across a page turn
 
 The run log entries [`table_continuations`](API.md#table_continuations),
@@ -3062,6 +3094,43 @@ read as they do.
 - **Audit files are named by what is in them.** A prompt is stored once per distinct text, by
   sha256: a run sends the same agent contract on every page. Every write is best-effort, because an
   audit file that cannot be written must not fail the run it describes.
+
+
+### What the public tally may say
+
+`GET /v1/stats` is unauthenticated: the demo page shows it to visitors. Its fields are in
+`docs/openapi.yaml`. This is why they are as they are.
+
+- **It counts what was delivered.** A session counts once it first reaches `ready_for_review`, from
+  a write-once `first_completed_at` stamp, so re-running a finished document, or a re-run that
+  fails, cannot make the number dip. Its pages really were made accessible. A feedback re-run does
+  not count its pages again: this is pages made accessible, not model calls.
+- **One upgrade-time miss.** Databases from before that column were backfilled from sessions in
+  `ready_for_review` or `closed`. A session that was mid-re-run when the upgraded build booted was
+  then marked `failed` by the startup sweep, so it is never counted. Counting in-flight sessions
+  instead would credit first runs that produced nothing.
+- **Volume is all-time, quality is the last 30 days.** An all-time rate converges and stops
+  responding to a fix; an all-time page count is the achievement.
+- **The window is fixed.** The endpoint takes no parameters, which keeps its one cache entry right
+  for everyone. A public `?days=` would let anyone narrow the window to one document.
+- **`clean_rate` counts silence as not clean.** It excludes documents with issues left open and
+  documents part of which the reviewer never answered about (#186). It is the Reader Agent's list,
+  not the final axe result, so the demo credits the reviewer rather than saying the document is
+  clean. The [quality tally](API.md#quality-tally-shared-secret-off-by-default) can see that gap.
+- **`mean_rounds` cannot say why the loop stopped.** 0 is good, but the loop also stops when a round
+  changes nothing. Read it beside `clean_rate`: early stopping can only move `clean_rate` down.
+- **`quality` is `null` under 20 documents (`PUBLIC_QUALITY_MIN_DOCUMENTS`).** It is a privacy
+  floor: on a quiet deployment the aggregate is the individual, and "50% clean" over four documents
+  is about identifiable people's uploads. It is enforced in `Store.publicQuality`, so a route edit
+  cannot bypass it. `null`, not zeros, because "0% clean" is the worst claim the field can make.
+- **No rule ids,** unlike the quality tally. A list of what Iris still fails at belongs in front of
+  the people who would fix it.
+- **The floor bounds one reading, not a series.** The delta between two reads is per-upload:
+  `documents_processed` +1 with `pages_processed` +40 means a 40-page document finished. And
+  `documents` times `clean_rate` is an exact count, so polling near the floor can tie a not-clean
+  result to one document. Nothing identifies who or what, so it needs outside knowledge of who
+  uploaded when. An operator for whom that matters should keep the endpoint off the public internet.
+  The 60-second cache coarsens when a change shows up, not its size.
 
 ## Designed for, and not built
 
