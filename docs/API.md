@@ -2514,8 +2514,9 @@ correction that truncates because the page is large would truncate again.
 - `ceiling_bound`: which term produced `ceiling`, `multiple` or `floor`. Read the term here, not off the
   number: a doubling that lands on 4,000 is still `multiple`. Absent wherever `ceiling` is.
 - `chars_kept`: the size of the fragment that ships.
+- On a truncation, `reply_chars`: how far the reply got (read it against `chars_kept`); `0` for a
+  reply of no characters at all.
 - On a truncation that returned something:
-  - `reply_chars`: how far the reply got (read it against `chars_kept`).
   - `reply_head` / `reply_tail`: its first and last 240 characters, whitespace folded. A reply shorter
     than both is quoted whole in `reply_head`. Deployment-only, never on `/v1/quality`. A tail
     mid-sentence in content the head has not reached is a page that needed the room; a tail repeating
@@ -2524,8 +2525,9 @@ correction that truncates because the page is large would truncate again.
     markup; says where the reply began, not where it went), `prose` (never began the page: raising the
     cap buys more of the same), `envelope` (the ceiling landed after the closing brace), or `empty`
     (whitespace only).
-- `truncated: true` with no `reply_chars` is two shapes: a reply of zero characters, or a truncation
-  that lost its evidence crossing a boundary. Only `reply_chars: 0` says it was the first.
+- A bare `truncated: true`, with no excerpt, is two shapes: a reply of zero characters
+  (`reply_chars: 0`), or a truncation that lost its class crossing a boundary (no `reply_chars` at
+  all). Read `reply_chars`, not the missing `reply_head`, to tell them apart.
 
 The fidelity problems the correction was for are still unfixed and on record.
 
@@ -2561,6 +2563,8 @@ correction leaves it, marked `@page-uncorrected`.
   working.
 
 Absent when nothing was refused, which is usual. Diagnostics counts these as `verification.declined`.
+Why refusals are allowed, and why split words are marked differently: [design notes — why a correction
+may refuse a problem](design-notes.md#why-a-correction-may-refuse-a-problem).
 
 ### `page_correction_recheck`
 
@@ -2580,8 +2584,9 @@ A second verdict on a corrected page: `ok` and its `problems`.
   counts say how far it got. At the default this is a count, not a rate.
 - `unjudged: true`: nothing judged it (no checking agent loaded), so its `ok` means nothing.
 
-Both kinds are counted apart in `verification.rechecks` (`binding_unjudged`, `sampled_unjudged`); an
-`ok: false` line's problems go to `rechecks.failures`, not `diagnostics.errors`.
+Diagnostics counts the two kinds apart as `verification.rechecks.binding` and `.sampled`, with
+`binding_unjudged` and `sampled_unjudged` for the `unjudged` ones among them. An `ok: false` line's
+problems go to `rechecks.failures`, not `diagnostics.errors`.
 `extraction_start` / `reextract_start` carry `recheck_sample_size` and `recheck_thresholds`, so a log
 with no recheck lines says whether the sample was off, nothing was corrected, or every correction fell
 below the first threshold.
