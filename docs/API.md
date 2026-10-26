@@ -45,103 +45,14 @@ export AUTH="Authorization: Bearer $IRIS_TOKEN"   # where the deployment sets a 
 
 ## Public tally (unauthenticated)
 
-How much this deployment has actually made accessible. No token: the browser app shows it to
-visitors before anyone signs in, and it is the number the project celebrates with.
+`GET /v1/stats`: how many pages and documents this deployment has made accessible, and, over the
+last 30 days, how well that went. No token. Exact contract: [`docs/openapi.yaml`](openapi.yaml).
+Why the fields are as they are, including the privacy floor: [design
+notes](design-notes.md#what-the-public-tally-may-say).
 
 ```bash
 curl -s "$BASE/stats"
 ```
-```json
-{ "pages_processed": 1284, "documents_processed": 212, "since": "2026-05-22T18:00:00.000Z",
-  "quality": { "window_days": 30, "documents": 212, "clean_rate": 0.93, "mean_rounds": 1.8 } }
-```
-
-* `pages_processed` — **distinct page images** Iris has converted to accessible HTML. A session
-  counts once it has reached `ready_for_review`, so an upload that has **never** reached it — still
-  queued, still running, or failed on its first run — is not in the number, and a feedback re-run
-  does **not** count its pages again: this is a tally of pages made accessible, not of model calls.
-  Note the asymmetry with a `failed` status: a session that completed once and then failed a re-run
-  stays counted (see "the number only ever goes up" below).
-* `documents_processed` — sessions counted, on the same basis. A 40-page PDF is one document and
-  forty pages.
-* `since` — when the earliest counted document finished, or `null` before anything has, so a
-  client can say "since May 2026" without hardcoding a launch date.
-* `quality` — how *well* it went, or **`null`** when the deployment has too few recent documents to
-  say (below). Present either way, so a client can tell "nothing to report" from an older server
-  without the field. Four fields, and no more:
-  * `window_days` — the window the two rates cover, echoed so a client can write "over the last 30
-    days" without hardcoding it. Fixed at 30 and **not** caller-adjustable: this endpoint takes no
-    parameters, which is what keeps its single shared cache entry correct for everyone, and a public
-    `?days=` would let anyone narrow the window until the denominator was one document.
-  * `documents` — the denominator: documents delivered inside the window, flawless ones included.
-    Distinct from `documents_processed`, which is all-time.
-  * `clean_rate` — share (0–1) of those documents the **reviewer** read in full and reported nothing
-    left open on. Stated the positive way round because this one is read by someone deciding whether
-    to trust Iris with a file. It is 1 − (the
-    [quality tally](#quality-tally-shared-secret-off-by-default)'s `unresolved_rate` ∪
-    `review_unread_rate`), not the complement of the first alone: a document part of which the
-    reviewer never answered about has nothing open because nothing was looked for, and counting that
-    as clean is what made this field worth doubting (#186). Note also what it is *not*: it is the
-    Reader Agent's remaining-issue list, not the final axe result, so a document carrying a
-    violation the reviewer never raised still counts here. The
-    [quality tally](#quality-tally-shared-secret-off-by-default) can see that gap (its `rules` come
-    from the final lint of the same run); this field cannot, which is why the demo page's sentence
-    credits the reviewer rather than saying the document came out clean.
-  * `mean_rounds` — mean reader/editor passes per document. **0 is the good value:** the loop stops
-    as soon as the Reader finds nothing, so a document that reads clean immediately contributes 0.
-    It is not *only* a good value, though, and this number cannot tell the two apart: the loop also
-    stops as soon as a round changes nothing, so a document whose remaining issues are ones the
-    loop is designed not to fix contributes a low count too. Read it beside `clean_rate`, which
-    convergence can only move DOWNWARD — stopping early can report issues a further Reader sample
-    might have called clean, never the reverse. So
-    a falling `mean_rounds` beside a steady `clean_rate` is the loop wasting fewer rounds; a
-    falling `mean_rounds` is not by itself evidence of anything improving.
-
-`quality` is `null` until the window holds at least 20 documents (`PUBLIC_QUALITY_MIN_DOCUMENTS`),
-and that floor is a privacy control, not a presentation choice. A rate over three documents is not
-a measurement — one bad afternoon reads as "67% clean" on a front page — and, more to the point, on
-a quiet deployment the aggregate *is* the individual: "50% finished clean" next to a document count
-of four is a statement about identifiable people's uploads. The floor is enforced in
-`Store.publicQuality`, not in the route, so a future route edit that reads the fields it wants
-cannot walk around it. Below the floor the answer is `null` rather than zeros, because a route has
-no way to tell a real 0% from an absent one and "0% clean" is the worst claim the field can make.
-
-**The floor bounds a snapshot, not a series of them.** `documents` and `clean_rate` together give an
-exact integer count of not-clean documents, and `documents_processed` deltas were already
-inferrable before `quality` existed — so an observer polling this endpoint on a deployment near the
-floor can difference the readings over days and attribute not-clean status to a single document,
-which is the inference the floor exists to prevent. Nothing identifying is exposed (no login, no
-filename, no per-document timestamp), so out-of-band knowledge of who uploaded when is needed for it
-to mean anything, and it is inherent to publishing any windowed rate rather than specific to these
-fields. An operator for whom that matters should treat it the same way as the page-count delta above:
-keep the endpoint off the public internet.
-
-Volume is all-time while quality is windowed, which is deliberate rather than an inconsistency: an
-all-time rate converges and stops responding to a fix, while an all-time page count is the
-achievement being reported. No rule ids here, unlike the
-[quality tally](#quality-tally-shared-secret-off-by-default) — a standing list of what Iris still
-fails at belongs in front of the people who would fix it, not on a public page.
-
-The number only ever goes up. It is derived from a write-once `first_completed_at` stamp rather
-than from current `status`, precisely so that asking Iris to re-run a finished document — which
-moves it back to `queued`, and possibly on to `failed` — cannot make the public count dip. For
-databases that predate that column, sessions already in `ready_for_review`/`closed` are backfilled
-from `updated_at`, so nothing already converted is dropped from the count.
-
-*One session is missed by that backfill, once:* one that had completed and was **mid-re-run** at the
-moment the upgraded build booted. It is not `ready_for_review`/`closed` at that instant, and the
-startup sweep then marks it `failed`, so it is excluded for good rather than until the re-run ends.
-Counting in-flight sessions instead would be worse — it would credit first runs that had produced
-nothing — so the tally undercounts by that one document. Only the upgrade moment is affected.
-
-Everything here is a deployment-wide aggregate: no session ids, logins, user ids, filenames or
-content. It is not, however, free of per-upload information: the **delta** between two reads is one
-— `documents_processed` +1 with `pages_processed` +40 means a 40-page document finished in that
-window, and on a quiet deployment the aggregate is the individual. Nothing identifying follows from
-it (no who, no what), but an operator who treats document sizes as sensitive should keep this
-endpoint off the public internet. Responses are cached for 60 seconds
-(`Cache-Control: public, max-age=60`), which coarsens *when* a conversion shows up but not the page
-count — so a page you just converted may take up to a minute to appear.
 
 ## Quality tally (shared secret, off by default)
 
@@ -4202,29 +4113,20 @@ verify call that follows is unwrapped, so a bare page whose verifier takes a pro
 
 ## Partial documents
 
-A page's extraction can fail on its own (a model call that hits the output ceiling, a stalled
-stream, a reply with no readable HTML in it — `page_no_output`). That page fails; the run does not. Every other page is still rendered, verified,
-assembled and reviewed, and the document is delivered.
+A page can fail on its own: a reply cut off at the output ceiling, a stalled stream, or a reply with
+no readable HTML (`page_no_output`). That page fails and the run goes on. Every other page is
+rendered, verified, assembled and reviewed, and the document is delivered.
 
-A page that carries nothing is **not** one of these. A blank verso is a page the agent can answer
-completely, and it answers with a `log` line saying the page is blank and an `html` holding nothing a
-reader receives — an empty string, or, in 33 of the 78 such replies in the bench logs, a comment, an
-empty paragraph or a bare page-break marker (`page_blank`, `pages_blank`, issue #219); that page
-contributes nothing to the document because there was nothing on it, the document is whole, and none
-of the markers below are written for it. A page whose only printed content is its own number is such a
-page: the folio is the one thing on a sheet this pipeline never delivers, so a page that prints nothing
-else has nothing on it a reader receives (issue #222).
-
-**Unless no page produced any content.** Then the run ends `failed` — a document containing none of
-the source's words is not a partial success, and an error is more use than an empty file. Where
-every page failed, the `error` is the first page's own provider error, which names the ceiling and
-the knob to raise. Where the pages were reported **blank**, it says how many of them were: a source
-whose every page is empty is a statement about the source, and delivering `<main></main>` from a run
-reporting success would leave that unsaid. `GET .../output` answers `409`, as it does for any failed
-run.
-
-The failed page is **not** silently dropped. Two comments say so, in different places and for
-different reasons:
+- **A blank page is not a failure.** The agent answers with a `log` line saying so and HTML that
+  holds nothing a reader receives: an empty string, a comment, an empty paragraph or a bare
+  page-break marker (`page_blank`, `pages_blank`). A page whose only content is its own page number
+  is blank too. No marker is written for it, and the document is whole.
+- **If no page produced content, the run fails.** When every page failed, `error` is the first
+  page's own provider error. When some or all were blank, it says `no page produced any content: <n>
+  of <m> source pages were reported blank`, plus how many could not be extracted.
+  `GET .../output` answers 409.
+- **A failed page is marked twice.** Inside `<main>`, where its content would have been, and once
+  more after `</main>`, which the Copy Editor cannot reach:
 
 ```html
 <main>
@@ -4237,48 +4139,22 @@ different reasons:
 -->
 ```
 
-The one **inside** `<main>` sits where the page's content would have been, so it says *where* the
-hole is — but it is part of the body handed to the Copy Editor each review round, and a round that
-rewrites the document may drop it. The one **after** `</main>` is injected once the review loop is
-finished, out of the editor's reach, so the document cannot end up claiming to be whole. Comments
-rather than visible prose, for the same reason as `@unresolved`: everything visible in a delivered
-document is meant to be text that was on the page. Both are invisible to a reader, inert to axe and
-to the screen-reader flattening, and findable by tooling.
-
-Three places report it, in increasing order of convenience: `page_extraction_failed` in the run log
-per page, `failed_pages` on the `run_complete` line (present only when there were any), and
-`pages_failed` in [diagnostics](#diagnostics-timing--hang-detection). A client that cares whether it
-received a whole document should check the last of those, not `status`.
-
-On a feedback re-extraction the same failure is non-destructive instead: the page keeps the content
-it already had, because a page Iris could not improve is not a page it lost. That case is
-`page_extraction_failed` with `kept: "prior"`, and it is deliberately **not** counted in
-`pages_failed` or `failed_pages` — the document is whole, it is just not improved. Look for it in
-`reextract_complete.failed`.
-
-A missing page stays missing across feedback rounds, and every round's document says so: the set is
-a property of the document, not of the run that lost the page. Sending feedback that names the
-failed page is what fixes it — re-extracting it successfully removes it from the set and logs
-`page_recovered`. Nothing else does, so `failed_pages` on round 3's `run_complete` still names a page
-lost in round 1 if it is still not there.
-
-Pages missing from the delivered document are also excluded from the regression fixtures captured on
-`POST .../close`: a fixture asserts that some HTML is the *right* output for a page image, and a
-failure comment is not.
+- **Where to read it:** `page_extraction_failed` per page in the run log, `failed_pages` on
+  `run_complete` (only when there are any), and `pages_failed` in
+  [diagnostics](#diagnostics-timing--hang-detection). To know whether you received a whole document,
+  check `pages_failed`, not `status`.
+- **On a feedback re-run** a failed re-extraction keeps the page's earlier content. It is logged as
+  `page_extraction_failed` with `kept: "prior"`, listed in `reextract_complete.failed`, and not
+  counted in `pages_failed` or `failed_pages`.
+- **A missing page stays missing** across feedback rounds, and every round's document marks it. Only
+  a successful re-extraction of that page removes it (`page_recovered`).
+- Missing pages are left out of the regression fixtures saved by `POST .../close`.
 
 ### A page that is here and is known to be wrong
 
-The opposite failure, and the one Iris knows the most about and used to say the least about (issue
-#328). These pages **are** in the document: they were rendered, the fidelity check rejected them
-naming what was wrong, one self-correction pass was bought, and it repaired nothing. So what those
-pages carry is content Iris named a defect in and never fixed. Not necessarily the rejected bytes:
-the marker is written after the review loop, and the Copy Editor may have rewritten a block on one
-of these pages since. What no later round can have done is **answer the check** — nothing after
-extraction asks whether a page is faithful to its source, and the editor, which is the one step
-that does see a source image after that point (for the pages the Reader's issues name), is told to
-*report* a discrepancy it notices rather than edit from one reading of an image
-([`editor_fidelity_observed`](#editor_fidelity_observed)). The rejection therefore stands whatever
-the markup became, and only a re-extraction can lift it.
+The page is in the document, but it failed Iris's fidelity check, and the one correction pass
+repaired nothing (#328). Its content may be missing or mis-structured. A table that lost rows is how
+this has been seen.
 
 ```html
 <!-- @page-uncorrected 5, 31
@@ -4290,44 +4166,24 @@ the markup became, and only a re-extraction can lift it.
 -->
 ```
 
-Written once after `</main>`, out of the Copy Editor's reach, like `@page-failed`. It is the more
-useful of the two declarations, because a page with no content is obviously incomplete to anyone who
-opens the file while a page whose statistical table lost its six aggregate rows looks finished and no
-longer adds up.
+- Written once, after `</main>`, like `@page-failed`.
+- A page is in the set exactly when its verdict failed and its `page_corrected` `result` is not
+  `kept`. The other results are `identical` (the same page back, even if written differently),
+  `rejected` (under a quarter of the page's size, refused as a deletion), `empty` (no HTML) and
+  `failed` (the call threw; `page_correction_failed` says why). `page_verify_failed` says what was
+  wrong.
+- The set is on `extraction_complete.uncorrected` (or `reextract_complete.uncorrected`) and on
+  `uncorrected_pages` on `run_complete`, only when there are any. `run_complete` is the one place it
+  appears in every mode, since a feedback round that re-extracts nothing logs neither of the others.
+- Diagnostics has no list of these pages; `pages_failed` is the no-content set.
+  `verification.results` and `verification.triggers` count how corrections ended, without naming
+  pages.
+- A correction that was adopted is not listed, even if it might still be wrong. No marker means no
+  page shipped as the version its own verifier rejected, not that every page was checked again.
+- Like a missing page, it follows the document across feedback rounds, only a re-extraction removes
+  it, and it is left out of the regression fixtures.
 
-The correction ends without repairing the page in five ways, and for the delivered document they are
-one fact — the page the verifier named problems in — so the marker does not distinguish them. The
-log does: `page_correction_failed` is the call that threw, and `page_corrected`'s `result` is
-`empty` (it answered with no HTML), `identical` (it answered with the page it was given, **or** with
-a different string carrying the same page — re-indented, or `&` written `&amp;` — which is adopted
-and is the fifth way) or `rejected` (its answer came back at under a quarter of that page's size and
-was refused as a deletion). Which makes the rule readable off the log without a per-value table: a
-page whose verdict failed is in this set exactly when its `page_corrected` `result` is **not**
-`kept`. `page_verify_failed` on the same image says what was wrong. The set itself is on
-`extraction_complete.uncorrected` (or `reextract_complete.uncorrected`) and, present only when there
-were any, on `uncorrected_pages` on the `run_complete` line — which is the one place it can be read
-on **every** mode, because a feedback round that re-extracts nothing runs no extraction and so logs
-neither of the other two. There is no diagnostics list of these pages — `pages_failed` is the
-no-content set and these pages are deliberately not in it;
-[Diagnostics](#diagnostics-timing--hang-detection)'s `verification.results` and
-`verification.triggers` count how many corrections ended each way without naming pages, so the run
-log is where you go for the page.
-
-It is **not** the claim "this page might be wrong". A correction the pass did adopt is not listed,
-even though replaying the check over 57 corrected pages put their pass rate at 26% (issue #288): that
-is a repaired page rather than the rejected one, the verifier rejects 71–74% of first renders, and a
-marker that fired on most of a document's pages would tell a reader nothing. What the **absence** of
-this marker means is exactly that no page shipped as the fragment its own verifier rejected — not
-that every page was checked after correction, which is a sample (`page_correction_recheck`) and not a
-gate.
-
-Like a missing page, it follows the document across feedback rounds rather than the run: re-extracting
-the page is the only thing that takes it out of the set, because re-rendering from the image is the
-only way a page whose correction failed gets a second answer. And like a missing page it is kept out
-of the regression fixtures captured on `POST .../close` — accepting a session is a human saying the
-*document* is good enough to close, which is not the same claim as this page being the correct output
-for its image, and filing it would gate every future page-agent update on reproducing markup this run
-had already declared wrong.
+Why both markers work this way: [design notes](design-notes.md#why-a-partial-document-says-so).
 
 ## Contributions (automatic)
 
