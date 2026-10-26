@@ -1939,366 +1939,168 @@ The diagnostics fold counts them as `verification.verify_inconsistent`.
 
 ### `page_corrected`
 
-What a self-correction pass did (`trigger`: `verify`, `links`, `alt`, `ids`, `words` or `both`;
-`problems`: how many it was given; `kinds`: what the verdict said was wrong going in — the same set
-as `page_verify_failed`'s, and empty on the `links`, `alt`, `ids` and `words` triggers, where the
-defect was found by code against the file's own annotations, a closed word list, the fragment's own
-parsed tree or the page's own two spellings of one word rather than named by the verifier).
+One self-correction pass on a page.
 
-`both` means **more than one** source, which is what it has always counted, so no reading of an older
-log changes as sources are added. It does not name which combination — `page_links_missing`,
-`page_generic_alt`, `page_duplicate_ids` and `page_split_words`, keyed by the same `image`, are where
-the per-source detail is exact.
+- `trigger`: what asked for it. `verify` is the checking model; `links`, `alt`, `ids` and `words` are
+  code checks; `both` means more than one source (which ones: that page's `page_links_missing`,
+  `page_generic_alt`, `page_duplicate_ids` and `page_split_words` lines, keyed by the same `image`).
+- `problems`: how many it was given. `kinds`: what the verdict said was wrong, the same set as
+  `page_verify_failed`'s; empty on the code triggers, where no verdict named anything.
+- `result`:
+  - `kept`: it changed the delivered document.
+  - `rejected`: thrown away for the page it was meant to improve. Three causes, two with their own
+    line: a reply a fraction of the page's size ([`page_correction_rejected`](#page_correction_rejected));
+    a second verdict naming something the rewrite lost (`page_links_correction_rejected`); and, with
+    neither, a binding recheck that could not be obtained (`page_verify_error` with
+    `correction_discarded: true`, counted as `rechecks.binding_error`).
+  - `identical`: it changed nothing, judged on the effect, not the string, so a re-indented page or
+    `&amp;` for `&` counts here. The fragment is still adopted. With `chars_before` / `chars_after` and
+    four `false` flags, the model re-typed the page; with no sizes and no flags, it returned the exact
+    string.
+  - `empty`: nothing usable came back.
+  - `failed`: the call threw ([`page_correction_failed`](#page_correction_failed)).
+  `identical`, `empty` and `failed` were paid for and bought nothing; `failed` costs most, since a
+  truncation pays a full output ceiling.
+- What changed, observed on the two fragments: `text_changed`, `alt_changed`, `attrs_changed`,
+  `structure_changed`, `chars_before` / `chars_after`, and `text_chars_before` / `text_chars_after`
+  (prose only, which tells added markup apart from restored content).
+- Image descriptions and markers. Each names its members, is capped at six names, and is absent when
+  nothing happened. None decides what ships or which reply is right.
+  - `alt_relocated`: named members a correction moved from one list in a description to another
+    (always also `alt_changed`).
+  - `alt_added`: a name that arrived: listed in the corrected description, in a list that already
+    held at least two of the earlier description's members, and named nowhere in the earlier
+    description's words. Disjoint from `alt_relocated` by construction, so the two can be added.
+  - `markers_added`: which of `[not legible]` and `[page not fully transcribed]` the corrected page has
+    more of.
 
-`result` is one of five:
+Before counting a corpus off the three:
 
-| `result` | What it says |
-| --- | --- |
-| `kept` | It changed the delivered document |
-| `rejected` | Thrown away in favour of the page it was meant to improve |
-| `identical` | It changed nothing about the page |
-| `empty` | Nothing usable came back |
-| `failed` | The model call threw, so nothing came back at all — see [`page_correction_failed`](#page_correction_failed) |
+- Two lists in two sentences with no semicolon between them read as one list.
+- A member only dropped is on neither line; the text sizes say a description lost prose.
+- A correction that changes how many images a fragment has is skipped: descriptions pair by position.
+- A name containing "and" or "or" reads as one member where its list uses commas, except as the first
+  half of the list's last item, where it is missed. With no commas at all, the conjunction splits it.
+- An entry is a token that changed list, not always a place: "pale and light and medium and dark"
+  yields band words.
+- A description that lost any member it no longer names anywhere reports no arrivals ("N.D." becoming
+  "North Dakota" reads as a loss and a gain), and so does one that listed a member twice. A member
+  moved between bands is not lost.
+- A wholly new list of new names is an invented category, reported by `structure_changed` and the
+  sizes, not here.
+- `markers_added` counts the whole fragment, attributes included. Inside an `alt`: `alt_changed` true,
+  `text_changed` false, equal text sizes. Inside another attribute: only `attrs_changed`. So do not
+  expect `text_changed` beside every `markers_added`.
 
-The last three are calls paid for that bought nothing, and `failed` is the expensive one, since a
-truncation has already paid for a full ceiling of output.
-
-**A `rejected` has three causes and only two of them have a rejection event.**
-[`page_correction_rejected`](#page_correction_rejected) is a reply that came back a fraction of the
-page's size; `page_links_correction_rejected` is a second verdict naming something the rewrite had
-lost; and — with neither of those beside it — a binding recheck that could not be obtained at all,
-which logs `page_verify_error` with `correction_discarded: true` and counts as
-`rechecks.binding_error`. Triaging a `rejected` by looking only for the first two finds no event for
-the third, which is why it is named here: the first two are a correction judged and found wanting,
-and the third was never judged.
-
-**`identical` is decided on the effect, not on string identity**, so a model that returns its own
-page re-indented or with `&` for `&amp;` is counted here rather than as `kept`. Such a fragment is
-still **adopted** — what ships is decided on string identity, deliberately, so that a change no
-signal here observes cannot be silently reverted. `identical` means the page call bought nothing, not
-that its output was discarded (that is `rejected`). Two shapes of it are worth telling apart, and
-field presence is what tells them apart: with `chars_before` / `chars_after` and all four flags
-`false`, the model re-typed the page to no effect; with no sizes and no flags at all, it handed back
-the exact string it was given. Same bill, different behaviour.
-
-When it changed something, `text_changed` / `alt_changed` / `attrs_changed` / `structure_changed` and
-`chars_before` / `chars_after` say **what** changed — observed on the two fragments, not claimed by
-the verdict, so an alt-text refinement, a re-typed `href` and a restored table row are
-distinguishable. `text_chars_before` / `text_chars_after` are the same two sizes with the markup
-taken out — how much prose a *reader* receives — which is what separates a correction that added
-markup to a page that was already complete from one that brought back content the vision pass had
-dropped.
-
-**Three more fields are about the image description and the completeness markers.**
-`alt_relocated` names one or more NAMED members the correction moved from one enumeration in a
-description into a disjoint one — a state that left `darkest` and entered `cross-hatched` (#355).
-`alt_added` names a member that ARRIVED: a name the corrected description lists in one of its
-categories, named nowhere in the words of the description it corrected — **in a list or out of one**,
-since a band of a single member and a mention in running prose are both the earlier reply naming the
-place — joining a list at least two of whose members that earlier description had already listed
-together (#373's `p084`, whose `below` band went from four members to six by gaining Colorado and
-Illinois). `markers_added` names which of the two body markers — `[not legible]`, `[page not fully
-transcribed]` — the corrected page has MORE of, which is the completeness claim a correction
-appended.
-
-The three share a contract. Each **names** its members rather than counting them, because a boolean
-saying something moved somewhere is not a claim anyone can check afterwards. None is a fifth flag: a
-relocation is always an `alt_changed` too, and what these add is what KIND of change it was, which
-the four booleans and the sizes cannot say. None takes a view on which of the two replies is right,
-none decides anything about what ships, and each is **absent rather than empty** where nothing
-happened, which is the ordinary case. `alt_relocated` and `alt_added` are **disjoint by
-construction** rather than by a rule — a member `alt_added` names the earlier description did not
-name at all, and one `alt_relocated` names it listed — so a reader can add them. Each is capped at
-**six** names independently, so one line carries at most twelve.
-
-Limits to know before a corpus is counted off them:
-
-- Two lists written as two sentences with no semicolon between them read as **one** list.
-- A member merely **dropped** is on neither line. Only `text_chars_before` / `text_chars_after` say a
-  description lost prose.
-- A correction that changes how many images a fragment has is **skipped**, since descriptions are
-  paired by position.
-- A name whose own words include "and" or "or" reads as one member wherever the list it sits in also
-  uses commas — except as the first half of that list's last item ("Ohio, Health and Human Services
-  and Education"), where nothing in the string says which conjunction is the list's and a member is
-  silently not seen. In a run written with **no commas at all** the conjunction is the only separator
-  there is, so such a name is split there, which costs the name itself and not its neighbours, since
-  its two halves always travel together.
-- Reading a run-on at all is what lets a word that is not a name onto the line — "the legend runs
-  pale and light and medium and dark" separates into band words — so an entry is a **token that
-  changed bucket** and not necessarily a place, and a corpus counted off these fields will contain
-  some adjectives.
-- A description that lost **any** member it no longer names anywhere reports no arrivals at all,
-  because a state written out in full ("N.D." becoming "North Dakota") drops one key and adds
-  another, and nothing in the two strings says the two are one place — the descriptions this reads
-  abbreviate constantly. A member the earlier description listed **twice** has no single written form
-  to match, so it too reads as lost. That costs the case where a description genuinely gained one
-  state and dropped another in the same pass.
-- A member that merely moved between two of the description's own bands is **not** such a loss, since
-  the correction still names it — and "still names it", like "named nowhere", is read off the
-  **words**, so a state re-banded into a band of one or left in running prose has not been lost
-  either.
-- A wholly new list of wholly new names is a category the correction **invented**, which is a
-  different claim: `structure_changed` and the sizes are what report a description rebuilt.
-- `markers_added` counts over the whole fragment, so a marker that arrives in an **attribute** is on
-  this line too: inside an `alt`, with `text_changed` **false**, `alt_changed` true and the two text
-  sizes **equal**, since nothing a reader reads as prose moved; and inside any other attribute (a
-  `title`, an `aria-label`), with `text_changed` and `alt_changed` both false and only
-  `attrs_changed` true. The page agent describing an unreadable region inside an image description
-  reaches the first, and it is much the commoner of the two. A corpus expecting `text_changed: true`
-  beside every `markers_added` line, or sizing the marker off the two text numbers, would read either
-  wrong.
-
-Why the two alt fields match the way they do, what their exact test costs, why the six-name budgets
-are separate, and why `markers_added` reports additions only, is in [design notes — what a
-correction's alt fields can and cannot
+Why they match the way they do: [design notes — what a correction's alt fields can and cannot
 see](design-notes.md#what-a-corrections-alt-fields-can-and-cannot-see).
 
 ### `page_correction_rejected`
 
-A correction came back at less than a quarter of the size of the page it was given (`page`,
-`image`, `trigger`, `reason: "shrank"`, `chars_before`, `chars_after`), so it was refused and the
-page it was asked to correct is what ships — paired with `page_corrected` `result: "rejected"`. A
-correction is single-shot, so what it returns is what the document would keep; a reply this much
-smaller did not correct that page. Applies on **every** trigger, unlike the links path's own
-check, and it is decided before either re-verification, so no Feedback Agent call is spent judging
-a fragment nothing will deliver.
-
-In the bench logs the two replies that would have hit this were an agent's scratch template and an
-abandoned draft, both bound by a parser that took the first `{…}` in a reasoning model's reply
-rather than the last (issue #170); the parser now reads the right one, and this is the floor under
-that judgement.
+A correction came back under a quarter of the size of the page it was given, so it was refused and
+the page it was meant to correct ships (`page`, `image`, `trigger`, `reason: "shrank"`, `chars_before`,
+`chars_after`). Paired with `page_corrected` `result: "rejected"`. Applies on every trigger, and is
+decided before any re-verification, so no checking call is spent on it.
 
 ### `page_correction_failed`
 
-A self-correction's model call threw (`page`, `image`, `trigger`, `problems`, `kinds`, `error`,
-`truncated`, `ceiling`, `ceiling_bound`, `chars_kept`, and on a truncation `reply_chars` /
-`reply_head` / `reply_tail` / `shape`), so the page keeps the version it already had — the extraction
-that succeeded, verified minutes earlier. **It costs the correction, not the page.**
+A self-correction's model call threw, so the page keeps the version it had: **it costs the
+correction, not the page**. Paired with `page_corrected` `result: "failed"`. Nothing is retried: a
+correction that truncates because the page is large would truncate again.
 
-Paired with `page_corrected` `result: "failed"`. Every error class is survivable here, not only a
-ceiling — a throttle, a stall and a truncation all leave behind a page good enough to have been worth
-correcting — and **nothing is retried**, because a correction truncating because the *page* is large
-will truncate again for a second full ceiling of output.
+- `trigger`, `problems`, `kinds`: as on `page_corrected`; `kinds` is empty on the code triggers.
+- `error`, and `truncated: true` when the model hit its output ceiling.
+- `ceiling`: the output ceiling this call asked for, on every failure (read `truncated` for whether it
+  is what the call died of). Usually the call's own cap, not the deployment's: twice what the page's
+  first pass spent, scaled up when a specialist lengthened it, with a 4,000-token floor
+  (`correctionCeiling` in `src/pipeline/extraction.ts`). **So the remedy for a truncated correction is
+  that multiple, not `providers.*.max_tokens`.**
+  - Larger than `providers.<provider>.max_tokens`: the adapter sent the smaller of the two, and the
+    truncation is the deployment's, as its message says.
+  - Absent: the call ran uncapped, and the configuration is the remedy. Either the first pass reported
+    no token usage, or the page was delivered blank ([`page_blank`](#page_blank)) and this is a re-render
+    from its image (reachable only on the `links` trigger).
+- `ceiling_bound`: which term produced `ceiling`, `multiple` or `floor`. Read the term here, not off the
+  number: a doubling that lands on 4,000 is still `multiple`. Absent wherever `ceiling` is.
+- `chars_kept`: the size of the fragment that ships.
+- On a truncation, `reply_chars`: how far the reply got (read it against `chars_kept`); `0` for a
+  reply of no characters at all.
+- On a truncation that returned something:
+  - `reply_head` / `reply_tail`: its first and last 240 characters, whitespace folded. A reply shorter
+    than both is quoted whole in `reply_head`. Deployment-only, never on `/v1/quality`. A tail
+    mid-sentence in content the head has not reached is a page that needed the room; a tail repeating
+    rows from the head is a model looping.
+  - `shape`: `truncated_envelope` (the asked-for reply, cut), `bare_html` (a reply that is the page's
+    markup; says where the reply began, not where it went), `prose` (never began the page: raising the
+    cap buys more of the same), `envelope` (the ceiling landed after the closing brace), or `empty`
+    (whitespace only).
+- A bare `truncated: true`, with no excerpt, is two shapes: a reply of zero characters
+  (`reply_chars: 0`), or a truncation that lost its class crossing a boundary (no `reply_chars` at
+  all). Read `reply_chars`, not the missing `reply_head`, to tell them apart.
 
-`truncated: true` says the model wrote an essay where a page was asked for, which is worth reading
-beside `page_verify_failed`'s problem list.
+The fidelity problems the correction was for are still unfixed and on record.
 
-`problems` is how much work the call was given and `kinds` is what kind of work, spelled exactly as
-`page_corrected` spells it so a failed correction and a kept one can be grouped together. `kinds` is
-empty on the `links` and `alt` triggers, where the defect was found by code against the source file's
-own annotations and no verdict named anything; a kind there would be a count the verifier never made.
-
-`ceiling` is the output ceiling this call **asked for**, which is usually **this call's own** and not
-the deployment's: a correction is capped at twice what the first pass of that page spent — scaled up
-if a specialist handed it a document longer than that pass produced — with a 4,000-token floor
-(`correctionCeiling` in `src/pipeline/extraction.ts`). **So the remedy on a truncated correction is
-that multiple, not `providers.*.max_tokens`.**
-
-It is the number asked for and not the number reached, so it is on **every** failure this line reports
-and not only a truncation: read it with `truncated`, which says whether the ceiling is what the call
-died of. A throttle or a stall carries a `ceiling` it never got near.
-
-A `ceiling` **larger** than `providers.<provider>.max_tokens` is not a contradiction, and is the one
-case where this field is not what the call asked the provider for: a caller may lower a call's ceiling
-and never raise it, so the adapter sent the smaller of the two, and a truncation on such a line is the
-deployment's ceiling — which is what its error message will name.
-
-`ceiling` is **absent** where the call ran uncapped, and the configuration is the remedy again on such
-a line — but it is two causes, not one, and the *page* tells them apart. Either the first pass reported
-no token usage, so there was no measurement to take a cap from; or the page rendered **nothing** and
-was delivered as blank ([`page_blank`](#page_blank)), whose correction is a re-render of the page from
-its image rather than an edit of a page, so nothing its first pass spent bounds it (issue #294 — this
-line is reachable there only on the `links` trigger, and it is the repair that catches a page the
-source file says was wrongly declared blank, which is why it is not capped at the floor).
-
-`ceiling_bound` says which of `correctionCeiling`'s two terms produced that number, because `ceiling`
-alone cannot: `multiple` is twice this page's own first pass, scaled by a specialist's growth where
-there was one, and `floor` is the 4,000-token floor binding on a small page whose doubling falls under
-it. **Read the term off this field and not off the number** — a page whose doubling lands on 4,000 was
-bound by the multiple and `ceiling === 4000` says otherwise. Absent wherever `ceiling` is, and for the
-same reason: no cap means no term that produced one.
-
-`chars_kept` is the size of the fragment that ships. On a truncation, four more fields say what the
-reply was, which is the evidence `ceiling` only poses a question about:
-
-`reply_chars` is how far the reply reached (the number `editor_truncated` calls `chars`, renamed here
-because `chars_kept` is on the same line and a bare `chars` would read as the page's own length — read
-it as a ratio against that), `reply_head` its first 240 characters and `reply_tail` its last 240, on
-`editor_truncated`'s terms exactly: whitespace folded, a fragment shorter than both excerpts together
-quoted **entire** under `reply_head` with no `reply_tail`, and deployment-only — never on
-`GET /v1/quality`.
-
-**A tail mid-sentence in content the head has not reached is a page that needed the room; a tail
-repeating rows already in the head is a model looping.** The excerpts are absent on every other
-failure, which has no reply to quote, and absent on a truncation that returned nothing at all —
-`reply_chars: 0` is the zero-character shape [Errors](#errors) describes, where raising anything buys
-a larger burn.
-
-On this line uniquely it is `reply_chars` and not the missing `reply_head` that says so, because
-`truncated` here is a predicate over the error's *message*: it is also true of a truncation whose class
-was lost crossing a boundary, and such a line carries no `reply_chars` at all. **So a bare
-`truncated: true` is two shapes** — a reply of zero characters, or a truncation that arrived without
-its evidence — and only `reply_chars` separates them.
-
-`shape` is that head-and-tail reading turned into something countable, in `page_no_output`'s
-vocabulary:
-
-| `shape` | The reply |
-| --- | --- |
-| `truncated_envelope` | The reply the prompt asked for, cut |
-| `bare_html` | A reply that IS the page's markup |
-| `prose` | A reply that never began the page |
-| `envelope` | The ceiling landed after the closing brace of a reply the model was still adding to |
-| `empty` | Whitespace only — not the zero-character shape, which carries no `shape` at all; `reply_chars` tells them apart |
-
-Only `prose` settles the question by itself — a cap spent on something other than the page buys more
-of the same if it is raised ([Errors](#errors)). And `bare_html` says where the reply **began** and not
-where the output went: a correction that starts the page and then narrates at it carries the same value
-as one that transcribed to its last character, and `reply_tail` is still what tells them apart. Nothing
-counts narration off this field. Absent on a truncation that returned nothing, where `reply_chars: 0`
-is already the whole of what is known, and absent on every failure with no reply at all, exactly as the
-excerpts are.
-
-`blocks_named` has no counterpart here: this call is asked for the page's HTML and not for an edits
-list. The fidelity problems the correction was asked to fix are still unfixed and still on record —
-keeping the page is not a claim that it was right.
-
-Where the multiple and the floor came from, what one round's truncations could and could not settle,
-and why a failed correction is not retried, is in [design notes — the output ceiling a correction asks
-for](design-notes.md#the-output-ceiling-a-correction-asks-for).
+Why the multiple and the floor, and why no retry: [design notes — the output ceiling a correction
+asks for](design-notes.md#the-output-ceiling-a-correction-asks-for).
 
 ### `page_correction_no_output`
 
-A self-correction's reply carried no readable HTML (`page`, `image`, `chars`, `shape` — the same
-shapes as `page_no_output`), so the page keeps the version it had. That version had already passed
-everything except the fidelity problem the correction was asked to fix, which makes it strictly
-better than the reply. Paired with `page_corrected` `result: "empty"`, which is the existing
-record of a correction call that bought nothing; this line says what came back instead.
-
-`declined` is on the line — a count, absent where it is 0 — where the reply refused a problem
-(below) and sent no page with the refusal: the prompt argues against that shape by name, because a
-reply with no `html` is a reply the run cannot use, and it is the one the field exists to make
-visible. A reader looking at a correction that came back empty needs to know whether the model was
-refusing or failing, and the two have different remedies. The count is a flag and not the record;
-the reasons are on `page_correction_declined`, keyed by the same `image`.
+A self-correction's reply had no readable HTML (`page`, `image`, `chars`, `shape`, with
+`page_no_output`'s shapes), so the page keeps the version it had. Paired with `page_corrected`
+`result: "empty"`. `declined` is a count, absent at 0, of problems the reply refused while sending no
+page: refusing and failing have different remedies. The reasons are on `page_correction_declined`,
+keyed by the same `image`.
 
 ### `page_correction_declined`
 
-The corrector refused one or more of the problems it was given, saying which and why (`page`,
-`image`, `trigger`, `problems` — the whole list it was offered — and `declined`, one entry per
-refusal with `problem`, `source` and `why`). Since #373: a correction's only legal move used to be
-compliance, so a problem asserting something about the HTML that the HTML itself refutes — an id
-used twice that is used once, an attribute missing that is present — was answered by editing a
-page that was right, and the edit was indistinguishable in the log from a repair.
+The corrector refused one or more problems, saying why (`page`, `image`, `trigger`, `problems`, the
+whole list it was offered, and `declined`: one entry per refusal with `problem`, `source` and `why`).
+It may refuse only a claim about the HTML it was shown that the HTML itself refutes (an id "used
+twice" that is used once), never a claim about the image. **It gates nothing**: no verdict, result,
+recheck or `uncorrected` set is decided here, so a wrong refusal leaves the page where a failed
+correction leaves it, marked `@page-uncorrected`.
 
-The licence is narrow by construction: it covers a claim about **the HTML the corrector was shown,
-refuted by that HTML**, and explicitly not a claim about what the *image* shows, which is the
-judgement the check was asked to make. **It gates nothing.** No verdict, no `page_corrected`
-`result`, no recheck and not the `uncorrected` set are decided here, so a problem declined wrongly
-leaves the page exactly where a correction that failed to fix it leaves it — named in
-`uncorrected`, with `@page-uncorrected` on the delivered document.
+- `problem`: the number the reply cited, against the numbered list it was sent. Absent when the reply
+  cited none.
+- `source`: which check raised that problem (`verify`, `links`, `alt`, `ids`, `words`), `null` when no
+  number was cited or it falls outside the list. A refusal over `verify` disagrees with the checking
+  model and may be right; over `links`, `alt` or `ids` it refuses a fact checked in code, which the
+  request marks and excludes by name. `words` is not counted as code-checked: Iris checked that both
+  spellings are on the page, not which is right, and the request invites a refusal there. It has its
+  own `declined.words` count in [Diagnostics](#diagnostics-timing--hang-detection).
+- `problems` is the denominator: 2 of 2 refused is a correction refused outright, 2 of 9 is the pass
+  working.
 
-The licence can buy a different *explanation* of a bad page and never silence about it. `problem`
-is the number the reply cited, against the numbered list in the request (numbered for this reason:
-matching a paraphrase back against the list would attribute a disagreement to the wrong entry),
-and is **absent** where the reply cited nothing rather than guessed at.
-
-`source` is which of the five checks raised that problem — `verify`, `links`, `alt`, `ids`, `words`
-— read off the bands of the concatenated list, and `null` where no number was cited or the number
-falls outside the list. It is the field that makes the risk measurable: a decline over `verify` is a
-disagreement with the Feedback Agent's reading and may well be right, while `links`, `alt` and
-`ids` were checked in code, so a decline there is a refusal of a fact — and those three entries
-are marked `(Iris checked this one in code.)` in the list the corrector reads, with the licence
-excluding a marked problem by name, so a `code_checked` decline is a corrector going past what it
-was told rather than following it.
-
-`words` does **not** count as `code_checked`, which is the one asymmetry in this field. What Iris
-verified there is that the page contains both spellings, and that is not arguable; which spelling is
-right is, and the problem's own text says so — it ends by inviting the corrector to say the page
-really prints both and change nothing. So a decline citing `words` may be the licence working
-exactly as written, and folding it into the field that counts abuse of the licence would put
-compliance in the numerator. It gets its own `declined.words` count in
-[Diagnostics](#diagnostics-timing--hang-detection) instead.
-
-That asymmetry is in the request too, and it has to be, or the count above measures a channel the
-request closes. A split-word entry carries a **different** mark —
-`(Iris checked in code that both spellings are on this page, not which one is right.)` — because the
-sentence excluding a marked problem from the licence ends "so fix it", which is true of a missing
-link, a placeholder alt and a duplicated id and false here. `non-farm`, `co-operation` and
-`inter-state` are forms a 1962 report prints, so "fix it" on such a page means joining a word the
-page does not print into the delivered document. The request therefore carries one more sentence,
-naming that mark: both spellings really are in the HTML, so that much is not in question, but which
-one the page prints is for the image to answer, and if the image shows both then no change is to be
-made. It is the only place in that request where what the image shows is a reason **not** to act,
-and it says so in those words, because the paragraph above it spends four sentences ruling that
-reason out everywhere else.
-
-`problems` is the denominator without which none of this can be read — 2 declined of 2 is a
-correction refused outright, 2 of 9 is the pass working. Written per **page** and not folded into
-a field on `page_corrected`, because a decline is per problem and that line is per page: a reply
-that declined one of five problems and fixed the other four is the shape this pass is meant to
-produce, and a count on the page's line could not be told apart from a reply that declined all
-five. Absent from a run where nothing declined, which is the ordinary case; the diagnostics fold
-counts it as `verification.declined`.
+Absent when nothing was refused, which is usual. Diagnostics counts these as `verification.declined`.
+Why refusals are allowed, and why split words are marked differently: [design notes — why a correction
+may refuse a problem](design-notes.md#why-a-correction-may-refuse-a-problem).
 
 ### `page_correction_recheck`
 
-A second verdict on a corrected page (`ok`, `problems`), with `problems_before` / `problems_after` —
-how many **fidelity** problems the page was sent to be corrected with, and how many this verdict names
-— `kinds_before` / `kinds_after`, the same two sides as kinds, and `links_before` / `alt_before` /
-`ids_before` / `words_before` / `numbers_before`, the missing links, placeholder alts, duplicated ids,
-words written two ways and numbers the text layer lacks it was also given.
+A second verdict on a corrected page: `ok` and its `problems`.
 
-**The five code-found counts are kept out of `problems_before`**, so that a page with one fidelity
-problem and two code-found defects does not read as three-in-one-out. `words_before` is the one whose
-family this verdict can also raise, since a visible hyphen is on the page, so `problems_after` may name
-a split word `words_before` also counts. **The exact answer to whether any of the five came back is the
-matching `_unrecovered` line, not the difference between these two numbers:**
-`page_links_unrecovered` says whether the links came back, and `page_generic_alt_unrecovered` /
-`page_duplicate_ids_unrecovered` / `text_layer_numbers_unrecovered` answer the alts, the ids and the
-numbers exactly and for free.
-`page_corrected`'s `problems` is the correction's whole bill.
+- `problems_before` / `problems_after`: fidelity problems the page was sent with, and how many this
+  verdict names. `kinds_before` / `kinds_after`: their kinds, both lists in full (not a diff).
+- `links_before`, `alt_before`, `ids_before`, `words_before`, `numbers_before`: the code-found defects
+  it was also given, kept out of `problems_before` so one fidelity problem and two code defects do not
+  read as three in. `problems_after` can name a split word that `words_before` also counts. Whether a
+  code-found defect came back is answered exactly by the matching `_unrecovered` line, not by the
+  difference of these numbers.
+- `binding: true`: the links path re-verifying a rewrite it may discard. The page had passed, so
+  `problems_before` is 0, and any problem here is a rewrite that lost something.
+- `binding: false`: a measurement-only sample of `defaults.recheck_sample_size` pages (default 1, `0`
+  for none), changing nothing that ships. Corrections are single-shot, so `ok: false` is expected; the
+  counts say how far it got. At the default this is a count, not a rate.
+- `unjudged: true`: nothing judged it (no checking agent loaded), so its `ok` means nothing.
 
-The kinds are what turn "the recheck did not pass" into an answer about the correction:
-`content_missing` in and `alt_quality` out is a page whose content came back and whose description is
-now the complaint, while `content_missing` on both sides is a correction that did not do the one thing
-it was asked to. Both are `ok: false` with the same counts. Counts, not a diff — deciding whether two
-of the Feedback Agent's prose descriptions are the same problem is fuzzy matching on model output, so
-both lists are on the line in full instead.
-
-**`binding: true` is the links path re-verifying a rewrite it may discard; `binding: false` is a
-measurement-only sample**, `defaults.recheck_sample_size` pages of the batch (default 1, `0` for none),
-which changes nothing about what is delivered. The two are counted apart in `verification.rechecks`,
-and a line with `ok: false` has its `problems` reported there as `rechecks.failures` — **not** in
-`diagnostics.errors`, which is failures of the run.
-
-**At the default the sample is a count and not a rate.** One draw per run, so `1 of 1 cleared` is
-everything it says, and a proportion read off it is not a measurement.
-`sampled_ok / sampled` becomes a rate only at a size at or above the page count, which is a census and
-costs one Feedback Agent call per correction.
-
-Read the two counts beside the flag:
-
-- On a **`binding: false`** line, a correction pass is single-shot and was never expected to reach zero
-  problems, so five-in-one-out and five-in-five-out are both `ok: false` and only these say which
-  happened.
-- On a **`binding: true`** line the page had **passed**, so `problems_before` is 0 by construction and
-  a problem named here is a rewrite of a good page that lost something — not a correction that failed
-  to converge.
-
+Diagnostics counts the two kinds apart as `verification.rechecks.binding` and `.sampled`, with
+`binding_unjudged` and `sampled_unjudged` for the `unjudged` ones among them. An `ok: false` line's
+problems go to `rechecks.failures`, not `diagnostics.errors`.
 `extraction_start` / `reextract_start` carry `recheck_sample_size` and `recheck_thresholds`, so a log
-with none of these lines in it says which of three things happened: the measurement is off, no page was
-corrected, or every correction landed below the first threshold.
+with no recheck lines says whether the sample was off, nothing was corrected, or every correction fell
+below the first threshold.
 
-`unjudged: true` marks a recheck nothing judged, on the same terms as `page_verify_ok`: `ok` is also
-what an unavailable Feedback Agent looks like, and with none loaded every page passes its first check,
-so every corrected page's recheck is the binding one and every one of them would otherwise read as a
-rewrite checked and found good. `verification.rechecks.binding_unjudged` and `sampled_unjudged` are
-those, per population.
-
-What a census of the sample answered, why the code-found counts are carried apart, and which pages
-the sample lands on, is in [design notes — the recheck, and what a sample of one can
+What a census of the sample showed: [design notes — the recheck, and what a sample of one can
 say](design-notes.md#the-recheck-and-what-a-sample-of-one-can-say).
 
 ### `page_correction_recheck_failed`
