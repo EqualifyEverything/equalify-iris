@@ -3236,6 +3236,158 @@ is why they are as they are.
   answer a question about the deployment. #263 reported six documents with no verdict and no way to
   tell #257's fixed cause from a new one.
 
+
+### Reading diagnostics
+
+The fields are in [API.md, Diagnostics](API.md#diagnostics-timing--hang-detection). This is why they
+are as they are, and the measurements behind them.
+
+**Errors and cost**
+
+- **`errors` holds failures only.** A sampled recheck logs `ok` meaning "named no problem", so every
+  failing second verdict used to land here as `"unknown"`: 31 of 31 across 22 rounds, all from a
+  sample that changes nothing that ships. Two clean documents read as having errors (#296).
+- **Two breakdowns, because an agent is a contract that serves several jobs.** The Feedback Agent
+  judges, re-judges, routes feedback and classifies lessons; the Copy Editor runs review rounds and
+  joins tables. Extraction read as 41% of one document's spend by agent, but 57.2% by step, because
+  `by_agent` books the per-page check to `feedback`. Overrides are keyed by agent, so `by_step`
+  cannot answer "which model should this be on?".
+- **`models` exists because a swap that never happened looked like one that saved nothing.** An
+  unknown `per_agent` key is ignored, and the run succeeds at the old price. Every `model_call`
+  carries `model`, on failures too, because a model id valid for one provider and given to another
+  fails every call, and that id is the whole diagnosis.
+- **Steps are split finely because buckets add.**
+- **Over-counting tokens on OpenAI-shaped providers is deliberate.** Whether cache writes are inside
+  the prompt total is undocumented there. Subtracting a number that may never have been in it would
+  understate the prompt and make a cache look cheaper than it was.
+
+**Caching**
+
+- Iris caches three prefixes: each agent's system prompt; on the fidelity check, the contract of the
+  agent being judged, the largest constant Iris sends; and on the Reader, the document's page index,
+  only when it is long enough to be worth it (about ten pages). The index is per document, so it is
+  cold once per session.
+- Pages are converted concurrently, so the first few calls of a phase go out before any has written
+  the entry: a few writes, not one. Prefixes on one request share one `cache_creation_input_tokens`.
+  On a long document the prefix is written a few times at 1.25x, not sent 25 times at 1x, and read
+  at 0.1x after.
+- An entry lives five minutes, refreshed on each read. `prompt_cache_ttl: 1h` writes at 2x, so it
+  needs a third use to pay off; it suits runs that arrive more than five minutes and less than an
+  hour apart. An unreadable value (`60m`) warns at startup and falls back to five minutes.
+- Caching changes nothing in the converted document. These are cost fields, not quality ones.
+
+**Verification**
+
+- **Correction is effectively mandatory.** On three real 25-page runs the Feedback Agent rejected 58
+  of 75 pages, and verification alone was 24% of one document's bill.
+- **Raw counts, not percentages,** because a rate over three pages is not a measurement.
+- **`alt` and `ids` are expected to be 0.** The alt rule flags nothing this pipeline writes; the id
+  rule flagged 2 of 1,501 page replies, one of them `fnref-1` written twice by `gpt-5.6-luna`, the
+  page model since 2026-09-10 (#344). One is the measured rate; several is the finding.
+- **`words` is expected to be non-zero.** In #334's 100-page census, `kimi-k2.5` wrote one word two
+  ways on 4 of 92 pages, `claude-sonnet-4-6` on 3 of 91 and `gpt-5.6-luna` on 2 of 91.
+- **`declined` (#373).** Before it, a correction's only legal move was to comply, so a false claim
+  about a page was answered by editing a page that was right. Its denominators come from every
+  correction's bill, not the declining pages' own, which would be a rate the run cannot be wrong
+  about. 2 declined of 2 is a correction refused outright; 2 of 40 is the feature working. The
+  corrector can tell code-checked problems apart because they are marked `(Iris checked this one in
+  code.)` and the licence excludes them by name. A word written two ways has its own mark, because
+  Iris knows both spellings are present but not which one the page prints; a "so fix it" there would
+  order a `nonfarm` the page never prints. Compare `words` with [`page_split_words`](API.md#page_split_words).
+- **`pages_unjudged` exists** because unjudged pages count as faithful, so a run that lost its
+  Feedback Agent halfway would read as a run with a good pass rate.
+- **`pages_skipped_blank` (#294).** In 36 judgements of blank pages on a 100-page corpus, the
+  verifier passed every one, for $0.0859 per arm: 0.77% of that bill, and growing as models get
+  cheaper. A verify call with no HTML cost $0.0095, against $0.0212 for an average page. The free
+  checks still run: a blank page with link annotations still fails the link comparison and buys a
+  correction. A hedged declaration is refused earlier by the doubt-word veto (`blank_vetoed`). A
+  stated declaration whose own log names something on the page is verified anyway
+  (`blank_contradicted`, #371), so `pages_blank - pages_skipped_blank` is the declarations that cost
+  a call.
+- **`pages_verify_error` (#364)** points the other way in money: a call made, billed for a full
+  ceiling, and answered with nothing. The case that prompted it was $0.5051 on one page, twice an
+  average page's bill and 3.2x the extraction it was checking. On older logs the same failure took
+  the page with it and shows as `page_extraction_failed`.
+- **`verify_kinds`** exists because two benchmark rounds rejected 74 of 94 and 76 of 100 pages with
+  no way to tell missing content from polished descriptions. Pages, not problems, so one page naming
+  six things cannot outweigh six pages naming one. `content_missing` cannot separate dropped table
+  rows from undescribed images; the page's `problems` text can.
+- **`verify_inconsistent` (#210)** prices a rule that would fail pages on content or structure
+  kinds: `content_or_structure` is the least it would cost, plus `undecided_pages` the most. Nothing
+  reads it in the pipeline.
+- **`effects` makes a high rejection rate readable.** Two bench rounds rejected 71% and 74% of pages
+  with `attrs` and `structure` touched on nearly every correction. A round clustered in `text_grew`
+  is recovering dropped content; one that barely leaves `attrs` and `structure` is buying markup on
+  readable pages, which the page prompt fixes more cheaply. No threshold: one added character is
+  `text_grew`, because any "cosmetic" band would be picked, not measured.
+- **`rejected: 0` is healthy.** The only rejection on every trigger is the shrink floor, which catches
+  a parser or ceiling failure. A merely wrong correction is kept; the rechecks show it.
+- **Nothing in `verification` gates anything.** Discarding a correction whose recheck failed would
+  ship the fragment that already failed the same verifier. A sample below a census would gate page 4
+  and not page 5, and a knob that changed what ships as it was turned would make its rates measure a
+  different pipeline.
+- **Rechecks (#288).** 8 runs over 111 corrections bought 8 verdicts, and two four-draw samples read
+  50% and 25%. Pages are chosen by a rule, not at random, so a fleet does not fix that. Replayed over
+  57 corrected bench pages, 26% cleared, against a 2% floor for re-asking about the uncorrected page
+  (19 better, 2 worse, p = 0.000). A census costs about half again on verify's 14.2% of the bill.
+  Problems are counted on fidelity only, because a link fixed going in cannot be seen coming out of a
+  check against the image.
+- **Unjudged rechecks come off both sides** because they log `ok: true`, so they are already inside
+  `binding_ok`. `pages_unjudged` comes off the denominator only, because an unjudged verdict never
+  writes `page_verify_failed`.
+- **`binding_error` is outside `pages_verify_error`** because that page has a real first verdict and
+  passed; counting it as unjudged would move the rate the nesting protects. A failed sampled recheck
+  has no counter, because the sample decides nothing either way.
+- **`failures` is bounded** because it is the one part that is model prose. The sampled recheck
+  supplies at most one per run by default; the binding recheck runs on every rewritten passing page,
+  so a link-heavy document can reach the cap. Twenty refusals and a count say the rewrite path is
+  losing content as well as fifty would.
+
+**Tables (#326)**
+
+- **No free-join share is published,** because it is a range. The same code on the same corpus took
+  9 of 17 pairs, then 4 of 17, then 5 of 16: 53%, 24% and 31%, a $0.72-per-100-pages swing in a step
+  that is 11.5% of the bill. Two extractions of one printed header agree 48-61% of the time. A
+  change credited with moving the share by less than about 2x is inside that spread.
+- **`_with_halves` is published because the bound** that drops bytes is 2.5x the largest pair this
+  corpus produced. A bound nothing reaches would otherwise bite invisibly. A loosening is scored on
+  the declines it recovers and on the free joins it must not break, so both counts are needed.
+- **`header_compared` tests cell counts, not the signature,** because a header of two empty rows
+  renders as `" // "`. It is not filtered to the `header_differs` reason, because #326 saw other
+  guards stand down on pairs whose headers also disagreed.
+- **Three failure counts, three remedies:** a better join, a higher cap, or a parseable body. Pooling
+  `body_unreadable` into `failed` would say `failed: 1` for a run where every pair stayed split. An
+  unknown `stage` is left out: a short total beats a guessed bucket.
+
+**Editor ceiling (#317)**
+
+- The Copy Editor is about a third of a round's bill, and a truncated window costs about 5x one that
+  fits. Before this, the salvage's hit rate meant reading `log.jsonl` by hand.
+- **Rounds, not documents.** The quality tally has the per-document rates, deployment-wide.
+- **A retreat knowingly accepts a duplicate,** because an edit carrying content backwards across the
+  cut leaves the source block untouched, and a truncated round is the last. A decline is not counted
+  in `retreated`, because nothing was applied.
+- **`decline_reasons` has `unrecognized`** because, unlike `tables`, it has a published total to
+  check against.
+
+**Fidelity observed (#183)**
+
+- The verifier is the same model family looking at the same image as the transcriber, so it can
+  misread a page twice. The Reader never sees an image; the Copy Editor does, for the pages the
+  Reader's issues name, and now has a field to say so. A run whose editor reports `content_missing`
+  on pages that passed VERIFY says the check missed content.
+
+**Pages**
+
+- **`pages_failed` has its own field** because the failed call shows in `errors` exactly like a
+  retried one, and `status` says the run succeeded, on 24 of 25 pages.
+- **`pages_blank` is apart from `pages_failed`** because a failed page is work to redo and a blank
+  one is finished. Six of 100 bench pages were blank versos reported as lost, which made three of
+  four whole documents read as partial (#179).
+- **`pages_bare_html` (#349)** was 13.7% of pages across four deployed rounds of one PDF.
+  `agents/page.md` records six kinds of obligation only in `log`. It is named for the reply's shape:
+  an envelope with an empty `log` has another remedy, and was 0 of 2,320 replies over 67 round logs.
+
 ## Designed for, and not built
 
 Designed for and intentionally **not** built in v1: PostgreSQL and S3 backends (SQLite + local

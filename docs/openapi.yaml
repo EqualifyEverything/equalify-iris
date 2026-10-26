@@ -698,7 +698,9 @@ paths:
     get:
       tags: [Sessions]
       summary: Timing, tokens and health of the latest run
-      description: Read from the run log. `in_flight` names the call a run is waiting on, if any.
+      description: |
+        Read from the run log. `in_flight` names the call a run is waiting on, if any. Field meanings in
+        full: docs/API.md, "Diagnostics".
       security: [{}, {apiKey: []}]
       parameters: [{$ref: "#/components/parameters/SessionId"}]
       responses:
@@ -708,23 +710,214 @@ paths:
             application/json:
               schema:
                 type: object
+                required: [session_id, status, phase, started_at, last_event_at, elapsed_ms, in_flight, in_flight_count, phase_durations_ms, model_calls, tokens, by_agent, by_step, slowest_calls, errors, verification, tables, editor_ceiling, pages_failed, pages_blank, pages_bare_html, fidelity_observed]
                 properties:
                   session_id: {type: string}
                   status: {$ref: "#/components/schemas/SessionStatus"}
                   phase: {$ref: "#/components/schemas/Phase"}
                   started_at: {type: [string, "null"]}
                   last_event_at: {type: [string, "null"]}
-                  elapsed_ms: {type: [integer, "null"]}
-                  in_flight: {type: [object, "null"]}
+                  elapsed_ms: {type: integer}
+                  in_flight:
+                    type: [object, "null"]
+                    description: The longest-waiting open model call.
+                    required: [agent, step, model, provider, capability, since, waiting_ms]
+                    properties:
+                      agent: {type: string}
+                      step: {type: string}
+                      model: {type: string}
+                      provider: {type: string}
+                      capability: {type: string}
+                      since: {type: string}
+                      waiting_ms: {type: integer}
                   in_flight_count: {type: integer}
-                  phase_durations_ms: {type: object}
-                  model_calls: {type: object}
-                  tokens: {type: object}
+                  phase_durations_ms: {type: object, additionalProperties: {type: integer}}
+                  model_calls:
+                    type: object
+                    required: [count, failed, total_ms, avg_ms, max_ms, concurrency_factor]
+                    properties:
+                      count: {type: integer}
+                      failed: {type: integer}
+                      total_ms: {type: integer}
+                      avg_ms: {type: integer}
+                      max_ms: {type: integer}
+                      concurrency_factor: {type: number, description: Total call time over elapsed time.}
+                  tokens:
+                    type: object
+                    required: [input, output, cache_read, cache_write, calls_reported]
+                    properties:
+                      input: {type: integer}
+                      output: {type: integer}
+                      cache_read: {type: integer}
+                      cache_write: {type: integer}
+                      calls_reported: {type: integer}
+                    description: "`input` excludes cache reads. Never summed here."
                   by_agent: {type: object, additionalProperties: {$ref: "#/components/schemas/Usage"}}
                   by_step: {type: object, additionalProperties: {$ref: "#/components/schemas/Usage"}}
-                  slowest_calls: {type: array, items: {type: object}}
-                  errors: {type: array, items: {type: object}}
-                  verification: {type: object}
+                  slowest_calls:
+                    type: array
+                    description: The five slowest calls.
+                    items:
+                      type: object
+                      required: [agent, step, model, capability, duration_ms, ok]
+                      properties:
+                        agent: {type: string}
+                        step: {type: string}
+                        model: {type: string}
+                        capability: {type: string}
+                        duration_ms: {type: integer}
+                        ok: {type: boolean}
+                  errors: {type: array, description: Failed calls and runs. Empty means the run is not in doubt., items: {type: object, required: [ts, type, message], properties: {ts: {type: [string, "null"]}, type: {type: string}, message: {type: string}}}}
+                  verification:
+                    type: object
+                    required: [pages_verified, pages_unjudged, pages_skipped_blank, pages_verify_error, verify_failed, verify_kinds, verify_untagged_problems, verify_inconsistent, corrections, results, triggers, declined, effects, rechecks]
+                    properties:
+                      pages_verified: {type: integer}
+                      pages_unjudged: {type: integer}
+                      pages_skipped_blank: {type: integer}
+                      pages_verify_error: {type: integer}
+                      verify_failed: {type: integer}
+                      verify_kinds:
+                        type: object
+                        required: [content_missing, content_wrong, structure_wrong, a11y_only, alt_quality, untagged_pages]
+                        properties:
+                          content_missing: {type: integer}
+                          content_wrong: {type: integer}
+                          structure_wrong: {type: integer}
+                          a11y_only: {type: integer}
+                          alt_quality: {type: integer}
+                          untagged_pages: {type: integer}
+                      verify_untagged_problems: {type: integer}
+                      verify_inconsistent:
+                        type: object
+                        required: [pages, content_missing, content_wrong, structure_wrong, a11y_only, alt_quality, content_or_structure, undecided_pages]
+                        properties:
+                          pages: {type: integer}
+                          content_missing: {type: integer}
+                          content_wrong: {type: integer}
+                          structure_wrong: {type: integer}
+                          a11y_only: {type: integer}
+                          alt_quality: {type: integer}
+                          content_or_structure: {type: integer}
+                          undecided_pages: {type: integer}
+                      corrections: {type: integer}
+                      results:
+                        type: object
+                        required: [kept, rejected, identical, empty, failed]
+                        properties:
+                          kept: {type: integer}
+                          rejected: {type: integer}
+                          identical: {type: integer}
+                          empty: {type: integer}
+                          failed: {type: integer}
+                      triggers:
+                        type: object
+                        required: [verify, links, alt, ids, words, numbers, both]
+                        properties:
+                          verify: {type: integer}
+                          links: {type: integer}
+                          alt: {type: integer}
+                          ids: {type: integer}
+                          words: {type: integer}
+                          numbers: {type: integer}
+                          both: {type: integer}
+                      declined:
+                        type: object
+                        required: [pages, problems, problems_offered, code_checked, words, numbers, unattributed]
+                        properties:
+                          pages: {type: integer}
+                          problems: {type: integer}
+                          problems_offered: {type: integer}
+                          code_checked: {type: integer}
+                          words: {type: integer}
+                          numbers: {type: integer}
+                          unattributed: {type: integer}
+                      effects:
+                        type: object
+                        required: [alt_only, text, attrs, structure, text_grew, text_shrank]
+                        properties:
+                          alt_only: {type: integer}
+                          text: {type: integer}
+                          attrs: {type: integer}
+                          structure: {type: integer}
+                          text_grew: {type: integer}
+                          text_shrank: {type: integer}
+                      rechecks:
+                        type: object
+                        required: [sampled, sampled_ok, sampled_unjudged, sampled_problems_before, sampled_problems_after, binding, binding_ok, binding_unjudged, binding_error, failures, verdicts_omitted]
+                        properties:
+                          sampled: {type: integer}
+                          sampled_ok: {type: integer}
+                          sampled_unjudged: {type: integer}
+                          sampled_problems_before: {type: integer}
+                          sampled_problems_after: {type: integer}
+                          binding: {type: integer}
+                          binding_ok: {type: integer}
+                          binding_unjudged: {type: integer}
+                          binding_error: {type: integer}
+                          failures: {type: array, description: "Failing recheck verdicts, at most 20, each message at most 600 characters plus a mark.", items: {type: object, required: [ts, page, binding, message], properties: {ts: {type: [string, "null"]}, page: {type: [integer, "null"]}, binding: {type: [boolean, "null"]}, message: {type: string}}}}
+                          verdicts_omitted: {type: integer}
+                    description: The verify-then-correct loop.
+                  tables:
+                    type: object
+                    required: [joined_in_code, joined_by_editor, joined_in_code_with_halves, code_declined, code_declined_with_halves, header_compared, header_differs, body_unreadable, failed, capped_pending]
+                    properties:
+                      joined_in_code: {type: integer}
+                      joined_by_editor: {type: integer}
+                      joined_in_code_with_halves: {type: integer}
+                      code_declined: {type: integer}
+                      code_declined_with_halves: {type: integer}
+                      header_compared: {type: integer}
+                      header_differs: {type: integer}
+                      body_unreadable: {type: integer}
+                      failed: {type: integer}
+                      capped_pending: {type: integer}
+                    description: Tables split across a page.
+                  editor_ceiling:
+                    type: object
+                    required: [truncated, salvaged, salvaged_closed, retreated, declined, decline_reasons]
+                    properties:
+                      truncated: {type: integer}
+                      salvaged: {type: integer}
+                      salvaged_closed: {type: integer}
+                      retreated: {type: integer}
+                      declined: {type: integer}
+                      decline_reasons:
+                        type: object
+                        required: [no_edits_list, no_complete_edit, unknown_block, unreadable_edit, out_of_order, all_refused, loss_before_cut, unrecognized]
+                        properties:
+                          no_edits_list: {type: integer}
+                          no_complete_edit: {type: integer}
+                          unknown_block: {type: integer}
+                          unreadable_edit: {type: integer}
+                          out_of_order: {type: integer}
+                          all_refused: {type: integer}
+                          loss_before_cut: {type: integer}
+                          unrecognized: {type: integer}
+                    description: Correction rounds that hit the output ceiling, in rounds.
+                  pages_failed: {type: array, items: {type: integer}, description: Pages with no content in the document.}
+                  pages_blank: {type: array, items: {type: integer}, description: Pages reported empty.}
+                  pages_bare_html: {type: array, items: {type: integer}, description: Pages delivered without their log.}
+                  fidelity_observed:
+                    type: object
+                    required: [observed, pages, unattached_pages, kinds, unattached, unplaced]
+                    properties:
+                      observed: {type: integer}
+                      pages: {type: array, items: {type: integer}}
+                      unattached_pages: {type: array, items: {type: integer}}
+                      kinds:
+                        type: object
+                        required: [content_missing, content_wrong, structure_wrong, a11y_only, alt_quality, untagged]
+                        properties:
+                          content_missing: {type: integer}
+                          content_wrong: {type: integer}
+                          structure_wrong: {type: integer}
+                          a11y_only: {type: integer}
+                          alt_quality: {type: integer}
+                          untagged: {type: integer}
+                      unattached: {type: integer}
+                      unplaced: {type: integer}
+                    description: What the Copy Editor noticed about a page. Evidence, not a rate.
         "404": {$ref: "#/components/responses/Error"}
         "410": {$ref: "#/components/responses/Error"}
         "401": {$ref: "#/components/responses/Error"}
