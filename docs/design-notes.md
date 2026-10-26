@@ -3105,8 +3105,9 @@ read as they do.
   a write-once `first_completed_at` stamp, so re-running a finished document, or a re-run that
   fails, cannot make the number dip. Its pages really were made accessible. A feedback re-run does
   not count its pages again: this is pages made accessible, not model calls.
-- **One upgrade-time miss.** Databases from before that column were backfilled from sessions in
-  `ready_for_review` or `closed`. A session that was mid-re-run when the upgraded build booted was
+- **Upgraded databases.** Databases from before that column were backfilled with `updated_at` for
+  sessions in `ready_for_review` or `closed`, so there `since` may be a last-update time, not a
+  finish time. A session that was mid-re-run when the upgraded build booted was
   then marked `failed` by the startup sweep, so it is never counted. Counting in-flight sessions
   instead would credit first runs that produced nothing.
 - **Volume is all-time, quality is the last 30 days.** An all-time rate converges and stops

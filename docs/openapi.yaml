@@ -245,10 +245,11 @@ paths:
                   quality:
                     type: [object, "null"]
                     description: "Last 30 days. `null` until the window holds 20 documents."
+                    required: [window_days, documents, clean_rate, mean_rounds]
                     properties:
                       window_days: {type: integer, description: "Always 30."}
                       documents: {type: integer, description: Documents delivered in the window.}
-                      clean_rate: {type: number, description: "Share (0-1) the reviewer read in full and left nothing open on."}
+                      clean_rate: {type: number, description: "Share (0-1) of documents the reviewer read in full and left nothing open on."}
                       mean_rounds: {type: number, description: Mean review rounds per document.}
         "429": {$ref: "#/components/responses/Error"}
 
