@@ -849,7 +849,8 @@
         for (const [k, v] of Object.entries(value)) {
           const sub = deref(spec, (schema.properties || {})[k] || (typeof schema.additionalProperties === 'object' ? schema.additionalProperties : {}));
           rows.push({ path: prefix + k, value: show(v), meaning: (sub && sub.description) || '' });
-          if (depth < 2 && v && typeof v === 'object') fieldRows(spec, sub, Array.isArray(v) ? v[0] : v, prefix + k + (Array.isArray(v) ? '[0]' : '') + '.', depth + 1, rows);
+          // Inside an array, read its first item against the item schema, not the array's.
+          if (depth < 2 && v && typeof v === 'object') fieldRows(spec, Array.isArray(v) ? deref(spec, sub && sub.items) : sub, Array.isArray(v) ? v[0] : v, prefix + k + (Array.isArray(v) ? '[0]' : '') + '.', depth + 1, rows);
         }
       }
       return rows;
@@ -900,6 +901,12 @@
     async function call(key, method, path, { body, extra, plain, json = true, headers } = {}) {
       const res = await fetch(API + path, { method, body, headers: { ...(body && !(body instanceof FormData) ? { 'Content-Type': 'application/json' } : {}), ...(headers || {}) } });
       const type = res.headers.get('content-type') || '';
+      // An image or a PDF is kept as bytes: decoding it as text would fill the card with noise.
+      if (/^image\/|pdf/.test(type)) {
+        const blob = await res.blob();
+        record(key, { method, path, extra, status: res.status, body: blob.size.toLocaleString() + ' bytes of ' + type.split(';')[0] + '.', plain });
+        return { res, text: '', blob, data: null };
+      }
       const text = await res.text();
       record(key, { method, path, extra, status: res.status, body: summarise(text, type), plain });
       return { res, text, data: json && type.includes('json') ? JSON.parse(text) : null };
@@ -909,12 +916,14 @@
       try { state.limits = (await call('limits', 'GET', '/limits', { plain: 'What this deployment accepts, and whether it makes tagged PDFs.' })).data; } catch { /* optional */ }
     }
 
-    // Before a new upload or a newly opened session: the last one's polling stops, and its cards go.
-    // The calls about the deployment itself (/limits, /me, /settings) stay.
+    // Before a new upload or a newly opened session: the last one's polling stops, and its cards go,
+    // with any Try-it answers (they may name the old session). The calls about the deployment itself
+    // (/limits, /me, /settings, /stats, /openapi.json) stay.
     function resetSession() {
       clearTimeout(state.timer);
       Object.assign(state, { id: null, uploaded: false, run: null, events: [], session: null, manifest: null, output: null, diagnostics: null, fields: null, pdf: null, done: false, sourceIsPdf: false });
-      for (const k of [...state.calls.keys()]) if (!['limits', 'me', 'settings', 'stats', 'openapi'].includes(k) && !k.startsWith('try-')) state.calls.delete(k);
+      for (const k of [...state.calls.keys()]) if (!['limits', 'me', 'settings', 'stats', 'openapi'].includes(k)) state.calls.delete(k);
+      document.querySelectorAll('.api-answer').forEach((d) => { d.innerHTML = ''; });
       lastSteps = null;
       snaps.clear();
     }
@@ -1279,7 +1288,8 @@
         const resp = deref(state.spec, (o.op.responses || {})[String(r.res.status)]) || {};
         const schema = resp.content && resp.content['application/json'] && resp.content['application/json'].schema;
         const rows = r.data ? fieldRows(state.spec, schema, r.data) : [];
-        const body = type.startsWith('image/') ? '<img src="' + API + esc(path) + '" alt="The page image this call returned" style="max-width:20rem">'
+        const body = r.blob && type.startsWith('image/') ? '<img src="' + URL.createObjectURL(r.blob) + '" alt="The page image this call returned" style="max-width:20rem">'
+          : r.blob ? '<p>' + r.blob.size.toLocaleString() + ' bytes of ' + esc(type.split(';')[0]) + '.</p>'
           : rows.length ? '<table><thead><tr><th scope="col">Field</th><th scope="col">Value</th><th scope="col">What it means</th></tr></thead><tbody>' + rows.map((x) => '<tr><td><code>' + esc(x.path) + '</code></td><td>' + esc(x.value) + '</td><td>' + md(x.meaning) + '</td></tr>').join('') + '</tbody></table>'
           : '<p>' + esc(type.includes('ndjson') ? r.text.split('\n').filter(Boolean).length + ' lines of the run log.' : type.includes('html') || type.includes('text') ? r.text.length.toLocaleString() + ' characters of text.' : '') + '</p>';
         out.innerHTML = '<p><strong>' + r.res.status + '</strong> ' + md(resp.description || '') + '</p>' + body

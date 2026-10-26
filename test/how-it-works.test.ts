@@ -230,21 +230,23 @@ test("a run's last line that lands after the next run starts still belongs to it
 
 // The API section is built from docs/openapi.yaml, so every input a route reads must be in it.
 const spec = (await import("yaml")).parse(readFileSync(join(root, "docs", "openapi.yaml"), "utf8"));
-test("every request field a route reads is an input in the OpenAPI document the API section shows", () => {
-  const found = new Set<string>();
+test("every request field a route reads is an input in the OpenAPI document, in the same place", () => {
+  // Where each read happens: a query string, a JSON body, or a multipart upload part.
+  const found: [string, string][] = [];
   for (const f of readdirSync(join(root, "src", "routes")).filter((n) => n.endsWith(".ts"))) {
     const src = readFileSync(join(root, "src", "routes", f), "utf8");
-    for (const m of src.matchAll(/req\.query\.(\w+)/g)) found.add(m[1]);
-    for (const m of src.matchAll(/upload\.(?:array|single)\("(\w+)"/g)) found.add(m[1]);
+    for (const m of src.matchAll(/req\.query\.(\w+)/g)) found.push(["query", m[1]]);
+    for (const m of src.matchAll(/upload\.(?:array|single)\("(\w+)"/g)) found.push(["body", m[1]]);
     for (const line of src.split("\n").filter((l) => /req\.body/.test(l))) {
       const m = /req\.body[^\n]*?\)\??\.(\w+)/.exec(line);
       assert.ok(m, `a req.body read this test cannot parse, in ${f}:\n  ${line.trim()}`);
-      found.add(m[1]);
+      found.push(["body", m[1]]);
     }
   }
-  assert.ok(found.size >= 7, `only ${found.size} inputs found; the patterns above stopped matching`);
-  const listed = new Set(lib.apiGroups(spec).flatMap((g) => g.ops.flatMap((o) => [...o.params.map((p) => p.name), ...o.body.map((b) => b.name)])));
-  assert.deepEqual([...found].filter((f) => !listed.has(f)).sort(), [], "a route reads an input the API section does not show");
+  assert.ok(found.length >= 7, `only ${found.length} inputs found; the patterns above stopped matching`);
+  const ops = lib.apiGroups(spec).flatMap((g) => g.ops) as unknown as { params: { name: string; in: string }[]; body: { name: string }[] }[];
+  const listed = new Set(ops.flatMap((o) => [...o.params.filter((p) => p.in === "query").map((p) => "query " + p.name), ...o.body.map((b) => "body " + b.name)]));
+  assert.deepEqual(found.map(([w, n]) => w + " " + n).filter((x) => !listed.has(x)).sort(), [], "a route reads an input the API section does not show where it is read");
 });
 
 // axe has no rule for a data table without column headers, so this checks it directly.
@@ -511,4 +513,17 @@ test("an answer is explained field by field from the document's descriptions", (
 
 test("backticked code in the document's descriptions shows as code, and nothing else becomes markup", () => {
   assert.equal(lib.md("`null` on the <b>last</b> page"), "<code>null</code> on the &lt;b&gt;last&lt;/b&gt; page");
+});
+
+test("an answer inside an array is explained from the item schema", () => {
+  const schema = spec.paths["/v1/sessions"].get.responses["200"].content["application/json"].schema;
+  const rows = lib.fieldRows(spec, schema, { sessions: [{ session_id: "ses_1", status: "queued" }], next_cursor: null });
+  assert.match(rows.find((r) => r.path === "sessions[0].status")!.meaning, /waits for a free slot/);
+});
+
+test("the API section, rendered, passes the same axe check", async () => {
+  const html = howItWorksPage(page, apiMd).replace('<div id="api-body"><p>Loading…</p></div>', '<div id="api-body">' + lib.apiHtml(spec) + "</div>");
+  assert.ok(html.includes('data-k="api0"'), "the section was put in the page");
+  const r = await runAxe(html);
+  assert.deepEqual(r.violations, []);
 });
