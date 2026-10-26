@@ -1249,26 +1249,9 @@ the image. The run log entries [`page_corrected`](API.md#page_corrected),
 the rules behind them have the shape they have. What happens when the verdict itself cannot be
 obtained is [above](#extraction-verdicts-and-empty-pages).
 
-- **Five things can send a page back, and that number grew**: two until #290, three until #373 and
-  four until #334. So a share taken over [`trigger`](API.md#page_corrected) across rounds is taken
+- **Six things can send a page back, and that number grew**: two until #290, three until #373, four
+  until #334 and five until #585. So a share taken over [`trigger`](API.md#page_corrected) across rounds is taken
   over a population that changed under it — the older rounds had fewer sources to fire on.
-
-### A fidelity check that cannot be obtained
-
-[`page_verify_error`](API.md#page_verify_error) exists because, until #364, a provider error on a
-page's first check propagated out of its extraction and shipped a `@page-failed` marker for a page
-that had rendered fine. On one 100-page bench arm, a page extracted as 8,855 characters, a complete
-568-word statistical table, was delivered as a 156-byte comment, and $0.5051 of that page's $0.6634
-was the call that deleted it.
-
-It cost three things besides the page. The document claimed the source page could not be extracted,
-which was false. `pages_failed` recorded a vision failure, so anyone tuning the page agent on it was
-tuning the wrong agent. And the marker advised raising `max_tokens`, which buys the verifier room to
-write more about a page it has already judged.
-
-The fix follows the pipeline's own rule: a check that cannot run is nothing to correct, so the page
-ships as extracted, the way a failed specialist leaves the general pass's page. On the binding
-recheck, no verdict is no licence to change a page known to be good, so the correction is discarded.
 
 ### Why a correction may refuse a problem
 

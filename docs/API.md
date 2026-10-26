@@ -1053,8 +1053,9 @@ A correction of a page that had already passed its fidelity check was refused by
 - `trigger`: what the correction was for. `links`, `alt`, `ids`, `words`, `numbers` or `both` (more
   than one; which ones are on that page's [`page_links_missing`](#page_links_missing),
   [`page_generic_alt`](#page_generic_alt), [`page_duplicate_ids`](#page_duplicate_ids) and
-  [`page_split_words`](#page_split_words) lines, keyed by `image`). Never `verify`: a page that
-  failed has no standing to protect.
+  [`page_split_words`](#page_split_words) and [`text_layer_numbers`](#text_layer_numbers) lines,
+  keyed by `image`; this line has no field for the numbers, so that is the only place they are).
+  Never `verify`: a page that failed has no standing to protect.
 - `links`: the missing hrefs. Always present, `[]` when no link was involved, so read `trigger`, not
   this, for what the call was for.
 - `alts`, `ids`, `words` (as `split / joined`): present when those were part of the call.
@@ -1434,7 +1435,7 @@ What happens to the page:
 - The sampled recheck's failure is [`page_correction_recheck_failed`](#page_correction_recheck_failed),
   not this line. It decides nothing either way.
 
-Why: [design notes — a fidelity check that cannot be obtained](design-notes.md#a-fidelity-check-that-cannot-be-obtained).
+Why: [design notes — extraction: verdicts and empty pages](design-notes.md#extraction-verdicts-and-empty-pages).
 
 ### `page_verify_inconsistent`
 
