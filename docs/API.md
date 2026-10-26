@@ -3162,7 +3162,8 @@ Every page is checked against its image, and a page that fails is re-rendered on
   that carried no kind. `verify_untagged_problems`: the same, in problems.
 - `verify_inconsistent`: pages the verifier passed while naming a problem. They bought no
   correction. Kinds as above, in pages. `content_or_structure`: pages naming a content or structure
-  kind. `undecided_pages`: pages whose problems had no known kind and named neither.
+  kind. `undecided_pages`: pages whose problems carried no kind this version knows, and named no content or
+  structure kind either.
 - `corrections`: pages re-rendered, which is more than `verify_failed`.
   - `triggers`: why. `verify` (rejected), `links` (passed, lost a link), `alt` (passed, placeholder
     alt), `ids` (passed, one `id` twice), `words` (passed, one word spelt two ways), `numbers` (a
@@ -3182,8 +3183,9 @@ Every page is checked against its image, and a page that fails is re-rendered on
     watch it. `words` and `numbers` are counted apart, because there only the image can say which is
     right. `unattributed`: declines naming no listed problem.
 - `rechecks`:
-  - `sampled`, `sampled_ok`: corrected pages that had failed, checked again. How many is
-    `defaults.recheck_sample_size` (default 1). Read it as a count, not a rate.
+  - `sampled`, `sampled_ok`: corrected pages that had failed, checked again. How many a run may take
+    is `defaults.recheck_sample_size` (default 1); `sampled` is how many it took. Read it as a count,
+    not a rate.
   - `sampled_problems_before`, `sampled_problems_after`: fidelity problems before and after, over
     the judged samples. A ratio, and an `after` of 0 does not mean the sample passed.
   - `binding`, `binding_ok`: re-checks of passing pages rewritten for a link or alt. The verdict

@@ -3256,7 +3256,8 @@ are as they are, and the measurements behind them.
   unknown `per_agent` key is ignored, and the run succeeds at the old price. Every `model_call`
   carries `model`, on failures too, because a model id valid for one provider and given to another
   fails every call, and that id is the whole diagnosis.
-- **Steps are split finely because buckets add.**
+- **Steps are split finely,** because fine buckets sum into a phase's cost, and a coarse bucket
+  cannot be split back apart.
 - **Over-counting tokens on OpenAI-shaped providers is deliberate.** Whether cache writes are inside
   the prompt total is undocumented there. Subtracting a number that may never have been in it would
   understate the prompt and make a cache look cheaper than it was.
