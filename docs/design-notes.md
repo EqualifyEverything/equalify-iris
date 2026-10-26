@@ -2864,6 +2864,31 @@ These are the rules both adapters enforce on a model call. The README states the
   of the switch is comparing the two and a comparison whose run log does not say which side produced a
   number is not one.
 
+
+### When a reply hits its output ceiling
+
+The messages are listed in [API.md, When a run fails](API.md#when-a-run-fails). This is why they
+read as they do.
+
+- **A cut-off page is never assembled.** It still parses, so it would be delivered as if the
+  missing content were never in the source. One page short, and saying so, is better than a page
+  that lies about being complete. The same holds for a reply that is a JSON envelope or an apology.
+- **Two ceilings say they are not the deployment's.** Without that, the advice "raise `max_tokens`"
+  would be followed and change nothing. The correction's cap is [The output ceiling a correction
+  asks for](#the-output-ceiling-a-correction-asks-for).
+- **Zero characters is not a size problem.** A model that streams reasoning as its own channel
+  counts it as output tokens, not reply. A larger ceiling is a bet that the thinking ends inside it,
+  and a lost bet is billed for the whole of the new ceiling. One extract call in a 100-page
+  benchmark spent 32,000 output tokens this way and returned nothing (#293).
+- **The zero-character message leads with the instruction.** A page's `@page-failed` marker keeps
+  only the first 300 characters of the message, and the advice this message takes back, `Raise
+  providers.<provider>.max_tokens.`, is inside that cut. So the take-back must come before the
+  explanation. `test/bedrock-output-ceiling.test.ts` pins it, with a margin of a few characters:
+  lengthening that sentence means measuring the cut again.
+- **"No page in 19 chars of HTML" is not "no HTML".** A comment or a bare page-break marker is HTML.
+  The first version of this message reported the reply's whole length while saying none of it was
+  markup.
+
 ## Running the service
 
 - **`GET /v1/sessions` pages on a compound cursor.** The endpoint was specified with a `cursor`

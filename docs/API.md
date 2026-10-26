@@ -590,79 +590,16 @@ Per address, per minute, with `ratelimit` headers on every answer except `/v1/he
 
 ## Get a tagged PDF (optional)
 
-A deployment that runs [equalify-iris-pdf](https://github.com/EqualifyEverything/equalify-iris-pdf)
-can give you the original PDF back with tags, built from the HTML. The feature is off unless
-`tagged_pdf.command` is set in the config. `GET /v1/limits` says whether it is on.
-
-It works only for a session made from **one PDF**. Iris keeps that PDF so it can tag it. Sessions made
-from images, or from several files, get `409 no_source_pdf`.
-
-**Read the PDF's form fields:**
-
-```bash
-curl -s -H "$AUTH" "$BASE/sessions/$SID/fields" | jq '.fields[0]'
-```
-```json
-{ "name": "applicant.name", "type": "text", "page": 1, "options": [], "required": true,
-  "readonly": false, "maxlen": 40, "editable": false, "multiSelect": false }
-```
-
-`type` is one of `text`, `checkbox`, `radio`, `combobox`, `listbox`, `button` or `signature`. A PDF with
-no form gives `{"fields": []}`. `label` is the field's own label (its tooltip) when the PDF has one.
-It needs iris-pdf with
-[equalify-iris-pdf#49](https://github.com/EqualifyEverything/equalify-iris-pdf/issues/49); an older one
-leaves it out.
-
-A flat form, such as a scan, has no fields until it is tagged. If its HTML has form controls, Iris
-tags it once and lists the fields it made, each with `"created": true`. `POST /pdf` fills them by
-those names. This needs iris-pdf with
-[equalify-iris-pdf#16](https://github.com/EqualifyEverything/equalify-iris-pdf/pull/16). An older
-one makes no fields, so the list is empty.
-
-It can answer `404`, `409 no_source_pdf`, `422` for a PDF the tagger
-refuses, or `503 busy`, the same as below.
-
-**Get the tagged PDF:**
+Where the deployment runs [equalify-iris-pdf](https://github.com/EqualifyEverything/equalify-iris-pdf),
+`GET /v1/sessions/{id}/fields` lists a one-PDF session's form fields, and `POST /v1/sessions/{id}/pdf`
+returns that PDF tagged, with any values filled in. Values are never stored or logged. Exact contract:
+[`docs/openapi.yaml`](openapi.yaml).
 
 ```bash
 curl -s -X POST -H "$AUTH" "$BASE/sessions/$SID/pdf" \
   -H 'content-type: application/json' \
-  -d '{"values":{"applicant.name":"Jane Doe","applicant.consent":true}}' > tagged.json
-jq -r .pdf tagged.json | base64 --decode > tagged.pdf
+  -d '{"values":{"applicant.name":"Jane Doe"}}' | jq -r .pdf | base64 --decode > tagged.pdf
 ```
-
-`values` is optional. Its keys are field names. A text field takes a string, a checkbox takes `true`
-or `false`, and a multi-select list takes an array. Fields you leave out keep what the PDF had.
-**The values are used for this one request and are never stored or logged.** The run log records
-only which field names were given.
-
-The answer is `{"filename", "pdf", "report"}`: the file name to save as, the PDF in base64, and the
-tagger's report. `report.warnings` lists what the tagger could not do cleanly, such as a form field
-it could not find in the HTML. The demo page turns each warning into a plain sentence. A PDF that
-was already tagged has its old tags replaced, with a `retagged` warning. This needs iris-pdf with
-[equalify-iris-pdf#8](https://github.com/EqualifyEverything/equalify-iris-pdf/pull/8). An older one
-answers `422 already_tagged`.
-
-In [audit mode](#audit-off-by-default), `report.detail` adds where and why: the structure tree, the
-words each page could not match (with the reason), the fields added and not matched, and time per
-step. Iris asks for it only from an iris-pdf whose `tag --help` lists `--report-detail`
-([equalify-iris-pdf#52](https://github.com/EqualifyEverything/equalify-iris-pdf/issues/52)). It never
-holds a form value.
-
-The session must have finished (`ready_for_review` or `closed`), or you get `409 invalid_state`. The
-PDF is tagged from the first pass's HTML for each page, before review. A page that failed extraction is
-left out, and the report lists it as `page_not_in_html`. Errors from the tagger keep
-its code: `400` for a bad value, `422` for a PDF it refuses (for example `encrypted`), and `504
-timeout` after `tagged_pdf.timeout_seconds` (300 by default). Two tagger runs at once, counting
-both `/fields` and `/pdf`, is the limit, so a third gets `503 busy` with `Retry-After`. A deployment without the feature answers
-`404 tagged_pdf_unavailable`.
-
-`422 permissions_denied` means the PDF's owner locked it against changes. The message says to ask for
-an unlocked copy. A locked PDF that still lets accessibility tools read it is tagged instead, with an
-`owner_restricted` warning, and keeps the owner's restrictions. If the owner also forbids filling in
-the form, sending any values gets `422 values_not_permitted`. An empty or missing `values` still gets
-the tagged copy. This needs iris-pdf with
-[equalify-iris-pdf#51](https://github.com/EqualifyEverything/equalify-iris-pdf/pull/51).
 
 ## Audit (off by default)
 
@@ -4398,85 +4335,43 @@ Every run saves suggestions for new or better agents, with no opt-out, and a wor
 
 ## Errors
 
-All errors share one shape:
+All errors share one shape, except `/v1/quality` and `/v1/suggestions`, which answer `{"error", "message"}`:
 ```json
 { "error": { "code": "invalid_state", "message": "Human-readable description", "details": {} } }
 ```
-Common codes: `unauthorized` (401 — see [Authenticate](#authenticate)), `session_not_found` (404), `invalid_state` (409), `invalid_request` (400), `rate_limited`
-(429, carries `Retry-After` — see [Rate limits](#rate-limits-how-often-you-may-ask)),
-`upload_too_large` (413), `body_too_large` (413, a JSON body over 2 MB), `session_expired` (410, see
-[Poll status](#poll-status)), `not_found` (404, no such route), `server_error` (500). Another 4xx refused while reading the request is `invalid_request`.
+The codes and their statuses are in [`docs/openapi.yaml`](openapi.yaml) (`ErrorCode`).
 
-A run that fails reports why in the `error` field of `GET /v1/sessions/{id}`. One worth
+### When a run fails
+
+A run that fails says why in `error` on `GET /v1/sessions/{id}`. A failed page costs that page; the
+run fails only when every page failed ([Partial documents](#partial-documents)). Messages worth
 recognizing:
 
-```
-openrouter: response hit the 32000-token output ceiling and was truncated
-(31998 chars returned). Raise providers.openrouter.max_tokens.
-```
+- `response hit the 32000-token output ceiling and was truncated (31998 chars returned). Raise
+  providers.openrouter.max_tokens.` The answer was longer than the ceiling, so it was cut mid-tag.
+  Iris never assembles a cut-off page. Raise `max_tokens` on that provider and re-run. Dense
+  full-page tables and forms are the usual cause.
+- `That ceiling is <model>'s own, below the 32000 in providers.bedrock.max_tokens`: the model refuses
+  that ceiling. Use a model with a higher one, or fewer pages per call
+  ([`output_ceiling_clamped`](#model_call_start--model_call)).
+- `That ceiling is this call's own`: Iris capped this call, because it can predict the answer's
+  size. Today only the page correction does this: twice the first pass's output tokens, scaled up
+  if it is handed more text, and never under 4,000 (`correctionCeiling` in
+  `src/pipeline/extraction.ts`). Raising `max_tokens` changes nothing. `step` on the `model_call`
+  line names the caller.
+- `(0 chars returned)`, followed by `No text was returned at all, so raising that ceiling is not the
+  remedy`: the whole ceiling went on reasoning before any reply. Change the model or the size of
+  the request, not the ceiling. On `page_extraction_failed` and `page_correction_failed` this is
+  `reply_chars: 0`. Read that field, not a missing `reply_head`; on `page_correction_failed`
+  `truncated: true` has a second cause ([`page_correction_failed`](#page_correction_failed)).
+- `page agent returned no HTML (prose, 412 chars)`: the reply arrived whole but held no HTML.
+  `page agent returned no page in 19 chars of HTML`: it held HTML that a reader receives nothing
+  from, such as a comment. Both are [`page_no_output`](#page_no_output); its `shape` says which
+  remedy applies. Either costs that page, not the run.
+- A **correction round** that hits the ceiling keeps what it returned, re-makes the rest a section
+  at a time, and stops. The document says so in an `@editor-truncated` comment
+  ([`editor_truncated`](#editor_truncated), [`editor_salvaged`](#editor_salvaged),
+  [`editor_sections`](#editor_sections)). The remedy is `max_tokens`.
 
-The model stopped at the output ceiling rather than at the end of its answer, so the HTML it
-returned is cut mid-tag. Iris never assembles such a fragment — a truncated page still parses, so it
-would otherwise be delivered as though the missing content were never in the source. Which page it
-costs and whether it costs the run is [Partial documents](#partial-documents): one page's failure
-costs that page, and the run only ends `failed` (with this as its `error`) when every page failed.
-Raise `max_tokens` on that provider block and re-run. Dense full-page tables and forms are the usual
-trigger.
-
-Two ceilings are **not** that one, and both say so in the same message rather than leaving the
-advice above to be followed:
-`That ceiling is <model>'s own, below the 32000 in providers.bedrock.max_tokens` is a model that
-refuses the ceiling the deployment asked for and needs a different model rather than a different
-setting ([`output_ceiling_clamped`](#model_call_start--model_call)), and
-`That ceiling is this call's own` is a ceiling **Iris** asked for, on a call whose answer has a
-size it can predict. Only the page-correction call does that today: it is handed a page and asked
-to return it with named problems fixed, so it is capped at twice what the first pass of that page
-spent (with a floor, `correctionCeiling` in `src/pipeline/extraction.ts`). Before the cap, one
-such call ran to the full 32,000 tokens on a page whose render cost 6,233, and the reply was
-discarded for being truncated — a bill 5.13x the first pass for output nothing read. The remedy is
-that caller's multiple, and `step` on the `model_call` line says which caller it was; raising
-`max_tokens` moves nothing.
-
-A **third** shape wears the same stop reason and is not a size problem at all:
-`(0 chars returned)`, where the ceiling was reached with no reply written. That message carries
-its own sentence too — `No text was returned at all, so raising that ceiling is not the remedy:
-look at the model's reasoning behaviour and at the size of what it was asked to produce. The
-ceiling was spent before the reply began, and a larger one buys more of whatever consumed it.` A
-response cut mid-document is an answer too long for its ceiling, and a larger one — whichever of
-the two above the call died of — is the fix. Zero characters means the whole ceiling went
-somewhere other than the text — reasoning a model streams as its own channel, which Iris counts as
-output tokens and not as reply ([`model_call`](#model_call_start--model_call)) — so raising the
-number is a bet that the thinking finishes inside the new ceiling, and a lost bet is billed for
-the whole of the new one. One extract call in a 100-page benchmark round spent 32,000 output
-tokens this way and returned nothing (issue #293). It is a reasoning model's failure, so the thing
-to change is the model or the size of the request; on the two page paths the run log says which
-shape it was — `reply_chars: 0` is this one (`page_extraction_failed`, `page_correction_failed`).
-Read that field and not the absence of `reply_head`: on `page_extraction_failed` the two say the
-same thing, but on `page_correction_failed` `truncated` is a predicate over the error's message
-and a bare `truncated: true` there has a second cause, which [that event's own
-section](#page_correction_failed) spells out.
-
-The order of the two sentences in that message is load-bearing, which is why it is quoted here whole:
-a page's `@page-failed` marker carries only the message's first 300 characters, and the advice this
-shape exists to withdraw — `Raise providers.<provider>.max_tokens.` — is inside that cut. So the
-instruction has to lead and the explanation has to follow, or the operator reading a lost page's
-marker gets the advice without the take-back. `test/bedrock-output-ceiling.test.ts` pins it; the
-margin is a handful of characters, so lengthening that sentence means re-measuring the cut.
-
-A reply that arrives whole and still cannot be read is the neighbouring case, and reads as
-`page agent returned no HTML (prose, 412 chars)` — [`page_no_output`](#page_no_output), with the
-`shape` that says which remedy applies. Where HTML did arrive and carried nothing a reader
-receives, the same line says that instead — `page agent returned no page in 19 chars of HTML` —
-because a comment or a bare page-break marker is not the model answering with no HTML, and the
-first reading of these reported the reply's whole length under a message that said none of it was
-markup. It costs the same as the ceiling does (that page, not the run) and for the same reason: a
-page whose content is a JSON envelope or an apology is a document that lies about being complete,
-which is worse than one page short and saying so.
-
-The same ceiling reached by a **correction** round is contained differently, because there the whole
-document is what did not fit: whatever the reply managed before the cut is applied and the part it
-never reached is re-made a section at a time, the loop then stops, and the delivered document says
-so in an `@editor-truncated` comment ([Fetch the HTML output](#fetch-the-html-output), and
-[`editor_truncated`](#editor_truncated) / [`editor_salvaged`](#editor_salvaged) /
-[`editor_sections`](#editor_sections)). The remedy is the same knob.
-
+Why these messages read as they do: [When a reply hits its output
+ceiling](design-notes.md#when-a-reply-hits-its-output-ceiling).

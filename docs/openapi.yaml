@@ -83,6 +83,17 @@ components:
       description: |
         Iris's own codes are listed in `x-codes`. On `/fields` and `/pdf`, iris-pdf's own codes pass
         through as well, such as `permissions_denied` or `values_not_permitted`.
+
+        - 400 `invalid_request`, also any other 4xx refused while reading the request.
+        - 401 `unauthorized`.
+        - 404 `session_not_found`; `not_found` for no such route; `audit_off`; `tagged_pdf_unavailable`.
+        - 409 `invalid_state`: the session is not in a state that allows this. `no_source_pdf`.
+        - 410 `session_expired`: past retention.
+        - 413 `upload_too_large`, or `body_too_large` for a JSON body over 2 MB.
+        - 422 `pdf_conversion_failed`: an uploaded PDF could not be read.
+        - 429 `rate_limited`, with `Retry-After`.
+        - 500 `server_error`; `tagger_failed`.
+        - 503 `busy`, with `Retry-After`. 504 `timeout`.
       x-codes:
         - invalid_request
         - body_too_large
@@ -158,7 +169,7 @@ components:
       required: [name, type, page]
       properties:
         name: {type: string, description: The PDF's own field name. Send values under it.}
-        label: {type: string, description: The field's tooltip, when the PDF has one.}
+        label: {type: [string, "null"], description: The field's tooltip, when the PDF has one.}
         type: {type: string, enum: [text, checkbox, radio, combobox, listbox, button, signature]}
         page: {type: integer}
         rect: {type: array, items: {type: number}}
@@ -721,7 +732,23 @@ paths:
     get:
       tags: [Tagged PDF]
       summary: The PDF's form fields
-      description: For a flat form, the fields iris-pdf would add. Needs one uploaded PDF.
+      description: |
+        Only on a deployment that runs equalify-iris-pdf
+        (`tagged_pdf.command` set; `GET /v1/limits` says), else 404 `tagged_pdf_unavailable`. Only for a
+        session made from one PDF, else 409 `no_source_pdf`.
+
+        - A PDF with no form answers `{"fields": []}`.
+        - `label` is the field's tooltip. An iris-pdf older than
+          equalify-iris-pdf#49 leaves it out.
+        - A flat form, such as a scan, has no fields of its own. Once the session is `ready_for_review`
+          or `closed`, and its HTML has form controls, Iris tags it once and lists the fields it adds,
+          each with `"created": true`. `POST /pdf` fills them by those names. If that fails, or iris-pdf
+          is older than equalify-iris-pdf#16, the list
+          is empty.
+        - At most two tagger runs at once, counting `/fields` and `/pdf` together. A third gets 503
+          `busy` with `Retry-After`.
+        - The tagger's own errors keep its code: 400 for a bad request, 422 for a PDF it refuses, 504
+          `timeout` after `tagged_pdf.timeout_seconds` (300 by default).
       security: [{}, {apiKey: []}]
       parameters: [{$ref: "#/components/parameters/SessionId"}]
       responses:
@@ -730,8 +757,10 @@ paths:
           content:
             application/json:
               schema: {type: object, properties: {fields: {type: array, items: {$ref: "#/components/schemas/Field"}}}}
+        "400": {$ref: "#/components/responses/Error"}
         "404": {$ref: "#/components/responses/Error"}
         "409": {$ref: "#/components/responses/Error"}
+        "422": {$ref: "#/components/responses/Error"}
         "410": {$ref: "#/components/responses/Error"}
         "500": {$ref: "#/components/responses/Error"}
         "503": {$ref: "#/components/responses/Error"}
@@ -743,7 +772,27 @@ paths:
     post:
       tags: [Tagged PDF]
       summary: The original PDF, tagged, with its form filled in
-      description: Once `ready_for_review`. Values are never stored or logged. In audit mode the report adds `detail`.
+      description: |
+        The session's PDF, tagged from the first pass's HTML for each page, before review. Same feature
+        check, one-PDF rule, two-run limit and tagger errors as `GET /fields`.
+
+        - The session must be `ready_for_review` or `closed`, else 409 `invalid_state`.
+        - `values` is optional, keyed by field name. A text field takes a string, a checkbox `true` or
+          `false`, a multi-select list an array. Fields left out keep what the PDF had. `values` that is
+          not an object is 400 `invalid_request`.
+        - Values are used for this request only, never stored or logged. The run log records only
+          the field names given.
+        - A page that failed extraction is left out; the report lists it as `page_not_in_html`.
+        - `report.warnings` lists what the tagger could not do cleanly. A PDF that was already tagged has
+          its tags replaced, with a `retagged` warning (an iris-pdf older than
+          equalify-iris-pdf#8 answers 422 `already_tagged`).
+        - In audit mode `report.detail` adds the structure tree, the words each page could not match and
+          why, the fields added and not matched, and time per step. Iris asks for it only when iris-pdf's
+          `tag --help` lists `--report-detail`. It never holds a form value.
+        - 422 `permissions_denied`: the owner locked the PDF against changes; ask for an unlocked copy. A
+          locked PDF that still lets accessibility tools read it is tagged, with an `owner_restricted`
+          warning, and keeps its restrictions. If filling in is also forbidden, any values get 422
+          `values_not_permitted`; empty `values` still gets the tagged copy.
       security: [{}, {apiKey: []}]
       parameters: [{$ref: "#/components/parameters/SessionId"}]
       requestBody:
@@ -758,7 +807,7 @@ paths:
               schema:
                 type: object
                 properties:
-                  filename: {type: string}
+                  filename: {type: string, description: The name to save as.}
                   pdf: {type: string, contentEncoding: base64}
                   report: {type: object, description: "What iris-pdf did and checked: source, pages, structure, form, verification, warnings, and in audit mode detail."}
         "400": {$ref: "#/components/responses/Error"}
