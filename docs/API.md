@@ -641,7 +641,7 @@ where markup arrived, and `reextract: true` on a feedback round.
 - The gate is that the reply asserted nothing, not that it was short: a correctly declared blank page
   has no HTML either. About 1% of pages reach it.
 - The second draw re-runs the repair steps, so `page_soft_hyphens`, `page_style_attributes`,
-  `page_digit_groups` and `page_links` can fire twice for one page. The second draw's lines carry
+  `page_digit_groups`, `page_links` and `page_fields` can fire twice for one page. The second draw's lines carry
   `redrawn: true`; discount them when counting page content.
 - A provider failure (throttle, stall, refusal) never reaches this line. A reply the model cut short
   does, as `truncated_envelope`, and is redrawn; a page that really exceeds the ceiling loses again,
@@ -1050,7 +1050,7 @@ whole word and hide the contradiction.
 
 The evidence is the page's own two spellings: no word list, no second model, no image. One of them
 is wrong, but the problem raised does **not** say which: forms like `inter-state` and `non-farm` are
-really printed, and on half of one model's measured cases the hyphen was right. Only the agent with the image
+really printed, and on 3 of the 6 words one model was measured on, the hyphen was right. Only the agent with the image
 can settle it (`agents/page.md`: "Where you cannot tell whose hyphen it is, keep it").
 
 **A lower bound, not a rate.** It misses:
