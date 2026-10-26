@@ -669,165 +669,92 @@ nothing](design-notes.md#a-draw-that-claimed-nothing-and-the-corpus-behind-redra
 
 ### `page_no_output`
 
-The page agent answered, and no HTML could be read out of the answer (`page`, `image`, `chars` of
-text, and the `shape` it was in). A reply that claimed nothing about the page has already been
-[redrawn once](#page_redrawn) by the time this line is written, so this is the second draw's failure
-and the page is now given up on: [`page_extraction_failed`](#page_extraction_failed) follows it and
-the page is lost the way any failed page is lost. "The reply could not be read" and "this text is
-the page" are different claims, and a reply delivered as content would put a JSON envelope, or an
-apology, into the document while the run reported every page delivered.
+The page agent answered, and no HTML could be read out of the answer. A reply that claimed nothing
+about the page has already been [redrawn once](#page_redrawn), so this is the second draw failing.
+[`page_extraction_failed`](#page_extraction_failed) follows, and the page is lost like any failed
+page, rather than shipping a JSON envelope or an apology as content.
 
-`shape` names the remedy:
+- `image`, `page`, `chars` (the whole reply), `shape`.
+- `dropped`: the reply's markup, up to 200 characters, when there was any.
+- When the reply claimed the page was blank and the claim was refused:
+  - `blank_vetoed`: the doubt words that refused it (the reply says the page could not be read).
+    Present whenever the reply claimed blank, possibly empty.
+  - `log`: the agent's own sentence. Present with `blank_vetoed`.
+  - `blank_contradicted`: words naming content on a page the log called empty. On this line the
+    claim was made in prose; a claim stated in the `blank` field is not refused for a contradiction,
+    and lands on [`page_blank`](#page_blank) instead (#371).
+  - `blank_stated: true`: the refused claim was made in the `blank` field. The prompt says never to
+    send the field for a page that could not be read, so this is the field being misused.
 
 | `shape` | What the reply was | What to do |
 | --- | --- | --- |
 | `truncated_envelope` | The output ceiling cut it off | Raise `providers.*.max_tokens` |
-| `envelope` | Complete, and its escaping defeated the parser | Rare — a reply whose only fault is the page's own unescaped punctuation is repaired before it reaches here. Report it |
-| `prose` | The agent answered conversationally | A prompt problem |
-| `empty_html` | An envelope read perfectly that carried no page | A prompt problem |
-| `empty` | Nothing in the reply at all | A prompt problem |
-| `bare_html` | The page's markup rather than the envelope | Read `dropped` — two findings, opposite remedies |
+| `envelope` | Complete, and its escaping defeated the parser | Rare, since a page's own unescaped punctuation is repaired first. Report it |
+| `prose` | A conversational answer | A prompt problem |
+| `empty_html` | An envelope with no `html`, or HTML holding nothing a reader receives (a comment, an empty wrapper, a bare page-break marker all count as nothing), and a `log` that does not say the page is blank | A prompt problem |
+| `empty` | Nothing at all | A prompt problem |
+| `bare_html` | The page's markup, not the envelope | Read `dropped`: either an unclosed fence made the parser refuse a real page, or the markup carried nothing, a prompt problem like `prose` |
 
-`empty_html` is no `html` key at all, or one whose HTML holds nothing a reader receives and whose
-`log` does not say the page is blank — the model answering with no page and not saying why, or
-saying it could not read it. **"Nothing a reader receives" is not "an empty string":** a comment, an
-empty wrapper and a bare page-break marker are all nothing, so a refused blank declaration reaches
-this line whichever way its fragment was written.
+A doubt word and a contradiction are read independently, so one line can carry both: `"Page is
+blank. The scan is blurry. There is handwriting on the page."` gives `blank_vetoed: ["blurry"]` and
+`blank_contradicted: ["there is handwriting"]`. Doubt wants a better scan, a contradiction a
+re-extraction. **Act on the doubt first:** a reply that could not read the page is not a reliable
+witness to what is on it.
 
-`bare_html` is markup the pipeline normally accepts and delivers (`bareHtml` in
-`src/pipeline/extraction.ts`). On **this** line it is one of two things with opposite remedies, and
-the shape cannot tell them apart: either the markup arrived behind a fence that never closed, so a
-page was refused by the parser and the text on the line is that page, or the markup arrived fine and
-carried nothing a reader receives, which is a prompt problem exactly as `prose` is. `dropped` is
-what separates them — it holds that markup, under the same 200-character bound as on
-[`page_blank`](#page_blank), because `chars` is the length of the whole reply and not of the fragment.
-
-A page the agent reports as **blank** is not here: that is [`page_blank`](#page_blank), and not a
-failure.
-
-**Where the reply did claim the page was blank and the claim was refused,** four fields say which
-check refused it and what it read:
-
-| Field | What it holds |
-| --- | --- |
-| `blank_vetoed` | The doubt words that refused the claim — the reply says the page could not be *read* |
-| `blank_contradicted` | The words that named content on a page the log had just called empty |
-| `blank_stated` | `true` where the refused claim was made in the reply's `blank` field rather than left to be read out of its prose |
-| `log` | The agent's own sentence |
-
-Without them the line reads as "the model answered with no page", which is the opposite of what
-happened, and tracing four such pages back to a single word once meant rerunning the regexes on the
-replies by hand (issue #190).
-
-`blank_stated` here is the one thing in these logs that can show the field being misused: a page
-whose log says it could not be read is the one page the prompt tells the model never to send the
-field for, and a run carrying `blank_stated` only on the line that honoured it could count the field
-working and not the field failing (issue #371).
-
-`blank_contradicted` on **this** line means the claim was made in prose. A claim the reply STATED in
-its `blank` field is not refused for a contradiction: it lands on [`page_blank`](#page_blank) with
-the same field name and a verify call instead (issue #371).
-
-**These are two findings with two remedies, and one line can carry both.** A doubt word means the
-page could not be read and wants a better scan. A contradiction means the agent answered with no
-page for a page it says has content on it, which wants a re-extraction. They are read independently,
-so `"Page is blank. The scan is blurry. There is handwriting on the page."` fills `blank_vetoed`
-with `blurry` and `blank_contradicted` with `there is handwriting`. **On a line with both, act on the
-doubt first** — a reply that could not read the page is not a reliable witness to what is on it.
-
-Which words count as doubt, as a contradiction, or as a declaration is a long rule, and every clause
-of it was bought by a page that had been lost: see
-[design notes — reading a blank-page declaration](design-notes.md#reading-a-blank-page-declaration).
+A page the agent reports blank and is believed is [`page_blank`](#page_blank), not a failure. Which
+words count: [design notes — reading a blank-page declaration](design-notes.md#reading-a-blank-page-declaration).
 
 ### `page_bare_html`
 
-The page agent's reply was **markup rather than the envelope**, so the page was rescued from the
-text as it stood (`page`, `image`, `chars` of the whole reply, `html_chars` of the markup taken
-from it, and `reextract: true` on a feedback round). The page **shipped**: it is in neither
-`pages_failed` nor `pages_blank`, the HTML is usable, and that is why the rescue exists. What it
-did not ship is a `"log"` — there was no field to put one in, and `agents/page.md` asks for that
-field by name in 26 places, six of which are obligations it discharges there and **nowhere else**:
-a page ending mid-sentence, a heading with no parent on the page, a symbol with no key, a
-placeholder image source, a language change, an irregular table.
+The page agent's reply was markup, not the envelope, so the page was rescued from the text as it
+stood. The page **shipped**, and is in neither `pages_failed` nor `pages_blank`, but with no `log`:
+the six things `agents/page.md` records only there (a page ending mid-sentence, a heading with no
+parent, a symbol with no key, a placeholder image, a language change, an irregular table) go
+unrecorded (#349).
 
-On these pages every one of those is unmet and unreported while the run says every page was
-delivered. Not rare, which is why it is now a line of its own: 41 of 300 first page calls across
-two multi-vendor bench rounds and 54 of 400 across four deployed rounds of one PDF (13.7%), and 0
-of those 41 left any other line behind. It is also the discriminator between the two readings of
-an empty log — `log: ""` **with** this line means the reply had no envelope, and without it means
-the model sent one and left the field empty, which is a prompt-compliance question rather than a
-parse one and has the opposite remedy.
+- `image`, `page`.
+- `chars`: the whole reply, what was billed. `html_chars`: the markup the page got. Together they
+  tell a whole page from a fragment rescued out of a truncated reply.
+- `reextract: true`: on a feedback round. Leave these out when comparing with a first-call rate.
 
-Which of the two the deployed models do is answerable now: over 67 round logs on file, 2,320
-`page.md` replies are 2,001 with a non-empty log and 319 bare, and **0** with an envelope whose
-log is empty.
-
-`chars` and `html_chars` are both here because they answer different questions — `chars` is what
-the reply was billed for and `html_chars` is what the page got, so a rescue that delivered a whole
-page and one that salvaged a fragment of a truncated reply are otherwise the same event.
-
-`reextract` marks the feedback round because the 13.7% is a rate over **first** calls and a count
-that pools rounds is not comparable with it. The verify step is sent no log section for these
-pages, and `agents/feedback.md` tells it to say nothing about the absence: that is a fact about
-the reply, not about the page (issue #349).
+`log: ""` **with** this line means there was no envelope; without it, the model sent an envelope and
+left the field empty, a prompt-compliance problem. The verifier is sent no log section for these
+pages and told not to mention it. How common it is: [design notes — reading
+diagnostics](design-notes.md#reading-diagnostics).
 
 ### `page_blank`
 
-The page agent read the page and reported it empty (`page`, `image`, and its own `log` line), so the
-page is delivered as an empty fragment because there was nothing on it to deliver.
+The page agent read the page and reported it empty, so it is delivered as an empty fragment. Not a
+failure, and not in `pages_failed`: a failed page is work to redo, a blank one is finished.
 
-**Not a failure and not in `pages_failed`.** The remedies are opposite: a failed page is work to
-redo, and a blank page is work already finished.
+- `image`, `page`, `log` (the agent's sentence).
+- `blank_stated: true`: the declaration came in the reply's `"blank": true` field, not the `log`.
+- `dropped`: the markup, up to 200 characters, when the declaration came as a comment, an empty
+  wrapper or a page-break marker rather than empty `html`. The delivered fragment is `""` either way.
+- `blank_contradicted`: on a declaration stated in the field whose own log names something on the
+  page. That page is delivered **and** verified, with the log's claim quoted to the verifier, so a log
+  that was right buys a correction.
 
-A reply earns this line when it is a complete envelope whose `html` is present and carries **nothing
-a reader receives** — no visible text, and none of the elements that are content with no text in
-them (a picture, a grid, a form control) — **and** it says the page is blank, either in the reply's
-own `"blank": true` field or, where that field is absent, in a `log` that asserts it in so many
-words. `blank_stated: true` says the declaration arrived in the field.
-
-`dropped` carries the markup, bounded to 200 characters, where the declaration was spelled in markup
-rather than as an empty `html` — a comment, an empty wrapper, a page-break marker. The fragment
-delivered is `""` whichever spelling arrived, so without the field the line would not say which one
-did. Prose is content whatever it says: `<p>This page is blank.</p>` is not a declaration, it is
+When a reply earns this line: a complete envelope, `html` that holds nothing a reader receives (no
+visible text, and no picture, grid or form control), and a declaration, in the `blank` field or,
+without it, in a `log` that says so plainly. Prose is content: `<p>This page is blank.</p>` is
 delivered as the page's words.
 
-**No verify call is bought for a blank page.** Its [`page_verify_ok`](#page_verify_ok--page_verify_failed)
-line says so with `skipped: "blank"` and `unjudged`. The one exception is a declaration **stated** in
-the field whose own log names something on the page: that page is delivered *and* judged, carries
-`blank_contradicted` on this line and no `skipped` on its verify line, and the log's claim is quoted
-to the verifier in its own words beside the empty fragment — so a log that was right about the
-heading it named buys a correction and the reader gets the page.
+- No verify call is bought, except for the `blank_contradicted` case. Its verify line says
+  `skipped: "blank"` and `unjudged`. So this line counts declarations made, not pages that ended up
+  empty, and `pages_blank - pages_skipped_blank` is the ones that cost a call.
+- No page-break marker is delivered for a blank page; one that arrives goes to `dropped`. A page
+  whose only content is its page number is blank by decision.
+- **A confident wrong declaration about a page whose file says nothing is not caught.** This line is
+  all the evidence it leaves. Where the file has link annotations for the page,
+  [`page_links_missing`](#page_links_missing) fires and buys a re-render.
+- **The field can state, not deny.** `"blank": false` is read as no answer, and the `log` decides.
+  `"true"` as a string counts; `1`, `"yes"` and `"blank"` do not.
 
-**This line therefore counts the declarations that were made, not the pages that ended up empty.**
-[Diagnostics](#diagnostics-timing--hang-detection) reads the ones that cost a verify call off it as
-`pages_blank - pages_skipped_blank`, and a page whose content came back that way is the
-[`page_corrected`](#page_corrected) line beside it, with `trigger: "verify"`.
-
-**No page-break marker is delivered for a blank page,** whatever the paper prints, so a marker that
-arrives anyway goes to `dropped` with the rest of the fragment. A page whose only printed content
-**is** its folio is one of these pages by decision: the folio is never transcribed as text and the
-marker it may be carried in is never delivered, so such a sheet has nothing on it a reader receives.
-
-Two limits to know before triaging a run off these lines:
-
-- **A confident wrong declaration about a page whose source file says nothing is not caught.** It is
-  delivered as an empty page and this line is the whole of the evidence it leaves, so a run with no
-  surprising `page_blank` lines is not evidence that no such page occurred. Where the source file
-  *does* carry link annotations for the page, the document contradicts the declaration and
-  [`page_links_missing`](#page_links_missing) fires on it as on any other page, buys a re-render
-  against the image, and that fragment is verified in turn.
-- **The field states and cannot deny.** `"blank": false` is read as no answer at all and the sentence
-  decides, exactly as it did before the field existed, so every error the field can make runs in one
-  direction. It is read loosely enough for `"true"` as a string and no further: `1`, `"yes"` and
-  `"blank"` are silence, because a field loose enough to accept them deletes a page on a typo. And it
-  cannot declare a page blank that came back with a page on it.
-
-Where a declaration is refused rather than accepted, the line is
-[`page_no_output`](#page_no_output) carrying `blank_vetoed` or `blank_contradicted`, or — on a
-feedback re-extraction of a page Iris already holds content for —
-[`page_blank_refused`](#page_blank_refused) below. Which words count as a declaration, a doubt or a
-contradiction, and what each clause of that rule cost before it existed, is in
-[design notes — reading a blank-page declaration](design-notes.md#reading-a-blank-page-declaration).
+A refused declaration is [`page_no_output`](#page_no_output) with `blank_vetoed` or
+`blank_contradicted`, or, on a feedback re-extraction of a page that already has content,
+[`page_blank_refused`](#page_blank_refused). Which words count: [design notes — reading a blank-page
+declaration](design-notes.md#reading-a-blank-page-declaration).
 
 ### `page_blank_refused`
 
