@@ -16,7 +16,7 @@ These commands are copy-pasteable. They are the same calls exercised by `test/e2
 runs the whole lifecycle against mock GitHub + mock model services and asserts every response.
 
 Requests are rate limited per client, and every response says how much of the budget is left:
-[Rate limits](#rate-limits-how-often-you-may-ask) has the numbers, the headers, and what a `429` looks like.
+[Rate limits](#rate-limits-how-often-you-may-ask) says where to find the numbers, the headers and the `429`.
 
 `fragment`, `block`, `verdict`, `declaration` and `round` all mean something specific here, and
 [README § Terms](../README.md#terms) defines them. These ones appear below in both of their senses:
@@ -36,6 +36,7 @@ Requests are rate limited per client, and every response says how much of the bu
 
 ```bash
 export BASE=http://localhost:8080/v1
+export AUTH="Authorization: Bearer $IRIS_TOKEN"   # where the deployment sets a token
 ```
 
 ## Health (unauthenticated)
@@ -565,250 +566,19 @@ There is no sign-in. A deployment is open (send no header) or gated (send `Autho
 
 ## Create a session (upload images)
 
-`multipart/form-data`. Repeat `images` once per file; **the order of the parts is the
-processing order** (not the filename). `images` is the only part the endpoint reads — there are
-no per-session options. (A `config` part used to override `max_review_iterations` for one
-session; it was removed, and sending one now is ignored rather than an error. The cap is the
-deployment's `defaults.max_review_iterations` — see [`GET /v1/me`](#deployment-defaults).)
+`POST /v1/sessions`, one `images` part per page or PDF, in reading order. Exact contract: [`docs/openapi.yaml`](openapi.yaml). What the page step then checks in code, and why, is in [design notes](design-notes.md#what-code-checks-on-each-page-and-why).
 
 ```bash
-create=$(curl -s -X POST -H "$AUTH" "$BASE/sessions" \
-  -F "images=@page-001.png" \
-  -F "images=@page-002.png")
-echo "$create"
-export SID=$(echo "$create" | jq -r .session_id)
+export SID=$(curl -s -H "$AUTH" -F images=@page1.png -F images=@page2.png "$BASE/sessions" | jq -r .session_id)
 ```
-```json
-{ "session_id": "ses_01HXYZ...", "status": "queued", "image_count": 2, "created_at": "..." }
-```
-Accepted file types: PNG, JPEG, GIF, WebP, **and PDF**. A PDF is rasterized server-side into
-one image per page (in page order) and processed like any other page sequence. Total pages
-(across all parts) are capped per deployment.
-
-Each **image** part also has a size limit, and an upload over it is rejected here with a `400`
-rather than accepted and failed later. The limit is not Iris's own: an uploaded image is passed
-to the vision model byte for byte, so the model's per-image cap is the cap — currently **5 MB
-base64**, which is **3.75 MB on disk**, on Amazon Bedrock. Ask the deployment instead of
-assuming, since it moves with the configured model and provider:
-[`GET /v1/limits`](#upload-limits-unauthenticated). A **PDF** is not measured against that
-limit — the file you send is not what reaches the model, since Iris rasterizes its pages at its
-own resolution — but each *rendered page* is. That matters for large-format pages: rasterizing
-at a fixed DPI means the page image scales with the physical page, so a letter page renders well
-inside the limit and an ARCH-D drawing does not.
-
-A page that renders too large is **rendered again, smaller**, rather than failing the upload —
-those pixels are Iris's choice and not yours. The second render fits the long edge the model
-reads where that is documented (so nothing it would have looked at is given up), and the
-`max_dimension_px` ceiling where Iris has no published limits for the configured model (so only
-pixels that could not have been sent at all are given up). The page appears in the session's run
-log as [`page_refit`](#page_refit). A page that is *still* over after that — a dense photographic
-or halftoned scan is over on bytes, not on size — fails with a `400` naming the page, the PDF,
-and the size it was retried at.
-
-Pixel dimensions are mostly **not** a limit worth planning around, and this is the common
-misdiagnosis: a large-but-light image converts fine, while a small-but-heavy photo is what
-fails. The model downscales anything over its long-edge limit (1568 px on Sonnet 4.6, 2576 px
-on Claude 4.7 and later) before reading it, so extra pixels buy no fidelity — they only spend
-bytes against the cap. Re-saving a 12-megapixel scan at 1568 px on the long edge, or as a JPEG,
-loses nothing the conversion would have used. There is one hard ceiling, `max_dimension_px`
-(8000 px on either edge): above it the model rejects the request outright rather than
-downscaling, so Iris rejects it here instead, reading the dimensions from the file's header.
-
-Both statements in that paragraph are documented for Claude, which is what a deployment normally
-runs. One that runs a vision model Iris has no published limits for gets the same two numbers
-enforced the same way — they are the conservative end of what is known — but they are then
-stand-ins rather than facts about it: nothing promises that the model discards the pixels above
-the long edge, and the 8000 px ceiling is Iris's rule rather than a refusal it has seen. This is
-why `hint` is the thing to quote ([Upload limits](#upload-limits-unauthenticated)): it is written
-from whichever of the two holds.
 
 ### Upload limits (unauthenticated)
 
-`GET /v1/limits` — unauthenticated. What this deployment accepts, resolved from the model and
-provider it is configured to use, so a client never has to hardcode numbers that change when
-the model does. The demo page states its file limits from this endpoint.
-
-```bash
-curl -s "$BASE/limits" | jq
-```
-```json
-{
-  "max_pages": 25,
-  "image": {
-    "max_bytes": 3932160,
-    "max_long_edge_px": 1568,
-    "max_dimension_px": 8000,
-    "media_types": ["image/png", "image/jpeg", "image/gif", "image/webp"],
-    "extensions": [".png", ".jpg", ".jpeg", ".gif", ".webp"],
-    "hint": "Each image must be under 3.7 MB and in one of PNG, JPEG, GIF, WEBP format. …"
-  },
-  "pdf": { "max_pages": 25 },
-  "upload": { "max_files": 25, "max_request_bytes": 134217728 },
-  "rate_limits": {
-    "general_per_minute": 240,
-    "upload_per_minute": 12,
-    "max_upload_memory_mb": 256,
-    "window_seconds": 60
-  },
-  "tagged_pdf": false
-}
-```
-
-`max_bytes` is what `POST /v1/sessions` enforces per image part, and `hint` is the same sentence
-its `400` carries — quote it rather than composing your own, and the two cannot disagree.
-`max_bytes` and `max_dimension_px` are both enforced — the second only when the dimensions can be
-read from the file's header, since a header Iris cannot parse must not become a rejection;
-`max_long_edge_px` is advice, not a limit —
-nothing rejects an image for exceeding it, because the model downscales past it instead of
-failing. If a client can only surface one number, surface `max_bytes`: it is what nearly every
-rejected upload will have broken. The model and provider that produced these numbers are
-deliberately not named here; that is deployment detail, and this endpoint answers a question
-about files.
-
-That last point is also why the advice about pixels lives in `hint` rather than in a field of its
-own. A deployment may run a vision model Iris has no published image limits for, and then the two
-pixel numbers are its conservative stand-ins rather than facts about that model — the same values,
-enforced the same way, but not something to tell a user they can rely on. `hint` is written from
-whichever of the two situations holds, so quoting it is always accurate; composing your own
-sentence from `max_long_edge_px` is what can go stale, and this is a second reason not to.
-
-`upload` is what one **request** may be, as opposed to what one image may be: `max_files` parts and
-`max_request_bytes` across all of them. They are refused at different moments, which matters if you
-are streaming: the byte total is checked before the body is read (or counted as it arrives, when the
-request declares no length), while the part count is refused during parsing, once a part past
-`max_files` appears. `rate_limits` is how often you may ask
-([Rate limits](#rate-limits-how-often-you-may-ask)), and is `null` on a deployment that does not
-limit requests in the app — which means "not limiting", not "unknown". `tagged_pdf` says whether
-this deployment can [return a tagged PDF](#get-a-tagged-pdf-optional).
-
-A PDF's **links survive**, which rasterizing alone would not manage: a link is an annotation
-over the page rather than something drawn on it, so the page image carries the link text and
-none of its target. The link targets are read out of the file separately and given to the page
-agent as ground truth, and the output's `<a href>`s are checked against them — the run log
-carries a `page_links` line per page that had any, and `page_links_missing` /
-`page_links_unrecovered` when one did not make it into the HTML. Three kinds are dropped on
-purpose: links to a destination inside the same document (the page they point at is in the
-delivered HTML already); any URL whose scheme is not `http(s)`, `mailto`, `tel`, or `ftp` — a
-PDF can carry a `javascript:` action, and that is not something to re-emit into a document —
-and any URL containing a character that would end the attribute it is written into (a quote,
-`<`, whitespace), which no legitimate URL carries unencoded. A link over an image with no text
-under it has nothing to attach to and is lost.
-
-**A placeholder is not a description.** `alt="image"` satisfies every machine-checkable rule
-there is — `image-alt` asks whether the attribute is *present* — and it tells a reader who
-cannot see the image nothing at all. So a closed list of words that name the medium rather than
-the content (`image`, `photo`, `figure`, `logo`, `screenshot`, `placeholder`, `null`, and about
-twenty more) is checked against every `alt` on every page, in code, and a page that carries one
-is sent back to the page agent with the image and asked to describe it — or to write `alt=""` if
-the image carries nothing a reader needs. `page_generic_alt` is the finding,
-`page_generic_alt_unrecovered` says the correction did not clear it, and
-`extraction_complete.alts_generic` is the count over the fragments the document is assembled
-*from*, beside `alts_checked` as its denominator. The delivered bytes are a separate line,
-`delivered_alt`, for the reason `delivered_markup` is measured there too: the review loop runs
-after extraction and replaces a top-level block's markup wholesale, `<img>` and its `alt`
-included, so a copy-edit round that guts an alt ships a placeholder the extraction counts never
-saw. It is deliberately **not** a length rule: the shortest alts
-this pipeline legitimately writes are `"M"`, `"Home"` and `"Meta"`, all of them logos, where one
-word is the correct answer — and `alt=""` is left alone, because an empty alt is a valid
-statement that an image is decorative. Measured over 1,064 non-empty alts across 32 bench run
-directories, the rule flags nothing the page agents wrote (issue #290). It exists because this
-was the one defect class where the only thing watching was the most expensive model in the
-deployment: the verifier catches a gutted alt 6 times out of 6, and the cheaper models it may be
-swapped for catch it 0–2 times out of 6.
-
-**One page's ids are its own, and a page that collides with itself is asked at the page step.** Ids
-arriving from independently extracted pages are made unique across the document by prefixing each
-page's (`namespaceAnchors`, written up under [`page_duplicate_ids`](#page_duplicate_ids)) — but a
-page that used one id twice gets the same prefix on both copies and stays collided, which is the one
-case that pass declines. Its only other reporter is lint on the **assembled** document, after that
-page's last chance to be read against its image — and where a prefixed id no longer carries the name
-the page gave it, so the finding is on `p3-fn-1`. That last part holds only where the rename ran:
-prefixing touches ids more than one *page* claims, so a document whose sole defect is page 3 using
-`fn-1` twice, with no other page claiming `fn-1`, reaches lint with `fn-1` intact. Per-page footnote
-numbering usually does produce the cross-page collision that renames it, but the reason to ask at
-the page step does not depend on that. So the duplicate is checked in code on the page's own
-fragment, off the parsed tree, and handed to the same self-correction pass as a dropped link:
-`page_duplicate_ids` is the finding, `page_duplicate_ids_unrecovered` says the correction did not
-clear it, and `extraction_complete.ids_duplicated` is the count over the fragments the document is
-assembled *from*, beside `ids_checked` as its denominator. It is a correction rather than a rename
-in code because renaming one end of the pair is how this defect gets worse: `href="#fn-1"` currently
-reaches the first copy, and a rename that leaves the reference behind turns a wrong target into a
-dangling one — and only the agent that wrote the page knows which sentence meant which note.
-Measured over every page reply in 32 bench run directories (1,501 fragments, 1,421 of them carrying
-an id), 2 duplicate an id within themselves, both of them footnote ids — one of the two on
-`gpt-5.6-luna`, which has been the deployed page model since 2026-09-10 (issues #373 and #344).
-
-Recovering a link never costs a page its structure, and neither does replacing a placeholder or
-renumbering an id. When a page passed its fidelity check and is re-rendered only to attach a link,
-to describe an image or to clear a collision, the rewrite is verified in turn, and one that lost
-something — a heading level, a `<th scope>` — is discarded in favour of the fragment that passed,
-logged as `page_links_correction_rejected` (`trigger` says a code-checked repair was refused, and
-`links` / `alts` / `ids` on the same line say which, since `both` names no pair). All three are
-local additions; the accessibility of a page that already checked out is not something any of them
-may be paid for with.
-
-**No correction may delete a page**, whatever triggered it. A self-correction pass is single-shot,
-so what it returns is what the document keeps — and a reply that comes back at less than a quarter
-of the size of the page it was given has not corrected that page. It is refused, the page it was
-asked to correct is what ships, and the run log says so (`page_correction_rejected`).
-
-`status` is `queued` on creation and becomes `running` when the pipeline actually starts. Those are
-usually the same instant, but a deployment runs at most `defaults.max_concurrent_runs` pipelines at
-once (default 2): beyond that, the session **waits in `queued`** — in FIFO order, for as long as it
-takes — rather than being rejected. Nothing is lost; the upload is already stored. If a session sits
-in `queued`, check its run log for `run_queued` / `run_dequeued` to see the wait rather than
-assuming a hang.
+`GET /v1/limits`: what an upload may be, for the model this deployment runs. Exact contract: [`docs/openapi.yaml`](openapi.yaml).
 
 ### Rate limits (how often you may ask)
 
-A deployment limits requests at the HTTP layer, because it is a single process whose reads hit
-SQLite synchronously — one client's runaway loop is felt by everyone, including the runs already
-in flight. Two budgets, each per minute, both published by `GET /v1/limits`:
-
-| Budget | Applies to | Default | Counted per |
-| --- | --- | --- | --- |
-| `general_per_minute` | everything under `/v1` except `/v1/health` | 240 | address |
-| `upload_per_minute` | `POST /v1/sessions` | 12 | address |
-
-Every response carries the budget it was counted against, so a client can pace itself without
-being refused first:
-
-```bash
-curl -si "${AUTH[@]}" "$BASE/sessions" | grep -i '^ratelimit'
-# ratelimit: limit=240, remaining=238, reset=41
-# ratelimit-policy: 240;w=60
-```
-
-Over budget is a `429` with `Retry-After` (seconds) and the standard error body:
-
-```json
-{ "error": { "code": "rate_limited",
-             "message": "Too many requests: this deployment allows 240 per minute per client. Retry in 41s.",
-             "details": { "limit": 240, "window_seconds": 60, "retry_after_seconds": 41 } } }
-```
-
-**Wait `Retry-After` seconds; do not retry immediately.** A tight retry loop spends the next
-window before it opens. If you are polling a session, poll every 2–5 seconds — a conversion takes
-minutes, and nothing changes faster than that.
-
-Two more refusals concern uploads specifically. Both normally answer **before** the body is read,
-so a rejected upload costs you nothing but the round trip — the one exception is a request that
-declares no length, which can only be refused while it is arriving:
-
-- `413 upload_too_large` — the request is bigger than `upload.max_request_bytes`. Retrying it
-  unchanged will fail again; split the batch across sessions. Normally answered from the declared
-  `Content-Length` before a byte of body is read; a request that declares no length (chunked) is
-  counted as it arrives and cut off at the same ceiling, mid-upload, with `received_bytes` in
-  `details` instead of `declared_bytes`.
-- `429 rate_limited` with `max_upload_memory_bytes` in `details` — too much upload is arriving at
-  once across all callers (`max_upload_memory_mb`). This is about *bytes in flight*, not your
-  request count, so small uploads are essentially never refused for it. Retry in a few seconds.
-
-**Everything is counted per address**, and nothing you can send changes that. There is no per-user
-budget to earn: the only credential you might present is a shared secret, so it is the same for every
-caller and would put the whole internet in one bucket. The cost is real — behind NAT or a shared
-proxy you share a budget with everyone else there. Operators: `server.trust_proxy` has to be right,
-or every request looks like it came from the proxy.
+Per address, per minute, with `ratelimit` headers on every answer except `/v1/health`, and 429 with `Retry-After` when over. Exact contract: the description at the top of [`docs/openapi.yaml`](openapi.yaml).
 
 ## Poll status
 

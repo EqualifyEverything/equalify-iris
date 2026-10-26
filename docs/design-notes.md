@@ -1439,6 +1439,82 @@ Iris refused whole is 0 characters of HTML however much page it was carrying.
   draw as well, and its remedy is still `providers.*.max_tokens`.
 
 
+### What code checks on each page, and why
+
+What the page step checks without a model, and the measurements behind each rule. The run-log
+events named here are in [API.md](API.md#run-log).
+
+A PDF's **links survive**, which rasterizing alone would not manage: a link is an annotation
+over the page rather than something drawn on it, so the page image carries the link text and
+none of its target. The link targets are read out of the file separately and given to the page
+agent as ground truth, and the output's `<a href>`s are checked against them — the run log
+carries a `page_links` line per page that had any, and `page_links_missing` /
+`page_links_unrecovered` when one did not make it into the HTML. Three kinds are dropped on
+purpose: links to a destination inside the same document (the page they point at is in the
+delivered HTML already); any URL whose scheme is not `http(s)`, `mailto`, `tel`, or `ftp` — a
+PDF can carry a `javascript:` action, and that is not something to re-emit into a document —
+and any URL containing a character that would end the attribute it is written into (a quote,
+`<`, whitespace), which no legitimate URL carries unencoded. A link over an image with no text
+under it has nothing to attach to and is lost.
+
+**A placeholder is not a description.** `alt="image"` satisfies every machine-checkable rule
+there is — `image-alt` asks whether the attribute is *present* — and it tells a reader who
+cannot see the image nothing at all. So a closed list of words that name the medium rather than
+the content (`image`, `photo`, `figure`, `logo`, `screenshot`, `placeholder`, `null`, and about
+twenty more) is checked against every `alt` on every page, in code, and a page that carries one
+is sent back to the page agent with the image and asked to describe it — or to write `alt=""` if
+the image carries nothing a reader needs. `page_generic_alt` is the finding,
+`page_generic_alt_unrecovered` says the correction did not clear it, and
+`extraction_complete.alts_generic` is the count over the fragments the document is assembled
+*from*, beside `alts_checked` as its denominator. The delivered bytes are a separate line,
+`delivered_alt`, for the reason `delivered_markup` is measured there too: the review loop runs
+after extraction and replaces a top-level block's markup wholesale, `<img>` and its `alt`
+included, so a copy-edit round that guts an alt ships a placeholder the extraction counts never
+saw. It is deliberately **not** a length rule: the shortest alts
+this pipeline legitimately writes are `"M"`, `"Home"` and `"Meta"`, all of them logos, where one
+word is the correct answer — and `alt=""` is left alone, because an empty alt is a valid
+statement that an image is decorative. Measured over 1,064 non-empty alts across 32 bench run
+directories, the rule flags nothing the page agents wrote (issue #290). It exists because this
+was the one defect class where the only thing watching was the most expensive model in the
+deployment: the verifier catches a gutted alt 6 times out of 6, and the cheaper models it may be
+swapped for catch it 0–2 times out of 6.
+
+**One page's ids are its own, and a page that collides with itself is asked at the page step.** Ids
+arriving from independently extracted pages are made unique across the document by prefixing each
+page's (`namespaceAnchors`, written up under [`page_duplicate_ids`](API.md#page_duplicate_ids)) — but a
+page that used one id twice gets the same prefix on both copies and stays collided, which is the one
+case that pass declines. Its only other reporter is lint on the **assembled** document, after that
+page's last chance to be read against its image — and where a prefixed id no longer carries the name
+the page gave it, so the finding is on `p3-fn-1`. That last part holds only where the rename ran:
+prefixing touches ids more than one *page* claims, so a document whose sole defect is page 3 using
+`fn-1` twice, with no other page claiming `fn-1`, reaches lint with `fn-1` intact. Per-page footnote
+numbering usually does produce the cross-page collision that renames it, but the reason to ask at
+the page step does not depend on that. So the duplicate is checked in code on the page's own
+fragment, off the parsed tree, and handed to the same self-correction pass as a dropped link:
+`page_duplicate_ids` is the finding, `page_duplicate_ids_unrecovered` says the correction did not
+clear it, and `extraction_complete.ids_duplicated` is the count over the fragments the document is
+assembled *from*, beside `ids_checked` as its denominator. It is a correction rather than a rename
+in code because renaming one end of the pair is how this defect gets worse: `href="#fn-1"` currently
+reaches the first copy, and a rename that leaves the reference behind turns a wrong target into a
+dangling one — and only the agent that wrote the page knows which sentence meant which note.
+Measured over every page reply in 32 bench run directories (1,501 fragments, 1,421 of them carrying
+an id), 2 duplicate an id within themselves, both of them footnote ids — one of the two on
+`gpt-5.6-luna`, which has been the deployed page model since 2026-09-10 (issues #373 and #344).
+
+Recovering a link never costs a page its structure, and neither does replacing a placeholder or
+renumbering an id. When a page passed its fidelity check and is re-rendered only to attach a link,
+to describe an image or to clear a collision, the rewrite is verified in turn, and one that lost
+something — a heading level, a `<th scope>` — is discarded in favour of the fragment that passed,
+logged as `page_links_correction_rejected` (`trigger` says a code-checked repair was refused, and
+`links` / `alts` / `ids` on the same line say which, since `both` names no pair). All three are
+local additions; the accessibility of a page that already checked out is not something any of them
+may be paid for with.
+
+**No correction may delete a page**, whatever triggered it. A self-correction pass is single-shot,
+so what it returns is what the document keeps — and a reply that comes back at less than a quarter
+of the size of the page it was given has not corrected that page. It is refused, the page it was
+asked to correct is what ships, and the run log says so (`page_correction_rejected`).
+
 ## Reading a blank-page declaration
 
 The run log entries [`page_blank`](API.md#page_blank) and [`page_no_output`](API.md#page_no_output)
