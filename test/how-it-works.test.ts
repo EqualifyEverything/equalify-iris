@@ -46,7 +46,7 @@ const lib = new Function(
    const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]); const AI = ''; const CODE = '';
    const plural = (n, one, many) => n + ' ' + (n === 1 ? one : (many || one + 's'));
    ${pure}
-   return { firstSummary, changeSummary, stageSettings, modelFor, usageByStage, usageLine, settingsHtml, inputsHtml, processSteps, pdfReportHtml, PDF_WARN, INPUTS, parseLog, parseReply, explain, SAY, runsOf, pagesFrom, roundsFrom, problems, unresolvedFrom, stagesFrom, curl };`,
+   return { feedbackFormHtml, firstSummary, changeSummary, stageSettings, modelFor, usageByStage, usageLine, settingsHtml, inputsHtml, processSteps, pdfReportHtml, PDF_WARN, INPUTS, parseLog, parseReply, explain, SAY, runsOf, pagesFrom, roundsFrom, problems, unresolvedFrom, stagesFrom, curl };`,
 )(index) as {
   parseLog(t: string): Record<string, unknown>[];
   parseReply(o: unknown): Record<string, unknown> | null;
@@ -54,6 +54,7 @@ const lib = new Function(
   SAY: Record<string, unknown>;
   INPUTS: { method: string; path: string; field: string | null }[];
   settingsHtml(st: unknown, limits?: unknown, stats?: unknown): string;
+  feedbackFormHtml(): string;
   firstSummary(steps: unknown[], id: string, uploaded: boolean): string;
   changeSummary(prev: Map<string, string>, steps: unknown[]): string[];
   stageSettings(key: string, ev: unknown[], st: unknown, limits: unknown, session: unknown): string;
@@ -429,4 +430,55 @@ test("the deployment section lists each model's prices and says costs are estima
   const h = lib.settingsHtml(st, null, null);
   assert.ok(h.includes("m: $3.3 in, $16.5 out, $0.33 cache read, $4.125 cache write per million tokens"), h);
   assert.ok(h.includes("Costs on this page are estimates from the prices above"));
+});
+
+test("a feedback re-run shows what it kept and what it redid", () => {
+  const by = (steps: { key: string; state: string; detail: string }[]) => Object.fromEntries(steps.map((x) => [x.key, x]));
+  const doc = by(lib.processSteps([
+    { type: "feedback_scoped", target: "document", pages: [], reason: "about tone" },
+    { type: "run_start", feedback: "use plainer words" },
+    { type: "phase", phase: "review" }, { type: "reader" },
+  ], { status: "running", phase: "review", image_count: 6 }, {}) as never);
+  assert.deepEqual([doc.upload.state, doc.upload.detail], ["done", "review again, pages kept"]);
+  assert.deepEqual([doc.read.state, doc.read.detail, doc.check.state], ["skipped", "kept from the run before", "skipped"]);
+  assert.deepEqual([doc.join.state, doc.join.detail], ["done", "axe re-checked the kept document"]);
+  const ext = by(lib.processSteps([
+    { type: "feedback_scoped", target: "extraction", pages: [2], reason: "names page 2" },
+    { type: "run_start", feedback: "the total on page 2 is wrong" },
+    { type: "reextract_start", pages: [2], of: 6 },
+    { type: "agent_call", agent: "page.md", image: "d-p2.png" },
+    { type: "reextract_complete", pages: [2] },
+  ], { status: "running", phase: "assembly", image_count: 6 }, {}) as never);
+  assert.deepEqual([ext.upload.detail, ext.read.state, ext.read.detail], ["re-read page 2", "done", "1 of 1 re-read"]);
+  assert.match(lib.explain({ type: "feedback_scoped", target: "extraction", pages: [2], reason: "names page 2" }), /re-reads page 2 from their images \(names page 2\)/);
+});
+
+test("the feedback form has a label, a hint that says it may be quoted publicly, and a submit button", () => {
+  const h = lib.feedbackFormHtml();
+  assert.match(h, /<label for="feedback-text">/);
+  assert.match(h, /<input id="feedback-text" type="text" aria-describedby="feedback-hint"/);
+  assert.match(h, /public “agent suggestion” issue/);
+  assert.match(h, /<button id="feedback-btn" type="submit"/);
+});
+
+test("an axe check that could not run on a re-run is a problem to look at", () => {
+  assert.deepEqual(lib.problems([{ type: "lint_unavailable", stage: "feedback_relint", lint_error: "boom" }]).map((p) => [p.level, p.text]), [["high", "axe-core could not check the document (feedback relint), so it was delivered unchecked: boom"]]);
+});
+
+test("a re-read page that keeps its earlier version is not reported as lost", () => {
+  const steps = lib.processSteps([
+    { type: "feedback_scoped", target: "extraction", pages: [2] }, { type: "run_start", feedback: "fix page 2" },
+    { type: "reextract_start", pages: [2], of: 6 }, { type: "page_extraction_failed", page: 2, kept: "prior", error: "cut off" },
+    { type: "reextract_complete", pages: [], failed: [2] },
+  ], { status: "running", phase: "assembly", image_count: 6 }, {});
+  const read = steps.find((x) => x.key === "read")!;
+  assert.equal(read.state, "done");
+  assert.match(read.detail, /1 kept the earlier version/);
+  assert.deepEqual(lib.problems([{ type: "page_extraction_failed", page: 2, kept: "prior", error: "cut off" }]).map((p) => p.level), ["info"]);
+});
+
+test("while feedback is being routed, the panel says so and nothing else runs yet", () => {
+  const steps = lib.processSteps([], { status: "running", phase: "extraction", image_count: 6 }, { pendingFeedback: true });
+  assert.deepEqual(steps.map((x) => [x.key, x.state]), [["upload", "working"], ["read", "waiting"], ["check", "waiting"], ["join", "waiting"], ["review", "waiting"], ["result", "waiting"], ["pdf", "skipped"]]);
+  assert.equal(steps[0].detail, "deciding what to redo");
 });
