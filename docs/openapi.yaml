@@ -20,7 +20,21 @@ info:
     Errors share one shape, `{"error": {"code", "message", "details"}}`, except the two endpoints
     behind the quality token, which answer `{"error", "message"}`.
 
-    Every `/v1` response except `/v1/health` carries `ratelimit` and `ratelimit-policy` headers.
+    Requests are limited per address, per minute: `general_per_minute` (default 240) for all of `/v1`
+    except `/v1/health`, and `upload_per_minute` (default 12) for uploads (`GET /v1/limits` has the
+    numbers). Every answer except `/v1/health` carries `ratelimit` and `ratelimit-policy` headers. Over
+    budget is 429 with `Retry-After` in seconds: wait that long. Poll a session every 2 to 5 seconds.
+
+    Two upload refusals, both normally answered before the body is read:
+
+    - 413 `upload_too_large`: over `upload.max_request_bytes`. Split the batch. `details` has
+      `declared_bytes`, or `received_bytes` when the request has no declared length and is cut off as
+      it arrives.
+    - 429: too much upload in flight across all callers (`max_upload_memory_bytes` in `details`). Retry
+      in a few seconds.
+
+    Behind NAT or a shared proxy you share a budget;
+    operators must set `server.trust_proxy`, or every request looks like the proxy's.
     `test/e2e.sh` makes these calls against mocks and checks each answer against this document.
 servers:
   - url: /
@@ -217,7 +231,21 @@ paths:
     get:
       tags: [Deployment]
       summary: What an upload may be
-      description: The same limits the upload enforces, so a client can say no before sending.
+      description: |
+        What this deployment accepts, worked out from the model and provider it runs, so a client never
+        hardcodes numbers that change with the model. The demo states its limits from this.
+
+        - `image.max_bytes` is what the upload enforces per image. `hint` is the same sentence the upload's
+          400 carries: quote it rather than writing your own, since it is worded for whichever model is
+          configured. If you can show one number, show `max_bytes`.
+        - `max_dimension_px` is enforced when the file's header can be read. `max_long_edge_px` is advice: the
+          model shrinks past it instead of failing.
+        - For a vision model Iris has no published limits for, the pixel numbers are conservative stand-ins,
+          enforced the same way.
+        - `upload` is what one request may be. The byte total is checked before the body is read (or as it
+          arrives, without a declared length); the part count is refused during parsing.
+        - `rate_limits` is `null` where the app does not limit requests, meaning "not limiting", not "unknown".
+        - The model and provider are not named here: see `GET /v1/settings`, which needs the token.
       responses:
         "200":
           description: The limits.
@@ -473,7 +501,24 @@ paths:
     post:
       tags: [Sessions]
       summary: Upload a document and start converting it
-      description: Parts named `images`, in reading order. Each PDF page becomes an image. The run starts now, or waits in `queued`.
+      description: |
+        One `images` part per file; the order of the parts is the order of the pages, whatever the filenames.
+        `images` is the only part read: there are no per-session options, and an old `config` part is
+        ignored. PNG, JPEG, GIF, WebP and PDF. Each PDF page becomes an image, in page order, and the total
+        pages across all parts are capped (`GET /v1/limits`).
+
+        - An image over the per-image size limit is refused here with 400, before anything runs. The limit
+          is the vision model's, so ask `GET /v1/limits` rather than assuming one.
+        - A PDF is not measured against it, but each rendered page is. A page that renders too large is
+          rendered again, smaller (logged as `page_refit`). One still too large after that, usually a dense
+          photographic scan, is refused with 400 naming the page, the PDF and the size tried.
+        - Pixel size is rarely the problem: the model shrinks anything over its long edge before reading it,
+          so extra pixels buy nothing. The one hard ceiling is `max_dimension_px` (8,000 px on either edge),
+          checked from the file's header.
+
+        The new session is `queued`, and `running` once a run slot is free (`defaults.max_concurrent_runs`,
+        default 2). Beyond that it waits in order, as long as it takes; the run log's `run_queued` and
+        `run_dequeued` show the wait.
       security: [{}, {apiKey: []}]
       requestBody:
         required: true
