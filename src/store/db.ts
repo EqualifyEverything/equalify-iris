@@ -98,7 +98,7 @@ export function encodeCursor(s: SessionCursor): string {
  *     tied on its timestamp, which is the very bug the compound cursor exists to
  *     fix. It is accepted anyway because the alternative is a 400 that breaks the
  *     client outright, and it is self-clearing: the cursor handed back is
- *     compound. Documented in docs/API.md "List sessions" so a gap reported
+ *     compound. Documented in docs/openapi.yaml (GET /v1/sessions, `cursor`) so a gap reported
  *     during an upgrade window is diagnosable rather than mysterious.
  *   * The timestamp half must be in EXACTLY the format the column stores —
  *     `Date#toISOString()`, UTC with milliseconds — not merely something

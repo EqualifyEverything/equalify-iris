@@ -7,14 +7,21 @@ info:
     The exact contract for every endpoint. To see each one work on a real document, in plain
     language, open `/how-it-works` on a running Iris.
 
+    There is no sign-in and no account. A deployment is open or gated. Open: `server.api_token` is
+    blank, so send no `Authorization` header. Gated: send `Authorization: Bearer <the token>`. The
+    token says whether a caller may use the API, not who they are: every session belongs to the
+    deployment. `GET /v1/me` with no header answers 200 when open and 401 when gated.
+
+    The token covers `/v1/me`, `/v1/settings` and everything under `/v1/sessions`. The rest stays
+    reachable on a gated deployment, on purpose: none of it touches a document. `/v1/health` is for
+    load balancers, `/v1/limits` lets someone check a file before sending it, `/v1/stats` is a
+    deployment-wide tally, and `/v1/quality` and `/v1/suggestions` have their own token.
+
     Errors share one shape, `{"error": {"code", "message", "details"}}`, except the two endpoints
     behind the quality token, which answer `{"error", "message"}`.
 
-    Where `server.api_token` is set, `/v1/me`, `/v1/settings` and everything under `/v1/sessions`
-    need `Authorization: Bearer <that token>`. `/v1/quality` and `/v1/suggestions` need their own
-    token. Every other endpoint is open.
-
     Every `/v1` response except `/v1/health` carries `ratelimit` and `ratelimit-policy` headers.
+    `test/e2e.sh` makes these calls against mocks and checks each answer against this document.
 servers:
   - url: /
 tags:
@@ -154,7 +161,9 @@ paths:
     get:
       tags: [Deployment]
       summary: Is Iris up?
-      description: For load balancers. Never rate limited.
+      description: |
+        `version` is the running build's, so this is how you check a deployment is the one you meant to
+        deploy. Never gated and never rate limited: the container's `HEALTHCHECK` polls it.
       responses:
         "200":
           description: Up.
@@ -245,7 +254,10 @@ paths:
     get:
       tags: [Deployment]
       summary: Can I use this deployment?
-      description: 200 means yes; 401 means it needs an API key. Also the review cap.
+      description: |
+        Call this first. It runs the same check an upload runs, so 200 means usable (and, with no header,
+        open), and 401 means the deployment needs `server.api_token` from its operator.
+        `defaults.max_review_iterations` is the review cap every new session gets.
       security: [{}, {apiKey: []}]
       responses:
         "200":
@@ -263,7 +275,13 @@ paths:
     get:
       tags: [Deployment]
       summary: How this deployment is set up
-      description: Every non-secret setting as Iris uses it, and the model each agent resolves to. Never a key, token, URL, path or ARN.
+      description: |
+        Every non-secret setting as Iris uses it, after defaults, and the provider and model each agent
+        resolves to for each kind of call. `agents` lists the four agents every run uses, then the
+        specialists in `agents/`. `purpose` is the opening of an agent file's Purpose section, `null` for
+        the reader and copy editor, whose prompts are in the code. Which kinds of call an agent makes
+        depends on the step: a run's `model_call` lines say what ran. `prices` are the operator's, in US
+        dollars per million tokens. Never a key, token, provider URL, file path or inference-profile ARN.
       security: [{}, {apiKey: []}]
       responses:
         "200":
@@ -376,7 +394,22 @@ paths:
     get:
       tags: [Operators]
       summary: Agents Iris suggested, for maintainers
-      description: Saved suggestions for new or better agents, grouped. A workflow files them as issues.
+      description: |
+        Every suggestion this deployment saved, grouped. Every run saves suggestions, with no opt-out:
+
+        - a new-agent suggestion when a page holds content a specialist would handle better (name, page,
+          reason)
+        - an agent-update proposal when feedback produced a lesson that generalizes and passed the agent's
+          fixtures (the lesson and the proposed prompt)
+
+        Iris files nothing itself. A workflow, `.github/workflows/agent-suggestions.yml`, reads this, groups
+        what means the same thing, and opens or updates one public issue per idea. Run it only against a
+        deployment whose documents are public: the reasons and prompts are model-written text about them.
+        Saving never fails a run; a failure is logged as `contribution_failed`.
+
+        `key` groups names that differ only in case, punctuation, or a trailing "agent" or "specialist".
+        `pages` and `reasons` hold the 10 most recent; `latest` is the newest proposal, with the full prompt
+        in `content`. Same token as `/v1/quality`: 404 when unset, 401 without it.
       security: [{qualityToken: []}]
       responses:
         "200":
@@ -396,7 +429,19 @@ paths:
     get:
       tags: [Sessions]
       summary: List sessions, newest first
-      description: Every session belongs to the deployment, so this lists all of them.
+      description: |
+        Newest first. This lists every session, not just yours. There is no sign-in, so any caller sees
+        every session's id, status, page count and times, and an id is all `/output` needs. Gate a
+        deployment that handles anything private. To follow your own work, keep the `session_id` the upload
+        returned.
+
+        - `limit`: 20 by default, at most 100. Anything that is not an integer of 1 or more is the default.
+        - `cursor`: pass `next_cursor` back byte for byte, percent-encoded in the URL (`%7C` for its `|`).
+          It is checked against the exact format Iris writes, so anything else is 400, never a silent restart.
+          One exception: a bare timestamp with no `|` (a cursor from before the compound one) is still
+          accepted, and that one request skips sessions created in the same millisecond. The next cursor is
+          compound, so it clears itself; if a client reports a gap during an upgrade, this is why.
+          Stop when `next_cursor` is `null`, not when a page comes back short.
       security: [{}, {apiKey: []}]
       parameters:
         - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 20}}
@@ -469,12 +514,35 @@ paths:
         "404": {$ref: "#/components/responses/Error"}
         "401": {$ref: "#/components/responses/Error"}
         "429": {$ref: "#/components/responses/Error"}
+      description: |
+        Poll until `status` is `ready_for_review` or `failed`.
+
+        - `error` appears on a failed session and only there: the message the run threw, the same one its
+          `run_failed` log line carries. Branch on `status`, not on the field.
+        - `phase` means something only while `status` is `running`. A `queued` session reports the phase it
+          will start in. Treat the list as open: show an unknown value as it is.
+        - Where `storage.session_retention_days` is set, a finished session unchanged for that many days has
+          its files deleted. This answer then has `expired_at`, and the session's other routes answer 410
+          `session_expired`.
 
   /v1/sessions/{id}/output:
     get:
       tags: [Sessions]
       summary: The accessible HTML
-      description: Once `ready_for_review`. Problems left open are listed in an `<!-- @unresolved -->` comment at the end.
+      description: |
+        Content-only accessible HTML, once `ready_for_review` (409 before).
+
+        - Provenance is in the run log, not in the HTML.
+        - A form control named after a PDF field gets a readable name (`case-number`, not
+          `SC-100[0].Page1[0].CN[0].CaseNumber[0]`). `/fields` and `/pdf` keep the PDF's own names.
+        - `<!-- @unresolved -->` at the end lists problems the review left open.
+        - `<!-- @editor-truncated -->` means a correction round's answer hit the model's output ceiling. Its
+          form says what got corrected: `blocks B of T` (the first B of T blocks, the rest asked again by
+          section or left; a passage moved backwards across that point may now appear twice), `sections C of N` (the whole body redone section by section), or bare (nothing
+          rescued, so none of the listed problems was worked on).
+        - `<!-- @lint-unavailable -->` means axe could not run, so nothing was checked.
+        - Images are `<img>` with a description and a placeholder `src` naming the page and the graphic.
+          Iris serves no image files, so those references do not resolve; the `alt` carries the content.
       security: [{}, {apiKey: []}]
       parameters: [{$ref: "#/components/parameters/SessionId"}]
       responses:
@@ -543,7 +611,20 @@ paths:
     post:
       tags: [Sessions]
       summary: Ask Iris to fix something, as a new run
-      description: Only when `ready_for_review`. Iris decides whether to re-read pages or only review again; the run log's `feedback_scoped` line says which.
+      description: |
+        Starts a new run of the same document, with the feedback given to every agent. The delivered HTML
+        is copied to `history/` first. Only when `ready_for_review`; until the new run finishes, more
+        feedback gets 409. The answer is `running`, or `queued` when every run slot is busy.
+
+        Iris routes the feedback (its `feedback_scoped` log line says which):
+
+        - `document`: the pages are kept, the saved body is re-checked, and the review runs again with the
+          feedback. For tone, wording, order or an accessibility rule.
+        - `extraction`: the named pages are read again from their images, then joined and reviewed. For
+          content that was misread or missed, which the reader cannot see because it never sees the images.
+
+        It chooses `document` when the pages cannot be pinned down, or when the feedback claims more than half
+        the document.
       security: [{}, {apiKey: []}]
       parameters: [{$ref: "#/components/parameters/SessionId"}]
       requestBody:
@@ -573,7 +654,10 @@ paths:
     post:
       tags: [Sessions]
       summary: Accept the document
-      description: Its pages become examples that future page-agent changes are checked against.
+      description: |
+        Accept the document: the output is final and the session's scratch files are deleted. Its pages
+        become examples future page-agent changes are checked against. Only when `ready_for_review` (409
+        otherwise). Suggestions were already saved during the run, so close does nothing more.
       security: [{}, {apiKey: []}]
       parameters: [{$ref: "#/components/parameters/SessionId"}]
       responses:
@@ -666,6 +750,12 @@ paths:
         "410": {$ref: "#/components/responses/Error"}
         "401": {$ref: "#/components/responses/Error"}
         "429": {$ref: "#/components/responses/Error"}
+      description: |
+        Audit mode only (`server.audit`, or `iris convert --audit`); otherwise 404 `audit_off`. Each run then
+        keeps the prompts it sent and the document after assembly (`assembled`) and after each review round (`round-<n>`), served with
+        the page images and working files. Answers while the run works. Anyone who can read a session can
+        read all of this.
+        Prompts never hold form values: those go only to `POST /pdf`, which calls no model.
 
   /v1/sessions/{id}/audit/pages/{order}:
     get:
@@ -702,7 +792,8 @@ paths:
     get:
       tags: [Audit]
       summary: One message as sent to a model
-      description: Named by a `model_call_start` line's `prompt`.
+      description: |
+        Named by a `model_call_start` line's `prompt`. Never holds a form value: those go only to `POST /pdf`, which calls no model.
       security: [{}, {apiKey: []}]
       parameters:
         - {$ref: "#/components/parameters/SessionId"}

@@ -46,7 +46,7 @@ const lib = new Function(
    const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]); const AI = ''; const CODE = '';
    const plural = (n, one, many) => n + ' ' + (n === 1 ? one : (many || one + 's'));
    ${pure}
-   return { answerHtml, md, apiGroups, fieldRows, apiHtml, feedbackFormHtml, firstSummary, changeSummary, stageSettings, modelFor, usageByStage, usageLine, settingsHtml, processSteps, pdfReportHtml, PDF_WARN, parseLog, parseReply, explain, SAY, runsOf, pagesFrom, roundsFrom, problems, unresolvedFrom, stagesFrom, curl };`,
+   return { mdBlock, answerHtml, md, apiGroups, fieldRows, apiHtml, feedbackFormHtml, firstSummary, changeSummary, stageSettings, modelFor, usageByStage, usageLine, settingsHtml, processSteps, pdfReportHtml, PDF_WARN, parseLog, parseReply, explain, SAY, runsOf, pagesFrom, roundsFrom, problems, unresolvedFrom, stagesFrom, curl };`,
 )(index) as {
   parseLog(t: string): Record<string, unknown>[];
   parseReply(o: unknown): Record<string, unknown> | null;
@@ -58,6 +58,7 @@ const lib = new Function(
   fieldRows(spec: unknown, schema: unknown, value: unknown): { path: string; value: string; meaning: string }[];
   apiHtml(spec: unknown): string;
   md(t: string): string;
+  mdBlock(t: string): string;
   answerHtml(i: number, a: unknown): string;
   firstSummary(steps: unknown[], id: string, uploaded: boolean): string;
   changeSummary(prev: Map<string, string>, steps: unknown[]): string[];
@@ -500,7 +501,9 @@ test("the API section shows every operation in the document, grouped, with who m
   const h = lib.apiHtml(spec);
   assert.equal((h.match(/<details data-k="api/g) || []).length, inDoc.length, "one card per operation");
   assert.match(h, /<label for="quality-token">[^<]+<\/label><p class="hint" id="qt-hint">[^<]*never stored, logged or shown/);
-  assert.ok(!/Bearer (?!YOUR_QUALITY_TOKEN)/.test(h), "a curl never holds a real token");
+  const curls = [...h.matchAll(/<pre tabindex="0">([^<]*)<\/pre>/g)].map((m) => m[1]).filter((c) => c.startsWith("curl"));
+  assert.ok(curls.length >= 20, "the curls were found");
+  assert.ok(curls.every((c) => !/Bearer (?!YOUR_QUALITY_TOKEN)/.test(c)), "a curl never holds a real token");
 });
 
 test("an answer is explained field by field from the document's descriptions", () => {
@@ -538,4 +541,9 @@ test("the API section, rendered, passes the same axe check", async () => {
   assert.deepEqual((await runAxe(withAnswers)).violations, []);
   const r = await runAxe(html);
   assert.deepEqual(r.violations, []);
+});
+
+test("a longer description renders as paragraphs and lists, escaped", () => {
+  assert.equal(lib.mdBlock("One `a`.\nStill one.\n\n- first\n  goes on\n- <b>second</b>"), "<p>One <code>a</code>. Still one.</p><ul><li>first goes on</li><li>&lt;b&gt;second&lt;/b&gt;</li></ul>");
+  assert.equal(lib.mdBlock("Iris routes it:\n- `document`: kept\n- `extraction`: re-read"), "<p>Iris routes it:</p><ul><li><code>document</code>: kept</li><li><code>extraction</code>: re-read</li></ul>", "a list straight after a sentence");
 });

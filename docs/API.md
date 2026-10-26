@@ -1,8 +1,9 @@
 # Equalify Iris — API Guide (bash / curl)
 
 For how the system works, in plain language, open `/how-it-works` on a running Iris. It makes these
-calls on a real document and explains each. Each endpoint's exact request and response is in
-[openapi.yaml](openapi.yaml), served as `GET /v1/openapi.json`.
+calls on a real document and explains each; every endpoint is under The API there, with Try it.
+Each endpoint's exact request and response is in [openapi.yaml](openapi.yaml), served as
+`GET /v1/openapi.json`. The sections below point at it.
 
 Every endpoint is under `/v1`. All responses are JSON unless noted. There is no sign-in
 ([Authenticate](#authenticate)). Whether you send anything at all depends on the deployment: where the operator set `server.api_token`, `/v1/me` and
@@ -39,13 +40,7 @@ export BASE=http://localhost:8080/v1
 
 ## Health (unauthenticated)
 
-```bash
-curl -s "$BASE/health"
-# {"status":"ok","service":"equalify-iris","version":"1.3.0"}
-```
-
-`version` is the running build's, so this is how you check a deployment is the one you meant to
-deploy. It is never gated and never rate limited — the container's own `HEALTHCHECK` polls it.
+`GET /v1/health` says Iris is up, and which version. Exact contract: [`docs/openapi.yaml`](openapi.yaml).
 
 ## Public tally (unauthenticated)
 
@@ -558,131 +553,15 @@ including why a green run that declines to file is the expected result on a youn
 
 ## Agent suggestions (shared secret, off by default)
 
-`GET /v1/suggestions` returns every suggestion this deployment has saved, grouped
-([Contributions](#contributions-automatic)). It uses the same `server.quality_token` as
-[`/v1/quality`](#quality-tally-shared-secret-off-by-default): **404** when it is unset, **401**
-without it.
-
-```bash
-curl -s -H "Authorization: Bearer $QUALITY_TOKEN" "$BASE/suggestions"
-```
-```json
-{
-  "new_agents": [
-    { "key": "barchart", "names": [{ "name": "barChartAgent", "count": 3 }], "count": 3, "sessions": 2,
-      "first_seen": "2026-10-01T12:00:00.000Z", "last_seen": "2026-10-09T08:30:00.000Z",
-      "pages": [{ "session_id": "ses_...", "page": "page-004.png" }],
-      "reasons": ["A grouped bar chart with twelve series."] }
-  ],
-  "agent_updates": [
-    { "agent": "page.md", "lesson_slug": "keep-footnote-numbers", "count": 2, "sessions": 2,
-      "first_seen": "2026-10-02T10:00:00.000Z", "last_seen": "2026-10-07T15:00:00.000Z",
-      "latest": { "session_id": "ses_...", "summary": "...", "diff_preview": "...", "content": "...",
-                  "lesson": { "instruction": "...", "feedback": "...", "count": 2 } } }
-  ]
-}
-```
-
-`key` groups names that differ only in case, punctuation, or a trailing "agent" or "specialist".
-`pages` and `reasons` hold the 10 most recent. `latest` is the newest proposal for that lesson, with
-the full proposed prompt in `content`.
+`GET /v1/suggestions`: the agents Iris suggested, behind the quality token. Exact contract: [`docs/openapi.yaml`](openapi.yaml).
 
 ## Authenticate
 
-**There is no sign-in.** You do not create an account or run an OAuth flow, and Iris holds no
-GitHub credential.
-
-The operator chooses one of two modes.
-
-**Open** — `server.api_token` is blank. Send no `Authorization` header at all. This is the default,
-and it is what makes the bundled browser app work with no setup.
-
-**Gated** — the operator set `server.api_token` to a shared secret and gave it to you. Send it as a
-bearer token:
-
-```bash
-export AUTH="Authorization: Bearer the-secret-the-operator-gave-you"
-curl -s -H "$AUTH" "$BASE/me"
-```
-
-This secret answers one question: may this caller use the API? It is a door key, not an identity.
-Every session belongs to the deployment. Where a deployment is open, drop `-H "$AUTH"` from every example
-below.
-
-To find out which kind you are talking to, call `GET /v1/me` with no header: **200** means open,
-**401** means gated. That answer cannot go stale, because it is the same check an upload runs.
-
-### What the gate covers
-
-`server.api_token` protects `/v1/me`, `/v1/settings` and everything under `/v1/sessions`, and nothing
-else — the gate is attached to those three mounts rather than to `/v1` as a whole. Five endpoints are outside it
-and stay reachable on a gated deployment, on purpose. None of them touches a document:
-
-| Endpoint | Why it is open |
-| --- | --- |
-| [`GET /v1/health`](#health-unauthenticated) | A load balancer's probe cannot hold a secret. |
-| [`GET /v1/limits`](#upload-limits-unauthenticated) | Someone deciding whether their scan is small enough should not need the key to find out. |
-| [`GET /v1/stats`](#public-tally-unauthenticated) | A deployment-wide tally with no per-session detail. |
-| [`GET /v1/quality`](#quality-tally-shared-secret-off-by-default) | Has its own separate token, and is 404 unless the operator set it. |
-| [`GET /v1/suggestions`](#agent-suggestions-shared-secret-off-by-default) | Uses the quality token, and is 404 unless the operator set it. |
-
-*Operators:* [docs/access.md](access.md#coming-from-an-earlier-build) covers a database from an
-earlier build.
+There is no sign-in. A deployment is open (send no header) or gated (send `Authorization: Bearer <token>`); `GET /v1/me` with no header answers 200 or 401. What the token covers, and why some endpoints stay open, is in the spec's description. Exact contract: [`docs/openapi.yaml`](openapi.yaml).
 
 ## Deployment defaults
 
-```bash
-curl -s -H "$AUTH" "$BASE/me"
-```
-```json
-{ "defaults": { "max_review_iterations": 3 } }
-```
-
-`defaults.max_review_iterations` is the review cap every session gets, read from the operator's
-config.
-
-**Call this first.** It is the cheapest way to find out whether the deployment works at all, because
-it runs the same check an upload runs:
-
-| Answer | What it means |
-| --- | --- |
-| **200** | Usable. If you sent no header, the deployment is open. |
-| **401** `This deployment requires a shared API token.` | Gated — you need `server.api_token` from the operator. |
-
-## Settings
-
-```bash
-curl -s -H "$AUTH" "$BASE/settings"
-```
-
-How this deployment is set up: every non-secret setting, as the value Iris actually uses (after
-defaults), and the provider and model each agent resolves to for each kind of call. `/how-it-works`
-shows it in words. It is behind the same key as `/v1/sessions`.
-
-```json
-{ "version": "1.3.0",
-  "access": { "api_key_required": false, "audit": true, "quality_report": true },
-  "run": { "max_review_iterations": 2, "extraction_concurrency": 5, "max_concurrent_runs": 2, "recheck_sample_size": 1 },
-  "retention_days": 30,
-  "tagged_pdf": { "on": true, "version": "iris-pdf 0.4.0", "timeout_seconds": 300 },
-  "providers": { "default": "bedrock",
-    "blocks": { "bedrock": { "api": "converse", "region": "us-east-2", "default_model": "us.anthropic.claude-sonnet-4-6",
-      "per_capability": {}, "max_tokens": 32000, "prompt_cache": true, "prompt_cache_ttl": "5m",
-      "inference_profiles": ["us.anthropic.claude-sonnet-4-6"],
-      "prices": { "us.anthropic.claude-sonnet-4-6": { "input": 3.3, "output": 16.5, "cache_read": 0.33, "cache_write": 4.125 } } } } },
-  "agents": [{ "agent": "page", "kind": "core", "purpose": "The Page Agent is the primary extraction agent. …",
-    "models": { "vision": { "provider": "bedrock", "model": "us.openai.gpt-5.6-luna" }, "text": { "…": "…" }, "structured_output": { "…": "…" } } }] }
-```
-
-`agents` lists the four agents Iris always runs, then the specialist agents in `agents/`. `purpose` is
-the opening of the agent file's "Purpose" section, shortened to whole sentences (`null` for the reader
-and copy editor, whose prompts are in the pipeline code). An agent's `models` names one model per kind
-of call. Which kinds an agent actually uses depends on the step, so
-read a run's `model_call` lines for what ran. It never shows an API key, a token, a provider URL, a
-file path, or an inference profile's ARN: only the model ids that go through one. `prices` is what the
-operator set in `providers.<name>.prices`, in US dollars per million tokens. `/how-it-works` multiplies
-it by each call's tokens for an estimated cost. With no prices set, the page shows tokens but no cost,
-and a model with no entry is shown as unpriced.
+`GET /v1/me`: call it first. It says whether you can use the deployment, and the review cap. Exact contract: [`docs/openapi.yaml`](openapi.yaml).
 
 ## Create a session (upload images)
 
@@ -933,94 +812,11 @@ or every request looks like it came from the proxy.
 
 ## Poll status
 
-The pipeline runs asynchronously; poll until `status` is `ready_for_review` (or `failed`).
-
-```bash
-curl -s -H "$AUTH" "$BASE/sessions/$SID" | jq
-```
-```json
-{
-  "session_id": "ses_01HXYZ...",
-  "status": "running",
-  "phase": "extraction",
-  "iterations_completed": 0,
-  "iterations_max": 3,
-  "image_count": 2,
-  "created_at": "...",
-  "updated_at": "..."
-}
-```
-`status` is one of `queued`, `running`, `ready_for_review`, `closed`, `failed`. One field is not in
-the payload above because it appears on a failed session and only there: `error`, the message the run
-threw, the same one the run log's [`run_failed`](#run_failed) line carries. Absent rather than empty
-on every other status, so branch on the status and not on the field.
-
-If the deployment sets `storage.session_retention_days`, a finished session that hasn't changed in that
-many days has its files deleted. This GET then shows `expired_at` (the list doesn't), and the
-session's other routes answer 410 `session_expired`.
-
-`phase` is one of `extraction`, `assembly`, `review`, `done`, and is only meaningful while
-`status` is `running` — a `queued` session reports the phase it will start in, not one it has
-reached. These are the four phases the pipeline enters; `triage` and `reconciliation` appear in
-an earlier design but are **not implemented** and are no longer emitted, so a client should not
-branch on them. Treat the list as open anyway: fall back to displaying the raw value rather than
-showing nothing for a phase you don't recognize.
-
-A simple wait loop:
-```bash
-until [ "$(curl -s -H "$AUTH" "$BASE/sessions/$SID" | jq -r .status)" = "ready_for_review" ]; do
-  sleep 2
-done
-```
+`GET /v1/sessions/{id}`: poll until `status` is `ready_for_review` or `failed`. Exact contract: [`docs/openapi.yaml`](openapi.yaml).
 
 ## Fetch the HTML output
 
-```bash
-curl -s -H "$AUTH" "$BASE/sessions/$SID/output" -o output.html
-```
-`text/html` — clean, content-only accessible HTML. Provenance comments (`@source`, `@agent`,
-`@fragment`) are **not** included, deliberately; provenance lives in the [run log](#run-log)
-instead. A form control named after one of the PDF's fields gets a readable name, from the field's
-label or the end of its name (`case-number`, not `SC-100[0].Page1[0].CN[0].CaseNumber[0]`).
-A name merely shaped like a field path is shortened the same way. `/fields` and `/pdf` still use the PDF's own names. An `<!-- @unresolved -->` comment listing outstanding issues is appended if the review loop
-stopped with any still open — at its iteration cap, or on a round that changed nothing, which is how
-a document whose remaining issues the loop is designed not to fix ordinarily ends. A third stop
-reason adds a second comment: `<!-- @editor-truncated -->` says a correction round's response hit
-the model's output ceiling — read together with `@unresolved`, which on its own would say the editor
-tried and could not fix them (the [quality tally](#quality-tally-shared-secret-off-by-default)'s
-`editor_truncated_rate`). It comes in three forms, and the difference is what corrections the
-document in your hand contains, and which part of it has which kind. `@editor-truncated blocks B of
-T` is the commonest: the reply was read as far as it got, so the first `B` of the document's `T`
-top-level blocks carry that round's **own** corrections, made by a call that saw the whole document
-and the page images. The same comment then says what happened to the other `T − B` — asked for again
-a section at a time (`C of N sections`), or not divisible and so left as they were — and `B` equal
-to `T` means the reply named its last block before the ceiling cut it, so nothing was left to ask
-for at all. `B` is not always where the ceiling stopped the reply: where the reply's next change
-would have left a block holding less than it came in with, the claim stops **there** instead (the
-[quality tally](#quality-tally-shared-secret-off-by-default)'s `editor_salvaged`, `lost_at`), and
-the comment says so in its own words — including that a passage moved backwards across that point
-may now be in the document twice, which is the trade that rule accepts and the one thing about it a
-person reading the document can act on. `@editor-truncated sections C of N` with no block count
-means no prefix could be used, so the **whole** body was re-made a section at a time and `C` of `N`
-came back corrected; each of those was made by a request that saw one section and not the rest of
-the document. Under both, the `@unresolved` list is the reading that preceded the corrections and
-was never taken again, so some of it may already be fixed. The bare `@editor-truncated` means
-nothing was rescued — the round was discarded and **none** of the issues below it were worked on.
-What `editor_truncated_lost_rate` counts deployment-wide is any part of the document that no editor
-pass reached: the bare form, `C` short of `N`, and blocks past `B` that no section covered. A third
-comment, `<!-- @lint-unavailable -->`, says axe-core could not run on this document at all, so
-**nothing** in it was checked for accessibility violations and an empty `@unresolved` is not a clean
-bill of health (the [quality tally](#quality-tally-shared-secret-off-by-default)'s
-`lint_error_rate`). Returns `409` while the session is still running.
-
-**Image references do not resolve, by design.** A graphic on the page — a logo, a diagram, a
-photograph — is emitted as an `<img>` with a description and a placeholder `src` naming the page
-and the graphic (`src="page-1-logo.png"`), because the extractor sees a rasterized page and has no
-asset to embed; the placeholder is also recorded in the run log. Iris serves no image endpoint, so
-those references 404 until a consumer supplies the files. What a screen-reader user receives is the
-`alt` text, which is the content the picture carries — but a client that renders this HTML in a
-browser will show broken images, and one that rewrites the `src`s has the log and the fragment to
-match them against.
+`GET /v1/sessions/{id}/output`: the accessible HTML, and the comments it can end with (`@unresolved`, `@editor-truncated`, `@lint-unavailable`). Exact contract: [`docs/openapi.yaml`](openapi.yaml).
 
 ## Get a tagged PDF (optional)
 
@@ -1100,63 +896,11 @@ the tagged copy. This needs iris-pdf with
 
 ## Audit (off by default)
 
-With `server.audit: true` (or `iris convert --audit`), each run also keeps the prompts it sent and the
-document after assembly and after each review round. These endpoints then serve them, with the page
-images and the session's working files. They answer while the run is still working. With audit mode
-off, each answers `404 audit_off`.
-
-**Anyone who can read a session can read all of this**, including the page images.
-
-```bash
-curl -s -H "$AUTH" "$BASE/sessions/$SID/audit"
-# {"session_id":"ses_...",
-#  "pages":[{"order":1,"name":"report-p1.png","media_type":"image/png","bytes":245119,"sha256":"…","url":"/v1/sessions/ses_.../audit/pages/1"}],
-#  "files":[{"name":"final.json","bytes":30211,"url":"…/audit/files/final.json"}],
-#  "runs":[{"run":1,"snapshots":[{"name":"assembled","bytes":41105,"url":"…/audit/runs/1/assembled"}]}],
-#  "prompts":{"count":9,"url":"/v1/sessions/ses_.../audit/prompts/{sha256}"}}
-```
-
-| Endpoint | What it returns |
-| --- | --- |
-| `GET /audit/pages/<order>` | The page image the models were sent |
-| `GET /audit/files/<name>` | A working file: `final.json` (the final pages), `lint.json` (the axe result), `links.json`, `fields.json`, `text-layer.json`, `unresolved.md`, `agent-updates.md`, or `source.pdf` |
-| `GET /audit/runs/<run>/<name>` | The document body at that stage, as `text/plain` |
-| `GET /audit/prompts/<sha256>` | One message as sent, named by a `model_call_start` line's `prompt` |
-
-Saved HTML is sent as plain text, so a browser does not run it. Prompts never hold form values: those
-go only to `POST /pdf`, which calls no model.
+`GET /v1/sessions/{id}/audit` and the routes under it serve page images, prompts and the document between steps, when `server.audit` is on. Anyone who can read a session can read all of this. Exact contract: [`docs/openapi.yaml`](openapi.yaml).
 
 ## Submit feedback (re-run)
 
-Triggers a new run within the same session, with the feedback injected as a top-level
-instruction to every agent. The prior output is snapshotted to
-`sessions/<id>/history/` so it can be reverted to.
-
-```bash
-curl -s -X POST -H "$AUTH" "$BASE/sessions/$SID/feedback" \
-  -H 'content-type: application/json' \
-  -d '{"feedback":"The footnote on page 4 was inlined as body text. Keep footnotes distinct."}'
-# 202 {"session_id":"ses_...","status":"running","phase":"extraction"}
-```
-Then poll status again as in step 4. A re-run is subject to the same `max_concurrent_runs` cap as a
-new upload, so the 202 may instead report `{"status":"queued","phase":"extraction"}` — accepted, waiting
-for a slot. Either way the session is no longer `ready_for_review`, so a second feedback POST gets a
-`409` until this run finishes.
-
-A re-run on a session that already produced output builds on the **existing document** rather
-than regenerating it, and is routed by what the feedback is about (visible in the run log as a
-`feedback_scoped` event):
-
-| Scope | What runs | Typical feedback |
-| --- | --- | --- |
-| `document` | Re-lint the saved body, then the feedback-aware review loop. No re-extraction. | tone, wording, ordering, an accessibility rule |
-| `extraction` | The named pages go back to the page agent **with their source image**, then reassemble + review. Other pages keep their prior fragments. | "the revenue figure on page 2 is wrong", missed or misread content |
-
-The second case exists because the **Reader** never sees the source images (by design — it
-reads the way a screen-reader user does), so a misreading of the source is invisible to it: no
-issue is raised, and the loop has nothing to act on. Routing is biased toward the cheaper
-`document` path: if the pages can't be localized, or the feedback claims more than half the
-document, it falls back rather than re-extracting broadly.
+`POST /v1/sessions/{id}/feedback`: a new run of the same document with your feedback, routed to a re-review or a re-read of named pages. Exact contract: [`docs/openapi.yaml`](openapi.yaml).
 
 ## Run log
 
@@ -5076,107 +4820,9 @@ of the regression fixtures captured on `POST .../close` — accepting a session 
 for its image, and filing it would gate every future page-agent update on reproducing markup this run
 had already declared wrong.
 
-## List sessions
-
-```bash
-curl -s -H "$AUTH" "$BASE/sessions?limit=20"
-curl -s -H "$AUTH" "$BASE/sessions?status=ready_for_review"
-```
-```json
-{ "sessions": [ { "session_id": "ses_...", "status": "ready_for_review",
-  "image_count": 2, "created_at": "...", "updated_at": "..." } ],
-  "next_cursor": "2026-05-22T18:00:00.000Z|ses_01HXYZ..." }
-```
-`limit` is `20` by default and capped at `100`. Anything not an integer of at least 1 —
-`0`, negative, fractional, non-numeric — is the default, not an error: one rule, so two
-equally invalid values can't get page sizes differing by a factor of twenty.
-
-**This lists every session, not just yours.** There is no sign-in, so every caller
-who can reach this endpoint sees every session anyone uploaded — including documents you did not
-upload, and yours to whoever asks next. That is the cost of having no sign-in, and it is why an
-operator handling anything private should gate the deployment with `server.api_token` and treat the
-list as shared among everyone holding that secret.
-
-Nothing here reveals a document's contents: a row is a `session_id`, a status, a page count and two
-timestamps. But a `session_id` is all `GET /v1/sessions/{id}/output` needs.
-
-If you only want your own work, keep the `session_id` that `POST /v1/sessions` returned; polling,
-output, feedback and close all work with it and none of them needs this list.
-
-Paginate by passing `cursor=<next_cursor>` **verbatim** — it encodes both halves of the
-sort key (`created_at|session_id`), because `created_at` alone is not unique: sessions
-created in the same millisecond tie on it, and paging on a non-unique key skips and
-repeats rows at page boundaries. Treat it as opaque; the shape is documented so a paging
-bug is readable in a request log, not so clients can construct one.
-
-"Verbatim" means the *value*, not the URL: **percent-encode it when you build the query
-string** (`%7C` for the `|`). A raw `|` is not a legal query character per RFC 3986 — curl,
-browsers and Express all accept it, but a strict URI type (`java.net.URI`) or a strict proxy
-will reject the request, and the error will not point back here. Use whatever your client
-calls `--data-urlencode`; the examples below do.
-
-`next_cursor` is `null` on the last page — including when that page is full. Stop when it
-is `null` rather than when a page comes back short.
-
-**Send the cursor back byte-for-byte.** It is validated against the exact format the store
-writes (UTC ISO-8601 with milliseconds), and anything else is a `400 invalid_request` — not
-a silent restart from page one. That includes values which are perfectly good timestamps
-for the same instant: `2026-05-22T18:00:00Z` (milliseconds dropped) and
-`2026-05-22T19:00:00.000+01:00` (an offset instead of `Z`) are both rejected, because the
-cursor is compared as a *string* and either one sorts above every stored value. If you
-round-trip cursors through a date type, you will reformat them; keep them as strings.
-
-One exception, and the only case where a page can still lose rows: a cursor from *before*
-this endpoint became compound is a bare timestamp with no `|`, and it is still accepted
-rather than 400'd — so a client paginating across the deploy that introduced the compound
-cursor keeps working, but that one request skips any sessions tied on that timestamp.
-It clears itself on the next page, since the cursor it hands back is compound. If a client
-reports a gap during an upgrade window, this is why; re-listing from the start is the fix.
-
-```bash
-# Walk every page.
-cursor=""
-while :; do
-  page=$(curl -s -H "$AUTH" --get ${cursor:+--data-urlencode "cursor=$cursor"} "$BASE/sessions?limit=50")
-  echo "$page" | jq -r '.sessions[].session_id'
-  cursor=$(echo "$page" | jq -r '.next_cursor // empty')
-  [ -z "$cursor" ] && break
-done
-```
-
-## Close the session (finalize + clean up)
-
-Locks the output and deletes `tmp/<id>/`. Requires `status` = `ready_for_review` (else `409`).
-Contributions are saved during the run ([Contributions](#contributions-automatic)), so close does nothing more.
-
-```bash
-curl -s -X POST -H "$AUTH" "$BASE/sessions/$SID/close"
-```
-```json
-{ "session_id": "ses_...", "status": "closed" }
-```
-
 ## Contributions (automatic)
 
-Every session gives something back, and there is no opt-out. Iris saves two kinds of suggestion on
-the deployment during the run:
-
-- **New agent suggestions** — the extractor met content that a dedicated agent would handle better,
-  such as a chart type. Iris saves the name, the page, and the model's reason.
-- **Agent update proposals** — your `/feedback` produced a change that generalizes beyond your
-  document and passed the agent's own fixtures. Iris saves the lesson and the proposed prompt.
-
-Iris itself files nothing on GitHub. A workflow that runs Sunday to Thursday, `.github/workflows/agent-suggestions.yml`,
-reads [`GET /v1/suggestions`](#agent-suggestions-shared-secret-off-by-default), groups suggestions
-that mean the same thing, and opens or updates one issue per idea. Counts keep growing on an issue
-after it is closed, so a maintainer can see demand return.
-
-Saving never fails your run. A failure is logged as [`contribution_failed`](#contribution_failed).
-The issues name no user, because there is no sign-in.
-
-*Operators:* unlike [`/v1/quality`](#quality-tally-shared-secret-off-by-default), this carries
-model-written text about your documents — the reasons and the proposed prompts — into public issues.
-Run the workflow only against a deployment whose documents are public.
+Every run saves suggestions for new or better agents, with no opt-out, and a workflow files them as public issues. How, and what that means for private documents, is in `GET /v1/suggestions`'s description. Exact contract: [`docs/openapi.yaml`](openapi.yaml).
 
 ## Errors
 
@@ -5262,15 +4908,3 @@ so in an `@editor-truncated` comment ([Fetch the HTML output](#fetch-the-html-ou
 [`editor_truncated`](#editor_truncated) / [`editor_salvaged`](#editor_salvaged) /
 [`editor_sections`](#editor_sections)). The remedy is the same knob.
 
-## Prove it works
-
-```bash
-./test/e2e.sh      # boots mocks + Iris, runs all of the above via curl, asserts each step
-```
-
-This is the same script CI runs on every PR, and its output is handed to the automated reviewer as
-evidence rather than re-run by it (see
-[Automated code review](ci.md#automated-code-review)). So a change that breaks a request or
-response documented above surfaces as a blocking review finding quoting the failure — which is why
-this file is in the reviewer's scope: the API docs are part of the contract, and docs that now
-contradict the code are treated as a real defect.

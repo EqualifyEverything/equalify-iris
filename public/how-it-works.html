@@ -857,13 +857,33 @@
     }
     // The document's descriptions mark code with backticks; show it as code, escaped first.
     const md = (t) => esc(t).replace(/`([^`]+)`/g, '<code>$1</code>');
+    // A longer description: paragraphs split by a blank line, and "- " items (with indented
+    // continuation lines) as a list. Escaped first, like md.
+    function mdBlock(t) {
+      // Each line is read: a "- " line starts a list item wherever it falls, so a list with no blank
+      // line before it still renders as a list.
+      const out = [];
+      for (const para of String(t || '').trim().split(/\n\s*\n/)) {
+        let text = [], items = null;
+        const flush = () => { if (text.length) out.push('<p>' + md(text.join(' ')) + '</p>'); text = []; };
+        for (const raw of para.split('\n')) {
+          const l = raw.trim();
+          if (/^- /.test(raw)) { flush(); (items = items || []).push(l.slice(2)); }
+          else if (items && /^\s/.test(raw)) items[items.length - 1] += ' ' + l;
+          else { if (items) { out.push('<ul>' + items.map((x) => '<li>' + md(x) + '</li>').join('') + '</ul>'); items = null; } text.push(l); }
+        }
+        flush();
+        if (items) out.push('<ul>' + items.map((x) => '<li>' + md(x) + '</li>').join('') + '</ul>');
+      }
+      return out.join('');
+    }
     const AUTH_WORDS = { open: 'Open to anyone.', key: 'Needs the API key where this deployment sets one.', quality: 'Needs the quality token.' };
     function apiCardHtml(o, i) {
       const k = 'api' + i;
       const tryable = o.method === 'GET' && o.path !== '/v1/openapi.json';
       const action = o.method === 'POST' ? (o.path === '/v1/sessions' ? 'Use <a href="#start">Start</a> to send one.' : o.path.endsWith('/feedback') ? 'Use the feedback box in step 5 of a finished run.' : o.path.endsWith('/pdf') ? 'Use “Make the tagged PDF” in step 6.' : o.path.endsWith('/close') ? '<button type="button" class="secondary" data-close="1">Accept the open document</button> <span class="hint">Accepting adds its pages to the examples Iris checks future page-agent changes against. It cannot be undone.</span>' : '') : '';
       return '<details data-k="' + k + '"><summary><span class="method">' + o.method + ' ' + esc(o.path) + '</span> ' + esc(o.summary) + '</summary>'
-        + (o.description ? '<p>' + md(o.description) + '</p>' : '')
+        + (o.description ? mdBlock(o.description) : '')
         + '<p class="hint">' + AUTH_WORDS[o.auth] + '</p>'
         + (o.params.length ? '<p><strong>You can send</strong></p><ul>' + o.params.map((x) => '<li><code>' + esc(x.name) + '</code> (' + esc(x.in) + ')' + (x.description ? ': ' + md(x.description) : '') + '</li>').join('') + '</ul>' : '')
         + (o.body.length ? '<p><strong>Body</strong></p><ul>' + o.body.map((x) => '<li><code>' + esc(x.name) + '</code>' + (x.required ? ' (required)' : '') + (x.description ? ': ' + md(x.description) : '') + '</li>').join('') + '</ul>' : '')
@@ -886,7 +906,7 @@
     function apiHtml(spec) {
       if (!spec) return '<p>This deployment did not serve its API description.</p>';
       let i = 0;
-      return apiGroups(spec).map((g) => '<h3>' + esc(g.tag) + '</h3><p class="hint">' + md(g.description) + '</p>'
+      return det('about-api', 'How to call it: keys, errors and limits', mdBlock(spec.info && spec.info.description)) + apiGroups(spec).map((g) => '<h3>' + esc(g.tag) + '</h3><p class="hint">' + md(g.description) + '</p>'
         + (g.tag === 'Operators' ? '<label for="quality-token">Quality token, to try these</label><p class="hint" id="qt-hint">Only for this page and only for these calls. It is never stored, logged or shown.</p><input id="quality-token" type="password" autocomplete="off" aria-describedby="qt-hint">' : '')
         + g.ops.map((o) => apiCardHtml(o, i++)).join('')).join('');
     }
