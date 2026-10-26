@@ -1487,7 +1487,9 @@ snapshotted to, relative to the session directory (`history/output-<timestamp>.h
 the only record of the document as it was delivered before this round; nothing else keeps it, and
 [Fetch the HTML output](#fetch-the-html-output) serves what this round produces.
 
-Written by `src/pipeline/orchestrator.ts`.
+`prior_output: null` means there was no delivered output to snapshot. Written for **every** re-run,
+including one that goes on to run `full` for want of saved state ([`run_start`](#run_start)) — so
+this line, and not `mode`, is what says feedback was submitted at all.
 
 ### `feedback_scoped`
 
@@ -3998,7 +4000,28 @@ The candidate prompt was re-run against the agent's stored fixtures before anyth
 `agent` is the file, `cases` how many fixtures were read, `passed` whether all of them held,
 `failures` **how many** did not, and `meanCoverage` the mean of the candidate's fixture scores.
 
-Written by `src/pipeline/feedback.ts`.
+`failures` here is a count. On [`agent_update_blocked`](#agent_update_blocked) the field of the same
+name is the list of strings behind it, and both lines are written for the same blocked update — so
+summing `failures` across the log adds a list to a number.
+
+`cases` counts fixture **files**, not fixtures judged. It is at most 3, the newest three by filename,
+and a fixture whose JSON cannot be parsed or whose image is gone contributes to neither `failures` nor
+`meanCoverage`. `cases: 3, passed: true` is therefore consistent with nothing having been judged at
+all.
+
+`meanCoverage` is `null` when no fixture was scored, which is not a zero: a score of 0 is a fixture
+the candidate produced no output for, which is a failure on that fixture rather than an absence of
+evidence. The mean is over the candidate alone — the comparison against the prompt in the library is
+[`eval_gate`](#eval_gate)'s.
+
+**A missing line does not mean the gate was skipped; it means it had nothing to check.** An agent with
+no fixtures directory, or an empty one, passes without writing anything here. So an
+[`agent_updates_proposed`](#agent_updates_proposed) with no `regression_gate` above it is a proposal
+that was checked against nothing.
+
+The candidate's own text is not recoverable from the log. Its `agent_call` lines carry `agent_sha:
+null` and `agent_content: null`, which is [`agent_call`](#agent_call)'s one case where neither field
+recovers the prompt that went out.
 
 ### `eval_gate`
 
@@ -4026,9 +4049,15 @@ The gate blocks a drop of more than **0.02** only. A line here whose `candidate`
 
 A proposed prompt change was not proposed after all: `agent` is the file it was about.
 
-Fields: `agent`, `failures`.
+**Two shapes, and `reason` is what tells them apart.** With no `reason`, this is the regression gate:
+`failures` is the list of strings saying what the candidate broke, at most one per fixture, and the
+[`regression_gate`](#regression_gate) line above it carries the same information as a count. With
+`reason: "eval_regression"`, this is the eval gate: `current`, `candidate` and `paired` repeat the
+[`eval_gate`](#eval_gate) line above it, and there is no `failures` field at all — nothing broke, the
+candidate simply scored lower.
 
-Written by `src/pipeline/feedback.ts`.
+Nothing is saved on either path, and the document the correction was about is unaffected: it was
+delivered before the training step began.
 
 ### `agent_updates_proposed`
 
@@ -4127,20 +4156,32 @@ Written by `src/routes/sessions.ts`.
 With tagged PDFs on, the upload reads the PDF's form fields, and the page agent is asked to name
 each control after its field, so the tagger can tag the field where it sits.
 
-Fields: `dropped`, `fields`, `image`, `unusable`.
-
-Written by `src/pipeline/extraction.ts`, `src/pipeline/stage.ts`.
+- `form_fields`: at upload, `fields` (how many were kept) and `unusable` (fields dropped: a name with
+  a quote, `'`, `<`, `>`, a backtick or a control character, a name over 100 characters, or no page
+  number), or the tagger's `error` code. Without them the run converts the same.
+- `page_fields`: `image`, `fields` (how many were in the prompt), `dropped` (past the cap of 40) and,
+  on a second draw, `redrawn: true`.
+- `page_fields_missing`: `image`, and `fields`, the names no control in the first pass's HTML has.
+  Only logged; no correction is made. A control a later correction removes is not reported here, but
+  the tagged PDF's report lists it as `field_not_in_html`.
 
 ### `calibrate_call_failed`
 
 One verifier call in the calibration harness threw: `image` is the page, `defect` the seeded defect the
 copy it was judging carried, and `error` the message.
 
+`defect: null` means the failed call was judging the **undamaged** copy of that page.
+
 **An ordinary run never writes this line.** Calibration is a tool — `src/tools/calibrate.ts` — and not
 a phase of a run: nothing else in `src/` imports `src/pipeline/calibration.ts`, so a session's log
 cannot contain it.
 
-Written by `src/pipeline/calibration.ts`.
+The failure is not counted as a miss. The call comes back marked unjudged, and every rate the report
+prints leaves the unjudged out of its denominator: a defect's catch rate is over what was applied
+minus what went unjudged, and the false-positive rate over the clean copies that were judged. The
+verdict substituted for the dead call reads `ok: true`, and is not counted as a pass either. What the
+line is for is telling a provider to retry apart from a verifier to fix, which is why an unparseable
+reply is counted separately from this.
 
 ### `audit_snapshot`
 
