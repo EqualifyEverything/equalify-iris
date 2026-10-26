@@ -44,18 +44,18 @@ components:
       name: id
       in: path
       required: true
-      schema: { type: string, pattern: "^ses_[A-Za-z0-9]+$" }
+      schema: {type: string, pattern: "^ses_[A-Za-z0-9]+$"}
   responses:
     Error:
       description: An error. `code` is one of `ErrorCode`.
       content:
         application/json:
-          schema: { $ref: "#/components/schemas/Error" }
+          schema: {$ref: "#/components/schemas/Error"}
     TokenError:
       description: Missing or wrong quality token (401), or the endpoint is off (404).
       content:
         application/json:
-          schema: { $ref: "#/components/schemas/TokenError" }
+          schema: {$ref: "#/components/schemas/TokenError"}
   schemas:
     ErrorCode:
       type: string
@@ -88,15 +88,15 @@ components:
           type: object
           required: [code, message]
           properties:
-            code: { $ref: "#/components/schemas/ErrorCode" }
-            message: { type: string, description: A sentence a person can act on. }
-            details: { type: object, description: Numbers behind the error, such as a limit. }
+            code: {$ref: "#/components/schemas/ErrorCode"}
+            message: {type: string, description: A sentence a person can act on.}
+            details: {type: object, description: Numbers behind the error, such as a limit.}
     TokenError:
       type: object
       required: [error, message]
       properties:
-        error: { type: string, enum: [unauthorized, not_found] }
-        message: { type: string }
+        error: {type: string, enum: [unauthorized, not_found]}
+        message: {type: string}
     SessionStatus:
       type: string
       enum: [queued, running, ready_for_review, closed, failed]
@@ -111,43 +111,43 @@ components:
       type: object
       required: [session_id, status, phase, iterations_completed, iterations_max, image_count, created_at, updated_at]
       properties:
-        session_id: { type: string }
-        status: { $ref: "#/components/schemas/SessionStatus" }
-        phase: { $ref: "#/components/schemas/Phase" }
-        iterations_completed: { type: integer, description: Review rounds finished. }
-        iterations_max: { type: integer, description: The review cap this session got when it was made. }
-        image_count: { type: integer, description: Pages. }
-        created_at: { type: string, format: date-time }
-        updated_at: { type: string, format: date-time }
-        error: { type: string, description: Only on a failed session. }
-        expired_at: { type: string, format: date-time, description: Only once retention deleted its files. }
+        session_id: {type: string}
+        status: {$ref: "#/components/schemas/SessionStatus"}
+        phase: {$ref: "#/components/schemas/Phase"}
+        iterations_completed: {type: integer, description: Review rounds finished.}
+        iterations_max: {type: integer, description: The review cap this session got when it was made.}
+        image_count: {type: integer, description: Pages.}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+        error: {type: string, description: Only on a failed session.}
+        expired_at: {type: string, format: date-time, description: Only once retention deleted its files.}
     Usage:
       type: object
       properties:
-        count: { type: integer }
-        total_ms: { type: integer }
-        max_ms: { type: integer }
-        input_tokens: { type: integer }
-        output_tokens: { type: integer }
-        cache_read_input_tokens: { type: integer }
-        cache_creation_input_tokens: { type: integer }
-        models: { type: array, items: { type: string } }
+        count: {type: integer}
+        total_ms: {type: integer}
+        max_ms: {type: integer}
+        input_tokens: {type: integer}
+        output_tokens: {type: integer}
+        cache_read_input_tokens: {type: integer}
+        cache_creation_input_tokens: {type: integer}
+        models: {type: array, items: {type: string}}
     Field:
       type: object
       required: [name, type, page]
       properties:
-        name: { type: string, description: The PDF's own field name. Send values under it. }
-        label: { type: string, description: The field's tooltip, when the PDF has one. }
-        type: { type: string, enum: [text, checkbox, radio, combobox, listbox, button, signature] }
-        page: { type: integer }
-        rect: { type: array, items: { type: number } }
-        options: { type: array, items: { type: string } }
-        required: { type: boolean }
-        readonly: { type: boolean }
-        maxlen: { type: [integer, "null"] }
-        editable: { type: boolean }
-        multiSelect: { type: boolean }
-        created: { type: boolean, description: A field iris-pdf would add to a flat form. }
+        name: {type: string, description: The PDF's own field name. Send values under it.}
+        label: {type: string, description: The field's tooltip, when the PDF has one.}
+        type: {type: string, enum: [text, checkbox, radio, combobox, listbox, button, signature]}
+        page: {type: integer}
+        rect: {type: array, items: {type: number}}
+        options: {type: array, items: {type: string}}
+        required: {type: boolean}
+        readonly: {type: boolean}
+        maxlen: {type: [integer, "null"]}
+        editable: {type: boolean}
+        multiSelect: {type: boolean}
+        created: {type: boolean, description: A field iris-pdf would add to a flat form.}
 
 paths:
   /v1/health:
@@ -164,16 +164,17 @@ paths:
                 type: object
                 required: [status, service, version]
                 properties:
-                  status: { type: string, enum: [ok] }
-                  service: { type: string }
-                  version: { type: string }
+                  status: {type: string, enum: [ok]}
+                  service: {type: string}
+                  version: {type: string}
 
   /v1/openapi.json:
     get:
       tags: [Deployment]
       summary: This document, as JSON
       responses:
-        "200": { description: The OpenAPI document. }
+        "200": {description: The OpenAPI document.}
+        "429": {$ref: "#/components/responses/Error"}
 
   /v1/stats:
     get:
@@ -189,17 +190,18 @@ paths:
                 type: object
                 required: [pages_processed, documents_processed, since]
                 properties:
-                  pages_processed: { type: integer, description: Pages delivered, counting each document's first run. }
-                  documents_processed: { type: integer }
-                  since: { type: [string, "null"], format: date-time, description: When the earliest counted document finished. }
+                  pages_processed: {type: integer, description: Pages delivered, counting each document's first run.}
+                  documents_processed: {type: integer}
+                  since: {type: [string, "null"], format: date-time, description: When the earliest counted document finished.}
                   quality:
                     type: [object, "null"]
                     description: "`null` until the last 30 days hold enough documents to say."
                     properties:
-                      window_days: { type: integer }
-                      documents: { type: integer }
-                      clean_rate: { type: number, description: Share of documents finished with nothing left open. }
-                      mean_rounds: { type: number, description: Average review rounds per document. }
+                      window_days: {type: integer}
+                      documents: {type: integer}
+                      clean_rate: {type: number, description: Share of documents finished with nothing left open.}
+                      mean_rounds: {type: number, description: Average review rounds per document.}
+        "429": {$ref: "#/components/responses/Error"}
 
   /v1/limits:
     get:
@@ -215,34 +217,35 @@ paths:
                 type: object
                 required: [max_pages, image, pdf, upload, rate_limits, tagged_pdf]
                 properties:
-                  max_pages: { type: integer }
+                  max_pages: {type: integer}
                   image:
                     type: object
                     properties:
-                      max_bytes: { type: integer }
-                      max_long_edge_px: { type: integer, description: The size the vision model reads at. }
-                      max_dimension_px: { type: integer }
-                      media_types: { type: array, items: { type: string } }
-                      extensions: { type: array, items: { type: string } }
-                      hint: { type: string, description: The limits as a sentence. }
-                  pdf: { type: object, properties: { max_pages: { type: integer } } }
-                  upload: { type: object, properties: { max_files: { type: integer }, max_request_bytes: { type: integer } } }
+                      max_bytes: {type: integer}
+                      max_long_edge_px: {type: integer, description: The size the vision model reads at.}
+                      max_dimension_px: {type: integer}
+                      media_types: {type: array, items: {type: string}}
+                      extensions: {type: array, items: {type: string}}
+                      hint: {type: string, description: The limits as a sentence.}
+                  pdf: {type: object, properties: {max_pages: {type: integer}}}
+                  upload: {type: object, properties: {max_files: {type: integer}, max_request_bytes: {type: integer}}}
                   rate_limits:
                     type: [object, "null"]
                     description: "`null` when limits are off."
                     properties:
-                      general_per_minute: { type: integer }
-                      upload_per_minute: { type: integer }
-                      max_upload_memory_mb: { type: integer }
-                      window_seconds: { type: integer }
-                  tagged_pdf: { type: boolean, description: Whether this deployment makes tagged PDFs. }
+                      general_per_minute: {type: integer}
+                      upload_per_minute: {type: integer}
+                      max_upload_memory_mb: {type: integer}
+                      window_seconds: {type: integer}
+                  tagged_pdf: {type: boolean, description: Whether this deployment makes tagged PDFs.}
+        "429": {$ref: "#/components/responses/Error"}
 
   /v1/me:
     get:
       tags: [Deployment]
       summary: Can I use this deployment?
       description: 200 means yes; 401 means it needs an API key. Also the review cap.
-      security: [{}, { apiKey: [] }]
+      security: [{}, {apiKey: []}]
       responses:
         "200":
           description: Usable.
@@ -251,15 +254,16 @@ paths:
               schema:
                 type: object
                 properties:
-                  defaults: { type: object, properties: { max_review_iterations: { type: integer } } }
-        "401": { $ref: "#/components/responses/Error" }
+                  defaults: {type: object, properties: {max_review_iterations: {type: integer}}}
+        "401": {$ref: "#/components/responses/Error"}
+        "429": {$ref: "#/components/responses/Error"}
 
   /v1/settings:
     get:
       tags: [Deployment]
       summary: How this deployment is set up
       description: Every non-secret setting as Iris uses it, and the model each agent resolves to. Never a key, token, URL, path or ARN.
-      security: [{}, { apiKey: [] }]
+      security: [{}, {apiKey: []}]
       responses:
         "200":
           description: The settings.
@@ -269,66 +273,67 @@ paths:
                 type: object
                 required: [version, access, run, retention_days, tagged_pdf, providers, agents]
                 properties:
-                  version: { type: string }
+                  version: {type: string}
                   access:
                     type: object
                     properties:
-                      api_key_required: { type: boolean }
-                      audit: { type: boolean }
-                      quality_report: { type: boolean }
+                      api_key_required: {type: boolean}
+                      audit: {type: boolean}
+                      quality_report: {type: boolean}
                   run:
                     type: object
                     properties:
-                      max_review_iterations: { type: integer }
-                      extraction_concurrency: { type: integer, description: Pages read at once. }
-                      max_concurrent_runs: { type: integer, description: Documents converted at once. }
-                      recheck_sample_size: { type: integer }
-                  retention_days: { type: [integer, "null"] }
+                      max_review_iterations: {type: integer}
+                      extraction_concurrency: {type: integer, description: Pages read at once.}
+                      max_concurrent_runs: {type: integer, description: Documents converted at once.}
+                      recheck_sample_size: {type: integer}
+                  retention_days: {type: [integer, "null"]}
                   tagged_pdf:
                     type: object
                     properties:
-                      on: { type: boolean }
-                      version: { type: [string, "null"] }
-                      timeout_seconds: { type: integer }
+                      on: {type: boolean}
+                      version: {type: [string, "null"]}
+                      timeout_seconds: {type: integer}
                   providers:
                     type: object
                     properties:
-                      default: { type: string }
+                      default: {type: string}
                       blocks:
                         type: object
                         additionalProperties:
                           type: object
                           properties:
-                            api: { type: string }
-                            region: { type: string }
-                            default_model: { type: string }
-                            per_capability: { type: object }
-                            max_tokens: { type: integer }
-                            prompt_cache: { type: boolean }
-                            prompt_cache_ttl: { type: string }
-                            inference_profiles: { type: array, items: { type: string } }
-                            prices: { type: object, description: US dollars per million tokens, by model, as the operator set them. }
+                            api: {type: string}
+                            region: {type: string}
+                            default_model: {type: string}
+                            per_capability: {type: object}
+                            max_tokens: {type: integer}
+                            prompt_cache: {type: boolean}
+                            prompt_cache_ttl: {type: string}
+                            inference_profiles: {type: array, items: {type: string}}
+                            prices: {type: object, description: US dollars per million tokens, by model, as the operator set them.}
                   agents:
                     type: array
                     items:
                       type: object
                       properties:
-                        agent: { type: string }
-                        kind: { type: string, enum: [core, specialist] }
-                        purpose: { type: [string, "null"] }
-                        models: { type: object, description: "Per capability (`vision`, `text`, `structured_output`): `{provider, model}`." }
-        "401": { $ref: "#/components/responses/Error" }
+                        agent: {type: string}
+                        kind: {type: string, enum: [core, specialist]}
+                        purpose: {type: [string, "null"]}
+                        models: {type: object, description: "Per capability (`vision`, `text`, `structured_output`): `{provider, model}`."}
+        "401": {$ref: "#/components/responses/Error"}
+        "429": {$ref: "#/components/responses/Error"}
 
   /v1/quality:
     get:
       tags: [Operators]
       summary: How good the output has been
       description: Rates over recent documents, for the weekly quality report. Cached for 60 seconds.
-      security: [{ qualityToken: [] }]
+      security: [{qualityToken: []}]
       parameters:
         - name: days
           in: query
-          schema: { type: integer, minimum: 1, maximum: 365, default: 30 }
+          schema: {type: integer, minimum: 1, maximum: 365, default: 30}
           description: The window, in days. Out-of-range values are clamped.
       responses:
         "200":
@@ -338,39 +343,40 @@ paths:
               schema:
                 type: object
                 properties:
-                  window_days: { type: integer, description: The window used. }
-                  documents: { type: integer, description: Documents delivered in the window. }
-                  files: { type: integer, description: Distinct uploads they came from. }
-                  documents_unhashed: { type: integer, description: Documents too old to have an upload hash. }
-                  since: { type: [string, "null"], format: date-time }
-                  mean_rounds: { type: number, description: Average copy-editor rounds per document. }
-                  unresolved_rate: { type: number, description: Finished with problems left open. }
-                  first_read: { type: object, description: What the reader found before anything was fixed. }
-                  unresolved_severity: { type: array, items: { type: object }, description: Problems left open, by severity. }
-                  review_stopped: { type: array, items: { type: object }, description: Why the review ended, by reason. }
-                  links_dropped_rate: { type: number, description: A link was lost by the copy editor. }
-                  links_unresolved_rate: { type: number, description: A link points nowhere in the document. }
-                  markup_unbalanced_rate: { type: number, description: An element is left unclosed. }
-                  table_no_body_rate: { type: number, description: A table has no content rows. }
-                  structural_defect_rate: { type: number, description: A label or reference names something missing. }
-                  lint_error_rate: { type: number, description: The accessibility check could not run. }
-                  lint_error_where: { type: array, items: { type: object } }
-                  documents_linted: { type: integer, description: Documents the check examined. }
-                  editor_truncated_rate: { type: number, description: A copy-editor answer was cut off. }
-                  editor_truncated_lost_rate: { type: number, description: Part of the document got no copy-editor pass. }
-                  editor_headings_gated_rate: { type: number, description: Edits were refused for losing headings. }
-                  review_unread_rate: { type: number, description: Part of the last read came back unusable. }
-                  unfinished_page_rate: { type: number, description: A page is marked as not fully transcribed. }
-                  rules: { type: array, items: { type: object }, description: Accessibility rules still failing, most common first. }
-        "401": { $ref: "#/components/responses/TokenError" }
-        "404": { $ref: "#/components/responses/TokenError" }
+                  window_days: {type: integer, description: The window used.}
+                  documents: {type: integer, description: Documents delivered in the window.}
+                  files: {type: integer, description: Distinct uploads they came from.}
+                  documents_unhashed: {type: integer, description: Documents too old to have an upload hash.}
+                  since: {type: [string, "null"], format: date-time}
+                  mean_rounds: {type: number, description: Average copy-editor rounds per document.}
+                  unresolved_rate: {type: number, description: Finished with problems left open.}
+                  first_read: {type: object, description: What the reader found before anything was fixed.}
+                  unresolved_severity: {type: array, items: {type: object}, description: Problems left open, by severity.}
+                  review_stopped: {type: array, items: {type: object}, description: Why the review ended, by reason.}
+                  links_dropped_rate: {type: number, description: A link was lost by the copy editor.}
+                  links_unresolved_rate: {type: number, description: A link points nowhere in the document.}
+                  markup_unbalanced_rate: {type: number, description: An element is left unclosed.}
+                  table_no_body_rate: {type: number, description: A table has no content rows.}
+                  structural_defect_rate: {type: number, description: A label or reference names something missing.}
+                  lint_error_rate: {type: number, description: The accessibility check could not run.}
+                  lint_error_where: {type: array, items: {type: object}}
+                  documents_linted: {type: integer, description: Documents the check examined.}
+                  editor_truncated_rate: {type: number, description: A copy-editor answer was cut off.}
+                  editor_truncated_lost_rate: {type: number, description: Part of the document got no copy-editor pass.}
+                  editor_headings_gated_rate: {type: number, description: Edits were refused for losing headings.}
+                  review_unread_rate: {type: number, description: Part of the last read came back unusable.}
+                  unfinished_page_rate: {type: number, description: A page is marked as not fully transcribed.}
+                  rules: {type: array, items: {type: object}, description: Accessibility rules still failing, most common first.}
+        "401": {$ref: "#/components/responses/TokenError"}
+        "404": {$ref: "#/components/responses/TokenError"}
+        "429": {$ref: "#/components/responses/Error"}
 
   /v1/suggestions:
     get:
       tags: [Operators]
       summary: Agents Iris suggested, for maintainers
       description: Saved suggestions for new or better agents, grouped. A workflow files them as issues.
-      security: [{ qualityToken: [] }]
+      security: [{qualityToken: []}]
       responses:
         "200":
           description: The suggestions.
@@ -379,21 +385,22 @@ paths:
               schema:
                 type: object
                 properties:
-                  new_agents: { type: array, items: { type: object } }
-                  agent_updates: { type: array, items: { type: object } }
-        "401": { $ref: "#/components/responses/TokenError" }
-        "404": { $ref: "#/components/responses/TokenError" }
+                  new_agents: {type: array, items: {type: object}}
+                  agent_updates: {type: array, items: {type: object}}
+        "401": {$ref: "#/components/responses/TokenError"}
+        "404": {$ref: "#/components/responses/TokenError"}
+        "429": {$ref: "#/components/responses/Error"}
 
   /v1/sessions:
     get:
       tags: [Sessions]
       summary: List sessions, newest first
       description: Every session belongs to the deployment, so this lists all of them.
-      security: [{}, { apiKey: [] }]
+      security: [{}, {apiKey: []}]
       parameters:
-        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
-        - { name: status, in: query, schema: { $ref: "#/components/schemas/SessionStatus" } }
-        - { name: cursor, in: query, schema: { type: string }, description: "`next_cursor` from the page before." }
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 20}}
+        - {name: status, in: query, schema: {$ref: "#/components/schemas/SessionStatus"}}
+        - {name: cursor, in: query, schema: {type: string}, description: "`next_cursor` from the page before."}
       responses:
         "200":
           description: One page of sessions.
@@ -408,18 +415,20 @@ paths:
                     items:
                       type: object
                       properties:
-                        session_id: { type: string }
-                        status: { $ref: "#/components/schemas/SessionStatus" }
-                        image_count: { type: integer }
-                        created_at: { type: string, format: date-time }
-                        updated_at: { type: string, format: date-time }
-                  next_cursor: { type: [string, "null"], description: "`null` on the last page." }
-        "400": { $ref: "#/components/responses/Error" }
+                        session_id: {type: string}
+                        status: {$ref: "#/components/schemas/SessionStatus"}
+                        image_count: {type: integer}
+                        created_at: {type: string, format: date-time}
+                        updated_at: {type: string, format: date-time}
+                  next_cursor: {type: [string, "null"], description: "`null` on the last page."}
+        "400": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+        "429": {$ref: "#/components/responses/Error"}
     post:
       tags: [Sessions]
       summary: Upload a document and start converting it
       description: Parts named `images`, in reading order. Each PDF page becomes an image. The run starts now, or waits in `queued`.
-      security: [{}, { apiKey: [] }]
+      security: [{}, {apiKey: []}]
       requestBody:
         required: true
         content:
@@ -428,7 +437,7 @@ paths:
               type: object
               required: [images]
               properties:
-                images: { type: array, items: { type: string, format: binary } }
+                images: {type: array, items: {type: string, format: binary}}
       responses:
         "201":
           description: Created.
@@ -437,62 +446,69 @@ paths:
               schema:
                 type: object
                 properties:
-                  session_id: { type: string }
-                  status: { $ref: "#/components/schemas/SessionStatus" }
-                  image_count: { type: integer }
-        "400": { $ref: "#/components/responses/Error" }
-        "413": { $ref: "#/components/responses/Error" }
-        "422": { $ref: "#/components/responses/Error" }
-        "429": { $ref: "#/components/responses/Error" }
+                  session_id: {type: string}
+                  status: {$ref: "#/components/schemas/SessionStatus"}
+                  image_count: {type: integer}
+        "400": {$ref: "#/components/responses/Error"}
+        "413": {$ref: "#/components/responses/Error"}
+        "422": {$ref: "#/components/responses/Error"}
+        "429": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
 
   /v1/sessions/{id}:
     get:
       tags: [Sessions]
       summary: Where a session is
-      security: [{}, { apiKey: [] }]
-      parameters: [{ $ref: "#/components/parameters/SessionId" }]
+      security: [{}, {apiKey: []}]
+      parameters: [{$ref: "#/components/parameters/SessionId"}]
       responses:
         "200":
           description: The session.
-          content: { application/json: { schema: { $ref: "#/components/schemas/Session" } } }
-        "404": { $ref: "#/components/responses/Error" }
+          content: {application/json: {schema: {$ref: "#/components/schemas/Session"}}}
+        "404": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+        "429": {$ref: "#/components/responses/Error"}
 
   /v1/sessions/{id}/output:
     get:
       tags: [Sessions]
       summary: The accessible HTML
       description: Once `ready_for_review`. Problems left open are listed in an `<!-- @unresolved -->` comment at the end.
-      security: [{}, { apiKey: [] }]
-      parameters: [{ $ref: "#/components/parameters/SessionId" }]
+      security: [{}, {apiKey: []}]
+      parameters: [{$ref: "#/components/parameters/SessionId"}]
       responses:
         "200":
           description: The document.
-          content: { text/html: { schema: { type: string } } }
-        "404": { $ref: "#/components/responses/Error" }
-        "409": { $ref: "#/components/responses/Error" }
-        "410": { $ref: "#/components/responses/Error" }
+          content: {text/html: {schema: {type: string}}}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "410": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+        "429": {$ref: "#/components/responses/Error"}
 
   /v1/sessions/{id}/logs:
     get:
       tags: [Sessions]
       summary: The run log
       description: One JSON line for each thing Iris did, written as it works. `/how-it-works` explains every line; the run-log section of docs/API.md defines the fields code reads.
-      security: [{}, { apiKey: [] }]
-      parameters: [{ $ref: "#/components/parameters/SessionId" }]
+      security: [{}, {apiKey: []}]
+      parameters: [{$ref: "#/components/parameters/SessionId"}]
       responses:
         "200":
           description: The log.
-          content: { application/x-ndjson: { schema: { type: string } } }
-        "404": { $ref: "#/components/responses/Error" }
-        "410": { $ref: "#/components/responses/Error" }
+          content: {application/x-ndjson: {schema: {type: string}}}
+        "404": {$ref: "#/components/responses/Error"}
+        "410": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+        "429": {$ref: "#/components/responses/Error"}
 
   /v1/sessions/{id}/diagnostics:
     get:
       tags: [Sessions]
       summary: Timing, tokens and health of the latest run
       description: Read from the run log. `in_flight` names the call a run is waiting on, if any.
-      security: [{}, { apiKey: [] }]
-      parameters: [{ $ref: "#/components/parameters/SessionId" }]
+      security: [{}, {apiKey: []}]
+      parameters: [{$ref: "#/components/parameters/SessionId"}]
       responses:
         "200":
           description: The summary.
@@ -501,37 +517,39 @@ paths:
               schema:
                 type: object
                 properties:
-                  session_id: { type: string }
-                  status: { $ref: "#/components/schemas/SessionStatus" }
-                  phase: { $ref: "#/components/schemas/Phase" }
-                  started_at: { type: [string, "null"] }
-                  last_event_at: { type: [string, "null"] }
-                  elapsed_ms: { type: [integer, "null"] }
-                  in_flight: { type: [object, "null"] }
-                  in_flight_count: { type: integer }
-                  phase_durations_ms: { type: object }
-                  model_calls: { type: object }
-                  tokens: { type: object }
-                  by_agent: { type: object, additionalProperties: { $ref: "#/components/schemas/Usage" } }
-                  by_step: { type: object, additionalProperties: { $ref: "#/components/schemas/Usage" } }
-                  slowest_calls: { type: array, items: { type: object } }
-                  errors: { type: array, items: { type: object } }
-                  verification: { type: object }
-        "404": { $ref: "#/components/responses/Error" }
-        "410": { $ref: "#/components/responses/Error" }
+                  session_id: {type: string}
+                  status: {$ref: "#/components/schemas/SessionStatus"}
+                  phase: {$ref: "#/components/schemas/Phase"}
+                  started_at: {type: [string, "null"]}
+                  last_event_at: {type: [string, "null"]}
+                  elapsed_ms: {type: [integer, "null"]}
+                  in_flight: {type: [object, "null"]}
+                  in_flight_count: {type: integer}
+                  phase_durations_ms: {type: object}
+                  model_calls: {type: object}
+                  tokens: {type: object}
+                  by_agent: {type: object, additionalProperties: {$ref: "#/components/schemas/Usage"}}
+                  by_step: {type: object, additionalProperties: {$ref: "#/components/schemas/Usage"}}
+                  slowest_calls: {type: array, items: {type: object}}
+                  errors: {type: array, items: {type: object}}
+                  verification: {type: object}
+        "404": {$ref: "#/components/responses/Error"}
+        "410": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+        "429": {$ref: "#/components/responses/Error"}
 
   /v1/sessions/{id}/feedback:
     post:
       tags: [Sessions]
       summary: Ask Iris to fix something, as a new run
       description: Only when `ready_for_review`. Iris decides whether to re-read pages or only review again; the run log's `feedback_scoped` line says which.
-      security: [{}, { apiKey: [] }]
-      parameters: [{ $ref: "#/components/parameters/SessionId" }]
+      security: [{}, {apiKey: []}]
+      parameters: [{$ref: "#/components/parameters/SessionId"}]
       requestBody:
         required: true
         content:
           application/json:
-            schema: { type: object, required: [feedback], properties: { feedback: { type: string } } }
+            schema: {type: object, required: [feedback], properties: {feedback: {type: string}}}
       responses:
         "202":
           description: Accepted. Poll the session again.
@@ -540,62 +558,68 @@ paths:
               schema:
                 type: object
                 properties:
-                  session_id: { type: string }
-                  status: { type: string, enum: [running, queued] }
-                  phase: { type: string, enum: [extraction] }
-        "400": { $ref: "#/components/responses/Error" }
-        "404": { $ref: "#/components/responses/Error" }
-        "409": { $ref: "#/components/responses/Error" }
-        "410": { $ref: "#/components/responses/Error" }
+                  session_id: {type: string}
+                  status: {type: string, enum: [running, queued]}
+                  phase: {type: string, enum: [extraction]}
+        "400": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "410": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+        "429": {$ref: "#/components/responses/Error"}
 
   /v1/sessions/{id}/close:
     post:
       tags: [Sessions]
       summary: Accept the document
       description: Its pages become examples that future page-agent changes are checked against.
-      security: [{}, { apiKey: [] }]
-      parameters: [{ $ref: "#/components/parameters/SessionId" }]
+      security: [{}, {apiKey: []}]
+      parameters: [{$ref: "#/components/parameters/SessionId"}]
       responses:
         "200":
           description: Closed.
           content:
             application/json:
-              schema: { type: object, properties: { session_id: { type: string }, status: { type: string, enum: [closed] } } }
-        "404": { $ref: "#/components/responses/Error" }
-        "409": { $ref: "#/components/responses/Error" }
-        "410": { $ref: "#/components/responses/Error" }
+              schema: {type: object, properties: {session_id: {type: string}, status: {type: string, enum: [closed]}}}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "410": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+        "429": {$ref: "#/components/responses/Error"}
 
   /v1/sessions/{id}/fields:
     get:
       tags: [Tagged PDF]
       summary: The PDF's form fields
       description: For a flat form, the fields iris-pdf would add. Needs one uploaded PDF.
-      security: [{}, { apiKey: [] }]
-      parameters: [{ $ref: "#/components/parameters/SessionId" }]
+      security: [{}, {apiKey: []}]
+      parameters: [{$ref: "#/components/parameters/SessionId"}]
       responses:
         "200":
           description: The fields.
           content:
             application/json:
-              schema: { type: object, properties: { fields: { type: array, items: { $ref: "#/components/schemas/Field" } } } }
-        "404": { $ref: "#/components/responses/Error" }
-        "409": { $ref: "#/components/responses/Error" }
-        "410": { $ref: "#/components/responses/Error" }
-        "500": { $ref: "#/components/responses/Error" }
-        "503": { $ref: "#/components/responses/Error" }
-        "504": { $ref: "#/components/responses/Error" }
+              schema: {type: object, properties: {fields: {type: array, items: {$ref: "#/components/schemas/Field"}}}}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "410": {$ref: "#/components/responses/Error"}
+        "500": {$ref: "#/components/responses/Error"}
+        "503": {$ref: "#/components/responses/Error"}
+        "504": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+        "429": {$ref: "#/components/responses/Error"}
 
   /v1/sessions/{id}/pdf:
     post:
       tags: [Tagged PDF]
       summary: The original PDF, tagged, with its form filled in
       description: Once `ready_for_review`. Values are never stored or logged. In audit mode the report adds `detail`.
-      security: [{}, { apiKey: [] }]
-      parameters: [{ $ref: "#/components/parameters/SessionId" }]
+      security: [{}, {apiKey: []}]
+      parameters: [{$ref: "#/components/parameters/SessionId"}]
       requestBody:
         content:
           application/json:
-            schema: { type: object, properties: { values: { type: object, description: Field name to value. } } }
+            schema: {type: object, properties: {values: {type: object, description: Field name to value.}}}
       responses:
         "200":
           description: The PDF and iris-pdf's report.
@@ -604,24 +628,26 @@ paths:
               schema:
                 type: object
                 properties:
-                  filename: { type: string }
-                  pdf: { type: string, contentEncoding: base64 }
-                  report: { type: object, description: "What iris-pdf did and checked: source, pages, structure, form, verification, warnings, and in audit mode detail." }
-        "400": { $ref: "#/components/responses/Error" }
-        "404": { $ref: "#/components/responses/Error" }
-        "409": { $ref: "#/components/responses/Error" }
-        "410": { $ref: "#/components/responses/Error" }
-        "422": { $ref: "#/components/responses/Error" }
-        "500": { $ref: "#/components/responses/Error" }
-        "503": { $ref: "#/components/responses/Error" }
-        "504": { $ref: "#/components/responses/Error" }
+                  filename: {type: string}
+                  pdf: {type: string, contentEncoding: base64}
+                  report: {type: object, description: "What iris-pdf did and checked: source, pages, structure, form, verification, warnings, and in audit mode detail."}
+        "400": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "410": {$ref: "#/components/responses/Error"}
+        "422": {$ref: "#/components/responses/Error"}
+        "500": {$ref: "#/components/responses/Error"}
+        "503": {$ref: "#/components/responses/Error"}
+        "504": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+        "429": {$ref: "#/components/responses/Error"}
 
   /v1/sessions/{id}/audit:
     get:
       tags: [Audit]
       summary: What audit mode kept for a session
-      security: [{}, { apiKey: [] }]
-      parameters: [{ $ref: "#/components/parameters/SessionId" }]
+      security: [{}, {apiKey: []}]
+      parameters: [{$ref: "#/components/parameters/SessionId"}]
       responses:
         "200":
           description: The list, with a URL for each item.
@@ -630,68 +656,78 @@ paths:
               schema:
                 type: object
                 properties:
-                  session_id: { type: string }
-                  pages: { type: array, items: { type: object, properties: { order: { type: integer }, name: { type: string }, media_type: { type: string }, bytes: { type: integer }, sha256: { type: string }, url: { type: string } } } }
-                  files: { type: array, items: { type: object, properties: { name: { type: string }, bytes: { type: integer }, url: { type: string } } } }
-                  runs: { type: array, items: { type: object } }
-                  prompts: { type: object, properties: { count: { type: integer }, url: { type: string } } }
-        "404": { $ref: "#/components/responses/Error" }
-        "410": { $ref: "#/components/responses/Error" }
+                  session_id: {type: string}
+                  pages: {type: array, items: {type: object, properties: {order: {type: integer}, name: {type: string}, media_type: {type: string}, bytes: {type: integer}, sha256: {type: string}, url: {type: string}}}}
+                  files: {type: array, items: {type: object, properties: {name: {type: string}, bytes: {type: integer}, url: {type: string}}}}
+                  runs: {type: array, items: {type: object}}
+                  prompts: {type: object, properties: {count: {type: integer}, url: {type: string}}}
+        "404": {$ref: "#/components/responses/Error"}
+        "410": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+        "429": {$ref: "#/components/responses/Error"}
 
   /v1/sessions/{id}/audit/pages/{order}:
     get:
       tags: [Audit]
       summary: A page image, as the models saw it
-      security: [{}, { apiKey: [] }]
+      security: [{}, {apiKey: []}]
       parameters:
-        - { $ref: "#/components/parameters/SessionId" }
-        - { name: order, in: path, required: true, schema: { type: integer } }
+        - {$ref: "#/components/parameters/SessionId"}
+        - {name: order, in: path, required: true, schema: {type: integer}}
       responses:
-        "200": { description: The image. }
-        "404": { $ref: "#/components/responses/Error" }
+        "200": {description: The image.}
+        "404": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+        "429": {$ref: "#/components/responses/Error"}
 
   /v1/sessions/{id}/audit/files/{name}:
     get:
       tags: [Audit]
       summary: One of the session's working files
-      security: [{}, { apiKey: [] }]
+      security: [{}, {apiKey: []}]
       parameters:
-        - { $ref: "#/components/parameters/SessionId" }
+        - {$ref: "#/components/parameters/SessionId"}
         - name: name
           in: path
           required: true
-          schema: { type: string, enum: [final.json, lint.json, links.json, fields.json, text-layer.json, unresolved.md, agent-updates.md, source.pdf] }
+          schema: {type: string, enum: [final.json, lint.json, links.json, fields.json, text-layer.json, unresolved.md, agent-updates.md, source.pdf]}
       responses:
-        "200": { description: The file. }
-        "404": { $ref: "#/components/responses/Error" }
+        "200": {description: The file.}
+        "404": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+        "429": {$ref: "#/components/responses/Error"}
 
   /v1/sessions/{id}/audit/prompts/{hash}:
     get:
       tags: [Audit]
       summary: One message as sent to a model
       description: Named by a `model_call_start` line's `prompt`.
-      security: [{}, { apiKey: [] }]
+      security: [{}, {apiKey: []}]
       parameters:
-        - { $ref: "#/components/parameters/SessionId" }
-        - { name: hash, in: path, required: true, schema: { type: string, pattern: "^[0-9a-f]{64}$" } }
+        - {$ref: "#/components/parameters/SessionId"}
+        - {name: hash, in: path, required: true, schema: {type: string, pattern: "^[0-9a-f]{64}$"}}
       responses:
         "200":
           description: The text.
-          content: { text/plain: { schema: { type: string } } }
-        "404": { $ref: "#/components/responses/Error" }
+          content: {text/plain: {schema: {type: string}}}
+        "404": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+        "429": {$ref: "#/components/responses/Error"}
 
   /v1/sessions/{id}/audit/runs/{run}/{name}:
     get:
       tags: [Audit]
       summary: The document at one step of a run
       description: Sent as plain text, so a browser does not run it.
-      security: [{}, { apiKey: [] }]
+      security: [{}, {apiKey: []}]
       parameters:
-        - { $ref: "#/components/parameters/SessionId" }
-        - { name: run, in: path, required: true, schema: { type: integer } }
-        - { name: name, in: path, required: true, schema: { type: string, pattern: "^(assembled|round-[0-9]+)$" } }
+        - {$ref: "#/components/parameters/SessionId"}
+        - {name: run, in: path, required: true, schema: {type: integer}}
+        - {name: name, in: path, required: true, schema: {type: string, pattern: "^(assembled|round-[0-9]+)$"}}
       responses:
         "200":
           description: The document body.
-          content: { text/plain: { schema: { type: string } } }
-        "404": { $ref: "#/components/responses/Error" }
+          content: {text/plain: {schema: {type: string}}}
+        "404": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+        "429": {$ref: "#/components/responses/Error"}

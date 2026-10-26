@@ -7,7 +7,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { parse } from "yaml";
-import { validate } from "./openapi-validate.mjs";
+import { validate } from "./openapi-validate.ts";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const spec = parse(readFileSync(join(root, "docs", "openapi.yaml"), "utf8"));
@@ -44,10 +44,12 @@ test("the spec names every route the code serves, and no other", () => {
 
 test("the spec lists every error code Iris sends, and none it does not", () => {
   const sent = new Set<string>();
-  const dirs = ["src/routes", "src/util", "src/auth"];
-  for (const d of dirs) {
-    for (const f of readdirSync(join(root, d)).filter((n) => n.endsWith(".ts"))) {
-      const src = read(d, f);
+  // Every source file, so a code sent from anywhere new is caught too.
+  const files = (readdirSync(join(root, "src"), { recursive: true }) as string[]).filter((n) => n.endsWith(".ts"));
+  assert.ok(files.length > 30, "the source walk found too few files");
+  {
+    for (const f of files) {
+      const src = read("src", f);
       for (const m of src.matchAll(/sendError\(\s*res,\s*\d{3},\s*"([a-z_]+)"/g)) sent.add(m[1]);
       for (const m of src.matchAll(/status === 413 \? "([a-z_]+)" : "([a-z_]+)"/g)) { sent.add(m[1]); sent.add(m[2]); }
     }
@@ -79,4 +81,20 @@ test("the schema check finds what it should", () => {
   assert.deepEqual(validate(s, { a: 1, b: null, c: "x" }, {}), []);
   assert.deepEqual(validate(s, { a: 1.5, b: 2, c: "y" }, {}), ["$.a: expected integer, got number", "$.b: expected string or null, got number", '$.c: "y" is not one of x']);
   assert.deepEqual(validate(s, {}, {}), ["$: missing a"]);
+});
+
+// The key gate and the rate limiter sit in front of whole mounts (src/index.ts), so every
+// operation behind them can answer their status, and the spec has to say so.
+test("every operation behind the API key can answer 401, and every /v1 one but health 429", () => {
+  const missing: string[] = [];
+  for (const [path, ops] of Object.entries(spec.paths as Record<string, Record<string, { security?: Record<string, unknown>[]; responses: Record<string, unknown> }>>)) {
+    for (const [method, op] of Object.entries(ops)) {
+      if ((op.security ?? []).some((x) => "apiKey" in x) && !op.responses["401"]) missing.push(`${method} ${path} 401`);
+      if (path !== "/v1/health" && !op.responses["429"]) missing.push(`${method} ${path} 429`);
+    }
+  }
+  assert.deepEqual(missing, []);
+  // And the mounts really are gated as the spec says: every /v1/sessions, /v1/me and /v1/settings mount has `auth`.
+  const index = read("src", "index.ts");
+  for (const m of index.matchAll(/app\.use\("(\/v1\/(?:sessions|me|settings))",\s*(\w+)/g)) assert.equal(m[2], "auth", `${m[1]} is mounted without auth`);
 });
