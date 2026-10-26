@@ -261,11 +261,15 @@ test("the settings and inputs tables all have column headers, and say the settin
     providers: { default: "openrouter", openrouter: { default_model: "m-1" } },
     defaults: { max_review_iterations: 2, extraction_concurrency: 5, max_concurrent_runs: 2, recheck_sample_size: 1 },
   } as never);
-  const html = lib.settingsHtml(st, { max_pages: 25 });
+  const html = lib.settingsHtml(st, null);
   const tables = html.split("<table>").slice(1);
-  assert.ok(tables.length >= 2, "the core and specialist tables");
+  assert.ok(tables.length >= 1, "the specialist table");
   for (const t of tables) assert.match(t.slice(0, t.indexOf("</table>")), /<thead><tr><th scope="col">/);
-  for (const words of ["Up to 2 review rounds per document.", "Up to 5 pages read at the same time.", "Up to 25 pages per document."]) assert.ok(html.includes(words), words);
+  // Each setting is said once, in the step it shapes, and not again in the deployment section.
+  const limits = { max_pages: 25, upload: { max_files: 25 }, rate_limits: { upload_per_minute: 12, general_per_minute: 240 } };
+  const at = (k: string) => lib.stageSettings(k, [], st, limits, null);
+  for (const [k, words] of [["upload", "up to 25 pages in up to 25 files"], ["upload", "up to 2 documents converted at once"], ["upload", "12 uploads and 240 requests a minute"], ["pages", "up to 5 pages at a time"], ["review", "up to 2 rounds"]]) assert.ok(at(k).includes(words), k + ": " + words);
+  for (const words of ["review round", "pages read at the same time", "pages per document", "converted at once"]) assert.ok(!html.includes(words), "the deployment section repeats: " + words);
 });
 test("the process panel says each step's state, count and time", () => {
   const t = (s: number) => new Date(Date.UTC(2026, 9, 25, 12, 0, s)).toISOString();
@@ -367,11 +371,12 @@ test("each step's Settings line names its caps and models, the run's model befor
   const ev = [{ type: "model_call", agent: "page", step: "extract", model: "us.used-model" }];
   assert.equal(lib.modelFor(ev, st, "page", "extract", "vision"), "used-model");
   const pages = lib.stageSettings("pages", ev, st, null, null);
-  for (const part of ["up to 5 pages at a time", "page agent: used-model", "checker: configured-model", "a failed page is fixed once", "1 fixed page checked again", "12 specialist agents available"]) assert.ok(pages.includes(part), part);
+  for (const part of ["up to 5 pages at a time", "page agent: used-model", "checker: configured-model", "1 fixed page checked again", "12 specialist agents available"]) assert.ok(pages.includes(part), part);
   // The session's own cap wins over the deployment's: it was fixed when the session was made.
   assert.ok(lib.stageSettings("review", [], st, null, { iterations_max: 3 }).includes("up to 3 rounds"));
   assert.ok(lib.stageSettings("review", [], st, null, null).includes("up to 2 rounds"));
-  assert.ok(lib.stageSettings("result", [], st, null, null).includes("files kept 30 days"));
+  // Retention is said once, where the deployment says who can see what.
+  assert.ok(lib.settingsHtml(st, null).includes("deleted 30 days after"));
   assert.ok(lib.stageSettings("join", [], st, null, null).includes("colour contrast is not checked"));
 });
 
