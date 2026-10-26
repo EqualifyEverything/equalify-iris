@@ -36,6 +36,7 @@ Requests are rate limited per client, and every response says how much of the bu
 
 ```bash
 export BASE=http://localhost:8080/v1
+export AUTH="Authorization: Bearer $IRIS_TOKEN"   # where the deployment sets a token
 ```
 
 ## Health (unauthenticated)
@@ -566,6 +567,10 @@ There is no sign-in. A deployment is open (send no header) or gated (send `Autho
 ## Create a session (upload images)
 
 `POST /v1/sessions`, one `images` part per page or PDF, in reading order. Exact contract: [`docs/openapi.yaml`](openapi.yaml). What the page step then checks in code, and why, is in [design notes](design-notes.md#what-code-checks-on-each-page-and-why).
+
+```bash
+export SID=$(curl -s -H "$AUTH" -F images=@page1.png -F images=@page2.png "$BASE/sessions" | jq -r .session_id)
+```
 
 ### Upload limits (unauthenticated)
 
