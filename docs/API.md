@@ -4339,7 +4339,7 @@ All errors share one shape, except `/v1/quality` and `/v1/suggestions`, which an
 ```json
 { "error": { "code": "invalid_state", "message": "Human-readable description", "details": {} } }
 ```
-The codes, and which endpoint answers which, are in [`docs/openapi.yaml`](openapi.yaml) (`ErrorCode`).
+The codes and their statuses are in [`docs/openapi.yaml`](openapi.yaml) (`ErrorCode`).
 
 ### When a run fails
 

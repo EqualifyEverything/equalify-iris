@@ -2874,9 +2874,8 @@ read as they do.
   missing content were never in the source. One page short, and saying so, is better than a page
   that lies about being complete. The same holds for a reply that is a JSON envelope or an apology.
 - **Two ceilings say they are not the deployment's.** Without that, the advice "raise `max_tokens`"
-  would be followed and change nothing. Before the page correction was capped, one such call ran to
-  the full 32,000 tokens on a page whose render cost 6,233, and the reply was discarded as
-  truncated: 5.13x the first pass's bill for output nothing read.
+  would be followed and change nothing. The correction's cap is [The output ceiling a correction
+  asks for](#the-output-ceiling-a-correction-asks-for).
 - **Zero characters is not a size problem.** A model that streams reasoning as its own channel
   counts it as output tokens, not reply. A larger ceiling is a bet that the thinking ends inside it,
   and a lost bet is billed for the whole of the new ceiling. One extract call in a 100-page
@@ -2887,7 +2886,7 @@ read as they do.
   explanation. `test/bedrock-output-ceiling.test.ts` pins it, with a margin of a few characters:
   lengthening that sentence means measuring the cut again.
 - **"No page in 19 chars of HTML" is not "no HTML".** A comment or a bare page-break marker is HTML.
-  An earlier message reported the reply's whole length under a message that said none of it was
+  The first version of this message reported the reply's whole length while saying none of it was
   markup.
 
 ## Running the service

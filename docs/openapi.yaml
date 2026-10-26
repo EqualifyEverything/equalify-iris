@@ -85,11 +85,15 @@ components:
         through as well, such as `permissions_denied` or `values_not_permitted`.
 
         - 400 `invalid_request`, also any other 4xx refused while reading the request.
-        - 401 `unauthorized`. 404 `session_not_found`, or `not_found` for no such route.
-        - 409 `invalid_state`: the session is not in a state that allows this.
+        - 401 `unauthorized`.
+        - 404 `session_not_found`; `not_found` for no such route; `audit_off`; `tagged_pdf_unavailable`.
+        - 409 `invalid_state`: the session is not in a state that allows this. `no_source_pdf`.
         - 410 `session_expired`: past retention.
         - 413 `upload_too_large`, or `body_too_large` for a JSON body over 2 MB.
-        - 429 `rate_limited`, with `Retry-After`. 500 `server_error`.
+        - 422 `pdf_conversion_failed`: an uploaded PDF could not be read.
+        - 429 `rate_limited`, with `Retry-After`.
+        - 500 `server_error`; `tagger_failed`.
+        - 503 `busy`, with `Retry-After`. 504 `timeout`.
       x-codes:
         - invalid_request
         - body_too_large
