@@ -1975,6 +1975,8 @@ said is read ([`editor_salvaged`](#editor_salvaged)) and only the rest is re-mad
 
 - `max_tokens`, `chars` returned, `error`, and `attached` / `of` images. `after: "images_refused"`
   when it was the retry without images that truncated.
+- An error recognized as a truncation by its message only (it lost its type on the way) carries just
+  `attached`, `of` and `error`: no `max_tokens`, `chars` or excerpts.
 - `reply_head` / `reply_tail` (#277): the first and last 240 characters. A reply under 480
   characters is all in `reply_head`, with no `reply_tail`. Absent on a reply of no text.
 - `blocks_named`: how many `"block"` keys the reply wrote. A count of a key, not a parse, so a
@@ -2365,7 +2367,8 @@ not gate on them (#375). It is `editor_patch`'s `navigation_lost` reading for th
 
 Nothing is refused on this line. A section is read on its own, so one sanctioned deletion silences
 only that section, and no heading can move between sections. It is not part of
-`editor_headings_gated_rate`, which counts blocks that were handed back. Why there is no refusal:
+`editor_headings_gated_rate`, which counts documents where at least one round had blocks handed
+back; adding these rounds would mix a guard that acted with a reading nobody acted on. Why there is no refusal:
 [design notes — salvaging a truncated round](design-notes.md#salvaging-a-truncated-round).
 
 ### `assembly`
