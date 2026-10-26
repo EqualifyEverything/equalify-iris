@@ -1709,151 +1709,113 @@ ship as they arrived.
 
 ### `table_joined`
 
-Two halves were merged into one table: `by` (`"code"` or `"editor"`, which path produced the
-merge), the merged `caption`, `rows_first` / `rows_second` / `rows_joined`, `chars_before` /
-`chars_after` for the two halves against the one table, and — on the editor path only — that
-editor's own `editor_log`. On `by: "code"` only, the two halves' own bytes as well
-(`halves` / `chars_first` / `chars_second` / `html_first` / `html_second`, exactly as
-[`table_join_code_declined`](#table_join_code_declined) carries them and documented there): a
-candidate loosening of the free path has to be scored on the pairs it must not break as well as on the
-pairs it would newly take, and these are the first population. The presence rule is `by`, which is on
-every line, so the population is countable. A paid join does not repeat them because the decline that
-bought it is the same pair's bytes, on the line immediately before — and since a pair's identity in
-this loop **is** those two strings, the two lines can be matched on the bytes rather than on their
-order.
+Two halves of a table split across a page were merged into one.
 
-A table printed across three or more pages is joined one pair per pass, so the second pass's first half
-**is** the first pass's merged table: `chars_first` on the later line equals `chars_after` on the earlier
-one, and the first two pieces' rows are on both. That is what the later pass judged, so a replay of that
-line needs it. It also means the retention figures below are a corpus's cost and not a ceiling — the
-ceiling is per line, and per document it is the 12 pairs the loop can reach.
+- `by`: `"code"` (no model call) or `"editor"` (a Copy Editor call). Read this, not the agent
+  ledger: a code join never reaches the ledger.
+- `caption` (up to 200 characters), `rows_first`, `rows_second`, `rows_joined`, `chars_before` (both
+  halves), `chars_after` (the merged table).
+- `editor_log`: on `by: "editor"`, when the editor wrote one.
+- On `by: "code"` only: the halves' own bytes (`halves`, `chars_first`, `chars_second`, `html_first`,
+  `html_second`), as documented under [`table_join_code_declined`](#table_join_code_declined). A paid
+  join does not repeat them: the decline just before it carries the same pair's bytes, and matches it
+  on those bytes.
+- A table across three or more pages is joined one pair per pass, so a later line's `chars_first`
+  equals an earlier line's `chars_after`.
+- `rows_joined` below `rows_first + rows_second` is not a defect. The merge drops the reprinted
+  header block, and may drop one bracketed note row, or exactly the rows the joined caption absorbed.
 
-**The merge is not a plain concatenation**, because the halves do not always agree on what to
-concatenate: a continued page can declare a different column count, the repeated header block can
-carry footnote-reference ids an endnote links back to, and the bracketed unit note a continued page
-reprints belongs in the joined table exactly once. Where one of those judgements is real the merge is
-a Copy Editor call (`copy_editor_table_join.md` in the agent ledger); where it is not, it is made in
-code and costs nothing.
-
-**Read `by` rather than the agent ledger to tell the two apart.** A pair joined in code never reaches
-the ledger, so a run's `table_joined` count and its `copy_editor_table_join.md` call count are
-different numbers on purpose.
-
-**`rows_joined` below `rows_first + rows_second` is not a defect.** The merge drops the duplicated
-header block the continued page reprinted, and it may drop one bracketed note row — or, where the
-joined caption absorbed note rows, exactly the rows it absorbed. Both paths go through the same
-verification, which is what makes this line trustworthy: one table, a caption without the
-continuation marker, no column lost, a header block still made of `<th>` cells, every distinct row
-label from either half still present as a cell somewhere, and the rows accounted for. What each of
-those checks is for, and how much slack the row floor allows, is in
-[design notes](design-notes.md#what-is-deterministic-and-what-the-answer-is-checked-against).
+Both paths pass the same verification: one table, a caption without the continuation marker, no
+column lost, a `<th>` header block, every row label kept, and the rows accounted for
+([design notes](design-notes.md#what-is-deterministic-and-what-the-answer-is-checked-against)).
 
 ### `table_join_code_declined`
 
-The merge was tried in code on this pair and stood down, so a Copy Editor call was bought for it: the
-second half's `caption` and the `reason`. Logged on **every** pair the code path did not take, because
-the share it takes is what a later round has to be able to re-measure and
-[`table_joined`](#table_joined) alone cannot tell a free join from a paid one.
+The code path stood down on this pair, so a Copy Editor call was bought for it. Logged on every pair
+the code path did not take. A decline costs nothing more: the pair goes to the editor as before. How
+often it fires depends on the extraction, not the code
+([design notes](design-notes.md#joining-a-table-split-across-a-page-turn)); per-run totals are
+`tables.code_declined` in [Diagnostics](#diagnostics-timing--hang-detection).
 
-**A decline costs nothing.** The pair goes to the editor exactly as it did before this path existed.
+`caption` is the second half's (up to 200 characters). `reason`:
 
 | `reason` | What stood the code path down |
 | --- | --- |
-| `header_differs` | The second half's header block is not the first half's, so which one describes the joined rows is a reading of the table |
-| `columns_differ` | A row of the continued page is wider than the first half already is. Reached where the continued page reprinted no header at all — the case the header comparison cannot see |
-| `id_would_be_lost` | An id on the half being dropped has no free counterpart to move onto: a footnote-reference anchor in the repeated header block, or an id on both halves' own `<caption>` or `<table>` element, where keeping one live target means choosing which |
-| `id_would_collide` | The join would print one id twice, a defect it would have introduced |
-| `note_repeat_unclear` | The continued page opens with a bracketed unit note the first half does not carry, so it is not the reprint rule 6 licenses dropping. "Carry" reads the first half's note rows **and** its caption, since the two halves need not agree on where they print it. The reverse is not a repeat: a note only the continued half carries is a first appearance |
-| `note_repeats_exceed_licence` | The join would drop more bracketed note rows as repeats than the row floor forgives, and joining anyway would come back `rows_lost` |
-| `caption_unclear` | The continuation marker is not wholly inside one text node, so taking it off means rewriting markup |
-| `no_caption_available` | Neither half has a caption, which the verification requires |
-| `content_outside_table` | A half's span parses to something beside its own table — the parser fosters a stray `<p>` out of a `<table>` and the joined table's `outerHTML` would not carry it. The one way this path can lose content where a model reply cannot |
-| `tfoot_no_tbody` | The first half has no `<tbody>` to append to and has a `<tfoot>`, so the rows would land after the table's own summary |
-| `unreadable` | A half holding no `<table>` |
-| `read_failed` | A parse **threw** — on a half, or on the merged candidate |
-| `verify:<reason>` | A code merge the same verification as [`table_join_failed`](#table_join_failed) refused. A refusal and a throw are different lines: only the throw is `read_failed` |
+| `header_differs` | The second half's header block is not the first half's |
+| `columns_differ` | A row of the continued page is wider than the first half. Reached where the continued page reprinted no header |
+| `id_would_be_lost` | An id on the dropped half has nowhere to move: a footnote-reference anchor in the repeated header, or an id on both halves' own `<caption>` or `<table>` |
+| `id_would_collide` | The join would print one id twice |
+| `note_repeat_unclear` | The continued page opens with a bracketed unit note the first half (its note rows or caption) does not carry. A note only the continued half carries is a first appearance, not a repeat |
+| `note_repeats_exceed_licence` | Dropping the repeated note rows would exceed the row floor, so the join would come back `rows_lost` |
+| `caption_unclear` | The continuation marker is not wholly inside one text node |
+| `no_caption_available` | Neither half has a caption |
+| `content_outside_table` | A half's span parses to something beside its table, such as a fostered `<p>`, which the joined table would lose |
+| `tfoot_no_tbody` | The first half has a `<tfoot>` and no `<tbody>`, so rows would land after the summary |
+| `unreadable` | A half holds no `<table>` |
+| `read_failed` | A parse threw, on a half or on the merged candidate |
+| `verify:<reason>` | The verification refused the code merge (reasons as in [`table_join_failed`](#table_join_failed)) |
 
-Every decline carries both halves' header blocks, because a header comparison is evidence about a
-`columns_differ` decline too:
-
-| Field | What it holds |
-| --- | --- |
-| `headers_identical` | String equality on the two **full** signatures, computed at the line rather than left to a reader of the capped `header_first` / `header_second` strings |
-| `header_rows_first` / `header_cells_first` / `header_rows_second` / `header_cells_second` | The size of each half's whole header block. `cells` counts every child of a header row, `<td>` included, because the signature does and because a header block returning as `<td>` is its own defect (`header_cells_lost`) |
-| `header_first` / `header_second` | The signatures as rule 3 compares them: per header cell, tag name, `colspan` and normalized text, cells joined with `\|` and rows with ` // `. Capped at 1,200 characters with a trailing `…` when cut |
-
-Four things to know before counting these:
-
-- **`cells` is the field that says whether a half declared a header block at all.** A header row
-  holding no cells reports `rows: 1, cells: 0` with an empty signature, which a rows-only reading
-  takes for a real header.
-- **`headers_identical: false` with a zero cell count beside it is a page that reprinted no header,
-  not two readings disagreeing.** Rule 3 skips the comparison entirely for such a pair. Count with the
-  cell counts, not without them.
-- **A signature is not re-splittable into a cell count.** A cell's own text can contain `|`; that is
-  what the four counts are for.
-- **All seven are absent in two cases and `reason` does not separate them** — do not read absence as
-  one reason, or one reason as absence. They are absent for `unreadable`, a half with no `<table>` to
-  read them from, and for the `read_failed` that is the **join itself** throwing on a half no parser
-  can read. The **other** `read_failed` is the verification throwing while it parses the merged
-  candidate, and there all seven are present. A half with a `<table>` but no header block is present
-  too, with an empty signature and `0` for both counts.
-
-The halves' own bytes are on the line as well, which is what makes a decline re-scorable:
+Both halves' header blocks:
 
 | Field | What it holds |
 | --- | --- |
-| `html_first` / `html_second` | The two halves exactly as the source delivered them |
-| `halves` | `"logged"` when the bytes are on the line, `"too_large"` when they are not. Always present |
-| `chars_first` / `chars_second` | Always present, so what an over-large pair dropped is measurable |
+| `headers_identical` | Whether the two full signatures are equal, computed before the cap |
+| `header_rows_first`, `header_cells_first`, `header_rows_second`, `header_cells_second` | Each half's header block size. `cells` counts every child of a header row, `<td>` included |
+| `header_first`, `header_second` | The signatures: per header cell, tag name, `colspan` and normalized text, cells joined with `\|`, rows with ` // `. Cut at 1,200 characters with a trailing `…` |
 
-Read the bytes back with `pairFromHalves` (exported from `src/pipeline/tables.ts`) rather than with a
-fresh parse, because that rebuilds the pair the round was holding and the free path then returns the
-verdict it returned in the round. A rebuilt half's `start` / `end` are offsets into itself, so a merge
-produced from a replay must not be spliced into anything.
+- `cells` says whether a half declared a header at all. A header row with no cells is `rows: 1,
+  cells: 0` and an empty signature.
+- `headers_identical: false` beside a zero cell count is a page that reprinted no header, not two
+  readings disagreeing. Count with the cell counts.
+- A signature cannot be split back into cells, since a cell's text can hold `|`.
+- All seven are absent for `unreadable`, and for a `read_failed` where the join threw on a half.
+  They are present for a `read_failed` where the verification threw on the merged candidate, and for
+  a half with a `<table>` and no header (empty signature, zero counts). `reason` alone does not tell
+  the two `read_failed`s apart.
 
-`halves` is present even when the bytes are, because presence alone cannot be counted: a re-score has
-to be able to say *N of M declines replayable* straight off the log, and the bound is a constant in
-the code that a reader of an old log has no way to know. A line written before this field is neither
-value, and reads as not replayable, which is what it is. The bound is 64,000 characters for the pair
-and it **refuses rather than truncates**, unlike the capped header signatures — half a table's bytes
-parse to a different table.
+The halves' own bytes, so a decline can be scored again without a run:
 
-**The run log carries page content, not only metadata about it.** These fields hold table markup from
-the submitted document verbatim. `GET /v1/sessions/{id}/logs` and the diagnostics route are both
-owner-scoped, so the only reader is whoever submitted the document, and `/v1/quality` publishes
-aggregates with no log text in them. Worth knowing before a run log is attached to a bug report or
-exported somewhere the document itself would not go.
+| Field | What it holds |
+| --- | --- |
+| `html_first`, `html_second` | The two halves exactly as delivered |
+| `halves` | `"logged"` when the bytes are on the line, `"too_large"` when the pair is over 64,000 characters, which is refused, not cut. Always present; absent only on old lines, which are not replayable |
+| `chars_first`, `chars_second` | Always present |
 
-**How often this line fires is not a property of the code.** The free path has taken 24–53% of pairs
-across rounds of the same rules on the same corpus — so this line fired on the other 47–76% — with
-nothing in the repo changing, because the disagreement is usually between two extractions of one
-printed header. Per-run totals are folded into `tables` in
-[Diagnostics](#diagnostics-timing--hang-detection) as `code_declined` and
-`code_declined_with_halves`. What the variability means for anyone re-measuring the free share, and
-why the guards are not loosened, is in
-[design notes — joining a table split across a page turn](design-notes.md#joining-a-table-split-across-a-page-turn).
+Read the bytes back with `pairFromHalves` (`src/pipeline/tables.ts`), not a fresh parse, so the free
+path returns the verdict it returned in the round. A rebuilt half's `start` and `end` are offsets into
+itself, so never splice a replayed merge into anything.
+
+**These fields hold the document's table markup verbatim.** The logs and diagnostics are visible to
+whoever can read the session, and `/v1/quality` publishes no log text. Keep that in mind before
+attaching a run log to a bug report.
 
 ### `table_join_failed`
 
-One pair was left as two tables. **The document keeps both halves byte for byte**, so every failure
-here delivers the output the pipeline had before this stage existed — unlike a correction round, a
-refusal costs one table's structure and not the document. A pair that failed is not asked again in the
-same run, since the next pass would send the same two tables to the same prompt, so one unjoinable
-pair does not starve the joinable pair after it.
+One pair was left as two tables. The document keeps both halves byte for byte, so a failure costs
+one table's structure, not the document. A failed pair is not asked again in the same run.
 
-`reason` is one of two groups. The pair never reached a verified answer:
+The fields depend on how it failed:
+
+- `reason: "read_failed", stage: "body"`: the assembled body would not parse, so no pair was joined.
+  One line per run, with no other fields. (jsdom overflows on a body nested a few hundred thousand
+  levels deep; the document then ships as it arrived.)
+- `unmatched_source` or `not_adjacent`: the source bytes cannot delimit the pair (see
+  [`table_continuations`](#table_continuations)). `caption` only.
+- `truncated` or `call_failed`: the request did not come back. `caption` and `error` (up to 300
+  characters).
+- Every other reason: `caption`, `rows_first`, `rows_second`, and `editor_log` when the editor wrote
+  one.
+
+`caption` is the second half's, up to 200 characters. Before a verified answer:
 
 | `reason` | What happened |
 | --- | --- |
-| `unmatched_source` / `not_adjacent` | The source bytes cannot delimit the pair (see [`table_continuations`](#table_continuations)). Reported with a caption and nothing else — there are no halves to replay |
 | `declined` | The editor judged the halves not to be one table |
-| `no_output` | A reply with no HTML in it |
-| `truncated` / `call_failed` | A request that did not come back |
-| `read_failed` | Markup no parser could read, with `stage: "body"` when it was the document rather than the reply. jsdom parses by recursion and overflows on a body nested a few hundred thousand levels deep, which is reachable because `anchors.ts` delivers a page past 500 levels as written. The document then ships exactly as it arrived rather than failing the phase, the way the lint one step later reports its own overflow as `@lint-unavailable` |
+| `no_output` | The reply had no HTML |
+| `read_failed` | The reply was markup no parser could read |
 
-Or the answer came back and the verification refused it. These are checked in this order, and the
-order is only which reason a failed pair reports:
+The answer came back and the verification refused it, checked in this order (the order decides which
+reason a pair reports):
 
 | `reason` | What the merge did to the table |
 | --- | --- |
@@ -1861,48 +1823,32 @@ order is only which reason a failed pair reports:
 | `no_caption` | The joined table has no caption |
 | `still_continued` | The continuation marker is still in the caption |
 | `columns_lost` | A column went |
-| `header_cells_lost` | The merged header block came back as `<td>`, which axe does not report and which removes the header association from the one table this stage exists to improve. Counted over the cells that describe columns, so a bracketed note row printed inside the block is not one of them |
-| `rows_lost` | Rows went, counted against both halves' rows less the collapsed header block and less an allowance that is the **larger** of one row and the note rows the joined **caption** absorbed, never their sum — a note promoted into the caption is content kept |
-| `labels_lost:<n>` | `n` row labels went. A bracketed unit note the merge moved from a row into the caption counts as kept, because the label check reads `th,td` and would otherwise refuse the very drop rule 6 licenses |
-| `caption_note_lost` | A bracketed note **either** half's caption carried is in neither the joined caption nor a row some half printed |
-| `caption_note_struck` | The note is still in the table, as a row a half printed where it printed it, and missing only from the caption rule 4 says to **copy** |
-| `note_shipped_twice` | The joined table holds one note in its caption **and** as a row |
-| `note_row_lost` | A note **neither** caption carried, printed by a half as a row, gone from the delivered table and not in the caption either |
+| `header_cells_lost` | The header block came back as `<td>`. Counted over cells that describe columns, not note rows |
+| `rows_lost` | Rows went, against both halves' rows less the collapsed header and less the **larger** of one row and the note rows the caption absorbed |
+| `labels_lost:<n>` | `n` row labels went. A note moved from a row into the caption counts as kept |
+| `caption_note_lost` | A bracketed note either half's caption carried is in neither the joined caption nor a row |
+| `caption_note_struck` | The note is still a row where a half printed it, but missing from the caption |
+| `note_shipped_twice` | One note is both in the caption and a row |
+| `note_row_lost` | A note neither caption carried, printed as a row, is gone and not in the caption |
 
-The four note reasons are last on purpose: a merge that dropped the note *and* lost rows should say
-`rows_lost`, because the note is the cheapest of these losses and would otherwise mask the dearest.
-Among the four the order is lost, then struck, then doubled, then `note_row_lost`, so that each reason
-names what happened to the note rather than the first condition that happens to hold.
+The note reasons come last so that a merge that also lost rows says `rows_lost`. Limits of the note
+checks:
 
-Three limits to know before triaging a run off the note reasons:
+- They match exact characters, in a caption or a note row only. A reworded or moved note reads as
+  lost, and the pair safely ships split.
+- ASCII and fullwidth brackets are read; parentheses are not (`(continued` must be dropped). A
+  parenthesised or undelimited note can go missing unseen.
+- Every bracketed run in either caption is owed, such as `[Sheet 2 of 3]`. Two captions with
+  different runs, such as `[In millions of dollars]` and `[In thousands]`, can never join.
 
-- **A note the merge kept in any form these cannot see reads as a note lost.** They match a run's
-  exact characters and look only in a caption or a note row, so a rewritten delimiter, a reworded note
-  or a note moved elsewhere in the table all refuse. Every such refusal is safe — the pair declines and
-  both halves ship — and every one costs a join that lost nothing.
-- **Both bracket widths are read, ASCII and fullwidth. The parenthesised spelling is not**, because a
-  check demanding every parenthesised run survive would demand the survival of `(continued`, which
-  rule 4 requires dropped. So a parenthesised note, and a note printed with no delimiter at all, can
-  go missing without this seeing it.
-- **It is a shape test and not a reading**, so every bracketed run in either caption is owed, not only
-  a note of measure. A caption carrying `[Sheet 2 of 3]` is owed too, and two captions carrying
-  different runs — `[In millions of dollars]` against `[In thousands]` — can be satisfied by no joined
-  caption that does not invent, so that pair declines for good and reports the loss rather than the
-  units disagreement that actually happened.
-
-Why the note rules are shaped this way, what each of them cost before it existed, and what the row
-floor forgives is in
-[design notes — the bracketed unit note](design-notes.md#the-bracketed-unit-note).
+Why: [design notes, the bracketed unit note](design-notes.md#the-bracketed-unit-note).
 
 ### `table_joins_capped`
 
-The document had more continuation pairs than one run will spend requests on (`joined`, `pending`,
-`max`), and the `pending` ones ship split. Present only when pairs remain. The cap is not a bound
-anything measured comes near — the worst 25-page chunk of the reference corpus has 7 pairs — and
-since #276 a pass need not cost anything at all, because a pair the code path takes buys no
-request. It bounds **passes**, not spend: a body that keeps producing pairs needs something to
-stop on. Pairs are re-read from the body each pass, which is how a table in three pieces closes:
-joining the first two leaves a document whose remaining half now follows a joined table.
+More continuation pairs than one run will try (`joined`, `pending`, `max`). The `pending` pairs ship
+split. Only when pairs remain. `max` is `MAX_TABLE_JOINS` (12), a bound on passes, not on spend:
+the worst 25-page chunk of the reference corpus has 7 pairs, and a code join buys no request. Pairs
+are re-read each pass, which is how a table in three pieces closes.
 
 ### `prose_joined`
 
