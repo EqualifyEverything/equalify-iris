@@ -120,31 +120,19 @@ test("both provider blocks in the example name the same model", () => {
   for (const id of ids) assert.ok(cacheableSystemPrompt(id, long), `${id} would silently disable prompt caching`);
 });
 
-// The one number the example's model choice PUBLISHES, checked against the place it is
-// published. `GET /v1/limits` derives `max_long_edge_px` from the configured model, and
-// docs/API.md prints a sample response with the value spelled out — so a model change in the
-// example config silently makes the documented sample wrong, and a client that hardcoded it
-// from the docs (which "Upload limits" exists to talk them out of) downscales to the wrong edge.
-//
-// Asserted against the docs rather than against 1568, so this is a drift check and not a
-// second copy of the number: whoever changes the model has one file left to update and this
-// says which. The prose above the sample quotes the same figure beside the model's name.
-test("the long edge the example publishes is the one the API sample prints", () => {
+// The one number the example's model choice publishes. `GET /v1/limits` works out `max_long_edge_px`
+// from the configured model, so a doc that prints the number goes stale when the model changes. The
+// docs now avoid printing it (docs/openapi.yaml points at `GET /v1/limits` instead); any copy that
+// does appear, as a JSON sample or as "(N px on <model>", must still be the configured model's.
+test("any long edge the docs print is the one the example config publishes", () => {
   credentials();
   const resolved = resolveImageLimits(loadConfig(EXAMPLE)).max_long_edge_px;
-
-  const docs = readFileSync(fileURLToPath(new URL("../docs/API.md", import.meta.url)), "utf8");
-  const printed = docs.match(/"max_long_edge_px":\s*(\d+)/g) ?? [];
-  assert.equal(printed.length, 1, `docs/API.md prints max_long_edge_px ${printed.length} times`);
-  assert.equal(Number(printed[0]!.match(/(\d+)/)![1]), resolved);
-
-  // The prose above the sample states the same number beside the model's name, and it is the
-  // copy a reader is more likely to act on than the JSON. Only the figure is asserted — the
-  // model NAME is deliberately not pinned anywhere in this file, since the name is allowed to
-  // change and this suite's whole approach to #176 is to assert agreement instead.
-  const sentence = docs.match(/long-edge limit \((\d+) px on /);
-  assert.ok(sentence, "docs/API.md no longer states the long edge in prose; drop this or repoint it");
-  assert.equal(Number(sentence[1]), resolved, "the prose long edge and the configured model disagree");
+  for (const rel of ["../docs/API.md", "../docs/openapi.yaml", "../docs/design-notes.md"]) {
+    const docs = readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
+    for (const m of docs.matchAll(/"max_long_edge_px":\s*(\d+)|long-edge limit \((\d+) px on /g)) {
+      assert.equal(Number(m[1] ?? m[2]), resolved, `${rel} prints a long edge of ${m[1] ?? m[2]}, and the example config resolves ${resolved}`);
+    }
+  }
 });
 
 // The examples an operator uncomments, actually uncommented. They sit under `per_agent`, whose
