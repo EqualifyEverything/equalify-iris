@@ -410,7 +410,10 @@
       const fixed = new Set(events.filter((e) => e.type === 'page_corrected' && e.result === 'kept').map((e) => e.image));
       for (const e of events) {
         switch (e.type) {
-          case 'page_extraction_failed': add('high', 'Page ' + e.page + ' could not be read, so the document is missing it: ' + e.error, e.type); break;
+          case 'page_extraction_failed':
+            if (e.kept === 'prior') add('info', 'Page ' + e.page + ' could not be re-read, so it keeps its earlier version: ' + e.error, e.type);
+            else add('high', 'Page ' + e.page + ' could not be read, so the document is missing it: ' + e.error, e.type);
+            break;
           case 'page_no_output': add('medium', 'The page agent\'s answer for ' + e.image + ' had no usable HTML.', e.type); break;
           case 'page_verify_failed': if (!fixed.has(e.image)) add('high', e.image + ' failed the check and no fix was kept, so it was delivered with these problems: ' + e.problems.join(' / '), e.type); break;
           case 'page_correction_declined': add('info', 'On page ' + e.page + ' the page agent refused ' + plural(e.declined.length, 'claim') + ' from the check as untrue. Read its reasons: ' + e.declined.map((d) => d.why).join(' / '), e.type); break;
@@ -420,7 +423,6 @@
           case 'editor_patch': if (e.discarded) add('medium', 'A review round\'s fixes were all thrown away, because the reply would have lost content (' + e.discarded.replace(/_/g, ' ') + ').', e.type); break;
           case 'editor_truncated': add('medium', 'A review round\'s answer was cut off at the model\'s length limit, so some fixes may be missing.', e.type); break;
           case 'assembly': if (!e.lint_ok && e.violations === undefined) add('high', 'axe-core could not check the document, so nothing was checked for accessibility: ' + (e.lint_error || ''), e.type); break;
-          case 'lint_unavailable': add('high', 'axe-core could not check the document' + (e.stage ? ' (' + String(e.stage).replace(/_/g, ' ') + ')' : '') + ', so it was delivered unchecked: ' + (e.lint_error || 'no message'), e.type); break;
           case 'lint_unavailable': add('high', 'axe-core could not check the document' + (e.stage ? ' (' + String(e.stage).replace(/_/g, ' ') + ')' : '') + ', so it was delivered unchecked: ' + (e.lint_error || 'no message'), e.type); break;
           case 'model_call': if (!e.ok) add('medium', 'A call to ' + e.model + ' (' + e.agent + ') failed: ' + e.error, e.type); break;
           case 'run_complete':
@@ -484,7 +486,9 @@
       const written = new Set(ev.filter((e) => e.type === 'agent_call' && e.agent === 'page.md' && e.image).map((e) => e.image)).size;
       const checkedOk = ev.filter((e) => e.type === 'page_verify_ok').length, checkedBad = ev.filter((e) => e.type === 'page_verify_failed').length;
       const fixed = ev.filter((e) => e.type === 'page_corrected' && e.result === 'kept').length;
-      const lost = ev.filter((e) => e.type === 'page_extraction_failed').length;
+      // A re-read that throws keeps the page's earlier version (`kept: "prior"`): not lost.
+      const lost = ev.filter((e) => e.type === 'page_extraction_failed' && e.kept !== 'prior').length;
+      const keptPrior = ev.filter((e) => e.type === 'page_extraction_failed' && e.kept === 'prior').length;
       const asm = ev.find((e) => e.type === 'assembly');
       const rounds = ev.filter((e) => e.type === 'reader').length;
       const rc = ev.find((e) => e.type === 'run_complete');
@@ -499,13 +503,21 @@
       const tEnd = rc ? Date.parse(rc.ts) : null;
       const now = opts.now || Date.now();
       const st = (doneCond, workingCond, problemCond) => (problemCond ? 'problem' : doneCond ? 'done' : workingCond ? 'working' : failed ? 'skipped' : 'waiting');
+      // Feedback was sent, and the new run has not logged its first line yet (Iris is deciding what to redo).
+      if (opts.pendingFeedback) {
+        return [
+          { key: 'upload', label: 'Feedback', state: 'working', detail: 'deciding what to redo', href: '#stage-start' },
+          ...['read', 'check', 'join', 'review', 'result'].map((key) => ({ key, label: { read: 'Read each page', check: 'Check each page', join: 'Join and check', review: 'Review', result: 'Result' }[key], state: 'waiting', detail: '', href: '#stage-' + (key === 'read' || key === 'check' ? 'pages' : key) })),
+          { key: 'pdf', label: 'Tagged PDF (optional)', state: 'skipped', detail: '', href: '#stage-pdf' },
+        ];
+      }
       const steps = [
         rerun
           ? { key: 'upload', label: 'Feedback', state: 'done', detail: scope ? (scope.target === 'extraction' ? 're-read ' + (reext ? 'page ' + reext.pages.join(', ') : 'some pages') : 'review again, pages kept') : 'deciding what to redo', href: '#stage-start' }
           : { key: 'upload', label: 'Upload', state: session ? 'done' : 'waiting', detail: session ? plural(n, 'page') : '', href: '#stage-start' },
         keptPages
           ? { key: 'read', label: 'Read each page', state: 'skipped', detail: 'kept from the run before', href: '#stage-pages' }
-          : { key: 'read', label: 'Read each page', state: st(has('extraction_complete') || has('reextract_complete'), phase === 'extraction' && !failed, lost > 0), detail: session ? (reext ? written + ' of ' + reext.pages.length + ' re-read' : written + ' of ' + n + ' written') + (lost ? ', ' + lost + ' lost' : '') : '', seconds: secs(t0, tExtract || (phase === 'extraction' && !finished ? now : null)), href: '#stage-pages' },
+          : { key: 'read', label: 'Read each page', state: st(has('extraction_complete') || has('reextract_complete'), phase === 'extraction' && !failed, lost > 0), detail: session ? (reext ? written + ' of ' + reext.pages.length + ' re-read' : written + ' of ' + n + ' written') + (lost ? ', ' + lost + ' lost' : '') + (keptPrior ? ', ' + keptPrior + ' kept the earlier version' : '') : '', seconds: secs(t0, tExtract || (phase === 'extraction' && !finished ? now : null)), href: '#stage-pages' },
         keptPages
           ? { key: 'check', label: 'Check each page', state: 'skipped', detail: 'kept from the run before', href: '#stage-pages' }
           : { key: 'check', label: 'Check each page', state: st(has('extraction_complete') || has('reextract_complete'), checkedOk + checkedBad > 0 && phase === 'extraction', false), detail: checkedOk + checkedBad ? checkedBad + ' failed, ' + fixed + ' fixed' : '', href: '#stage-pages' },
@@ -541,7 +553,8 @@
         li.querySelector('.state').textContent = STATE_WORD[x.state] + (x.detail ? ': ' + x.detail : '') + (x.seconds != null ? ' · ' + x.seconds + ' s' : '');
       });
       if (!state.id) { lastSteps = null; return; }
-      const said = lastSteps ? changeSummary(lastSteps, steps) : [firstSummary(steps, state.id, state.uploaded)];
+      // While feedback is pending, say nothing: "Feedback sent" stays in the status region until the run starts.
+      const said = state.pendingFeedback ? [] : lastSteps ? changeSummary(lastSteps, steps) : [firstSummary(steps, state.id, state.uploaded)];
       lastSteps = new Map(steps.map((x) => [x.key, x.state]));
       if (said.length) live(said.join(' '));
     }
@@ -1013,7 +1026,9 @@
 
       // The process panel.
       const pdfState = state.pdfBusy ? 'working' : state.pdf ? (state.pdf.report ? 'done' : 'failed') : null;
-      const steps = processSteps(ev, latest ? s : { ...(s || {}), status: ev.some((e) => e.type === 'run_failed') ? 'failed' : 'ready_for_review', phase: 'done' }, { maxRounds: s && s.iterations_max, pdf: pdfState, pdfOn: state.limits ? Boolean(state.limits.tagged_pdf) : undefined });
+      // Pending until the new run's first line (run_start) is in the log.
+      if (state.pendingFeedback && runs.length > state.pendingFeedback.runs) state.pendingFeedback = null;
+      const steps = processSteps(ev, latest ? s : { ...(s || {}), status: ev.some((e) => e.type === 'run_failed') ? 'failed' : 'ready_for_review', phase: 'done' }, { maxRounds: s && s.iterations_max, pdf: pdfState, pdfOn: state.limits ? Boolean(state.limits.tagged_pdf) : undefined, pendingFeedback: Boolean(state.pendingFeedback) && latest });
       updateProcess(steps);
 
       // Now.
@@ -1034,7 +1049,7 @@
       if (rs1 && rs1.feedback) {
         const fbLines = ev.filter((e) => ['feedback_rerun', 'feedback_scoped', 'reextract_start', 'page_lessons_injected', 'feedback_learned', 'run_queued', 'run_dequeued'].includes(e.type));
         patch($('stage-start'), '<h3>1. Feedback</h3><p>' + AI + ' Your feedback: <q>' + esc(rs1.feedback) + '</q></p>'
-          + '<p>' + CODE + ' The earlier document is kept, and the feedback is given to every agent in this run. ' + (fbScope ? esc(explain(fbScope)) : '') + '</p><ul>' + fbLines.filter((e) => e !== fbScope).map((e) => '<li>' + esc(explain(e)) + '</li>').join('') + '</ul>');
+          + '<p>' + CODE + ' The feedback is given to every agent in this run. ' + (fbScope ? esc(explain(fbScope)) : 'Iris is deciding what to redo.') + '</p><ul>' + fbLines.filter((e) => e !== fbScope).map((e) => '<li>' + esc(explain(e)) + '</li>').join('') + '</ul>');
       } else patch($('stage-start'), '<h3>1. Upload</h3>' + stageSettings('upload', ev, state.settings, state.limits, s) + '<p>' + CODE + ' Each page became an image' + (n ? ' (' + plural(n, 'page') + ')' : '') + '.</p><ul>' + startEvents.map((e) => '<li>' + esc(explain(e)) + '</li>').join('') + '</ul>');
 
       // 2. Pages.
@@ -1137,7 +1152,7 @@
         const r = await call('feedback', 'POST', '/sessions/' + state.id + '/feedback', { body: JSON.stringify({ feedback: text }), extra: "-H 'Content-Type: application/json' -d '{\"feedback\":\"…\"}'", plain: 'Your feedback. Iris works on the same document again, as a new run of this session.' });
         if (!r.res.ok) throw new Error((r.data && r.data.error && r.data.error.message) || r.res.statusText);
         // Follow the new run like an upload: the latest run is shown, and polling starts again.
-        Object.assign(state, { run: null, done: false, output: null, diagnostics: null, fields: null, pdf: null });
+        Object.assign(state, { run: null, done: false, output: null, diagnostics: null, fields: null, pdf: null, pendingFeedback: { runs: runsOf(state.events).length } });
         live('Feedback sent. Iris is working on the document again, as run ' + (runsOf(state.events).length + 1) + '.');
         $('progress-h').focus();
         clearTimeout(state.timer);

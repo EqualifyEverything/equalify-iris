@@ -465,6 +465,20 @@ test("an axe check that could not run on a re-run is a problem to look at", () =
   assert.deepEqual(lib.problems([{ type: "lint_unavailable", stage: "feedback_relint", lint_error: "boom" }]).map((p) => [p.level, p.text]), [["high", "axe-core could not check the document (feedback relint), so it was delivered unchecked: boom"]]);
 });
 
-test("an axe check that could not run on a re-run is a problem to look at", () => {
-  assert.deepEqual(lib.problems([{ type: "lint_unavailable", stage: "feedback_relint", lint_error: "boom" }]).map((p) => [p.level, p.text]), [["high", "axe-core could not check the document (feedback relint), so it was delivered unchecked: boom"]]);
+test("a re-read page that keeps its earlier version is not reported as lost", () => {
+  const steps = lib.processSteps([
+    { type: "feedback_scoped", target: "extraction", pages: [2] }, { type: "run_start", feedback: "fix page 2" },
+    { type: "reextract_start", pages: [2], of: 6 }, { type: "page_extraction_failed", page: 2, kept: "prior", error: "cut off" },
+    { type: "reextract_complete", pages: [], failed: [2] },
+  ], { status: "running", phase: "assembly", image_count: 6 }, {});
+  const read = steps.find((x) => x.key === "read")!;
+  assert.equal(read.state, "done");
+  assert.match(read.detail, /1 kept the earlier version/);
+  assert.deepEqual(lib.problems([{ type: "page_extraction_failed", page: 2, kept: "prior", error: "cut off" }]).map((p) => p.level), ["info"]);
+});
+
+test("while feedback is being routed, the panel says so and nothing else runs yet", () => {
+  const steps = lib.processSteps([], { status: "running", phase: "extraction", image_count: 6 }, { pendingFeedback: true });
+  assert.deepEqual(steps.map((x) => [x.key, x.state]), [["upload", "working"], ["read", "waiting"], ["check", "waiting"], ["join", "waiting"], ["review", "waiting"], ["result", "waiting"], ["pdf", "skipped"]]);
+  assert.equal(steps[0].detail, "deciding what to redo");
 });
