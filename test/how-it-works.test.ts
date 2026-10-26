@@ -46,7 +46,7 @@ const lib = new Function(
    const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]); const AI = ''; const CODE = '';
    const plural = (n, one, many) => n + ' ' + (n === 1 ? one : (many || one + 's'));
    ${pure}
-   return { md, apiGroups, fieldRows, apiHtml, feedbackFormHtml, firstSummary, changeSummary, stageSettings, modelFor, usageByStage, usageLine, settingsHtml, processSteps, pdfReportHtml, PDF_WARN, parseLog, parseReply, explain, SAY, runsOf, pagesFrom, roundsFrom, problems, unresolvedFrom, stagesFrom, curl };`,
+   return { answerHtml, md, apiGroups, fieldRows, apiHtml, feedbackFormHtml, firstSummary, changeSummary, stageSettings, modelFor, usageByStage, usageLine, settingsHtml, processSteps, pdfReportHtml, PDF_WARN, parseLog, parseReply, explain, SAY, runsOf, pagesFrom, roundsFrom, problems, unresolvedFrom, stagesFrom, curl };`,
 )(index) as {
   parseLog(t: string): Record<string, unknown>[];
   parseReply(o: unknown): Record<string, unknown> | null;
@@ -58,6 +58,7 @@ const lib = new Function(
   fieldRows(spec: unknown, schema: unknown, value: unknown): { path: string; value: string; meaning: string }[];
   apiHtml(spec: unknown): string;
   md(t: string): string;
+  answerHtml(i: number, a: unknown): string;
   firstSummary(steps: unknown[], id: string, uploaded: boolean): string;
   changeSummary(prev: Map<string, string>, steps: unknown[]): string[];
   stageSettings(key: string, ev: unknown[], st: unknown, limits: unknown, session: unknown): string;
@@ -243,7 +244,8 @@ test("every request field a route reads is an input in the OpenAPI document, in 
       found.push(["body", m[1]]);
     }
   }
-  assert.ok(found.length >= 7, `only ${found.length} inputs found; the patterns above stopped matching`);
+  const distinct = new Set(found.map(([w, n]) => w + " " + n));
+  assert.ok(distinct.size >= 7, `only ${distinct.size} distinct inputs found; the patterns above stopped matching`);
   const ops = lib.apiGroups(spec).flatMap((g) => g.ops) as unknown as { params: { name: string; in: string }[]; body: { name: string }[] }[];
   const listed = new Set(ops.flatMap((o) => [...o.params.filter((p) => p.in === "query").map((p) => "query " + p.name), ...o.body.map((b) => "body " + b.name)]));
   assert.deepEqual(found.map(([w, n]) => w + " " + n).filter((x) => !listed.has(x)).sort(), [], "a route reads an input the API section does not show where it is read");
@@ -524,6 +526,16 @@ test("an answer inside an array is explained from the item schema", () => {
 test("the API section, rendered, passes the same axe check", async () => {
   const html = howItWorksPage(page, apiMd).replace('<div id="api-body"><p>Loading…</p></div>', '<div id="api-body">' + lib.apiHtml(spec) + "</div>");
   assert.ok(html.includes('data-k="api0"'), "the section was put in the page");
+  // And a Try-it answer in each of its shapes, in the first card's answer area.
+  const rows = [{ path: "status", value: "ok", meaning: "`ok` when up" }];
+  const answers = [
+    lib.answerHtml(0, { status: 200, description: "Up.", rows, raw: '{"status":"ok"}' }),
+    lib.answerHtml(1, { status: 200, description: "The image.", rows: [], imageUrl: "blob:x", bytes: "9 bytes of image/png." }),
+    lib.answerHtml(2, { status: 200, description: "The log.", rows: [], summary: "3 lines of the run log.", raw: "{}" }),
+  ].join("");
+  const withAnswers = html.replace('<div class="api-answer" id="api-answer-0"></div>', '<div class="api-answer" id="api-answer-0">' + answers + "</div>");
+  assert.ok(withAnswers.includes("blob:x"), "the answers were put in the page");
+  assert.deepEqual((await runAxe(withAnswers)).violations, []);
   const r = await runAxe(html);
   assert.deepEqual(r.violations, []);
 });

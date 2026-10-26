@@ -874,6 +874,15 @@
         + (tryable ? '<button type="button" class="secondary" data-try="' + i + '">Try it</button>' : '') + (action ? '<p>' + action + '</p>' : '')
         + '<div class="api-answer" id="api-answer-' + i + '"></div></details>';
     }
+    // One Try-it answer: its status and meaning, then the fields explained (or the image, or a size),
+    // then the raw answer for text.
+    function answerHtml(i, a) {
+      const body = a.imageUrl ? '<img src="' + esc(a.imageUrl) + '" alt="The page image this call returned" style="max-width:20rem">'
+        : a.bytes && !a.rows.length ? '<p>' + esc(a.bytes) + '</p>'
+        : a.rows.length ? '<table><thead><tr><th scope="col">Field</th><th scope="col">Value</th><th scope="col">What it means</th></tr></thead><tbody>' + a.rows.map((x) => '<tr><td><code>' + esc(x.path) + '</code></td><td>' + esc(x.value) + '</td><td>' + md(x.meaning) + '</td></tr>').join('') + '</tbody></table>'
+        : '<p>' + esc(a.summary) + '</p>';
+      return '<p><strong>' + a.status + '</strong> ' + md(a.description) + '</p>' + body + (a.raw ? det('raw' + i, 'The answer itself', '<pre tabindex="0">' + esc(a.raw) + '</pre>') : '');
+    }
     function apiHtml(spec) {
       if (!spec) return '<p>This deployment did not serve its API description.</p>';
       let i = 0;
@@ -1288,12 +1297,13 @@
         const resp = deref(state.spec, (o.op.responses || {})[String(r.res.status)]) || {};
         const schema = resp.content && resp.content['application/json'] && resp.content['application/json'].schema;
         const rows = r.data ? fieldRows(state.spec, schema, r.data) : [];
-        const body = r.blob && type.startsWith('image/') ? '<img src="' + URL.createObjectURL(r.blob) + '" alt="The page image this call returned" style="max-width:20rem">'
-          : r.blob ? '<p>' + r.blob.size.toLocaleString() + ' bytes of ' + esc(type.split(';')[0]) + '.</p>'
-          : rows.length ? '<table><thead><tr><th scope="col">Field</th><th scope="col">Value</th><th scope="col">What it means</th></tr></thead><tbody>' + rows.map((x) => '<tr><td><code>' + esc(x.path) + '</code></td><td>' + esc(x.value) + '</td><td>' + md(x.meaning) + '</td></tr>').join('') + '</tbody></table>'
-          : '<p>' + esc(type.includes('ndjson') ? r.text.split('\n').filter(Boolean).length + ' lines of the run log.' : type.includes('html') || type.includes('text') ? r.text.length.toLocaleString() + ' characters of text.' : '') + '</p>';
-        out.innerHTML = '<p><strong>' + r.res.status + '</strong> ' + md(resp.description || '') + '</p>' + body
-          + (type.startsWith('image/') || type.includes('pdf') ? '' : det('raw' + i, 'The answer itself', '<pre tabindex="0">' + esc(r.text.slice(0, 6000)) + '</pre>'));
+        if (out.dataset.url) URL.revokeObjectURL(out.dataset.url);
+        const imageUrl = r.blob && type.startsWith('image/') ? URL.createObjectURL(r.blob) : '';
+        if (imageUrl) out.dataset.url = imageUrl;
+        out.innerHTML = answerHtml(i, { status: r.res.status, description: resp.description || '', rows, imageUrl,
+          bytes: r.blob ? r.blob.size.toLocaleString() + ' bytes of ' + type.split(';')[0] + '.' : '',
+          summary: type.includes('ndjson') ? r.text.split('\n').filter(Boolean).length + ' lines of the run log.' : type.includes('html') || type.includes('text') ? r.text.length.toLocaleString() + ' characters of text.' : '',
+          raw: r.blob ? '' : r.text.slice(0, 6000) });
         live('Answer ' + r.res.status + ' from ' + o.method + ' ' + o.path + '.');
       } catch (e) {
         out.innerHTML = '<p class="status-bad">The call failed: ' + esc(e.message) + '</p>';
