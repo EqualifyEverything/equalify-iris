@@ -371,9 +371,9 @@ if (brand.logo) {
 // Keep the old /demo path working for any shared links.
 app.get("/demo", (_req, res) => res.redirect(302, "/"));
 // The technical walkthrough (public/how-it-works.html): the same API, explained step by step. Each run
-// log event's meaning comes from docs/API.md's index (eventIndex.ts), so the page and the reference
+// log event's meaning comes from docs/run-log.md's index (eventIndex.ts), so the page and the reference
 // cannot disagree.
-const apiMd = fileURLToPath(new URL("../docs/API.md", import.meta.url));
+const apiMd = fileURLToPath(new URL("../docs/run-log.md", import.meta.url));
 const howItWorksHtml = howItWorksPage(
   readFileSync(fileURLToPath(new URL("../public/how-it-works.html", import.meta.url)), "utf8"),
   existsSync(apiMd) ? readFileSync(apiMd, "utf8") : "",

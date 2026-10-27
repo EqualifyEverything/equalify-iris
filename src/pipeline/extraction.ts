@@ -6335,7 +6335,7 @@ export async function reExtractPages(
           kept: "prior",
           // The same evidence as a first pass that truncated, on the round a USER asked for. Left off
           // here at first, and that was the wrong half to leave: this round is the one someone is
-          // waiting on an answer about, and a reader following docs/API.md's row would have read the
+          // waiting on an answer about, and a reader following docs/run-log.md's row would have read the
           // absence of these fields as "not a truncation" (#293, review of #297).
           ...truncationEvidence(e),
         });
@@ -6354,7 +6354,7 @@ export async function reExtractPages(
   // Pages left as they were because their re-extraction threw. NOT reported as
   // `failedPages`: that field means the document has no content for the page, and these
   // pages have their prior content — the document is whole, it is just not improved.
-  // Conflating the two tells a client following docs/API.md "Partial documents" that it
+  // Conflating the two tells a client following docs/run-log.md "Partial documents" that it
   // received a partial document when it did not.
   const keptPrior = outcomes.filter((o) => o.failed).map((o) => o.fragment.order);
   // The pages this round got a fresh answer for: every page whose re-extraction ran without

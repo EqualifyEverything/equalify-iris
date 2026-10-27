@@ -238,15 +238,15 @@
   </div>
 
   <footer>
-    <p><a href="/">The demo</a> · <a href="https://github.com/EqualifyEverything/equalify-iris/blob/main/docs/API.md">API reference</a> · <a href="https://github.com/EqualifyEverything/equalify-iris">Source on GitHub</a></p>
+    <p><a href="/">The demo</a> · <a href="https://github.com/EqualifyEverything/equalify-iris/blob/main/docs/openapi.yaml">API reference</a> · <a href="https://github.com/EqualifyEverything/equalify-iris/blob/main/docs/run-log.md">Run log reference</a> · <a href="https://github.com/EqualifyEverything/equalify-iris">Source on GitHub</a></p>
   </footer>
 
   <script>
-    // Filled in by the server from docs/API.md's run-log index (src/eventIndex.ts): each event's
+    // Filled in by the server from docs/run-log.md's index (src/eventIndex.ts): each event's
     // one-line meaning and its anchor in the reference.
     const EVENT_INDEX = /*IRIS_EVENT_INDEX*/{};
     const API = '/v1';
-    const REF = 'https://github.com/EqualifyEverything/equalify-iris/blob/main/docs/API.md';
+    const REF = 'https://github.com/EqualifyEverything/equalify-iris/blob/main/docs/run-log.md';
     const $ = (id) => document.getElementById(id);
     const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
     const AI = '<span class="who ai">AI</span>';

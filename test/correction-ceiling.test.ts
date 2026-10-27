@@ -328,7 +328,7 @@ test("a specialist that grows the page grows the cap, through the pipeline", asy
     // caller's ceiling and the deployment's, and a caller may only ever lower one — so this call is
     // sent at 32,000 and is bounded by the config. The log line then carries a `ceiling` larger than
     // `max_tokens`, which reads correctly: the deployment is what bound the call, and the truncation
-    // message on that same line names the config accordingly (docs/API.md's run log).
+    // message on that same line names the config accordingly (docs/run-log.md's run log).
     assert.ok((cap ?? 0) > 32_000, "a merge can compute past the deployment's ceiling");
     // The dispatch really did happen — otherwise this test would be asserting about a merge that
     // never ran and a cap that was never scaled.
@@ -724,7 +724,7 @@ test("a capped call that wrote nothing gets both caveats, in the order they are 
 });
 
 test("an uncapped call's truncation message is exactly what it always was", async () => {
-  // The regression this whole change most has to avoid: docs/API.md quotes this sentence, and a
+  // The regression this whole change most has to avoid: docs/run-log.md quotes this sentence, and a
   // deployment that never caps anything must not see a word of the new machinery.
   const bedrock = new BedrockProvider({ default_model: MODEL, api: "converse" } as never);
   stubBedrock(bedrock, [{ events: cutOff("<p>cut mid-") }]);
@@ -782,7 +782,7 @@ test("a caller's cap and a model's own ceiling coexist, and the binding one is t
 
 test("a refused capped call still files the DEPLOYMENT's ceiling as what was asked", async () => {
   // The #254 aggregate reads `output_ceiling_asked` as "what `providers.bedrock.max_tokens` says"
-  // (docs/API.md) and pairs it with `output_ceiling_stated` as the remedy. A capped call that gets
+  // (docs/run-log.md) and pairs it with `output_ceiling_stated` as the remedy. A capped call that gets
   // refused must not file its own cap there: a row reading 12466 against a config reading 32000
   // sends whoever aggregates it to edit a number that is already what the row claims it should be.
   const bedrock = new BedrockProvider({ default_model: NOVA, api: "converse" } as never);

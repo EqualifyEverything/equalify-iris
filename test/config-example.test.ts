@@ -128,7 +128,7 @@ test("both provider blocks in the example name the same model", () => {
 test("any long edge the docs print is the one the example config publishes", () => {
   credentials();
   const resolved = resolveImageLimits(loadConfig(EXAMPLE)).max_long_edge_px;
-  for (const rel of ["../docs/API.md", "../docs/openapi.yaml", "../docs/design-notes.md", "../config.example.yaml"]) {
+  for (const rel of ["../docs/run-log.md", "../docs/openapi.yaml", "../docs/design-notes.md", "../config.example.yaml"]) {
     const docs = readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
     for (const m of docs.matchAll(/"?max_long_edge_px"?:\s*(?:\{[^}]*example:\s*|\n(?:[ \t]+\w+:.*\n)*?[ \t]+example:\s*)?(\d+)|long-edge limit \((\d+) px on /g)) {
       assert.equal(Number(m[1] ?? m[2]), resolved, `${rel} prints a long edge of ${m[1] ?? m[2]}, and the example config resolves ${resolved}`);

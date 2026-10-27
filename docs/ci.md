@@ -555,4 +555,4 @@ floor as the weekly job, for a stronger reason — on a quiet deployment the agg
 individual, and a rate over four documents shown next to a document count is a statement about
 identifiable people's uploads. The floor is enforced in the store rather than in the route, so a
 later route change cannot publish a number this refused to. See
-[the public tally in `docs/API.md`](API.md#public-tally-unauthenticated) for the fields.
+[`GET /v1/stats` in `docs/openapi.yaml`](openapi.yaml) for the fields.

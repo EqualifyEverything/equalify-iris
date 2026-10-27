@@ -395,7 +395,7 @@ interface Attempt {
 
 // What to do about a response that hit its ceiling, appended to `TruncatedResponseError`'s
 // standing sentence. `undefined` for the deployment's own ceiling: raising `max_tokens` is
-// exactly right there, and that message is quoted verbatim in docs/API.md.
+// exactly right there, and that message is quoted verbatim in docs/run-log.md.
 //
 // The other two both say "raising that setting will not move it", for different reasons, and
 // getting the reason wrong sends someone to change something that is not binding. Deliberately
@@ -721,7 +721,7 @@ export class BedrockProvider implements ModelProvider {
       // covers one.
       //
       // `asked: this.maxTokens` and not `asked`, which since #285 may be a cap this one call chose:
-      // the field is documented as what `providers.<provider>.max_tokens` says (docs/API.md), and
+      // the field is documented as what `providers.<provider>.max_tokens` says (docs/run-log.md), and
       // it exists to be paired with `stated` as the remedy — a row reading 12466 where the config
       // reads 32000 would send whoever aggregates it to edit a number that is already correct.
       // The rejection is the deployment's ceiling being unacceptable either way: `stated < asked`

@@ -1581,7 +1581,7 @@ const BLOCK_KEY = /"block"\s*:/g;
 // expected to be 0 there and the head is what says whether the model answered about the section it
 // was given. A count above 0 on that row is not noise but the same prompt problem in its other
 // form — a model answering a plain-HTML request in the shape of the whole-document contract.
-// docs/API.md says so on both rows.
+// docs/run-log.md says so on both rows.
 //
 // The excerpt pair itself — its width, its whitespace folding, and the rule that quotes a short
 // fragment whole instead of as a head — is `replyExcerpt` in providers/types.ts, shared with the

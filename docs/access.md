@@ -9,7 +9,7 @@ access control is an optional shared secret, `server.api_token`.
 model budget, and list and read every session. That is what lets the bundled demo page work with no
 setup. It suits a laptop or a private network, not a public URL. With `server.audit` on, reading a
 session also means its page images, the original upload and every prompt sent
-([Audit](API.md#audit-off-by-default)).
+([Audit](openapi.yaml)).
 
 **Set it and callers must present it:**
 

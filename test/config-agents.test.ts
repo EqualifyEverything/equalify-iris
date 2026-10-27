@@ -531,7 +531,7 @@ function unclosedBoldRuns(doc: string): string[] {
 //   - The link check three functions down enumerated `docs/` with readdirSync while these two named
 //     files, so the two halves of this file disagreed about what "the docs" meant — and a new
 //     `docs/*.md` was auto-covered by one and silently uncovered by the others.
-//   - `docs/API.md` (1,897 lines, bold lead-ins and tables throughout) and CONTRIBUTING.md were
+//   - `docs/run-log.md` (1,897 lines, bold lead-ins and tables throughout) and CONTRIBUTING.md were
 //     outside BOTH checks for no stated reason. They pass, so nothing was holding them out.
 // A document is now covered by being a document, which is the only rule that cannot go stale.
 const PROSE_DOCS = [
@@ -857,7 +857,7 @@ function headingAnchors(markdown: string): Set<string> {
 }
 
 // The slug rule itself, pinned on a heading rather than on the docs. The link check below does
-// fail on a collapsing rule today — seven of the links in docs/API.md point at headings of this
+// fail on a collapsing rule today — seven of the links in docs/run-log.md point at headings of this
 // shape — but it fails by calling a correct link broken, which reads as the link needing repair.
 // It also only fails while some document happens to link to such a heading.
 test("a heading slug keeps both spaces around a dropped character", () => {
@@ -940,16 +940,16 @@ test("every relative link in the docs resolves, file and anchor", () => {
   );
 });
 
-// docs/API.md's run log was one table of 65 rows, and the largest cell in it ran to 9,176
+// docs/run-log.md's run log was one table of 65 rows, and the largest cell in it ran to 9,176
 // characters — a reference nobody could scan and nobody could read. It is now an index of one row per
 // event and a section per event, which introduces a way to be wrong that the single table did not
 // have: the two halves can disagree. A new event indexed and not written up is a row that scrolls
 // nowhere, and one written up and not indexed cannot be found from the top at all. The link check
 // above catches the first (a dead anchor) and is blind to the second.
-test("every run-log event in docs/API.md is both indexed and written up, once each", () => {
-  const lines = readFileSync(join(ROOT, "docs/API.md"), "utf8").split("\n");
+test("every run-log event in docs/run-log.md is both indexed and written up, once each", () => {
+  const lines = readFileSync(join(ROOT, "docs/run-log.md"), "utf8").split("\n");
   const from = lines.indexOf("## Run log");
-  assert.notEqual(from, -1, "docs/API.md has no `## Run log` heading any more");
+  assert.notEqual(from, -1, "docs/run-log.md has no `## Run log` heading any more");
   const after = lines.findIndex((l, i) => i > from && l.startsWith("## "));
   assert.ok(after > from, "`## Run log` is the last section in the file, which it should not be");
   const body = lines.slice(from, after);
@@ -1007,7 +1007,7 @@ test("every run-log event in docs/API.md is both indexed and written up, once ea
 // this time nothing about it is maintained by hand — the numbers are read back out of that paragraph,
 // and the coverage itself is asserted rather than counted. A new event fails here until it is written
 // up.
-test("docs/API.md's run log documents every event src/ emits, and says so in numbers that are current", () => {
+test("docs/run-log.md's run log documents every event src/ emits, and says so in numbers that are current", () => {
   // THREE emit shapes reach the log, and each is invisible to a grep for the others:
   //   1. `ctx.log.event("name", …)` everywhere in the pipeline — 108 names.
   //   2. `this.onEvent?.("model_call_start", meta)` in src/providers — `model_call_start` and
@@ -1130,12 +1130,12 @@ test("docs/API.md's run log documents every event src/ emits, and says so in num
       "fixing the search and not the count.",
   );
 
-  const api = readFileSync(join(ROOT, "docs/API.md"), "utf8");
+  const api = readFileSync(join(ROOT, "docs/run-log.md"), "utf8");
   const lines = api.split("\n");
   const from = lines.indexOf("## Run log");
   // Named, because the alternative is loud but wrong: a renamed heading leaves `from` at -1, the
   // slice below empty, and every event in src/ reported as undocumented.
-  assert.notEqual(from, -1, "docs/API.md has no `## Run log` heading any more");
+  assert.notEqual(from, -1, "docs/run-log.md has no `## Run log` heading any more");
   const after = lines.findIndex((l, i) => i > from && l.startsWith("## "));
   const headings = lines.slice(from, after).filter((l) => l.startsWith("### ")).map((l) => l.slice(4));
 

@@ -428,7 +428,7 @@ export async function verifyAgentOutput(
   // whole-reply repair in `src/util/json.ts` reads the envelope correctly when the reply is nothing
   // but its JSON, which is what the prompt asks for; this is the half that also holds when the
   // model fences it or writes a sentence first, and it degrades to a page nobody judged rather than
-  // to a page that passed. `pages_unjudged` counts those, and `docs/API.md` says what it is a
+  // to a page that passed. `pages_unjudged` counts those, and `docs/run-log.md` says what it is a
   // subset of.
   if (!parsed || typeof parsed.faithful !== "boolean" || typeof parsed.accessible !== "boolean") {
     return unjudgedVerdict();

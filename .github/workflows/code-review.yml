@@ -1111,7 +1111,7 @@ jobs:
 
             - Agent markdown edits that loosen the output contract, drop the accessibility
               requirements, or change a pinned git SHA without explanation.
-            - Docs (`README.md`, `docs/API.md`, `docs/models.md`, `docs/design-notes.md`,
+            - Docs (`README.md`, `docs/run-log.md`, `docs/models.md`, `docs/design-notes.md`,
               `docs/ci.md`, `docs/access.md`, `docs/verifier-calibration.md`) that now
               contradict the code, and `config.example.yaml` missing a newly-required config key.
               `docs/access.md` states what `src/auth/` does with a token and
