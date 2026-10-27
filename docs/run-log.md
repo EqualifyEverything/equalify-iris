@@ -1,250 +1,14 @@
-# Equalify Iris — API Guide (bash / curl)
+# What a run reports
 
-For how the system works, in plain language, open `/how-it-works` on a running Iris. It makes these
-calls on a real document and explains each; every endpoint is under The API there, with Try it.
-Each endpoint's exact request and response is in [openapi.yaml](openapi.yaml), served as
-`GET /v1/openapi.json`. The sections below point at it.
-
-Every endpoint is under `/v1`. All responses are JSON unless noted. Which ones need a token:
-the description at the top of [openapi.yaml](openapi.yaml).
-
-These commands are copy-pasteable. They are the same calls exercised by `test/e2e.sh`, which
-runs the whole lifecycle against mock GitHub + mock model services and asserts every response.
-
-Requests are rate limited per client, and every response says how much of the budget is left:
-[Rate limits](#rate-limits-how-often-you-may-ask) says where to find the numbers, the headers and the `429`.
-
-`fragment`, `block`, `verdict`, `declaration` and `round` all mean something specific here, and
-[README § Terms](../README.md#terms) defines them. These ones appear below in both of their senses:
-
-- **`round`** — a round of the reader/editor loop, or one captured run of a corpus. The text says
-  which: a **bench round** or a **deployed round**.
-- **`fragment`** — one page's extracted HTML, or the `#id` part of a link. The second sense is what
-  `links_unresolved_rate` under [Quality tally](#quality-tally-shared-secret-off-by-default) is about.
-- **`block`** — one top-level element of the assembled document, which is what
-  `@editor-truncated blocks B of T` counts, or a group of table rows: the "header block" in
-  `table_no_body_rate` is a `<thead>`.
-- **`declaration`** — the page agent's claim that a page holds no content, except on the
-  [run log](#run-log)'s `page_main_stripped` line, where it is the `lang` declaration on the
-  document's root element.
-
-`verdict` has one sense here: the Feedback Agent's decision about one page.
-
-```bash
-export BASE=http://localhost:8080/v1
-export AUTH="Authorization: Bearer $IRIS_TOKEN"   # where the deployment sets a token
-```
-
-## Health (unauthenticated)
-
-`GET /v1/health` says Iris is up, and which version. Exact contract: [`docs/openapi.yaml`](openapi.yaml).
-
-## Public tally (unauthenticated)
-
-`GET /v1/stats`: how many pages and documents this deployment has made accessible, and, over the
-last 30 days, how well that went. No token. Exact contract: [`docs/openapi.yaml`](openapi.yaml).
-Why the fields are as they are, including the privacy floor: [design
-notes](design-notes.md#what-the-public-tally-may-say).
-
-```bash
-curl -s "$BASE/stats"
-```
-
-## Quality tally (shared secret, off by default)
-
-`GET /v1/quality`: how good the output has been over recent documents. It has one caller,
-`.github/workflows/quality-report.yml`, which reads it weekly and files an issue when a rate crosses
-a threshold in that workflow. Access and field types: [`docs/openapi.yaml`](openapi.yaml). Why the
-fields are as they are: [design notes](design-notes.md#reading-the-quality-tally). Setting up the
-workflow: [ci.md](ci.md), "Weekly quality report".
-
-```bash
-curl -s -H "Authorization: Bearer $IRIS_QUALITY_TOKEN" "$BASE/quality?days=30"
-```
-
-**Nothing here may carry document content.** The workflow copies these values into a public issue,
-and the documents are user uploads. Rule ids are axe-core's fixed vocabulary. Unresolved issues and
-dropped links appear only as counts. A new field must not quote a document.
-
-Every count is per session: a file uploaded three times is three documents.
-
-**Denominators and window**
-
-- `documents`: documents delivered in the window, flawless ones included. Every `_rate` divides by
-  it, and is 0 when it is 0.
-- `documents_linted`: documents the linter examined (`documents` minus the lint errors). `rules[].share`
-  divides by it. When it is well below `documents`, the rule table describes a subset.
-- `files`: distinct uploads, by sha256. For one file, the file's own hash; for several, the sha256 of
-  their hex hashes joined by newlines, in upload order, so another order or grouping is another
-  upload. `documents_unhashed`: sessions from before the hash, counted in `documents` but not `files`.
-- `window_days`: the window used. `?days=` is clamped to 1-365 and a garbled value means 30, so read
-  this rather than assume. `since`: the earliest document in the window, or `null`.
-
-**The review loop**
-
-- `mean_rounds`: mean Copy Editor passes per document, against `defaults.max_review_iterations`. 0
-  means the first reading found nothing. `null` when nothing ran. The loop also stops when a round
-  changes nothing, so a low `mean_rounds` beside a non-zero `unresolved_rate` is ordinary.
-- `unresolved_rate`: documents that finished with issues still open, at the `cap`, `converged` or
-  `truncated` exit. Only the count of issues is stored, never their text. Three kinds are never
-  resolved, by design, so always land here:
-  - two headings labelled alike, where nothing the Copy Editor has says whether they are one section
-    or two
-  - a `[not legible]` marker the Copy Editor could not read either, often because it had no image
-    for that page (`capEditorImages`, or a provider refusing a large request)
-  - a `[page not fully transcribed]` marker, which only a re-extraction can fix
-    (`unfinished_page_rate` counts these)
-- `first_read`: what the reviewer found before anything was fixed. Every other number is taken after
-  the Copy Editor ran, so this is the one that tells "the editor fixed it" from "the reviewer found
-  nothing".
-  - `mean_issues`: mean issues raised by each document's first read. A cleared document counts 0;
-    `null` when no document recorded a read.
-  - `documents`: how many recorded a first read, the denominator of `mean_issues`.
-  - `unread_documents`: of those, how many had part of the first read come back unusable. On them
-    the count is a floor.
-  - A document-level feedback re-run keeps the earlier first read, re-dated to the re-run, so it can
-    carry an older reviewer's number into a new window ([`first_read_carried`](#first_read_carried)).
-    A re-run that re-extracts replaces it.
-- `unresolved_severity`: documents with at least one open issue at each severity. Always all four
-  entries, zeroes included. Not a partition: one document can be in several, so the counts can sum
-  to more than `unresolved_rate × documents`. `high` is what a reader would call a barrier.
-  `unrated` means the Reader wrote another severity or none.
-- `review_stopped`: which exit ended each document. Always all five entries. A partition: the counts
-  sum to `documents` when every run recorded one. A smaller sum means older documents, never a sixth
-  exit.
-  - `clean`: re-read the finished document and found nothing.
-  - `converged`, `truncated`, `cap`: delivered an `@unresolved` list. Together they are the documents
-    in `unresolved_rate`.
-  - `unread`: an empty list that is still not clean (`review_unread_rate`).
-  - Each points at a different fix: `cap` at `max_review_iterations`, `converged` at a prompt,
-    `truncated` at the output ceiling, `unread` at the reviewer.
-  - On `cap` and `converged` the open list was read on the delivered bytes. On `truncated` it may be
-    older than them, so that exit over-reports.
-- `review_unread_rate`: part of the reviewer's **last** read came back unusable (prose, an apology,
-  `{"issues": "none"}`), so part of the document has no verdict. Not counted clean. Can overlap
-  `unresolved_rate`. The document carries `@review-unread`; the run log has
-  [`reader_no_output`](#reader_no_output), and that call's [`agent_call`](#agent_call) `output` is the
-  reply.
-- `unfinished_page_rate`: documents delivered with a `[page not fully transcribed]` marker. Each is
-  in `unresolved_rate`, so subtract this before comparing that rate to a threshold. The cause is
-  extraction or `max_pages`.
-
-**The Copy Editor**
-
-- `links_dropped_rate`: an `href` present before the Copy Editor was missing after it. A URL completed
-  to the link's printed text is not counted ([`editor_links_completed`](#editor_links_completed)).
-- `editor_truncated_rate`: a correction round's reply hit the output ceiling, whatever was rescued.
-  What the reply finished is applied ([`editor_salvaged`](#editor_salvaged)), the rest is redone a
-  section at a time, and the loop stops. `@editor-truncated` in the document says which. These
-  documents are also in `unresolved_rate`. A non-zero value means `max_tokens` is low for
-  `max_pages`. The weekly workflow sets no threshold on it.
-- `editor_truncated_lost_rate`: neither route covered the whole body. The run log says why:
-  [`editor_salvage_declined`](#editor_salvage_declined), [`editor_sections_declined`](#editor_sections_declined),
-  a section that truncated in turn, or a section that came back with under half its prose
-  ([`editor_section_failed`](#editor_section_failed), `reason: "shrank"`, which `max_tokens` does
-  not fix). A subset of `editor_truncated_rate` and of `unresolved_rate`. This one has a threshold.
-- `editor_headings_gated_rate`: at least one round had blocks handed back because applying them would
-  leave fewer headings with every word still there (`headings_reverted` on `editor_patch`, or
-  `discarded: "headings_lost"`). It rises when the guard works. Per document.
-  - Gated rounds are retried, so a document can count here and still stop `clean`.
-  - A rise beside a rise in `cap` points at the Copy Editor's prompt (`EDITOR_SYSTEM` in
-    `src/pipeline/review.ts`) or model. More rounds buy more of the same.
-  - Known false positives: a heading correctly turned into a `<label>`, `<caption>`, `<dt>` or `<th>`,
-    or a repeated title dropped. When the replacement lands in a different block, the whole round is
-    refused (`discarded: "headings_lost"`, `headings_dropped`, no `headings_reverted`).
-  - 0 does not mean no round demotes a heading. The guard is only on the block-patch path. The
-    whole-body and sectioned paths log [`editor_navigation`](#editor_navigation) instead and refuse
-    nothing, so read those lines where there are any.
-
-**The delivered document**
-
-- `links_unresolved_rate`: shipped with an `href="#"` or a fragment naming an `id` the document does
-  not have. `#` and `#top` are excluded. Which ones: [`internal_links`](#internal_links).
-- `markup_unbalanced_rate`: an element whose end tag HTML requires (`table`, `ul`, `a`, `section`,
-  ...; never `li` or `tr`) has unequal start and end tags. Measured on the delivered bytes. Which
-  element: [`delivered_markup`](#delivered_markup).
-- `table_no_body_rate`: at least one table with no content row: no rows, none outside `<thead>`, or,
-  with no `<thead>`, only header rows. Row headers (`<th scope="row">`) are content. Measured on the
-  parsed tree.
-- `structural_defect_rate`: an `aria-labelledby`, `aria-describedby` or `label[for]` naming a missing
-  `id`; a `<dl>` with terms and no definitions; or a `<nav>`, `<aside>` or named `<section>` holding
-  nothing a reader receives. Which: [`delivered_structure`](#delivered_structure), which also reports
-  `lang_on_void`, not counted here.
-
-**The accessibility check**
-
-- `lint_error_rate`: the lint pass errored instead of running. Those documents have no accessibility
-  verdict: `lint_ok: false` and no `violations` figure, and an `@lint-unavailable` comment in the
-  document. The `assembly` line (or [`lint_unavailable`](#lint_unavailable)) carries `lint_error`,
-  `lint_error_where`, `lint_error_name` and the first frames of `lint_error_stack`.
-- `lint_error_where`: which step failed. `parse` (jsdom refused the HTML), `inject` (axe's own source
-  would not run, a dependency problem) or `run` (the rule pass threw). Always all three entries. A
-  sum below `lint_error_rate × documents` means older documents. No message or stack, because they
-  can quote markup.
-- `rules[]`: per axe rule id, `documents` that violated it, `share` of `documents_linted`, total
-  offending `nodes`, and `impact`. Sorted by `documents`, then `nodes`, then id.
-
-## Agent suggestions (shared secret, off by default)
-
-`GET /v1/suggestions`: the agents Iris suggested, behind the quality token. Exact contract: [`docs/openapi.yaml`](openapi.yaml).
-
-## Authenticate
-
-There is no sign-in. A deployment is open (send no header) or gated (send `Authorization: Bearer <token>`); `GET /v1/me` with no header answers 200 or 401. What the token covers, and why some endpoints stay open, is in the spec's description. Exact contract: [`docs/openapi.yaml`](openapi.yaml).
-
-## Deployment defaults
-
-`GET /v1/me`: call it first. It says whether you can use the deployment, and the review cap. Exact contract: [`docs/openapi.yaml`](openapi.yaml).
-
-## Create a session (upload images)
-
-`POST /v1/sessions`, one `images` part per page or PDF, in reading order. Exact contract: [`docs/openapi.yaml`](openapi.yaml). What the page step then checks in code, and why, is in [design notes](design-notes.md#what-code-checks-on-each-page-and-why).
-
-```bash
-export SID=$(curl -s -H "$AUTH" -F images=@page1.png -F images=@page2.png "$BASE/sessions" | jq -r .session_id)
-```
-
-### Upload limits (unauthenticated)
-
-`GET /v1/limits`: what an upload may be, for the model this deployment runs. Exact contract: [`docs/openapi.yaml`](openapi.yaml).
-
-### Rate limits (how often you may ask)
-
-Per address, per minute, with `ratelimit` headers on every answer except `/v1/health`, and 429 with `Retry-After` when over. Exact contract: the description at the top of [`docs/openapi.yaml`](openapi.yaml).
-
-## Poll status
-
-`GET /v1/sessions/{id}`: poll until `status` is `ready_for_review` or `failed`. Exact contract: [`docs/openapi.yaml`](openapi.yaml).
-
-## Fetch the HTML output
-
-`GET /v1/sessions/{id}/output`: the accessible HTML, and the comments it can end with (`@unresolved`, `@editor-truncated`, `@lint-unavailable`). Exact contract: [`docs/openapi.yaml`](openapi.yaml).
-
-## Get a tagged PDF (optional)
-
-Where the deployment runs [equalify-iris-pdf](https://github.com/EqualifyEverything/equalify-iris-pdf),
-`GET /v1/sessions/{id}/fields` lists a one-PDF session's form fields, and `POST /v1/sessions/{id}/pdf`
-returns that PDF tagged, with any values filled in. Values are never stored or logged. Exact contract:
-[`docs/openapi.yaml`](openapi.yaml).
-
-```bash
-curl -s -X POST -H "$AUTH" "$BASE/sessions/$SID/pdf" \
-  -H 'content-type: application/json' \
-  -d '{"values":{"applicant.name":"Jane Doe"}}' | jq -r .pdf | base64 --decode > tagged.pdf
-```
-
-## Audit (off by default)
-
-`GET /v1/sessions/{id}/audit` and the routes under it serve page images, prompts and the document between steps, when `server.audit` is on. Anyone who can read a session can read all of this. Exact contract: [`docs/openapi.yaml`](openapi.yaml).
-
-## Submit feedback (re-run)
-
-`POST /v1/sessions/{id}/feedback`: a new run of the same document with your feedback, routed to a re-review or a re-read of named pages. Exact contract: [`docs/openapi.yaml`](openapi.yaml).
+Field by field: the run log, the diagnostics built from it, the deployment-wide quality tally, the
+markers a partial document carries, and the messages a failed run gives. What each endpoint takes and
+returns is in [openapi.yaml](openapi.yaml). To watch a run, open `/how-it-works` on a running Iris.
+The examples use `localhost:8080`; on a gated deployment add `-H "Authorization: Bearer <token>"`.
 
 ## Run log
 
 ```bash
-curl -s -H "$AUTH" "$BASE/sessions/$SID/logs"
+curl -s "http://localhost:8080/v1/sessions/<id>/logs"
 ```
 `application/x-ndjson` — one JSON object per line (agent calls with git-SHA / inline-content
 version pinning, model-call timing, no-content signals, phase transitions).
@@ -434,12 +198,12 @@ covers slightly more than the run and on a session with feedback rounds it mixes
 ### `phase`
 
 A phase marker for timing: `phase` is `extraction`, `assembly` or `review`, written as the session's
-own `phase` field is set ([Poll status](#poll-status)).
+own `phase` field is set ([`GET /v1/sessions/{id}`](openapi.yaml)).
 [Diagnostics](#diagnostics-timing--hang-detection) turns these into `phase_durations_ms` by
 measuring each to the next, and the last one to the run's terminal line — or to now, on a run still
 going.
 
-Three values here and four in [Poll status](#poll-status): `done` is a phase the session record
+Three values here and four in [`GET /v1/sessions/{id}`](openapi.yaml): `done` is a phase the session record
 reaches and never a log line, so the last phase is measured to `run_complete`. A
 `feedback_iterative` round has no `assembly` marker, because it assembles nothing — it re-reviews
 the body already delivered. So a phase missing from a session's log is not always a phase that
@@ -481,7 +245,7 @@ as the call ran, so a call that **threw** still says what it spent
 ([Diagnostics](#diagnostics-timing--hang-detection) reads these back as `tokens`). One line per
 completion, not per HTTP request.
 
-In [audit mode](#audit-off-by-default) the start line also carries `prompt`: each message sent, as
+In audit mode ([`GET /v1/sessions/{id}/audit`](openapi.yaml)) the start line also carries `prompt`: each message sent, as
 `role`, `sha256` and `chars` (fetch its text at `/audit/prompts/<sha256>`), and each image, as
 `media_type`, `bytes` and `sha256`, which matches a page image's hash in the audit list.
 
@@ -568,7 +332,7 @@ Feedback arrived, and the document it is about was copied aside before this roun
 `feedback` is the text as submitted, and `prior_output` the path the previous `output.html` was
 snapshotted to, relative to the session directory (`history/output-<timestamp>.html`). That copy is
 the only record of the document as it was delivered before this round; nothing else keeps it, and
-[Fetch the HTML output](#fetch-the-html-output) serves what this round produces.
+[`GET /v1/sessions/{id}/output`](openapi.yaml) serves what this round produces.
 
 `prior_output: null` means there was no delivered output to snapshot. Written for **every** re-run,
 including one that goes on to run `full` for want of saved state ([`run_start`](#run_start)) — so
@@ -777,7 +541,7 @@ only: like every excerpt of a document, it stays in the run log and never reache
 
 `truncated: true` with **no** `reply_head` at all is the shape worth watching: a call that spent a
 whole ceiling of output and never began the page, which is a reasoning model burning the budget
-before the answer, not a page that needed more room (see [Errors](#errors) and `EMPTY_REPLY` in
+before the answer, not a page that needed more room (see [When a run fails](#when-a-run-fails) and `EMPTY_REPLY` in
 `src/providers/types.ts`).
 
 ### `extraction_complete`
@@ -2631,7 +2395,7 @@ can appear underneath it.
 
 New-agent suggestions from this run were saved for the maintainers: `agents` lists the names and
 `count` the rows (one per agent and page). They are served by
-[`GET /v1/suggestions`](#agent-suggestions-shared-secret-off-by-default).
+[`GET /v1/suggestions`](openapi.yaml).
 
 Written by `src/pipeline/contribute.ts`.
 
@@ -2644,7 +2408,7 @@ This line comes **after** [`run_complete`](#run_complete), and it does not fail 
 
 ### `run_failed`
 
-The run threw, so there is no document: `error` is the message, and [Poll status](#poll-status)
+The run threw, so there is no document: `error` is the message, and [`GET /v1/sessions/{id}`](openapi.yaml)
 hands the client that same string in its own `error` field, which exists on a failed session and
 nowhere else.
 
@@ -2659,7 +2423,7 @@ pages reported blank, which an empty document could not.
 
 ### `tagged_pdf` / `tagged_pdf_failed`
 
-A [tagged PDF](#get-a-tagged-pdf-optional) was made, or the tagger refused. `ms` is how long it took.
+A tagged PDF ([`POST /v1/sessions/{id}/pdf`](openapi.yaml)) was made, or the tagger refused. `ms` is how long it took.
 `tagged_pdf` lists `fields_given`, the names of the fields that were filled in. The values are
 never logged. `tagged_pdf_failed` has the tagger's `code` and `error`. An `internal_error`'s
 message is left out, because it may quote a value.
@@ -2707,7 +2471,7 @@ reply is counted separately from this.
 
 ### `audit_snapshot`
 
-Audit mode only ([Audit](#audit-off-by-default)). The document's body was saved at one stage: `name`
+Audit mode only ([`GET /v1/sessions/{id}/audit`](openapi.yaml)). The document's body was saved at one stage: `name`
 is `assembled` (the pages joined, before review) or `round-<n>` (after review round `n`'s fixes), `run`
 is which run of the session it belongs to (a feedback re-run is the next), and `chars` its length. Fetch
 it at `/audit/runs/<run>/<name>`.
@@ -2727,7 +2491,7 @@ what is slow, stuck or expensive. Field types: [`docs/openapi.yaml`](openapi.yam
 are as they are: [design notes](design-notes.md#reading-diagnostics).
 
 ```bash
-curl -s -H "$AUTH" "$BASE/sessions/$SID/diagnostics" | jq
+curl -s "http://localhost:8080/v1/sessions/<id>/diagnostics" | jq
 ```
 
 Unless a field says otherwise, counts sum over every run the session has had, feedback rounds
@@ -2893,6 +2657,140 @@ These follow the document's current state, so a page recovered in a later round 
   mid-sentence cut, an orphan heading, a language change, and so on) went unrecorded. A bare page
   whose verify call then failed is in `pages_failed` too.
 
+## Quality tally (shared secret, off by default)
+
+`GET /v1/quality`: how good the output has been over recent documents. It has one caller,
+`.github/workflows/quality-report.yml`, which reads it weekly and files an issue when a rate crosses
+a threshold in that workflow. Access and field types: [`docs/openapi.yaml`](openapi.yaml). Why the
+fields are as they are: [design notes](design-notes.md#reading-the-quality-tally). Setting up the
+workflow: [ci.md](ci.md), "Weekly quality report".
+
+```bash
+curl -s -H "Authorization: Bearer $IRIS_QUALITY_TOKEN" "http://localhost:8080/v1/quality?days=30"
+```
+
+**Nothing here may carry document content.** The workflow copies these values into a public issue,
+and the documents are user uploads. Rule ids are axe-core's fixed vocabulary. Unresolved issues and
+dropped links appear only as counts. A new field must not quote a document.
+
+Every count is per session: a file uploaded three times is three documents.
+
+**Denominators and window**
+
+- `documents`: documents delivered in the window, flawless ones included. Every `_rate` divides by
+  it, and is 0 when it is 0.
+- `documents_linted`: documents the linter examined (`documents` minus the lint errors). `rules[].share`
+  divides by it. When it is well below `documents`, the rule table describes a subset.
+- `files`: distinct uploads, by sha256. For one file, the file's own hash; for several, the sha256 of
+  their hex hashes joined by newlines, in upload order, so another order or grouping is another
+  upload. `documents_unhashed`: sessions from before the hash, counted in `documents` but not `files`.
+- `window_days`: the window used. `?days=` is clamped to 1-365 and a garbled value means 30, so read
+  this rather than assume. `since`: the earliest document in the window, or `null`.
+
+**The review loop**
+
+- `mean_rounds`: mean Copy Editor passes per document, against `defaults.max_review_iterations`. 0
+  means the first reading found nothing. `null` when nothing ran. The loop also stops when a round
+  changes nothing, so a low `mean_rounds` beside a non-zero `unresolved_rate` is ordinary.
+- `unresolved_rate`: documents that finished with issues still open, at the `cap`, `converged` or
+  `truncated` exit. Only the count of issues is stored, never their text. Three kinds are never
+  resolved, by design, so always land here:
+  - two headings labelled alike, where nothing the Copy Editor has says whether they are one section
+    or two
+  - a `[not legible]` marker the Copy Editor could not read either, often because it had no image
+    for that page (`capEditorImages`, or a provider refusing a large request)
+  - a `[page not fully transcribed]` marker, which only a re-extraction can fix
+    (`unfinished_page_rate` counts these)
+- `first_read`: what the reviewer found before anything was fixed. Every other number is taken after
+  the Copy Editor ran, so this is the one that tells "the editor fixed it" from "the reviewer found
+  nothing".
+  - `mean_issues`: mean issues raised by each document's first read. A cleared document counts 0;
+    `null` when no document recorded a read.
+  - `documents`: how many recorded a first read, the denominator of `mean_issues`.
+  - `unread_documents`: of those, how many had part of the first read come back unusable. On them
+    the count is a floor.
+  - A document-level feedback re-run keeps the earlier first read, re-dated to the re-run, so it can
+    carry an older reviewer's number into a new window ([`first_read_carried`](#first_read_carried)).
+    A re-run that re-extracts replaces it.
+- `unresolved_severity`: documents with at least one open issue at each severity. Always all four
+  entries, zeroes included. Not a partition: one document can be in several, so the counts can sum
+  to more than `unresolved_rate × documents`. `high` is what a reader would call a barrier.
+  `unrated` means the Reader wrote another severity or none.
+- `review_stopped`: which exit ended each document. Always all five entries. A partition: the counts
+  sum to `documents` when every run recorded one. A smaller sum means older documents, never a sixth
+  exit.
+  - `clean`: re-read the finished document and found nothing.
+  - `converged`, `truncated`, `cap`: delivered an `@unresolved` list. Together they are the documents
+    in `unresolved_rate`.
+  - `unread`: an empty list that is still not clean (`review_unread_rate`).
+  - Each points at a different fix: `cap` at `max_review_iterations`, `converged` at a prompt,
+    `truncated` at the output ceiling, `unread` at the reviewer.
+  - On `cap` and `converged` the open list was read on the delivered bytes. On `truncated` it may be
+    older than them, so that exit over-reports.
+- `review_unread_rate`: part of the reviewer's **last** read came back unusable (prose, an apology,
+  `{"issues": "none"}`), so part of the document has no verdict. Not counted clean. Can overlap
+  `unresolved_rate`. The document carries `@review-unread`; the run log has
+  [`reader_no_output`](#reader_no_output), and that call's [`agent_call`](#agent_call) `output` is the
+  reply.
+- `unfinished_page_rate`: documents delivered with a `[page not fully transcribed]` marker. Each is
+  in `unresolved_rate`, so subtract this before comparing that rate to a threshold. The cause is
+  extraction or `max_pages`.
+
+**The Copy Editor**
+
+- `links_dropped_rate`: an `href` present before the Copy Editor was missing after it. A URL completed
+  to the link's printed text is not counted ([`editor_links_completed`](#editor_links_completed)).
+- `editor_truncated_rate`: a correction round's reply hit the output ceiling, whatever was rescued.
+  What the reply finished is applied ([`editor_salvaged`](#editor_salvaged)), the rest is redone a
+  section at a time, and the loop stops. `@editor-truncated` in the document says which. These
+  documents are also in `unresolved_rate`. A non-zero value means `max_tokens` is low for
+  `max_pages`. The weekly workflow sets no threshold on it.
+- `editor_truncated_lost_rate`: neither route covered the whole body. The run log says why:
+  [`editor_salvage_declined`](#editor_salvage_declined), [`editor_sections_declined`](#editor_sections_declined),
+  a section that truncated in turn, or a section that came back with under half its prose
+  ([`editor_section_failed`](#editor_section_failed), `reason: "shrank"`, which `max_tokens` does
+  not fix). A subset of `editor_truncated_rate` and of `unresolved_rate`. This one has a threshold.
+- `editor_headings_gated_rate`: at least one round had blocks handed back because applying them would
+  leave fewer headings with every word still there (`headings_reverted` on `editor_patch`, or
+  `discarded: "headings_lost"`). It rises when the guard works. Per document.
+  - Gated rounds are retried, so a document can count here and still stop `clean`.
+  - A rise beside a rise in `cap` points at the Copy Editor's prompt (`EDITOR_SYSTEM` in
+    `src/pipeline/review.ts`) or model. More rounds buy more of the same.
+  - Known false positives: a heading correctly turned into a `<label>`, `<caption>`, `<dt>` or `<th>`,
+    or a repeated title dropped. When the replacement lands in a different block, the whole round is
+    refused (`discarded: "headings_lost"`, `headings_dropped`, no `headings_reverted`).
+  - 0 does not mean no round demotes a heading. The guard is only on the block-patch path. The
+    whole-body and sectioned paths log [`editor_navigation`](#editor_navigation) instead and refuse
+    nothing, so read those lines where there are any.
+
+**The delivered document**
+
+- `links_unresolved_rate`: shipped with an `href="#"` or a fragment naming an `id` the document does
+  not have. `#` and `#top` are excluded. Which ones: [`internal_links`](#internal_links).
+- `markup_unbalanced_rate`: an element whose end tag HTML requires (`table`, `ul`, `a`, `section`,
+  ...; never `li` or `tr`) has unequal start and end tags. Measured on the delivered bytes. Which
+  element: [`delivered_markup`](#delivered_markup).
+- `table_no_body_rate`: at least one table with no content row: no rows, none outside `<thead>`, or,
+  with no `<thead>`, only header rows. Row headers (`<th scope="row">`) are content. Measured on the
+  parsed tree.
+- `structural_defect_rate`: an `aria-labelledby`, `aria-describedby` or `label[for]` naming a missing
+  `id`; a `<dl>` with terms and no definitions; or a `<nav>`, `<aside>` or named `<section>` holding
+  nothing a reader receives. Which: [`delivered_structure`](#delivered_structure), which also reports
+  `lang_on_void`, not counted here.
+
+**The accessibility check**
+
+- `lint_error_rate`: the lint pass errored instead of running. Those documents have no accessibility
+  verdict: `lint_ok: false` and no `violations` figure, and an `@lint-unavailable` comment in the
+  document. The `assembly` line (or [`lint_unavailable`](#lint_unavailable)) carries `lint_error`,
+  `lint_error_where`, `lint_error_name` and the first frames of `lint_error_stack`.
+- `lint_error_where`: which step failed. `parse` (jsdom refused the HTML), `inject` (axe's own source
+  would not run, a dependency problem) or `run` (the rule pass threw). Always all three entries. A
+  sum below `lint_error_rate × documents` means older documents. No message or stack, because they
+  can quote markup.
+- `rules[]`: per axe rule id, `documents` that violated it, `share` of `documents_linted`, total
+  offending `nodes`, and `impact`. Sorted by `documents`, then `nodes`, then id.
+
 ## Partial documents
 
 A page can fail on its own: a reply cut off at the output ceiling, a stalled stream, or a reply with
@@ -2967,19 +2865,7 @@ this has been seen.
 
 Why both markers work this way: [design notes](design-notes.md#why-a-partial-document-says-so).
 
-## Contributions (automatic)
-
-Every run saves suggestions for new or better agents, with no opt-out, and a workflow files them as public issues. How, and what that means for private documents, is in `GET /v1/suggestions`'s description. Exact contract: [`docs/openapi.yaml`](openapi.yaml).
-
-## Errors
-
-All errors share one shape, except `/v1/quality` and `/v1/suggestions`, which answer `{"error", "message"}`:
-```json
-{ "error": { "code": "invalid_state", "message": "Human-readable description", "details": {} } }
-```
-The codes and their statuses are in [`docs/openapi.yaml`](openapi.yaml) (`ErrorCode`).
-
-### When a run fails
+## When a run fails
 
 A run that fails says why in `error` on `GET /v1/sessions/{id}`. A failed page costs that page; the
 run fails only when every page failed ([Partial documents](#partial-documents)). Messages worth

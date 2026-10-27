@@ -521,7 +521,7 @@ test("a truncation on a clamped model names the model's ceiling, not the deploym
 test("a truncation on a model that accepted the ceiling reads exactly as it always did", async () => {
   // The note above is for the clamped case only. Nothing about the message an operator has
   // been reading for a year moves for the deployment that never met a lower ceiling —
-  // docs/API.md quotes it verbatim.
+  // docs/run-log.md quotes it verbatim.
   const bedrock = provider({ default_model: CLAUDE, api: "converse" });
   stubAttempts(bedrock, [
     {

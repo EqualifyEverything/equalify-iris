@@ -21,7 +21,7 @@ Several of these decisions reverse an earlier design, so they are written as dec
 as a diff against it. Iris was specified up front in a requirements document. That document was
 amended twenty-odd times as the build disagreed with it, and it has now been retired. The design
 record is the git history and the issues each decision cites. What is true today is here, in
-[API.md](API.md), in [models.md](models.md) and in the code.
+[run-log.md](run-log.md), in [models.md](models.md) and in the code.
 
 **Write plainly and directly, and give each document one job.** Both are requirements rather than
 preferences ([CONTRIBUTING.md § Documentation](../CONTRIBUTING.md#documentation) states them;
@@ -185,7 +185,7 @@ Places where a decision was left open, and where v1 intentionally stops:
   prompt's job rather than replacing it. Two consequences are worth knowing. A document that used to
   pass may now spend review iterations on heading levels. And `heading-order` can now appear in the
   quality tally, where it has been the worked example in
-  [`docs/API.md`'s quality tally](API.md#quality-tally-shared-secret-off-by-default) all along
+  [`docs/run-log.md`'s quality tally](run-log.md#quality-tally-shared-secret-off-by-default) all along
   without once being reportable.
 - **A `<main>` inside the delivered `<main>` is linted for, and removed before it gets there.**
   `wrapDocument` puts the assembled body inside `<main>`, and 18% of page answers across a six-model
@@ -475,7 +475,7 @@ Places where a decision was left open, and where v1 intentionally stops:
   refusing half is what makes it decidable at all: a compound joins words, so a hyphen whose right-hand
   side is not a word cannot be a compound joint, and that is the whole of the reasoning. The three
   conditions and what each of them stops are on
-  [`assembly_words_joined`](API.md#assembly_words_joined); this section is why each is drawn where it is.
+  [`assembly_words_joined`](run-log.md#assembly_words_joined); this section is why each is drawn where it is.
 
 - **The third condition is a boundary between two passes rather than a safety margin.** The page
   carrying the hyphen is `page_split_words`' ground: it raises exactly this shape, the page agent
@@ -505,7 +505,7 @@ Places where a decision was left open, and where v1 intentionally stops:
   1,221 page files, measured.
 
   Two classes of comment reach this pass: a model-written one inside a page fragment, and Iris's own
-  [`@page-failed`](API.md#page_extraction_failed), which is the whole body of its fragment and carries up
+  [`@page-failed`](run-log.md#page_extraction_failed), which is the whole body of its fragment and carries up
   to 300 characters of provider error text. A delivered document's `@` markers are not among them —
   `wrapDocument` appends those after this pass has run.
 
@@ -527,14 +527,14 @@ Places where a decision was left open, and where v1 intentionally stops:
 - **It runs after the page-break prose join, which is the only place it can.** Before that seam closes,
   `Simi-` and `larly` are two whole words in two paragraphs. So a word broken across a page and a word
   broken across a line are settled by the same pass, and the hyphen
-  [`prose_joined`](API.md#prose_joined)'s `word_splits` records as kept is this pass's input.
+  [`prose_joined`](run-log.md#prose_joined)'s `word_splits` records as kept is this pass's input.
 
 ### Style attributes in page replies
 
 `agents/page.md` forbids styling in so many words, and #374 still found 52 `style` attributes shipped
 on one 91-page arm. 46 of them were `padding-left`, 40 on one page's row headings: a table's row
 hierarchy shown by indentation instead of markup. That is why
-[`page_style_attributes`](API.md#page_style_attributes) logs the property names: removing the
+[`page_style_attributes`](run-log.md#page_style_attributes) logs the property names: removing the
 attribute makes the page look clean, while the structure it stood for is still missing. The repeated
 removal of nested empty spans guards a shape no one has seen written (0 of 69 styled spans over 1,741
 kept bench files); it keeps the counts honest, not a measured need.
@@ -544,7 +544,7 @@ kept bench files); it keeps the counts honest, not a measured need.
 - **The number is checkable because Iris supplied it** (#333). The page agent is handed
   `filename: acir-p052.png, page 2 of 25`, so a leak can only be one of two numbers, and the one tested
   is the filename's — its LAST integer, which is the part Iris writes. The conditions a label has to
-  meet before it is touched are on [`page_markers`](API.md#page_markers).
+  meet before it is touched are on [`page_markers`](run-log.md#page_markers).
 
   The last integer and not every integer, because `<base>-p<N>.png` takes `<base>` from the uploaded
   file's own name: a check reading all of them finds the label `Page 1` in `volume-1-p13.png` and takes a
@@ -602,7 +602,7 @@ kept bench files); it keeps the counts honest, not a measured need.
 
 ### Why a partial document says so
 
-The rules are in [API.md, Partial documents](API.md#partial-documents). This is why.
+The rules are in [run-log.md, Partial documents](run-log.md#partial-documents). This is why.
 
 - **One page short, and saying so, beats no document.** But a run where no page produced content is
   not a partial success: an error says more than an empty file. A source whose every page is blank is
@@ -620,7 +620,7 @@ The rules are in [API.md, Partial documents](API.md#partial-documents). This is 
 - **`@page-uncorrected` is the more useful marker.** A page with no content is obviously incomplete.
   A page whose table lost its six total rows looks finished and no longer adds up. No later step
   answers the fidelity check: the Copy Editor, the only later step that sees a source image, is told
-  to report a mismatch, not edit from it ([`editor_fidelity_observed`](API.md#editor_fidelity_observed)).
+  to report a mismatch, not edit from it ([`editor_fidelity_observed`](run-log.md#editor_fidelity_observed)).
   So the rejection stands whatever the markup became.
 - **It does not mark "this page might be wrong".** Replaying the check over 57 corrected pages
   passed 26% of them (#288), and the verifier rejects 71-74% of first renders. A marker on most
@@ -633,11 +633,11 @@ The rules are in [API.md, Partial documents](API.md#partial-documents). This is 
 
 ## Joining a table split across a page turn
 
-The run log entries [`table_continuations`](API.md#table_continuations),
-[`table_joined`](API.md#table_joined),
-[`table_join_code_declined`](API.md#table_join_code_declined),
-[`table_join_failed`](API.md#table_join_failed) and
-[`table_joins_capped`](API.md#table_joins_capped) say what a caller does about each outcome. This
+The run log entries [`table_continuations`](run-log.md#table_continuations),
+[`table_joined`](run-log.md#table_joined),
+[`table_join_code_declined`](run-log.md#table_join_code_declined),
+[`table_join_failed`](run-log.md#table_join_failed) and
+[`table_joins_capped`](run-log.md#table_joins_capped) say what a caller does about each outcome. This
 section is why the rules behind them have the shape they have. The figures are from the 100-page
 reference corpus and the round logs, and for several of these rules they are the only evidence there
 is.
@@ -1252,21 +1252,21 @@ every reason below was bought by a pair that shipped split or a defect that ship
 ## Correcting a page against its image
 
 A page whose fidelity check failed, or that code found a defect in, goes back to the page agent with
-the image. The run log entries [`page_corrected`](API.md#page_corrected),
-[`page_correction_failed`](API.md#page_correction_failed),
-[`page_correction_recheck`](API.md#page_correction_recheck) and
-[`page_redrawn`](API.md#page_redrawn) say what a caller does with each outcome. This section is why
+the image. The run log entries [`page_corrected`](run-log.md#page_corrected),
+[`page_correction_failed`](run-log.md#page_correction_failed),
+[`page_correction_recheck`](run-log.md#page_correction_recheck) and
+[`page_redrawn`](run-log.md#page_redrawn) say what a caller does with each outcome. This section is why
 the rules behind them have the shape they have. What happens when the verdict itself cannot be
 obtained is [above](#extraction-verdicts-and-empty-pages).
 
 - **Six things can send a page back, and that number grew**: two until #290, three until #373, four
-  until #334 and five until #585. So a share taken over [`trigger`](API.md#page_corrected) across rounds is taken
+  until #334 and five until #585. So a share taken over [`trigger`](run-log.md#page_corrected) across rounds is taken
   over a population that changed under it — the older rounds had fewer sources to fire on.
 
 ### Why a correction may refuse a problem
 
 - **A correction can say a problem is untrue, but only about the HTML it was shown** (#373,
-  [`page_correction_declined`](API.md#page_correction_declined)). Before, compliance was its only
+  [`page_correction_declined`](run-log.md#page_correction_declined)). Before, compliance was its only
   move, so a problem the HTML itself refuted ("an id used twice" that is used once) was answered by
   editing a page that was right, and the edit looked like a repair in the log. A claim about the image
   is still never refusable: that is the check's own judgement.
@@ -1420,7 +1420,7 @@ Iris refused whole is 0 characters of HTML however much page it was carrying.
   draws. The distinctness is counted rather than assumed, because those pairs average 2.2 page-agent
   calls each. All 20 are `page_no_output` events and can only be, since every round on disk predates
   this branch. Replayed through today's parser, **three** survive: the other 17 are blank pages whose
-  declaration [`page_blank`](API.md#page_blank) honours, and a character floor would have redrawn
+  declaration [`page_blank`](run-log.md#page_blank) honours, and a character floor would have redrawn
   every one of them. The three that still arrive carry no declaration to read at all — no envelope
   survives the parse, so there is no `log` — and each of the three wanted the redraw. So the
   declaration test is right about all 20 where a character floor is right about 3.
@@ -1484,7 +1484,7 @@ Iris refused whole is 0 characters of HTML however much page it was carrying.
 ### What code checks on each page, and why
 
 What the page step checks without a model, and the measurements behind each rule. The run-log
-events named here are in [API.md](API.md#run-log).
+events named here are in [run-log.md](run-log.md#run-log).
 
 A PDF's **links survive**, which rasterizing alone would not manage: a link is an annotation
 over the page rather than something drawn on it, so the page image carries the link text and
@@ -1523,7 +1523,7 @@ swapped for catch it 0–2 times out of 6.
 
 **One page's ids are its own, and a page that collides with itself is asked at the page step.** Ids
 arriving from independently extracted pages are made unique across the document by prefixing each
-page's (`namespaceAnchors`, written up under [`page_duplicate_ids`](API.md#page_duplicate_ids)) — but a
+page's (`namespaceAnchors`, written up under [`page_duplicate_ids`](run-log.md#page_duplicate_ids)) — but a
 page that used one id twice gets the same prefix on both copies and stays collided, which is the one
 case that pass declines. Its only other reporter is lint on the **assembled** document, after that
 page's last chance to be read against its image — and where a prefixed id no longer carries the name
@@ -1559,7 +1559,7 @@ asked to correct is what ships, and the run log says so (`page_correction_reject
 
 ## Reading a blank-page declaration
 
-The run log entries [`page_blank`](API.md#page_blank) and [`page_no_output`](API.md#page_no_output)
+The run log entries [`page_blank`](run-log.md#page_blank) and [`page_no_output`](run-log.md#page_no_output)
 say what a caller does about each outcome. This section is why the rule that separates them has the
 shape it has. Every word of it was bought by a page that had been lost, and the errors it can still
 make run in one direction on purpose.
@@ -1584,9 +1584,9 @@ make run in one direction on purpose.
   those logs says the paper prints no number, which makes the label the image's position in the file and
   the anchor a claim that the document's page 14 begins there.
 
-- **`bare_html` earns its keep on [`page_correction_failed`](API.md#page_correction_failed)**, where 24
+- **`bare_html` earns its keep on [`page_correction_failed`](run-log.md#page_correction_failed)**, where 24
   of 180 corrections in one bench round answered in bare markup and were being read as `prose` (issue
-  #365). On [`page_no_output`](API.md#page_no_output) the value is two findings with opposite remedies
+  #365). On [`page_no_output`](run-log.md#page_no_output) the value is two findings with opposite remedies
   and cannot separate them by itself, which is why `dropped` sits on the same line.
 
 - **The declaration is a field first, a sentence second, and the field states without being able to
@@ -2033,7 +2033,7 @@ make run in one direction on purpose.
 - **The blank count is the declarations that were made, not the pages that ended up empty.** Since
   #371 a page delivered empty can have content put back by the correction its judgement earns, and it
   still counts here; the count is kept that way deliberately, because
-  [Diagnostics](API.md#diagnostics-timing--hang-detection) reads the declarations that cost a verify
+  [Diagnostics](run-log.md#diagnostics-timing--hang-detection) reads the declarations that cost a verify
   call off it as `pages_blank - pages_skipped_blank`. A page whose content came back that way is the
   `page_corrected` line beside it, with `trigger: "verify"`.
 
@@ -2654,7 +2654,7 @@ every dollar on a reply nothing read (#295).
   `[not legible]` and fidelity reports are in, and the editor's own precondition already sends that shape
   to a report rather than a change.
 
-  Back to the predicate, and the thread the two paragraphs above interrupt: `docs/API.md` had the same
+  Back to the predicate, and the thread the two paragraphs above interrupt: `docs/run-log.md` had the same
   shape of error as those branch labels, in the
   other direction — it defined the field by kind and *illustrated* it by value, so the examples were more
   precise than the definition above them. Three rounds on one predicate, each approximation defensible
@@ -2736,7 +2736,7 @@ every dollar on a reply nothing read (#295).
 - **The regression gate and the eval gate log the same shape, and no field on the line separates them.**
   Both replay fixtures under the same `agent`, both carry a null `agent_sha` and a null `agent_content`,
   and both hardcode `step: "agent_regression"` on the `model_call` beside them. The
-  [`eval_gate`](API.md#eval_gate) line that follows sits after BOTH halves, so it does not split them
+  [`eval_gate`](run-log.md#eval_gate) line that follows sits after BOTH halves, so it does not split them
   either. Order and count do. The regression
   gate is awaited to completion before the eval gate starts, so every one of its lines precedes every one
   of the eval gate's. The two halves are also the same length. Both gates read the same fixture
@@ -2748,7 +2748,7 @@ every dollar on a reply nothing read (#295).
 - **Both of the count rule's caveats are themselves visible in the log**, so the rule can be checked
   before it is applied. A gate that THREW leaves a short half: a provider error or timeout on any one
   replay rejects the whole gate, neither gate call is wrapped, so the round logs
-  [`feedback_training_failed`](API.md#feedback_training_failed) and finishes with whichever replay lines
+  [`feedback_training_failed`](run-log.md#feedback_training_failed) and finishes with whichever replay lines
   were already written still in place. That is the case to watch for, because a truncated eval half read
   under the count rule is attributed to the candidate prompt — the exact confusion the rule exists to
   prevent. And the fixture set can change
@@ -2758,7 +2758,7 @@ every dollar on a reply nothing read (#295).
   depends on it.
 
 - **A missing `eval_gate` line does not mean the log was cut short.** A regression gate that FAILED logs
-  [`agent_update_blocked`](API.md#agent_update_blocked) and returns before the eval gate is reached, so a
+  [`agent_update_blocked`](run-log.md#agent_update_blocked) and returns before the eval gate is reached, so a
   round with no `eval_gate` and no `feedback_training_failed` ran no eval gate and every null-SHA replay
   in it was the regression gate's. A round carrying `feedback_training_failed` is the throwing case, and there the replays could
   belong to either gate.
@@ -2838,7 +2838,7 @@ These are the rules both adapters enforce on a model call. The README states the
 
   Because the pages then arrive, the wrong setting has no other consequence anyone downstream can
   see. So every clamped call also carries `output_ceiling_clamped` on its `model_call` line, with
-  the ceiling asked for and the one granted ([API.md's run log](API.md#run-log)). The warning is
+  the ceiling asked for and the one granted ([the run log](run-log.md#run-log)). The warning is
   once per process, the log line is once per call: an aggregate over run logs is the only place a
   `max_tokens` nobody chose shows up.
 - **The limits are about *silence*, not duration.** Both adapters **stream**, to tell a stalled call
@@ -2934,7 +2934,7 @@ These are the rules both adapters enforce on a model call. The README states the
 
 ### When a reply hits its output ceiling
 
-The messages are listed in [API.md, When a run fails](API.md#when-a-run-fails). This is why they
+The messages are listed in [run-log.md, When a run fails](run-log.md#when-a-run-fails). This is why they
 read as they do.
 
 - **A cut-off page is never assembled.** It still parses, so it would be delivered as if the
@@ -3122,9 +3122,9 @@ read as they do.
   would and explains them, so it shows the API as it is and works on any deployment. What the run
   log cannot hold (page images, prompts as sent, the document between stages) comes from audit mode
   (`server.audit`), which is off by default because it serves all of that to anyone who can read a
-  session. The page does not replace docs/API.md: a walkthrough explains one run, and the reference
+  session. The page does not replace docs/run-log.md: a walkthrough explains one run, and the reference
   holds each field's exact contract, which the log's readers (diagnostics, the quality tally, the
-  bench) depend on. Each event's one-line meaning comes from API.md's index at boot
+  bench) depend on. Each event's one-line meaning comes from run-log.md's index at boot
   (`src/eventIndex.ts`), so the page cannot describe an event the reference does not.
 - **Audit files are named by what is in them.** A prompt is stored once per distinct text, by
   sha256: a run sends the same agent contract on every page. Every write is best-effort, because an
@@ -3152,7 +3152,7 @@ read as they do.
 - **`clean_rate` counts silence as not clean.** It excludes documents with issues left open and
   documents part of which the reviewer never answered about (#186). It is the Reader Agent's list,
   not the final axe result, so the demo credits the reviewer rather than saying the document is
-  clean. The [quality tally](API.md#quality-tally-shared-secret-off-by-default) can see that gap.
+  clean. The [quality tally](run-log.md#quality-tally-shared-secret-off-by-default) can see that gap.
 - **`mean_rounds` cannot say why the loop stopped.** 0 is good, but the loop also stops when a round
   changes nothing. Read it beside `clean_rate`: early stopping can only move `clean_rate` down.
 - **`quality` is `null` under 20 documents (`PUBLIC_QUALITY_MIN_DOCUMENTS`).** It is a privacy
@@ -3171,7 +3171,7 @@ read as they do.
 
 ### Reading the quality tally
 
-The fields are in [API.md, Quality tally](API.md#quality-tally-shared-secret-off-by-default). This
+The fields are in [run-log.md, Quality tally](run-log.md#quality-tally-shared-secret-off-by-default). This
 is why they are as they are.
 
 **Access**
@@ -3274,7 +3274,7 @@ is why they are as they are.
 
 ### Reading diagnostics
 
-The fields are in [API.md, Diagnostics](API.md#diagnostics-timing--hang-detection). This is why they
+The fields are in [run-log.md, Diagnostics](run-log.md#diagnostics-timing--hang-detection). This is why they
 are as they are, and the measurements behind them.
 
 **Errors and cost**
@@ -3329,7 +3329,7 @@ are as they are, and the measurements behind them.
   corrector can tell code-checked problems apart because they are marked `(Iris checked this one in
   code.)` and the licence excludes them by name. A word written two ways has its own mark, because
   Iris knows both spellings are present but not which one the page prints; a "so fix it" there would
-  order a `nonfarm` the page never prints. Compare `words` with [`page_split_words`](API.md#page_split_words).
+  order a `nonfarm` the page never prints. Compare `words` with [`page_split_words`](run-log.md#page_split_words).
 - **`pages_unjudged` exists** because unjudged pages count as faithful, so a run that lost its
   Feedback Agent halfway would read as a run with a good pass rate.
 - **`pages_skipped_blank` (#294).** In 36 judgements of blank pages on a 100-page corpus, the

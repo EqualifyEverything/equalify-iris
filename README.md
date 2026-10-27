@@ -42,7 +42,7 @@ Design constraints:
 When Iris meets content a specialist agent would handle better than the general pass, it saves a
 suggestion: the agent's name, the page, and why. Feedback that improves an agent is saved the same
 way. A workflow (Sunday to Thursday) groups these and files one GitHub issue per idea
-([Contributions](docs/API.md#contributions-automatic)). Maintainers triage those issues; merged agents
+([Agent suggestions](docs/ci.md#agent-suggestions)). Maintainers triage those issues; merged agents
 become part of the shared `agents/` library.
 
 ## Terms
@@ -188,7 +188,7 @@ so anyone who can call it can list and read every document. `server.api_token` g
 shared secret. What to choose, and what the gate leaves open: **[docs/access.md](docs/access.md)**.
 
 Suggestions from every run are saved and filed upstream by a maintainer workflow
-([Contributions](docs/API.md#contributions-automatic)). **Contributing back is the sustainability
+([Agent suggestions](docs/ci.md#agent-suggestions)). **Contributing back is the sustainability
 model:** the agents in `agents/` improve because sessions run against real documents and real
 corrections.
 
@@ -210,7 +210,7 @@ The order of the `images` parts is the processing order. Then poll `GET /v1/sess
 `status` is `ready_for_review`, fetch `GET /v1/sessions/{id}/output`, and
 `POST /v1/sessions/{id}/close`. Leave out the `Authorization` header on an open deployment.
 
-Copy-pasteable `curl` and every run-log event's fields: **[docs/API.md](docs/API.md)**. To run every
+Every field Iris reports about a run (the run log, diagnostics, the quality tally): **[docs/run-log.md](docs/run-log.md)**. To run every
 endpoint end to end with mock services and no credentials: `./test/e2e.sh`.
 
 What it costs is a config choice: **[docs/cost.md](docs/cost.md)**. Which model to run each agent
@@ -263,13 +263,13 @@ change:
 | --- | --- | --- |
 | behaviour, or the reason for it | [docs/design-notes.md](docs/design-notes.md) | the reasoning, the benchmark evidence, superseded behaviour, and what a rule cost before it existed |
 | an endpoint, a parameter or a response field | [docs/openapi.yaml](docs/openapi.yaml) | the exact contract, which `/how-it-works` builds its API section from; tests fail if a route or error code is missing |
-| a run-log event | [docs/API.md](docs/API.md) | what fires a line and what its fields hold |
+| a run-log event | [docs/run-log.md](docs/run-log.md) | what fires a line and what its fields hold |
 | which model runs an agent | [docs/models.md](docs/models.md) | **suggested** models. Every model is declared in config, never in the code, so no doc may say Iris "uses" one |
 | the price of a step | [docs/cost.md](docs/cost.md) | prices with the round each came from. Iris costs nothing per token on self-hosted open-weight models; only a suggested config has a price |
 | accessibility reporting, testing, or support information | [ACCESSIBILITY.md](ACCESSIBILITY.md) | reporting and triage guidance, contributor checks, and testing limitations |
 | a workflow in `.github/` | [docs/ci.md](docs/ci.md) | the five workflows, including the bot that reviews your PR |
 | the gate, or what a 401 means | [docs/access.md](docs/access.md) | who may call the API, and an older database |
-| a pipeline step, or a run-log event a person needs explained | [`public/how-it-works.html`](public/how-it-works.html) | the walkthrough. An event's one-line meaning comes from API.md's index, so only a new step or a plainer sentence (`SAY`) needs an edit here |
+| a pipeline step, or a run-log event a person needs explained | [`public/how-it-works.html`](public/how-it-works.html) | the walkthrough. An event's one-line meaning comes from run-log.md's index, so only a new step or a plainer sentence (`SAY`) needs an edit here |
 | a config key | [`config.example.yaml`](config.example.yaml) | the key list, documented inline. This README states decisions, not keys |
 | one of the five words in [Terms](#terms) | every doc that uses it | each is narrower here than in English and each has an unrelated sense |
 
@@ -300,7 +300,8 @@ credentials.
 | Document | What is in it |
 |---|---|
 | `/how-it-works` on a running Iris | How a document moves through Iris and iris-pdf, step by step, with every API call. Open a session there to find out what went wrong. Start here. |
-| [docs/API.md](docs/API.md) | Every endpoint, with copy-pasteable `curl`. The run log's fields. |
+| [docs/openapi.yaml](docs/openapi.yaml) | Every endpoint: what it takes and returns. Served as `GET /v1/openapi.json`. |
+| [docs/run-log.md](docs/run-log.md) | Every field Iris reports about a run: the run log, diagnostics, the quality tally, partial documents, failure messages. |
 | [docs/design-notes.md](docs/design-notes.md) | Why the code is the way it is. Read this before changing it. |
 | [docs/models.md](docs/models.md) | Which model to run on which agent, what each was measured at, and how a swap fails quietly. |
 | [docs/access.md](docs/access.md) | Gating the API, what a shared deployment means, an older database. |

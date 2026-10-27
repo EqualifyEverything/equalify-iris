@@ -10,7 +10,7 @@ import { eventIndex, howItWorksPage } from "../src/eventIndex.ts";
 import { runAxe } from "../src/pipeline/lint.ts";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const apiMd = readFileSync(join(root, "docs", "API.md"), "utf8");
+const apiMd = readFileSync(join(root, "docs", "run-log.md"), "utf8");
 const page = readFileSync(join(root, "public", "how-it-works.html"), "utf8");
 const index = eventIndex(apiMd);
 
@@ -42,7 +42,7 @@ const script = page.slice(page.lastIndexOf("<script>") + 8, page.lastIndexOf("</
 const pure = script.slice(script.indexOf("// ----- Reading the log"), script.indexOf("// ----- State and API calls"));
 const lib = new Function(
   "EVENT_INDEX",
-  `const REF = 'https://x/API.md'; const API = '/v1'; const location = { origin: 'https://iris.test' };
+  `const REF = 'https://x/run-log.md'; const API = '/v1'; const location = { origin: 'https://iris.test' };
    const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]); const AI = ''; const CODE = '';
    const plural = (n, one, many) => n + ' ' + (n === 1 ? one : (many || one + 's'));
    ${pure}

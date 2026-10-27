@@ -144,7 +144,7 @@ function retryAfterSeconds(res: Response): number {
 
 // One rate limiter, built the same way three times over. The pieces that must not
 // differ between them live here: the error shape (sendError, so a 429 looks like every
-// other error — see docs/API.md "Errors"), the `RateLimit`/`RateLimit-Policy` headers a client can read
+// other error — see docs/openapi.yaml (`ErrorCode`)), the `RateLimit`/`RateLimit-Policy` headers a client can read
 // its remaining budget from, and the absence of the long-deprecated `X-RateLimit-*`
 // pair.
 function limiter(opts: {

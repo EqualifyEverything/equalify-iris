@@ -334,7 +334,7 @@ test("a failed re-extraction keeps the page it could not improve", async () => {
     assert.equal(failed.kept, "prior");
     // And the same evidence a first pass would have recorded (#293). This is the round a USER asked
     // for, so it is the worst one to leave silent: someone is waiting on an answer about this page,
-    // and a reader following docs/API.md's row reads a missing `truncated` as "not a truncation".
+    // and a reader following docs/run-log.md's row reads a missing `truncated` as "not a truncation".
     assert.equal(failed.truncated, true);
     assert.equal(failed.reply_chars, 87_851);
     assert.equal(String(failed.reply_head).length, 240);
@@ -591,7 +591,7 @@ test("a page that kept its prior content is not reported as missing", () => {
   // The feedback path logs the same event with `kept: "prior"`, and it means the
   // opposite: the re-extraction threw, so the page kept the content it already had and
   // the document is whole. Naming it here sends a client looking for a hole that is not
-  // there — docs/API.md "Partial documents" tells it to check this field for exactly that.
+  // there — docs/run-log.md "Partial documents" tells it to check this field for exactly that.
   const log = [
     { ts: "2026-08-24T00:00:00.000Z", type: "run_start", images: 3 },
     { ts: "2026-08-24T00:00:10.000Z", type: "page_extraction_failed", image: "page-002.png", page: 2, error: "x", kept: "prior" },
@@ -619,7 +619,7 @@ const diag = (events: Record<string, unknown>[]) =>
   });
 
 test("a page a later round recovered is no longer reported as missing", () => {
-  // Otherwise the field only ever grows, and the client Iris told to check it (docs/API.md
+  // Otherwise the field only ever grows, and the client Iris told to check it (docs/run-log.md
   // "Partial documents") is sent looking for a hole the round it just paid for filled — on
   // a document that no longer carries any marker to corroborate it.
   const d = diag([

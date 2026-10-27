@@ -523,7 +523,7 @@ export async function runAxe(html: string): Promise<LintResult> {
         // rather than replacing it.
         //
         // Iris's own quality reporting has used this rule as its worked example since
-        // the tally shipped (`Store.qualityStats` in store/db.ts, docs/API.md "Quality
+        // the tally shipped (`Store.qualityStats` in store/db.ts, docs/run-log.md "Quality
         // tally") and could not once have reported it: every rule id in `run_signals`
         // comes from this call, so a rule the tag filter drops is one the weekly report
         // can never raise, however often the output breaks it.

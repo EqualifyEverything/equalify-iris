@@ -2035,7 +2035,7 @@ test("the page agent's table-naming rule keeps the clauses that make it a rule",
     // 2 as a `<tr><td colspan="8">` closing the <thead> — a row of data the page never printed. Only
     // gpt-5.6-luna was near-clean on placement (1 of 22), and it is the arm that spelled the note
     // `［Percentage distribution］` in fullwidth brackets on `p041` and `(Percentage distribution)` on
-    // `p052`, so no arm gets this right unprompted. `docs/API.md` already treats the note as one of
+    // `p052`, so no arm gets this right unprompted. `docs/run-log.md` already treats the note as one of
     // the joins the Copy Editor decides, which is a rule for merging a mark nothing asked for.
     ["a note of measure under the title is part of the caption",
       /a note of measure set under it — "\[In millions of dollars\]", "\[Percentage distribution\]", "\[Per capita as a percent of U.S. average\]" — is part of that name too, and goes inside the same <caption> after the title, delimiters as printed/],

@@ -359,7 +359,7 @@ test("models covers the whole session, not the current round, so a restart betwe
   // read at boot, so a session extracted before a restart and given feedback after one really did
   // run on two models, and reporting one of them would be the lie. It is pinned because the
   // docs turn this field into a verdict on a config edit (docs/models.md "How to tell whether
-  // the swap took", docs/API.md
+  // the swap took", docs/run-log.md
   // "Diagnostics"):
   // that reading holds on a session that has only run since the edit, which is why both say so.
   const text = log(

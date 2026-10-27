@@ -76,7 +76,7 @@ function readTextLayers(path: string): Record<string, TextLayer> {
 }
 
 // Input files are stored as "<0001>__<original-name>" so submitted order
-// (which is significant — see docs/API.md) survives, independent of filename.
+// (which is significant — see docs/run-log.md) survives, independent of filename.
 export function enumerateInputs(paths: Paths, sessionId: string): InputImage[] {
   const dir = paths.sessionInput(sessionId);
   const links = readByOrder<PdfLink>(paths.sessionLinks(sessionId));

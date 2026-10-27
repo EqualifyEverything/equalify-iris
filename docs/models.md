@@ -89,7 +89,7 @@ upload rather than at boot — which is how #312 shipped broken for a day.
 
 Diagnostics reports the model ids that answered each agent's
 calls: `by_agent.<agent>.models` from `GET /v1/sessions/{id}/diagnostics`
-([API.md](API.md#diagnostics-timing--hang-detection)). Read it on a session that has only run since
+([run-log.md](run-log.md#diagnostics-timing--hang-detection)). Read it on a session that has only run since
 the edit — a session's log spans its feedback rounds too, so one extracted before a restart and given
 feedback after it honestly holds both ids. Two ids are not automatically a defect: resolution keys on
 capability, so a provider's `per_capability` block can put one agent on two models deliberately.

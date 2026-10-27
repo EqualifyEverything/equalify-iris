@@ -214,7 +214,7 @@ export const SIGNAL_UNRESOLVED = "iris:unresolved";
 // `feedback_iterative` round re-reviews the body that was already delivered, so its own first
 // read is on rewritten bytes and would land here as a smaller number for a reason that has
 // nothing to do with the Reader. `Store.priorFirstRead` and its caller in the orchestrator are
-// that exception, and `docs/API.md` names it beside the re-run.
+// that exception, and `docs/run-log.md` names it beside the re-run.
 export const SIGNAL_FIRST_READ_ISSUES = "iris:first-read-issues";
 // How many windows of that first read came back with no usable answer (`ReaderWindow.usable`),
 // recorded only when there is any.
@@ -937,8 +937,8 @@ export class Store {
    * `failStaleSessions` then marks it `failed` on that same boot — so it is
    * excluded permanently rather than until its re-run finishes. Widening the
    * filter to include in-flight sessions would be worse: it would count first
-   * runs that had never produced anything. Documented in docs/API.md "Public
-   * tally" so the one-off gap is explicable rather than mysterious.
+   * runs that had never produced anything. Documented in docs/design-notes.md "What the public tally
+   * may say" so the one-off gap is explicable rather than mysterious.
    *
    * Unlike everything else in the constructor, `ALTER TABLE` is not idempotent,
    * so the check and the write are wrapped rather than trusted. Two processes
@@ -1470,7 +1470,7 @@ export class Store {
    * mean the same way a reviewer going blind would. That is the one reading the field exists
    * to prevent, arriving from the other direction. So the orchestrator carries this value
    * forward instead of recording the re-read's, and the row keeps meaning what
-   * `SIGNAL_FIRST_READ_ISSUES` and `docs/API.md` "Quality tally" say it means.
+   * `SIGNAL_FIRST_READ_ISSUES` and `docs/run-log.md` "Quality tally" say it means.
    *
    * `undefined` when there is none — a session delivered before this was recorded, or one
    * whose run never got a read. The caller records nothing in that case rather than

@@ -1,4 +1,4 @@
-// The run log's index in docs/API.md, as `{ type: { summary, anchor } }`, for the /how-it-works page
+// The run log's index in docs/run-log.md, as `{ type: { summary, anchor } }`, for the /how-it-works page
 // (public/how-it-works.html). Read from the doc rather than copied, so the page's one-line meaning of
 // an event is the reference's own: test/config-agents.test.ts already fails when the index and the
 // events src/ emits disagree, and that check now covers the page too.

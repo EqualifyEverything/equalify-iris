@@ -401,7 +401,7 @@ paths:
       tags: [Operators]
       summary: How good the output has been
       description: |
-        Rates over recent documents, for the weekly quality report. Field meanings in full: docs/API.md,
+        Rates over recent documents, for the weekly quality report. Field meanings in full: docs/run-log.md,
         "Quality tally".
 
         - Off unless `server.quality_token` (`IRIS_QUALITY_TOKEN`) is set: then 404, not 401.
@@ -681,7 +681,7 @@ paths:
     get:
       tags: [Sessions]
       summary: The run log
-      description: One JSON line for each thing Iris did, written as it works. `/how-it-works` explains every line; the run-log section of docs/API.md defines the fields code reads.
+      description: One JSON line for each thing Iris did, written as it works. `/how-it-works` explains every line; docs/run-log.md defines the fields code reads.
       security: [{}, {apiKey: []}]
       parameters: [{$ref: "#/components/parameters/SessionId"}]
       responses:
@@ -699,7 +699,7 @@ paths:
       summary: Timing, tokens and health of the latest run
       description: |
         Read from the run log. `in_flight` names the call a run is waiting on, if any. Field meanings in
-        full: docs/API.md, "Diagnostics".
+        full: docs/run-log.md, "Diagnostics".
       security: [{}, {apiKey: []}]
       parameters: [{$ref: "#/components/parameters/SessionId"}]
       responses:

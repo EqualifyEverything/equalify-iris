@@ -175,4 +175,4 @@ Your PR gets a review from Claude in CI before a maintainer reads it
 `src/pipeline` (extraction → assembly → review), `src/providers` (LLM provider abstraction),
 `src/routes` (the `/v1` API), `src/auth` (the optional API gate),
 `agents/` (the agent prompt files).
-See [README.md](README.md) and [docs/API.md](docs/API.md).
+See [README.md](README.md).
