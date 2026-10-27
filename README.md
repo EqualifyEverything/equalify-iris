@@ -42,7 +42,7 @@ Design constraints:
 When Iris meets content a specialist agent would handle better than the general pass, it saves a
 suggestion: the agent's name, the page, and why. Feedback that improves an agent is saved the same
 way. A workflow (Sunday to Thursday) groups these and files one GitHub issue per idea
-([Contributions](docs/openapi.yaml)). Maintainers triage those issues; merged agents
+([Agent suggestions](docs/ci.md#agent-suggestions)). Maintainers triage those issues; merged agents
 become part of the shared `agents/` library.
 
 ## Terms
@@ -188,7 +188,7 @@ so anyone who can call it can list and read every document. `server.api_token` g
 shared secret. What to choose, and what the gate leaves open: **[docs/access.md](docs/access.md)**.
 
 Suggestions from every run are saved and filed upstream by a maintainer workflow
-([Contributions](docs/openapi.yaml)). **Contributing back is the sustainability
+([Agent suggestions](docs/ci.md#agent-suggestions)). **Contributing back is the sustainability
 model:** the agents in `agents/` improve because sessions run against real documents and real
 corrections.
 

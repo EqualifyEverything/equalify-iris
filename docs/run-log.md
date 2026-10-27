@@ -198,12 +198,12 @@ covers slightly more than the run and on a session with feedback rounds it mixes
 ### `phase`
 
 A phase marker for timing: `phase` is `extraction`, `assembly` or `review`, written as the session's
-own `phase` field is set ([Poll status](openapi.yaml)).
+own `phase` field is set ([`GET /v1/sessions/{id}`](openapi.yaml)).
 [Diagnostics](#diagnostics-timing--hang-detection) turns these into `phase_durations_ms` by
 measuring each to the next, and the last one to the run's terminal line — or to now, on a run still
 going.
 
-Three values here and four in [Poll status](openapi.yaml): `done` is a phase the session record
+Three values here and four in [`GET /v1/sessions/{id}`](openapi.yaml): `done` is a phase the session record
 reaches and never a log line, so the last phase is measured to `run_complete`. A
 `feedback_iterative` round has no `assembly` marker, because it assembles nothing — it re-reviews
 the body already delivered. So a phase missing from a session's log is not always a phase that
@@ -245,7 +245,7 @@ as the call ran, so a call that **threw** still says what it spent
 ([Diagnostics](#diagnostics-timing--hang-detection) reads these back as `tokens`). One line per
 completion, not per HTTP request.
 
-In [audit mode](openapi.yaml) the start line also carries `prompt`: each message sent, as
+In audit mode ([`GET /v1/sessions/{id}/audit`](openapi.yaml)) the start line also carries `prompt`: each message sent, as
 `role`, `sha256` and `chars` (fetch its text at `/audit/prompts/<sha256>`), and each image, as
 `media_type`, `bytes` and `sha256`, which matches a page image's hash in the audit list.
 
@@ -332,7 +332,7 @@ Feedback arrived, and the document it is about was copied aside before this roun
 `feedback` is the text as submitted, and `prior_output` the path the previous `output.html` was
 snapshotted to, relative to the session directory (`history/output-<timestamp>.html`). That copy is
 the only record of the document as it was delivered before this round; nothing else keeps it, and
-[Fetch the HTML output](openapi.yaml) serves what this round produces.
+[`GET /v1/sessions/{id}/output`](openapi.yaml) serves what this round produces.
 
 `prior_output: null` means there was no delivered output to snapshot. Written for **every** re-run,
 including one that goes on to run `full` for want of saved state ([`run_start`](#run_start)) — so
@@ -541,7 +541,7 @@ only: like every excerpt of a document, it stays in the run log and never reache
 
 `truncated: true` with **no** `reply_head` at all is the shape worth watching: a call that spent a
 whole ceiling of output and never began the page, which is a reasoning model burning the budget
-before the answer, not a page that needed more room (see [Errors](openapi.yaml) and `EMPTY_REPLY` in
+before the answer, not a page that needed more room (see [When a run fails](#when-a-run-fails) and `EMPTY_REPLY` in
 `src/providers/types.ts`).
 
 ### `extraction_complete`
@@ -2408,7 +2408,7 @@ This line comes **after** [`run_complete`](#run_complete), and it does not fail 
 
 ### `run_failed`
 
-The run threw, so there is no document: `error` is the message, and [Poll status](openapi.yaml)
+The run threw, so there is no document: `error` is the message, and [`GET /v1/sessions/{id}`](openapi.yaml)
 hands the client that same string in its own `error` field, which exists on a failed session and
 nowhere else.
 
@@ -2423,7 +2423,7 @@ pages reported blank, which an empty document could not.
 
 ### `tagged_pdf` / `tagged_pdf_failed`
 
-A [tagged PDF](openapi.yaml) was made, or the tagger refused. `ms` is how long it took.
+A tagged PDF ([`POST /v1/sessions/{id}/pdf`](openapi.yaml)) was made, or the tagger refused. `ms` is how long it took.
 `tagged_pdf` lists `fields_given`, the names of the fields that were filled in. The values are
 never logged. `tagged_pdf_failed` has the tagger's `code` and `error`. An `internal_error`'s
 message is left out, because it may quote a value.
@@ -2471,7 +2471,7 @@ reply is counted separately from this.
 
 ### `audit_snapshot`
 
-Audit mode only ([Audit](openapi.yaml)). The document's body was saved at one stage: `name`
+Audit mode only ([`GET /v1/sessions/{id}/audit`](openapi.yaml)). The document's body was saved at one stage: `name`
 is `assembled` (the pages joined, before review) or `round-<n>` (after review round `n`'s fixes), `run`
 is which run of the session it belongs to (a feedback re-run is the next), and `chars` its length. Fetch
 it at `/audit/runs/<run>/<name>`.

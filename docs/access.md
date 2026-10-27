@@ -9,7 +9,7 @@ access control is an optional shared secret, `server.api_token`.
 model budget, and list and read every session. That is what lets the bundled demo page work with no
 setup. It suits a laptop or a private network, not a public URL. With `server.audit` on, reading a
 session also means its page images, the original upload and every prompt sent
-([Audit](openapi.yaml)).
+([`GET /v1/sessions/{id}/audit`](openapi.yaml)).
 
 **Set it and callers must present it:**
 
@@ -19,7 +19,7 @@ server:
 ```
 
 ```bash
-curl -H "Authorization: Bearer $IRIS_API_TOKEN" "$BASE/me"
+curl -H "Authorization: Bearer $IRIS_API_TOKEN" "http://localhost:8080/v1/me"
 ```
 
 A missing, malformed or wrong token gets the same `401`, which says only that the deployment is

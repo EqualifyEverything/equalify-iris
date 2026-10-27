@@ -937,8 +937,8 @@ export class Store {
    * `failStaleSessions` then marks it `failed` on that same boot — so it is
    * excluded permanently rather than until its re-run finishes. Widening the
    * filter to include in-flight sessions would be worse: it would count first
-   * runs that had never produced anything. Documented in docs/run-log.md "Public
-   * tally" so the one-off gap is explicable rather than mysterious.
+   * runs that had never produced anything. Documented in docs/design-notes.md "What the public tally
+   * may say" so the one-off gap is explicable rather than mysterious.
    *
    * Unlike everything else in the constructor, `ALTER TABLE` is not idempotent,
    * so the check and the write are wrapped rather than trusted. Two processes
