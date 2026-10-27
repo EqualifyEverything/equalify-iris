@@ -57,6 +57,7 @@
     details { margin: .4rem 0; }
     summary { cursor: pointer; font-weight: 600; }
     ol.calls { list-style: none; padding: 0; }
+    .what { margin-top: 0; }
     ol.calls > li { border: 1px solid var(--border); border-radius: 8px; padding: .6rem .9rem; margin: .5rem 0; background: var(--bg); }
     .method { font: bold .9rem ui-monospace, monospace; }
     .status-ok { color: var(--ok); font-weight: 600; }
@@ -109,21 +110,14 @@
 
   <div class="layout">
     <nav class="side" aria-label="On this page">
-      <h2 class="side-h">Before you start</h2>
-      <ul class="side-links">
-        <li><a href="#overview">How it works</a></li>
-        <li><a href="#settings">This deployment</a></li>
-        <li><a href="#api">The API</a></li>
-      </ul>
-      <h2 class="side-h" id="process-h">Process</h2>
+      <p class="side-links"><a href="#start">Follow a document</a></p>
+      <h2 class="side-h" id="process-h">Steps</h2>
       <p id="side-status" class="side-status">No document yet.</p>
       <ol id="process" class="process" aria-labelledby="process-h"></ol>
-      <h2 class="side-h">This run</h2>
+      <h2 class="side-h">Reference</h2>
       <ul class="side-links">
-        <li><a href="#start">Start</a></li>
-        <li><a href="#progress">What Iris did</a></li>
-        <li><a href="#problems">Things to look at</a></li>
-        <li><a href="#calls">API calls</a></li>
+        <li><a href="#deployment">This deployment</a></li>
+        <li><a href="#api">The API</a></li>
         <li><a href="#log">Run log</a></li>
         <li><a href="#share">Share</a></li>
       </ul>
@@ -133,47 +127,11 @@
       <div id="live" class="visually-hidden" role="status" aria-live="polite"></div>
       <div id="error" role="alert"></div>
 
-      <section class="box" id="overview" aria-labelledby="overview-h">
-        <h2 id="overview-h">How it works</h2>
-        <p>Iris turns a PDF into accessible HTML. <span class="who ai">AI</span> Models read and write. <span class="who code">Code</span> Code prepares their input, checks their output and throws away replies that lose content. If asked, <strong>iris-pdf</strong> then tags the original PDF, using code only.</p>
-        <svg id="diagram" viewBox="0 0 1180 752" role="img" aria-labelledby="diagram-t diagram-d"><title id="diagram-t">How a document moves through Iris and iris-pdf</title><desc id="diagram-d">Three lanes of steps. The numbered list after the diagram says the same in words.</desc><defs><marker id="hiw-ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#333"/></marker></defs><rect x="4" y="4" width="1172" height="258" rx="10" fill="#f6f6f6" stroke="#ccc"/><text x="1162" y="26" class="lane" text-anchor="end">1  Iris, one page at a time</text><rect x="4" y="266" width="1172" height="206" rx="10" fill="#f6f6f6" stroke="#ccc"/><text x="1162" y="288" class="lane" text-anchor="end">2  Iris, the whole document</text><rect x="4" y="480" width="1172" height="266" rx="10" fill="#f6f6f6" stroke="#ccc"/><text x="1162" y="502" class="lane" text-anchor="end">3  iris-pdf, only if a tagged PDF is asked for</text><g class="st" id="st-upload"><path class="bx" d="M22,82 h110 l22,22 v56 h-132 z" fill="#fff" stroke="#555" stroke-width="2"/><path d="M132,82 v22 h22" fill="none" stroke="#555" stroke-width="2"/><text x="32" y="116" class="b">Your</text><text x="32" y="133" class="b">document</text></g><g class="st" id="st-render"><rect class="bx" x="200" y="44" width="190" height="74" rx="8" fill="#dfe9f7" stroke="#0b3d7a" stroke-width="2"/><rect x="208" y="52" width="46" height="17" rx="8" fill="#fff" stroke="#0b3d7a"/><text x="215" y="65" class="tag" fill="#0b3d7a">Code</text><text x="210" y="88" class="b">Turn each page</text><text x="210" y="105" class="b">into an image</text><text id="n-render" x="295.0" y="134" class="note" text-anchor="middle">150 DPI</text></g><g class="st" id="st-fields"><rect class="bx" x="200" y="160" width="190" height="74" rx="8" fill="#dfe9f7" stroke="#0b3d7a" stroke-width="2"/><rect x="208" y="168" width="46" height="17" rx="8" fill="#fff" stroke="#0b3d7a"/><text x="215" y="181" class="tag" fill="#0b3d7a">Code</text><text x="210" y="204" class="b">Read the form&#x27;s</text><text x="210" y="221" class="b">fields (iris-pdf)</text><text id="n-fields" x="295.0" y="250" class="note" text-anchor="middle">if it is a form</text></g><g class="st" id="st-page"><rect class="bx" x="500" y="100" width="190" height="74" rx="8" fill="#fbe3c8" stroke="#7a3e00" stroke-width="2"/><rect x="508" y="108" width="30" height="17" rx="8" fill="#fff" stroke="#7a3e00"/><text x="515" y="121" class="tag" fill="#7a3e00">AI</text><text x="510" y="144" class="b">Page agent writes</text><text x="510" y="161" class="b">the page&#x27;s HTML</text><text id="n-page" x="595.0" y="190" class="note" text-anchor="middle">one call per page</text></g><g class="st" id="st-verify"><rect class="bx" x="826" y="100" width="190" height="74" rx="8" fill="#fbe3c8" stroke="#7a3e00" stroke-width="2"/><rect x="834" y="108" width="30" height="17" rx="8" fill="#fff" stroke="#7a3e00"/><text x="841" y="121" class="tag" fill="#7a3e00">AI</text><text x="836" y="144" class="b">Check HTML against</text><text x="836" y="161" class="b">the image (+ Code rules)</text><text id="n-verify" x="921.0" y="190" class="note" text-anchor="middle">a second model</text></g><path d="M154,110 H192" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><path d="M154,132 C176,132 176,197 192,197" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><path d="M390,81 C445,81 445,125 492,125" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><rect x="401.5" y="58" width="87.0" height="19" rx="9" fill="#fff" stroke="#888"/><text x="445" y="72" class="data" text-anchor="middle">page image</text><path d="M390,197 C445,197 445,152 492,152" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><rect x="397.85" y="202" width="94.3" height="19" rx="9" fill="#fff" stroke="#888"/><text x="445" y="216" class="data" text-anchor="middle">field names</text><path d="M690,137 H818" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><rect x="714.15" y="125" width="79.7" height="19" rx="9" fill="#fff" stroke="#888"/><text x="754" y="139" class="data" text-anchor="middle">page HTML</text><path d="M921,100 C921,50 595,50 595,92" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><rect x="685.3" y="40" width="145.4" height="19" rx="9" fill="#fff" stroke="#888"/><text x="758" y="54" class="data" text-anchor="middle">problems: fix once</text><path d="M1016,137 H1130 V264 H117 V312" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><rect x="550.95" y="252" width="138.1" height="19" rx="9" fill="#fff" stroke="#888"/><text x="620" y="266" class="data" text-anchor="middle">every page&#x27;s HTML</text><g class="st" id="st-assemble"><rect class="bx" x="22" y="320" width="190" height="74" rx="8" fill="#dfe9f7" stroke="#0b3d7a" stroke-width="2"/><rect x="30" y="328" width="46" height="17" rx="8" fill="#fff" stroke="#0b3d7a"/><text x="37" y="341" class="tag" fill="#0b3d7a">Code</text><text x="32" y="364" class="b">Join pages, fix ids,</text><text x="32" y="381" class="b">axe-core check</text><text id="n-assemble" x="117.0" y="410" class="note" text-anchor="middle">accessibility check</text></g><g class="st" id="st-reader"><rect class="bx" x="290" y="320" width="190" height="74" rx="8" fill="#fbe3c8" stroke="#7a3e00" stroke-width="2"/><rect x="298" y="328" width="30" height="17" rx="8" fill="#fff" stroke="#7a3e00"/><text x="305" y="341" class="tag" fill="#7a3e00">AI</text><text x="300" y="364" class="b">Reader lists</text><text x="300" y="381" class="b">problems</text><text id="n-reader" x="385.0" y="410" class="note" text-anchor="middle">reads text only</text></g><g class="st" id="st-editor"><rect class="bx" x="558" y="320" width="190" height="74" rx="8" fill="#fbe3c8" stroke="#7a3e00" stroke-width="2"/><rect x="566" y="328" width="30" height="17" rx="8" fill="#fff" stroke="#7a3e00"/><text x="573" y="341" class="tag" fill="#7a3e00">AI</text><text x="568" y="364" class="b">Copy editor fixes</text><text x="568" y="381" class="b">(Code refuses losses)</text><text id="n-editor" x="653.0" y="410" class="note" text-anchor="middle">a few rounds at most</text></g><g class="st" id="st-serve"><rect class="bx" x="826" y="320" width="190" height="74" rx="8" fill="#dfe9f7" stroke="#0b3d7a" stroke-width="2"/><rect x="834" y="328" width="46" height="17" rx="8" fill="#fff" stroke="#0b3d7a"/><text x="841" y="341" class="tag" fill="#0b3d7a">Code</text><text x="836" y="364" class="b">Readable names,</text><text x="836" y="381" class="b">unsolved list added</text><text id="n-serve" x="921.0" y="410" class="note" text-anchor="middle">when you download it</text></g><path d="M212,357 H282" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><rect x="210.8" y="336" width="72.4" height="19" rx="9" fill="#fff" stroke="#888"/><text x="247" y="350" class="data" text-anchor="middle">document</text><path d="M480,342 H550" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><rect x="478.8" y="321" width="72.4" height="19" rx="9" fill="#fff" stroke="#888"/><text x="515" y="335" class="data" text-anchor="middle">problems</text><path d="M558,374 H488" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)" stroke-dasharray="5 4"/><rect x="497.75" y="374" width="50.5" height="19" rx="9" fill="#fff" stroke="#888"/><text x="523" y="388" class="data" text-anchor="middle">fixes</text><path d="M748,357 H818" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><rect x="746.8" y="336" width="72.4" height="19" rx="9" fill="#fff" stroke="#888"/><text x="783" y="350" class="data" text-anchor="middle">document</text><g class="st" id="st-html"><path class="bx" d="M1040,318 h110 l22,22 v56 h-132 z" fill="#fff" stroke="#111" stroke-width="3"/><path d="M1150,318 v22 h22" fill="none" stroke="#111" stroke-width="2"/><text x="1050" y="352" class="b">Accessible</text><text x="1050" y="369" class="b">HTML</text></g><path d="M1016,357 H1034" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><path d="M1106,396 V476 H117 V532" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><rect x="523.65" y="464" width="152.7" height="19" rx="9" fill="#fff" stroke="#888"/><text x="600" y="478" class="data" text-anchor="middle">HTML + original PDF</text><g class="st" id="st-pdf-read"><rect class="bx" x="22" y="540" width="190" height="74" rx="8" fill="#dfe9f7" stroke="#0b3d7a" stroke-width="2"/><rect x="30" y="548" width="46" height="17" rx="8" fill="#fff" stroke="#0b3d7a"/><text x="37" y="561" class="tag" fill="#0b3d7a">Code</text><text x="32" y="584" class="b">Read the page&#x27;s</text><text x="32" y="601" class="b">words + positions</text><text id="n-pdf-read" x="117.0" y="630" class="note" text-anchor="middle">OCR for a scan</text></g><g class="st" id="st-pdf-match"><rect class="bx" x="290" y="540" width="190" height="74" rx="8" fill="#dfe9f7" stroke="#0b3d7a" stroke-width="2"/><rect x="298" y="548" width="46" height="17" rx="8" fill="#fff" stroke="#0b3d7a"/><text x="305" y="561" class="tag" fill="#0b3d7a">Code</text><text x="300" y="584" class="b">Match Iris&#x27;s words</text><text x="300" y="601" class="b">to the page&#x27;s</text><text id="n-pdf-match" x="385.0" y="630" class="note" text-anchor="middle">words, not coordinates</text></g><g class="st" id="st-pdf-tag"><rect class="bx" x="558" y="540" width="190" height="74" rx="8" fill="#dfe9f7" stroke="#0b3d7a" stroke-width="2"/><rect x="566" y="548" width="46" height="17" rx="8" fill="#fff" stroke="#0b3d7a"/><text x="573" y="561" class="tag" fill="#0b3d7a">Code</text><text x="568" y="584" class="b">Tag text in place,</text><text x="568" y="601" class="b">add form fields</text><text id="n-pdf-tag" x="653.0" y="630" class="note" text-anchor="middle">structure tree</text></g><g class="st" id="st-pdf-check"><rect class="bx" x="826" y="540" width="190" height="74" rx="8" fill="#dfe9f7" stroke="#0b3d7a" stroke-width="2"/><rect x="834" y="548" width="46" height="17" rx="8" fill="#fff" stroke="#0b3d7a"/><text x="841" y="561" class="tag" fill="#0b3d7a">Code</text><text x="836" y="584" class="b">Check pixels and</text><text x="836" y="601" class="b">words, then save</text><text id="n-pdf-check" x="921.0" y="630" class="note" text-anchor="middle">refuses if changed</text></g><path d="M212,577 H282" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><rect x="221.75" y="556" width="50.5" height="19" rx="9" fill="#fff" stroke="#888"/><text x="247" y="570" class="data" text-anchor="middle">words</text><path d="M480,577 H550" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><rect x="482.45" y="556" width="65.1" height="19" rx="9" fill="#fff" stroke="#888"/><text x="515" y="570" class="data" text-anchor="middle">matches</text><path d="M748,577 H818" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><rect x="761.4" y="556" width="43.2" height="19" rx="9" fill="#fff" stroke="#888"/><text x="783" y="570" class="data" text-anchor="middle">tags</text><g class="st" id="st-pdf"><path class="bx" d="M1040,538 h110 l22,22 v56 h-132 z" fill="#fff" stroke="#111" stroke-width="3"/><path d="M1150,538 v22 h22" fill="none" stroke="#111" stroke-width="2"/><text x="1050" y="572" class="b">Tagged</text><text x="1050" y="589" class="b">PDF</text></g><path d="M1016,577 H1034" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><g class="st" id="st-pdf-review"><rect class="bx" x="826" y="660" width="190" height="74" rx="8" fill="#fbe3c8" stroke="#7a3e00" stroke-width="2" stroke-dasharray="6 4"/><rect x="834" y="668" width="30" height="17" rx="8" fill="#fff" stroke="#7a3e00"/><text x="841" y="681" class="tag" fill="#7a3e00">AI</text><text x="836" y="704" class="b">Optional review:</text><text x="836" y="721" class="b">does it say what it shows?</text></g><path d="M1000,614 V652" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)" stroke-dasharray="5 4"/></svg>
-        <p id="diagram-state" class="hint"></p>
-        <details>
-          <summary>The same in words</summary>
-          <ol>
-            <li><strong>Each page.</strong> <span class="who code">Code</span> The page becomes an image, and form fields are read. <span class="who ai">AI</span> The page agent writes its HTML. <span class="who ai">AI</span> A second model checks it against the image, and <span class="who code">Code</span> rules check links, image descriptions and ids. A failed page is fixed once.</li>
-            <li><strong>The whole document.</strong> <span class="who code">Code</span> Pages are joined and checked with axe-core. <span class="who ai">AI</span> A reader lists problems and <span class="who ai">AI</span> a copy editor fixes them, for a few rounds. <span class="who code">Code</span> A fix that loses content is thrown away. What is left is listed in the HTML.</li>
-            <li><strong>Tagged PDF, if asked.</strong> <span class="who code">Code</span> iris-pdf matches the HTML's words to the PDF's, tags the text in place, adds form fields, and checks every page before saving.</li>
-          </ol>
-        </details>
-        <details>
-          <summary>Words the run log uses</summary>
-          <dl>
-            <dt>Page agent</dt><dd>The model call that writes one page's HTML from its image.</dd>
-            <dt>Verdict</dt><dd>The checking model's answer about one page: is it faithful to the image, and is it accessible.</dd>
-            <dt>Fragment</dt><dd>One page's HTML, before the pages are joined.</dd>
-            <dt>Block</dt><dd>One top-level part of the joined document. The copy editor changes the document block by block.</dd>
-            <dt>Round</dt><dd>One pass of the review: the reader lists problems, then the copy editor fixes them.</dd>
-            <dt>Declaration</dt><dd>The page agent saying a page is blank. Iris can refuse it, for example for a page that is only too dark to read.</dd>
-            <dt>Run</dt><dd>One conversion of a document. Feedback starts a new run of the same document.</dd>
-          </dl>
-        </details>
-      </section>
-
-      <section class="box" id="settings" aria-labelledby="settings-h">
-        <h2 id="settings-h">This deployment</h2>
-        <p class="hint">From <code>GET /v1/settings</code> and <code>/v1/limits</code>. Secrets are never shown.</p>
-        <div id="settings-body"><p>Loading…</p></div>
-      </section>
-
-      <section class="box" id="api" aria-labelledby="api-h">
-        <h2 id="api-h">The API</h2>
-        <p>Every endpoint, from <code>GET /v1/openapi.json</code>, the exact contract. Open one to see what it does, try it on real data, and read its answer explained.</p>
-        <div id="api-body"><p>Loading…</p></div>
-      </section>
-
       <section class="box" id="start" aria-labelledby="start-h">
-        <h2 id="start-h" tabindex="-1">Start</h2>
+        <h2 id="start-h" tabindex="-1">Follow a document</h2>
+        <p>Iris turns a PDF into accessible HTML. <span class="who ai">AI</span> Models read and write. <span class="who code">Code</span> Code prepares their input, checks their output and throws away replies that lose content. If asked, <strong>iris-pdf</strong> then tags the original PDF, using code only. Each step below says what it does, how this deployment sets it up, and, once you run a document, what happened and which API calls it made.</p>
+        <svg id="diagram" viewBox="0 0 1180 752" role="img" aria-labelledby="diagram-t diagram-d"><title id="diagram-t">How a document moves through Iris and iris-pdf</title><desc id="diagram-d">Three lanes of steps. The numbered steps below say the same in words.</desc><defs><marker id="hiw-ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#333"/></marker></defs><rect x="4" y="4" width="1172" height="258" rx="10" fill="#f6f6f6" stroke="#ccc"/><text x="1162" y="26" class="lane" text-anchor="end">1  Iris, one page at a time</text><rect x="4" y="266" width="1172" height="206" rx="10" fill="#f6f6f6" stroke="#ccc"/><text x="1162" y="288" class="lane" text-anchor="end">2  Iris, the whole document</text><rect x="4" y="480" width="1172" height="266" rx="10" fill="#f6f6f6" stroke="#ccc"/><text x="1162" y="502" class="lane" text-anchor="end">3  iris-pdf, only if a tagged PDF is asked for</text><g class="st" id="st-upload"><path class="bx" d="M22,82 h110 l22,22 v56 h-132 z" fill="#fff" stroke="#555" stroke-width="2"/><path d="M132,82 v22 h22" fill="none" stroke="#555" stroke-width="2"/><text x="32" y="116" class="b">Your</text><text x="32" y="133" class="b">document</text></g><g class="st" id="st-render"><rect class="bx" x="200" y="44" width="190" height="74" rx="8" fill="#dfe9f7" stroke="#0b3d7a" stroke-width="2"/><rect x="208" y="52" width="46" height="17" rx="8" fill="#fff" stroke="#0b3d7a"/><text x="215" y="65" class="tag" fill="#0b3d7a">Code</text><text x="210" y="88" class="b">Turn each page</text><text x="210" y="105" class="b">into an image</text><text id="n-render" x="295.0" y="134" class="note" text-anchor="middle">150 DPI</text></g><g class="st" id="st-fields"><rect class="bx" x="200" y="160" width="190" height="74" rx="8" fill="#dfe9f7" stroke="#0b3d7a" stroke-width="2"/><rect x="208" y="168" width="46" height="17" rx="8" fill="#fff" stroke="#0b3d7a"/><text x="215" y="181" class="tag" fill="#0b3d7a">Code</text><text x="210" y="204" class="b">Read the form&#x27;s</text><text x="210" y="221" class="b">fields (iris-pdf)</text><text id="n-fields" x="295.0" y="250" class="note" text-anchor="middle">if it is a form</text></g><g class="st" id="st-page"><rect class="bx" x="500" y="100" width="190" height="74" rx="8" fill="#fbe3c8" stroke="#7a3e00" stroke-width="2"/><rect x="508" y="108" width="30" height="17" rx="8" fill="#fff" stroke="#7a3e00"/><text x="515" y="121" class="tag" fill="#7a3e00">AI</text><text x="510" y="144" class="b">Page agent writes</text><text x="510" y="161" class="b">the page&#x27;s HTML</text><text id="n-page" x="595.0" y="190" class="note" text-anchor="middle">one call per page</text></g><g class="st" id="st-verify"><rect class="bx" x="826" y="100" width="190" height="74" rx="8" fill="#fbe3c8" stroke="#7a3e00" stroke-width="2"/><rect x="834" y="108" width="30" height="17" rx="8" fill="#fff" stroke="#7a3e00"/><text x="841" y="121" class="tag" fill="#7a3e00">AI</text><text x="836" y="144" class="b">Check HTML against</text><text x="836" y="161" class="b">the image (+ Code rules)</text><text id="n-verify" x="921.0" y="190" class="note" text-anchor="middle">a second model</text></g><path d="M154,110 H192" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><path d="M154,132 C176,132 176,197 192,197" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><path d="M390,81 C445,81 445,125 492,125" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><rect x="401.5" y="58" width="87.0" height="19" rx="9" fill="#fff" stroke="#888"/><text x="445" y="72" class="data" text-anchor="middle">page image</text><path d="M390,197 C445,197 445,152 492,152" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><rect x="397.85" y="202" width="94.3" height="19" rx="9" fill="#fff" stroke="#888"/><text x="445" y="216" class="data" text-anchor="middle">field names</text><path d="M690,137 H818" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><rect x="714.15" y="125" width="79.7" height="19" rx="9" fill="#fff" stroke="#888"/><text x="754" y="139" class="data" text-anchor="middle">page HTML</text><path d="M921,100 C921,50 595,50 595,92" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><rect x="685.3" y="40" width="145.4" height="19" rx="9" fill="#fff" stroke="#888"/><text x="758" y="54" class="data" text-anchor="middle">problems: fix once</text><path d="M1016,137 H1130 V264 H117 V312" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><rect x="550.95" y="252" width="138.1" height="19" rx="9" fill="#fff" stroke="#888"/><text x="620" y="266" class="data" text-anchor="middle">every page&#x27;s HTML</text><g class="st" id="st-assemble"><rect class="bx" x="22" y="320" width="190" height="74" rx="8" fill="#dfe9f7" stroke="#0b3d7a" stroke-width="2"/><rect x="30" y="328" width="46" height="17" rx="8" fill="#fff" stroke="#0b3d7a"/><text x="37" y="341" class="tag" fill="#0b3d7a">Code</text><text x="32" y="364" class="b">Join pages, fix ids,</text><text x="32" y="381" class="b">axe-core check</text><text id="n-assemble" x="117.0" y="410" class="note" text-anchor="middle">accessibility check</text></g><g class="st" id="st-reader"><rect class="bx" x="290" y="320" width="190" height="74" rx="8" fill="#fbe3c8" stroke="#7a3e00" stroke-width="2"/><rect x="298" y="328" width="30" height="17" rx="8" fill="#fff" stroke="#7a3e00"/><text x="305" y="341" class="tag" fill="#7a3e00">AI</text><text x="300" y="364" class="b">Reader lists</text><text x="300" y="381" class="b">problems</text><text id="n-reader" x="385.0" y="410" class="note" text-anchor="middle">reads text only</text></g><g class="st" id="st-editor"><rect class="bx" x="558" y="320" width="190" height="74" rx="8" fill="#fbe3c8" stroke="#7a3e00" stroke-width="2"/><rect x="566" y="328" width="30" height="17" rx="8" fill="#fff" stroke="#7a3e00"/><text x="573" y="341" class="tag" fill="#7a3e00">AI</text><text x="568" y="364" class="b">Copy editor fixes</text><text x="568" y="381" class="b">(Code refuses losses)</text><text id="n-editor" x="653.0" y="410" class="note" text-anchor="middle">a few rounds at most</text></g><g class="st" id="st-serve"><rect class="bx" x="826" y="320" width="190" height="74" rx="8" fill="#dfe9f7" stroke="#0b3d7a" stroke-width="2"/><rect x="834" y="328" width="46" height="17" rx="8" fill="#fff" stroke="#0b3d7a"/><text x="841" y="341" class="tag" fill="#0b3d7a">Code</text><text x="836" y="364" class="b">Readable names,</text><text x="836" y="381" class="b">unsolved list added</text><text id="n-serve" x="921.0" y="410" class="note" text-anchor="middle">when you download it</text></g><path d="M212,357 H282" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><rect x="210.8" y="336" width="72.4" height="19" rx="9" fill="#fff" stroke="#888"/><text x="247" y="350" class="data" text-anchor="middle">document</text><path d="M480,342 H550" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><rect x="478.8" y="321" width="72.4" height="19" rx="9" fill="#fff" stroke="#888"/><text x="515" y="335" class="data" text-anchor="middle">problems</text><path d="M558,374 H488" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)" stroke-dasharray="5 4"/><rect x="497.75" y="374" width="50.5" height="19" rx="9" fill="#fff" stroke="#888"/><text x="523" y="388" class="data" text-anchor="middle">fixes</text><path d="M748,357 H818" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><rect x="746.8" y="336" width="72.4" height="19" rx="9" fill="#fff" stroke="#888"/><text x="783" y="350" class="data" text-anchor="middle">document</text><g class="st" id="st-html"><path class="bx" d="M1040,318 h110 l22,22 v56 h-132 z" fill="#fff" stroke="#111" stroke-width="3"/><path d="M1150,318 v22 h22" fill="none" stroke="#111" stroke-width="2"/><text x="1050" y="352" class="b">Accessible</text><text x="1050" y="369" class="b">HTML</text></g><path d="M1016,357 H1034" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><path d="M1106,396 V476 H117 V532" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><rect x="523.65" y="464" width="152.7" height="19" rx="9" fill="#fff" stroke="#888"/><text x="600" y="478" class="data" text-anchor="middle">HTML + original PDF</text><g class="st" id="st-pdf-read"><rect class="bx" x="22" y="540" width="190" height="74" rx="8" fill="#dfe9f7" stroke="#0b3d7a" stroke-width="2"/><rect x="30" y="548" width="46" height="17" rx="8" fill="#fff" stroke="#0b3d7a"/><text x="37" y="561" class="tag" fill="#0b3d7a">Code</text><text x="32" y="584" class="b">Read the page&#x27;s</text><text x="32" y="601" class="b">words + positions</text><text id="n-pdf-read" x="117.0" y="630" class="note" text-anchor="middle">OCR for a scan</text></g><g class="st" id="st-pdf-match"><rect class="bx" x="290" y="540" width="190" height="74" rx="8" fill="#dfe9f7" stroke="#0b3d7a" stroke-width="2"/><rect x="298" y="548" width="46" height="17" rx="8" fill="#fff" stroke="#0b3d7a"/><text x="305" y="561" class="tag" fill="#0b3d7a">Code</text><text x="300" y="584" class="b">Match Iris&#x27;s words</text><text x="300" y="601" class="b">to the page&#x27;s</text><text id="n-pdf-match" x="385.0" y="630" class="note" text-anchor="middle">words, not coordinates</text></g><g class="st" id="st-pdf-tag"><rect class="bx" x="558" y="540" width="190" height="74" rx="8" fill="#dfe9f7" stroke="#0b3d7a" stroke-width="2"/><rect x="566" y="548" width="46" height="17" rx="8" fill="#fff" stroke="#0b3d7a"/><text x="573" y="561" class="tag" fill="#0b3d7a">Code</text><text x="568" y="584" class="b">Tag text in place,</text><text x="568" y="601" class="b">add form fields</text><text id="n-pdf-tag" x="653.0" y="630" class="note" text-anchor="middle">structure tree</text></g><g class="st" id="st-pdf-check"><rect class="bx" x="826" y="540" width="190" height="74" rx="8" fill="#dfe9f7" stroke="#0b3d7a" stroke-width="2"/><rect x="834" y="548" width="46" height="17" rx="8" fill="#fff" stroke="#0b3d7a"/><text x="841" y="561" class="tag" fill="#0b3d7a">Code</text><text x="836" y="584" class="b">Check pixels and</text><text x="836" y="601" class="b">words, then save</text><text id="n-pdf-check" x="921.0" y="630" class="note" text-anchor="middle">refuses if changed</text></g><path d="M212,577 H282" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><rect x="221.75" y="556" width="50.5" height="19" rx="9" fill="#fff" stroke="#888"/><text x="247" y="570" class="data" text-anchor="middle">words</text><path d="M480,577 H550" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><rect x="482.45" y="556" width="65.1" height="19" rx="9" fill="#fff" stroke="#888"/><text x="515" y="570" class="data" text-anchor="middle">matches</text><path d="M748,577 H818" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><rect x="761.4" y="556" width="43.2" height="19" rx="9" fill="#fff" stroke="#888"/><text x="783" y="570" class="data" text-anchor="middle">tags</text><g class="st" id="st-pdf"><path class="bx" d="M1040,538 h110 l22,22 v56 h-132 z" fill="#fff" stroke="#111" stroke-width="3"/><path d="M1150,538 v22 h22" fill="none" stroke="#111" stroke-width="2"/><text x="1050" y="572" class="b">Tagged</text><text x="1050" y="589" class="b">PDF</text></g><path d="M1016,577 H1034" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)"/><g class="st" id="st-pdf-review"><rect class="bx" x="826" y="660" width="190" height="74" rx="8" fill="#fbe3c8" stroke="#7a3e00" stroke-width="2" stroke-dasharray="6 4"/><rect x="834" y="668" width="30" height="17" rx="8" fill="#fff" stroke="#7a3e00"/><text x="841" y="681" class="tag" fill="#7a3e00">AI</text><text x="836" y="704" class="b">Optional review:</text><text x="836" y="721" class="b">does it say what it shows?</text></g><path d="M1000,614 V652" fill="none" stroke="#333" stroke-width="2" marker-end="url(#hiw-ah)" stroke-dasharray="5 4"/></svg>
+        <p id="diagram-state" class="hint"></p>
         <form id="run-form">
           <label for="file">Convert a document</label>
           <p class="hint" id="file-hint">A PDF, or page images in order. A real conversion: a few minutes.</p>
@@ -186,38 +144,89 @@
           <input id="session-id" type="text" aria-describedby="session-hint" autocomplete="off" spellcheck="false">
           <button id="open-btn" type="submit" class="secondary">Open</button>
         </form>
+        <div id="run-status" hidden>
+          <h3 id="run-h" tabindex="-1">This run</h3>
+          <p id="now" class="now"></p>
+          <div id="run-pick-box"></div>
+          <p id="audit-note" class="hint" hidden>Audit mode is off here, so page images, prompts and in-between documents are not shown.</p>
+          <div id="problems" hidden>
+            <h4>Things to look at</h4>
+            <div id="problem-list"></div>
+          </div>
+        </div>
       </section>
 
-      <section class="box" id="progress" aria-labelledby="progress-h" hidden>
-        <h2 id="progress-h" tabindex="-1">What Iris did</h2>
-        <p id="now" class="now"></p>
-        <div id="run-pick-box"></div>
-        <div id="run-used"></div>
-        <p id="audit-note" class="hint" hidden>Audit mode is off here, so page images, prompts and in-between documents are not shown.</p>
-        <div id="stage-start"></div>
+      <section class="box step" id="step-upload" aria-labelledby="step-upload-h">
+        <h2 id="step-upload-h">1. Upload</h2>
+        <p class="what" id="what-upload"><span class="who code">Code</span> Each page becomes an image, and a form's fields are read. The document joins a queue and starts when a slot is free.</p>
+        <div id="set-upload"></div>
+        <div id="stage-upload"></div>
+        <div id="calls-upload"></div>
+      </section>
+      <section class="box step" id="step-pages" aria-labelledby="step-pages-h">
+        <h2 id="step-pages-h">2. Read and check each page</h2>
+        <p class="what" id="what-pages"><span class="who ai">AI</span> The page agent writes each page's HTML from its image. <span class="who ai">AI</span> A second model checks it against the image, and <span class="who code">Code</span> rules check links, image descriptions and ids. A page that fails is fixed once.</p>
+        <div id="set-pages"></div>
         <div id="stage-pages"></div>
+      </section>
+      <section class="box step" id="step-join" aria-labelledby="step-join-h">
+        <h2 id="step-join-h">3. Join and check</h2>
+        <p class="what" id="what-join"><span class="who code">Code</span> The pages are joined into one document, its ids are made unique, and axe-core checks it.</p>
+        <div id="set-join"></div>
         <div id="stage-join"></div>
+        <div id="calls-join"></div>
+      </section>
+      <section class="box step" id="step-review" aria-labelledby="step-review-h">
+        <h2 id="step-review-h">4. Review</h2>
+        <p class="what" id="what-review"><span class="who ai">AI</span> A reader reads the whole document as text, as a screen reader gets it, and lists problems. <span class="who ai">AI</span> A copy editor fixes them, looking at the page images. <span class="who code">Code</span> A fix that loses content is thrown away. This repeats for a few rounds at most.</p>
+        <div id="set-review"></div>
         <div id="stage-review"></div>
+        <div id="calls-review"></div>
+      </section>
+      <section class="box step" id="step-result" aria-labelledby="step-result-h">
+        <h2 id="step-result-h">5. Result</h2>
+        <p class="what" id="what-result"><span class="who code">Code</span> Readable names are added, and any problem left open is listed in the HTML. Feedback starts a new run of the same document.</p>
+        <div id="set-result"></div>
         <div id="stage-result"></div>
+        <div id="calls-result"></div>
+      </section>
+      <section class="box step" id="step-pdf" aria-labelledby="step-pdf-h">
+        <h2 id="step-pdf-h">6. Tagged PDF (optional)</h2>
+        <p class="what" id="what-pdf"><span class="who code">Code</span> Only when asked: iris-pdf matches the HTML's words to the PDF's, tags the text in place, adds form fields, and checks every page before saving.</p>
+        <div id="set-pdf"></div>
         <div id="stage-pdf"></div>
+        <div id="calls-pdf"></div>
       </section>
 
-      <section class="box" id="problems" aria-labelledby="problems-h" hidden>
-        <h2 id="problems-h">Things to look at</h2>
-        <p class="hint">From the run log. Start here when a document came out wrong.</p>
-        <div id="problem-list"></div>
+      <section class="box" id="deployment" aria-labelledby="deployment-h">
+        <h2 id="deployment-h">This deployment</h2>
+        <p class="hint">From <code>GET /v1/settings</code>, <code>/v1/limits</code> and <code>/v1/stats</code>. Secrets are never shown. Each step above lists the settings that shape it.</p>
+        <div id="settings-body"><p>Loading…</p></div>
+        <div id="calls-deployment"></div>
       </section>
 
-      <section class="box" id="calls" aria-labelledby="calls-h" hidden>
-        <h2 id="calls-h">API calls</h2>
-        <p class="hint">Every request this page sent, with what came back. <a href="https://github.com/EqualifyEverything/equalify-iris/blob/main/docs/API.md">API reference</a>.</p>
-        <ol id="call-list" class="calls"></ol>
+      <section class="box" id="api" aria-labelledby="api-h">
+        <h2 id="api-h">The API</h2>
+        <p>Every endpoint, from <code>GET /v1/openapi.json</code>, the exact contract. A call this page made is shown in its step; try the others here.</p>
+        <div id="api-body"><p>Loading…</p></div>
       </section>
 
-      <section class="box" id="log" aria-labelledby="log-h" hidden>
+      <section class="box" id="log" aria-labelledby="log-h">
         <h2 id="log-h">Run log</h2>
         <p class="hint">One line per thing Iris did. Each name links to its definition.</p>
-        <div id="log-table"></div>
+        <details>
+          <summary>Words the run log uses</summary>
+          <dl>
+            <dt>Page agent</dt><dd>The model call that writes one page's HTML from its image.</dd>
+            <dt>Verdict</dt><dd>The checking model's answer about one page: is it faithful to the image, and is it accessible.</dd>
+            <dt>Fragment</dt><dd>One page's HTML, before the pages are joined.</dd>
+            <dt>Block</dt><dd>One top-level part of the joined document. The copy editor changes the document block by block.</dd>
+            <dt>Round</dt><dd>One pass of the review: the reader lists problems, then the copy editor fixes them.</dd>
+            <dt>Declaration</dt><dd>The page agent saying a page is blank. Iris can refuse it, for example for a page that is only too dark to read.</dd>
+            <dt>Run</dt><dd>One conversion of a document. Feedback starts a new run of the same document.</dd>
+          </dl>
+        </details>
+        <div id="log-table"><p>No document yet.</p></div>
       </section>
 
       <section class="box" id="share" aria-labelledby="share-h" hidden>
@@ -225,9 +234,6 @@
         <p>Link to this run: <a id="share-link" href="#"></a></p>
         <button id="export-btn" type="button" class="secondary">Download the run for an AI agent (JSON)</button>
       </section>
-
-
-
     </main>
   </div>
 
@@ -506,30 +512,30 @@
       // Feedback was sent, and the new run has not logged its first line yet (Iris is deciding what to redo).
       if (opts.pendingFeedback) {
         return [
-          { key: 'upload', label: 'Feedback', state: 'working', detail: 'deciding what to redo', href: '#stage-start' },
-          ...['read', 'check', 'join', 'review', 'result'].map((key) => ({ key, label: { read: 'Read each page', check: 'Check each page', join: 'Join and check', review: 'Review', result: 'Result' }[key], state: 'waiting', detail: '', href: '#stage-' + (key === 'read' || key === 'check' ? 'pages' : key) })),
-          { key: 'pdf', label: 'Tagged PDF (optional)', state: 'skipped', detail: '', href: '#stage-pdf' },
+          { key: 'upload', label: 'Feedback', state: 'working', detail: 'deciding what to redo', href: '#step-upload' },
+          ...['read', 'check', 'join', 'review', 'result'].map((key) => ({ key, label: { read: 'Read each page', check: 'Check each page', join: 'Join and check', review: 'Review', result: 'Result' }[key], state: 'waiting', detail: '', href: '#step-' + (key === 'read' || key === 'check' ? 'pages' : key) })),
+          { key: 'pdf', label: 'Tagged PDF (optional)', state: 'skipped', detail: '', href: '#step-pdf' },
         ];
       }
       const steps = [
         rerun
-          ? { key: 'upload', label: 'Feedback', state: 'done', detail: scope ? (scope.target === 'extraction' ? 're-read ' + (reext ? 'page ' + reext.pages.join(', ') : 'some pages') : 'review again, pages kept') : 'deciding what to redo', href: '#stage-start' }
-          : { key: 'upload', label: 'Upload', state: session ? 'done' : 'waiting', detail: session ? plural(n, 'page') : '', href: '#stage-start' },
+          ? { key: 'upload', label: 'Feedback', state: 'done', detail: scope ? (scope.target === 'extraction' ? 're-read ' + (reext ? 'page ' + reext.pages.join(', ') : 'some pages') : 'review again, pages kept') : 'deciding what to redo', href: '#step-upload' }
+          : { key: 'upload', label: 'Upload', state: session ? 'done' : 'waiting', detail: session ? plural(n, 'page') : '', href: '#step-upload' },
         keptPages
-          ? { key: 'read', label: 'Read each page', state: 'skipped', detail: 'kept from the run before', href: '#stage-pages' }
-          : { key: 'read', label: 'Read each page', state: st(has('extraction_complete') || has('reextract_complete'), phase === 'extraction' && !failed, lost > 0), detail: session ? (reext ? written + ' of ' + reext.pages.length + ' re-read' : written + ' of ' + n + ' written') + (lost ? ', ' + lost + ' lost' : '') + (keptPrior ? ', ' + keptPrior + ' kept the earlier version' : '') : '', seconds: secs(t0, tExtract || (phase === 'extraction' && !finished ? now : null)), href: '#stage-pages' },
+          ? { key: 'read', label: 'Read each page', state: 'skipped', detail: 'kept from the run before', href: '#step-pages' }
+          : { key: 'read', label: 'Read each page', state: st(has('extraction_complete') || has('reextract_complete'), phase === 'extraction' && !failed, lost > 0), detail: session ? (reext ? written + ' of ' + reext.pages.length + ' re-read' : written + ' of ' + n + ' written') + (lost ? ', ' + lost + ' lost' : '') + (keptPrior ? ', ' + keptPrior + ' kept the earlier version' : '') : '', seconds: secs(t0, tExtract || (phase === 'extraction' && !finished ? now : null)), href: '#step-pages' },
         keptPages
-          ? { key: 'check', label: 'Check each page', state: 'skipped', detail: 'kept from the run before', href: '#stage-pages' }
-          : { key: 'check', label: 'Check each page', state: st(has('extraction_complete') || has('reextract_complete'), checkedOk + checkedBad > 0 && phase === 'extraction', false), detail: checkedOk + checkedBad ? checkedBad + ' failed, ' + fixed + ' fixed' : '', href: '#stage-pages' },
+          ? { key: 'check', label: 'Check each page', state: 'skipped', detail: 'kept from the run before', href: '#step-pages' }
+          : { key: 'check', label: 'Check each page', state: st(has('extraction_complete') || has('reextract_complete'), checkedOk + checkedBad > 0 && phase === 'extraction', false), detail: checkedOk + checkedBad ? checkedBad + ' failed, ' + fixed + ' fixed' : '', href: '#step-pages' },
         // A re-run that kept the pages does not join them again: it re-checks the kept document with
         // axe, and logs only a failure (lint_unavailable, stage feedback_relint).
         keptPages
           ? (() => { const bad = has('lint_unavailable', (e) => e.stage === 'feedback_relint');
-              return { key: 'join', label: 'Join and check', state: bad ? 'problem' : phase === 'review' || rc || finished ? 'done' : failed ? 'skipped' : 'working', detail: bad ? 'axe could not run' : 'axe re-checked the kept document', href: '#stage-join' }; })()
-          : { key: 'join', label: 'Join and check', state: st(Boolean(asm), phase === 'assembly', asm && !asm.lint_ok && asm.violations === undefined), detail: asm ? (asm.violations ? 'axe: ' + plural(asm.violations, 'problem') : asm.lint_ok ? 'axe: no problems' : 'axe could not run') : '', seconds: secs(tExtract, tAsm), href: '#stage-join' },
-        { key: 'review', label: 'Review', state: st(Boolean(rc) || finished, phase === 'review' && !failed, false), detail: rounds ? 'round ' + rounds + (opts.maxRounds ? ' of ' + opts.maxRounds : '') : '', seconds: secs(tAsm, tEnd || (phase === 'review' && !finished ? now : null)), href: '#stage-review' },
-        { key: 'result', label: 'Result', state: failed ? 'problem' : finished ? 'done' : 'waiting', detail: rc ? (rc.unresolved ? rc.unresolved + ' left open' : 'nothing left open') : failed ? 'the run failed' : '', seconds: secs(t0, tEnd), href: '#stage-result' },
-        { key: 'pdf', label: 'Tagged PDF (optional)', state: opts.pdf === 'done' ? 'done' : opts.pdf === 'working' ? 'working' : opts.pdf === 'failed' ? 'problem' : finished && opts.pdfOn ? 'waiting' : 'skipped', detail: opts.pdf ? '' : finished && opts.pdfOn ? 'not asked for' : opts.pdfOn === false ? 'off here' : '', href: '#stage-pdf' },
+              return { key: 'join', label: 'Join and check', state: bad ? 'problem' : phase === 'review' || rc || finished ? 'done' : failed ? 'skipped' : 'working', detail: bad ? 'axe could not run' : 'axe re-checked the kept document', href: '#step-join' }; })()
+          : { key: 'join', label: 'Join and check', state: st(Boolean(asm), phase === 'assembly', asm && !asm.lint_ok && asm.violations === undefined), detail: asm ? (asm.violations ? 'axe: ' + plural(asm.violations, 'problem') : asm.lint_ok ? 'axe: no problems' : 'axe could not run') : '', seconds: secs(tExtract, tAsm), href: '#step-join' },
+        { key: 'review', label: 'Review', state: st(Boolean(rc) || finished, phase === 'review' && !failed, false), detail: rounds ? 'round ' + rounds + (opts.maxRounds ? ' of ' + opts.maxRounds : '') : '', seconds: secs(tAsm, tEnd || (phase === 'review' && !finished ? now : null)), href: '#step-review' },
+        { key: 'result', label: 'Result', state: failed ? 'problem' : finished ? 'done' : 'waiting', detail: rc ? (rc.unresolved ? rc.unresolved + ' left open' : 'nothing left open') : failed ? 'the run failed' : '', seconds: secs(t0, tEnd), href: '#step-result' },
+        { key: 'pdf', label: 'Tagged PDF (optional)', state: opts.pdf === 'done' ? 'done' : opts.pdf === 'working' ? 'working' : opts.pdf === 'failed' ? 'problem' : finished && opts.pdfOn ? 'waiting' : 'skipped', detail: opts.pdf ? '' : finished && opts.pdfOn ? 'not asked for' : opts.pdfOn === false ? 'off here' : '', href: '#step-pdf' },
       ];
       return steps;
     }
@@ -548,8 +554,7 @@
         li.querySelector('.icon').textContent = STATE_ICON[x.state];
         const a = li.querySelector('a');
         a.textContent = x.label;
-        // Before a run the step sections are hidden, so every step points at Start.
-        a.setAttribute('href', state.id ? x.href : '#start');
+        a.setAttribute('href', x.href);
         li.querySelector('.state').textContent = STATE_WORD[x.state] + (x.detail ? ': ' + x.detail : '') + (x.seconds != null ? ' · ' + x.seconds + ' s' : '');
       });
       if (!state.id) { lastSteps = null; return; }
@@ -613,22 +618,22 @@
       const out = [];
       if (src) {
         const kind = src.xfa ? 'an XFA form' : src.acroform ? 'a fillable form' : 'not a fillable form';
-        out.push('<h4>a. Read the PDF</h4><p>' + plural(src.pages, 'page') + ', ' + kind + (src.encrypted ? ', encrypted' : '') + (src.signed ? ', signed' : '')
+        out.push('<h3>a. Read the PDF</h3><p>' + plural(src.pages, 'page') + ', ' + kind + (src.encrypted ? ', encrypted' : '') + (src.signed ? ', signed' : '')
           + (Array.isArray(src.hadTextLayer) ? '. Pages with their own text: ' + (src.hadTextLayer.join(', ') || 'none, so text came from OCR') : '') + '.</p>');
       }
       if (Array.isArray(r.pages) && r.pages.length) {
         const rows = r.pages.map((pg) => '<tr><td>' + pg.page + '</td><td>' + esc(pg.textSource === 'pdf-text' ? 'the PDF' : pg.textSource ?? '') + '</td>'
           + ['words', 'matched', 'addedFromHtml', 'furniture', 'lost', 'redrawn'].map((k) => '<td>' + (pg[k] ?? '') + '</td>').join('') + '</tr>').join('');
-        out.push('<h4>b. Match the words</h4><p>' + CODE + ' Each word in the HTML is matched to a word the page draws: words, not positions.</p>'
+        out.push('<h3>b. Match the words</h3><p>' + CODE + ' Each word in the HTML is matched to a word the page draws: words, not positions.</p>'
           + '<table><thead><tr><th scope="col">Page</th><th scope="col">Text from</th><th scope="col">Words</th><th scope="col">Matched</th><th scope="col">Added from HTML</th><th scope="col">Page furniture</th><th scope="col">Lost</th><th scope="col">Drawn again</th></tr></thead><tbody>' + rows + '</tbody></table>');
       }
       if (st || f) {
         const types = st ? Object.entries(st.byType || {}).map(([t, c]) => esc(t) + ' ' + c).join(', ') : '';
-        out.push('<h4>c. Tag and fill</h4><p>' + (st ? plural(st.elements, 'structure element') + (types ? ': ' + types : '') + '. ' : '')
+        out.push('<h3>c. Tag and fill</h3><p>' + (st ? plural(st.elements, 'structure element') + (types ? ': ' + types : '') + '. ' : '')
           + (f ? 'Form: ' + plural(f.fields, 'field') + ', ' + f.set + ' filled' + ((f.created || []).length ? ', ' + f.created.length + ' added' : '') + ((f.unresolved || []).length ? ', ' + f.unresolved.length + ' not matched' : '') + '.' : '') + '</p>');
       }
       if (v) {
-        out.push('<h4>d. Check, then save</h4><ul>'
+        out.push('<h3>d. Check, then save</h3><ul>'
           + (v.pixels ? '<li>Pixels: ' + esc(v.pixels === 'identical-outside-fields' ? 'identical, apart from form fields' : v.pixels) + (v.differingPixels ? ' (' + v.differingPixels + ' differ)' : '') + '.</li>' : '')
           + (typeof v.textPreserved === 'boolean' ? '<li>Every source word kept: ' + (v.textPreserved ? 'yes' : 'no') + '.</li>' : '')
           + (r.pdfua ? '<li>PDF/UA check: ' + (r.pdfua.checked ? esc(r.pdfua.result || 'run') : 'not run') + '.</li>' : '')
@@ -735,58 +740,41 @@
       const r = st && st.run, items = [];
       const m = (label, agent, step, cap) => { const x = modelFor(ev, st, agent, step, cap); return x ? label + ': ' + esc(x) : null; };
       if (key === 'upload') {
-        if (limits) items.push('up to ' + plural(limits.max_pages, 'page'), limits.image && limits.image.max_bytes ? 'each image under ' + (Math.floor((limits.image.max_bytes / 1048576) * 10) / 10).toFixed(1) + ' MB' : null);
+        // Rounded down, so the page never promises more than Iris accepts (3.75 MB reads 3.7 MB, as Iris's own message does).
+        const img = (limits && limits.image) || {}, rl = limits && limits.rate_limits;
+        if (limits) items.push('up to ' + plural(limits.max_pages, 'page') + (limits.upload ? ' in up to ' + plural(limits.upload.max_files, 'file') : ''),
+          img.extensions ? 'a PDF, or ' + esc(img.extensions.map((e) => e.slice(1).toUpperCase()).join(', ')) : null,
+          img.max_bytes ? 'each image under ' + (Math.floor((img.max_bytes / 1048576) * 10) / 10).toFixed(1) + ' MB' + (img.max_long_edge_px ? ', read at up to ' + img.max_long_edge_px + ' pixels on its long edge' : '') : null,
+          rl ? 'up to ' + rl.upload_per_minute + ' uploads and ' + rl.general_per_minute + ' requests a minute from one address' : 'no request limits');
+        if (r) items.push('up to ' + plural(r.max_concurrent_runs, 'document') + ' converted at once; others wait');
         if (st) items.push('audit mode ' + (st.access.audit ? 'on' : 'off'));
       } else if (key === 'pages') {
         if (r) items.push('up to ' + plural(r.extraction_concurrency, 'page') + ' at a time');
-        items.push(m('page agent', 'page', 'extract', 'vision'), m('checker', 'feedback', 'verify', 'vision'), 'a failed page is fixed once');
+        items.push(m('page agent', 'page', 'extract', 'vision'), m('checker', 'feedback', 'verify', 'vision'));
         if (r && r.recheck_sample_size) items.push(plural(r.recheck_sample_size, 'fixed page') + ' checked again');
         if (st) items.push(plural(st.agents.filter((a) => a.kind === 'specialist').length, 'specialist agent') + ' available');
+        // A specialist this run called, with its model: the step-2 agents beyond the four core ones.
+        const used = new Map();
+        for (const e of ev) if (e.type === 'model_call' && e.agent && !['page', 'feedback', 'reader', 'copy_editor'].includes(e.agent)) used.set(e.agent, modelName(e.model));
+        if (used.size) items.push('specialists used: ' + [...used].map(([a, mm]) => esc(a) + ': ' + esc(mm)).join(', '));
       } else if (key === 'join') {
         items.push('axe-core, WCAG 2.2 A and AA rules', 'colour contrast is not checked: the HTML has no styling');
       } else if (key === 'review') {
         const cap = session && session.iterations_max != null ? session.iterations_max : r && r.max_review_iterations;
         if (cap != null) items.push('up to ' + plural(cap, 'round'));
-        items.push(m('reader', 'reader', 'read', 'text'), m('copy editor', 'copy_editor', 'edit', 'vision'), 'a fix that loses content is thrown away');
-      } else if (key === 'result') {
-        if (st) items.push(st.retention_days ? 'files kept ' + plural(st.retention_days, 'day') : 'files kept until deleted');
+        items.push(m('reader', 'reader', 'read', 'text'), m('copy editor', 'copy_editor', 'edit', 'vision'));
       } else if (key === 'pdf') {
         if (st && st.tagged_pdf.on) items.push(esc(st.tagged_pdf.version || 'iris-pdf'), 'up to ' + st.tagged_pdf.timeout_seconds + ' seconds', 'detailed report ' + (st.access.audit ? 'on' : 'off'));
+        else if (st) items.push('off on this deployment');
       }
       const xs = items.filter(Boolean);
       return xs.length ? '<p class="settings-line"><span class="label">Settings</span> ' + xs.join(' · ') + '</p>' : '';
     }
 
-    // The four agents every run uses, in plain words. Their files (two are in the pipeline code, not
-    // agents/) are written for the models; a specialist's purpose comes from its file.
-    const CORE_PURPOSE = {
-      page: 'Writes each page\'s HTML from the page image.',
-      feedback: 'Checks each page\'s HTML against its image, and learns from feedback.',
-      reader: 'Reads the whole document as text, as a screen reader gets it, and lists problems.',
-      copy_editor: 'Fixes the problems the reader listed, looking at the page images.',
-    };
-    function settingsHtml(st, limits, stats) {
+    function settingsHtml(st, stats) {
       if (!st) return '<p>This deployment did not say how it is set up.</p>';
-      const r = st.run, ul = (xs) => '<ul>' + xs.filter(Boolean).map((x) => '<li>' + x + '</li>').join('') + '</ul>';
-      // Rounded down, so the page never promises more than Iris accepts (3.75 MB reads 3.7 MB, as Iris's own message does).
-      const mb = (b) => (Math.floor((b / 1048576) * 10) / 10).toFixed(1) + ' MB';
+      const ul = (xs) => '<ul>' + xs.filter(Boolean).map((x) => '<li>' + x + '</li>').join('') + '</ul>';
       const out = ['<p>Iris ' + esc(st.version) + '.</p>'];
-      if (limits) {
-        const img = limits.image || {}, rl = limits.rate_limits;
-        out.push('<h3>Limits</h3>' + ul([
-          'Up to ' + plural(limits.max_pages, 'page') + ' per document' + (limits.upload ? ', in up to ' + plural(limits.upload.max_files, 'file') : '') + '.',
-          img.extensions ? 'A PDF, or images: ' + esc(img.extensions.map((e) => e.slice(1).toUpperCase()).join(', ')) + '.' : null,
-          img.max_bytes ? 'Each image under ' + mb(img.max_bytes) + (img.max_long_edge_px ? ', and read at up to ' + img.max_long_edge_px + ' pixels on its long edge' : '') + '. A PDF\'s pages are turned into images that fit.' : null,
-          rl ? 'Up to ' + rl.upload_per_minute + ' uploads and ' + rl.general_per_minute + ' requests a minute from one address.' : 'No request limits.',
-        ]));
-      }
-      out.push('<h3>How a document is worked on</h3>' + ul([
-        'Up to ' + plural(r.extraction_concurrency, 'page') + ' read at the same time.',
-        'Up to ' + plural(r.max_review_iterations, 'review round') + ' per document.',
-        'Up to ' + plural(r.max_concurrent_runs, 'document') + ' converted at once. Others wait their turn.',
-        r.recheck_sample_size ? plural(r.recheck_sample_size, 'fixed page') + ' per run checked again, to measure the checker.' : null,
-        st.tagged_pdf.on ? 'Tagged PDFs: on (' + esc(st.tagged_pdf.version || 'iris-pdf') + ', up to ' + st.tagged_pdf.timeout_seconds + ' seconds each).' : 'Tagged PDFs: off.',
-      ]));
       out.push('<h3>What Iris keeps, and who can see it</h3>' + ul([
         st.retention_days ? 'A document\'s files are deleted ' + plural(st.retention_days, 'day') + ' after it was last used.' : 'Documents are kept until someone deletes them.',
         st.access.api_key_required ? 'Only callers with this deployment\'s API key can convert or read documents.' : '<strong>No API key is needed, so anyone who can reach this site can read any document converted here.</strong>',
@@ -795,14 +783,15 @@
       ]));
       if (stats && stats.pages_processed) {
         const q = stats.quality;
-        out.push('<h3>Track record</h3><p>' + stats.pages_processed.toLocaleString() + ' pages in ' + stats.documents_processed.toLocaleString() + ' documents since ' + esc(String(stats.since).slice(0, 10)) + '.'
+        const count = (n, one) => n.toLocaleString() + ' ' + (n === 1 ? one : one + 's');
+        out.push('<h3>Track record</h3><p>' + count(stats.pages_processed, 'page') + ' in ' + count(stats.documents_processed, 'document') + ' since ' + esc(String(stats.since).slice(0, 10)) + '.'
           + (q && q.documents ? ' In the last ' + q.window_days + ' days, ' + Math.round(q.clean_rate * 100) + '% of ' + q.documents.toLocaleString() + ' documents finished with nothing left open.' : '') + '</p>');
       }
       const caps = [['vision', 'Reading images'], ['text', 'Text only'], ['structured_output', 'Structured answers']];
       const cell = (m) => m ? esc(modelName(m.model)) + ' <span class="hint">(' + esc(m.provider) + ')</span>' : '—';
-      const row = (a) => '<tr><th scope="row">' + esc(a.agent) + '</th><td>' + esc((a.kind === 'core' && CORE_PURPOSE[a.agent]) || a.purpose || '') + '</td>' + caps.map(([c]) => '<td>' + cell(a.models[c]) + '</td>').join('') + '</tr>';
+      const row = (a) => '<tr><th scope="row">' + esc(a.agent) + '</th><td>' + esc(a.purpose || '') + '</td>' + caps.map(([c]) => '<td>' + cell(a.models[c]) + '</td>').join('') + '</tr>';
       const head = '<table><thead><tr><th scope="col">Agent</th><th scope="col">What it does</th>' + caps.map(([, w]) => '<th scope="col">' + w + '</th>').join('') + '</tr></thead><tbody>';
-      const core = st.agents.filter((a) => a.kind === 'core'), spec = st.agents.filter((a) => a.kind === 'specialist');
+      const spec = st.agents.filter((a) => a.kind === 'specialist');
       const blocks = Object.entries(st.providers.blocks).map(([name, b]) => '<li><strong>' + esc(name) + '</strong>' + (name === st.providers.default ? ' (the default)' : '') + ': ' + [
         b.api ? 'API ' + esc(b.api) : null, b.region ? 'region ' + esc(b.region) : null,
         'default model ' + esc(modelName(b.default_model)), 'answers up to ' + b.max_tokens.toLocaleString() + ' tokens',
@@ -813,9 +802,9 @@
           + (pr.cache_read != null ? ', $' + pr.cache_read + ' cache read' : '') + (pr.cache_write != null ? ', $' + pr.cache_write + ' cache write' : '') + ' per million tokens</li>').join('') + '</ul>' : '')
         + '</li>').join('');
       const priced = Object.values(st.providers.blocks).some((b) => b.prices && Object.keys(b.prices).length);
-      out.push('<h3>Which model does what</h3><p class="hint">A run\'s log says which it actually used.</p>'
-        + head + core.map(row).join('') + '</tbody></table>'
-        + (spec.length ? det('spec', 'Specialist agents (' + spec.length + '), used when a page needs one', head + spec.map(row).join('') + '</tbody></table>') : '')
+      // The four core agents are named, with their models, in the steps that use them; the specialists
+      // are used only when a page needs one, so they are listed here.
+      out.push((spec.length ? '<h3>Specialist agents</h3>' + det('spec', plural(spec.length, 'specialist agent') + ', used when a page needs one', head + spec.map(row).join('') + '</tbody></table>') : '')
         + '<h3>Model providers</h3><ul>' + blocks + '</ul>'
         + '<p class="hint">' + (priced ? 'Costs on this page are estimates from the prices above, set by this deployment. They are not a bill.' : 'No prices are set, so this page shows tokens but not cost.') + '</p>');
       return out.join('');
@@ -881,7 +870,7 @@
     function apiCardHtml(o, i) {
       const k = 'api' + i;
       const tryable = o.method === 'GET' && o.path !== '/v1/openapi.json';
-      const action = o.method === 'POST' ? (o.path === '/v1/sessions' ? 'Use <a href="#start">Start</a> to send one.' : o.path.endsWith('/feedback') ? 'Use the feedback box in step 5 of a finished run.' : o.path.endsWith('/pdf') ? 'Use “Make the tagged PDF” in step 6.' : o.path.endsWith('/close') ? '<button type="button" class="secondary" data-close="1">Accept the open document</button> <span class="hint">Accepting adds its pages to the examples Iris checks future page-agent changes against. It cannot be undone.</span>' : '') : '';
+      const action = o.method === 'POST' ? (o.path === '/v1/sessions' ? 'Use <a href="#start">Convert a document</a> to send one.' : o.path.endsWith('/feedback') ? 'Use the feedback box in step 5 of a finished run.' : o.path.endsWith('/pdf') ? 'Use “Make the tagged PDF” in step 6.' : o.path.endsWith('/close') ? '<button type="button" class="secondary" data-close="1">Accept the open document</button> <span class="hint">Accepting adds its pages to the examples Iris checks future page-agent changes against. It cannot be undone.</span>' : '') : '';
       return '<details data-k="' + k + '"><summary><span class="method">' + o.method + ' ' + esc(o.path) + '</span> ' + esc(o.summary) + '</summary>'
         + (o.description ? mdBlock(o.description) : '')
         + '<p class="hint">' + AUTH_WORDS[o.auth] + '</p>'
@@ -891,6 +880,7 @@
         // The two every gated or limited endpoint shares, said once rather than as a row on each card.
         + (o.responses.some((r) => r.code === '429') || o.auth === 'key' ? '<p class="hint">' + (o.auth === 'key' ? 'It answers <code>401</code> without the key, where one is needed. ' : '') + (o.responses.some((r) => r.code === '429') ? 'It answers <code>429</code> when too many requests come from one address.' : '') + '</p>' : '')
         + '<pre tabindex="0">' + esc(curl(o.method, o.path.replace(/^\/v1/, ''), o.auth === 'quality' ? "-H 'Authorization: Bearer YOUR_QUALITY_TOKEN'" : o.method === 'POST' && o.body.length ? "-H 'Content-Type: application/json' -d '{…}'" : '')) + '</pre>'
+        + '<p class="called" id="api-called-' + i + '" hidden></p>'
         + (tryable ? '<button type="button" class="secondary" data-try="' + i + '">Try it</button>' : '') + (action ? '<p>' + action + '</p>' : '')
         + '<div class="api-answer" id="api-answer-' + i + '"></div></details>';
     }
@@ -909,6 +899,18 @@
       return det('about-api', 'How to call it: keys, errors and limits', mdBlock(spec.info && spec.info.description)) + apiGroups(spec).map((g) => '<h3>' + esc(g.tag) + '</h3><p class="hint">' + md(g.description) + '</p>'
         + (g.tag === 'Operators' ? '<label for="quality-token">Quality token, to try these</label><p class="hint" id="qt-hint">Only for this page and only for these calls. It is never stored, logged or shown.</p><input id="quality-token" type="password" autocomplete="off" aria-describedby="qt-hint">' : '')
         + g.ops.map((o) => apiCardHtml(o, i++)).join('')).join('');
+    }
+
+    // Each call is shown once, in the step that made it. The calls the page makes on load are about the
+    // deployment; the polls follow the run from the upload on. A saved document goes with the step that
+    // made it. A Try-it answer (no home) stays in its API card.
+    const CALL_HOME = { upload: 'upload', session: 'upload', logs: 'upload', audit: 'upload', output: 'result', diagnostics: 'result', feedback: 'result', close: 'result', fields: 'pdf', pdf: 'pdf', openapi: 'deployment', limits: 'deployment', stats: 'deployment', settings: 'deployment', me: 'deployment' };
+    const HOME_WORDS = { upload: 'step 1, Upload', join: 'step 3, Join and check', review: 'step 4, Review', result: 'step 5, Result', pdf: 'step 6, Tagged PDF', deployment: 'This deployment' };
+    const callHome = (c) => c.key.startsWith('snapshot-') ? (/\/assembled$/.test(c.path) ? 'join' : 'review') : CALL_HOME[c.key] || null;
+    // Whether a path the page called is an instance of a path in the API document: `{x}` matches one segment.
+    function pathFits(template, path) {
+      const tpl = template.replace(/^\/v1/, '').split('/'), xs = path.split('?')[0].split('/');
+      return xs.length === tpl.length && tpl.every((t, j) => /^\{.+\}$/.test(t) || t === xs[j]);
     }
 
     // ----- State and API calls -----
@@ -961,11 +963,11 @@
       if (state.gated) { setError(GATED); return; }
       if (state.id === id) return;
       state.id = id;
-      $('progress').hidden = false; $('calls').hidden = false; $('log').hidden = false; $('share').hidden = false;
+      $('run-status').hidden = false; $('share').hidden = false;
       const link = location.origin + location.pathname + '#session=' + id;
       $('share-link').href = link; $('share-link').textContent = link;
       history.replaceState(null, '', '#session=' + id);
-      $('progress-h').focus();
+      $('run-h').focus();
       await tick();
     }
 
@@ -1051,7 +1053,7 @@
     document.addEventListener('toggle', async (ev) => {
       const d = ev.target;
       if (!(d instanceof HTMLDetailsElement) || !d.open || !d.dataset.src || snaps.has(d.dataset.src)) return;
-      const r = await call('snapshot', 'GET', d.dataset.src.slice(API.length), { json: false, plain: 'One of the in-between versions of the document that audit mode saved.' });
+      const r = await call('snapshot-' + d.dataset.src, 'GET', d.dataset.src.slice(API.length), { json: false, plain: 'One of the in-between versions of the document that audit mode saved.' });
       snaps.set(d.dataset.src, r.res.ok ? r.text : '<p>Could not load it.</p>');
       render();
     }, true);
@@ -1060,13 +1062,12 @@
     function render() {
       const runs = runsOf(state.events);
       const pick = state.run === null ? runs.length - 1 : Math.min(state.run, runs.length - 1);
-      const ev = runs[pick], s = state.session;
+      const ev = state.id ? runs[pick] : [], s = state.session;
       const latest = pick === runs.length - 1;
       patch($('run-pick-box'), runs.length > 1 ? '<label for="run-pick">Which run to show</label><p class="hint" id="run-pick-hint">This document was worked on ' + runs.length + ' times. Each feedback re-run is the next run.</p><select id="run-pick" data-k="run-pick" aria-describedby="run-pick-hint">'
         + runs.map((r, i) => { const st = r.find((e) => e.type === 'run_start'); return '<option value="' + i + '"' + (i === pick ? ' selected' : '') + '>Run ' + (i + 1) + (st && st.feedback ? ', feedback: ' + esc(st.feedback) : ', the first conversion') + '</option>'; }).join('') + '</select>' : '');
       const sel = $('run-pick'); if (sel && !sel.dataset.wired) { sel.dataset.wired = '1'; sel.addEventListener('change', () => { state.run = Number(sel.value); safeRender(); }); }
-      // The diagram.
-      // No run, no state: the diagram is only a picture until a session is open.
+      // The diagram. No run, no state: it is only a picture until a session is open.
       const { done, active } = state.id ? stagesFrom(ev, latest ? s : { status: 'ready_for_review' }) : { done: [], active: null };
       document.querySelectorAll('#diagram .st').forEach((g) => {
         const k = g.id.slice(3);
@@ -1083,7 +1084,7 @@
           t.setAttribute('text-anchor', 'end');
           g.appendChild(t);
         }
-        if (t) t.textContent = k === active ? 'working now' : done.includes(k) ? '\u2713 done' : '';
+        if (t) t.textContent = k === active ? 'working now' : done.includes(k) ? '✓ done' : '';
       });
       // The diagram is one image to a screen reader, so its state is also said here in words.
       // A step's whole label: its box holds one line per text element ("Turn each page", "into an image").
@@ -1092,19 +1093,8 @@
       $('diagram-state').textContent = !state.id ? 'No document is open, so no step has run. The diagram shows the steps every document goes through.'
         : (active ? 'Working now: ' + label(active) + '. ' : '') + (doneLabels.length ? 'Done so far: ' + doneLabels.join('; ') + '.' : 'Nothing is done yet.');
       const pages = pagesFrom(ev, state.manifest);
-      const n = s ? s.image_count : pages.length;
-      const setNote = (k, t) => { const el = document.getElementById('n-' + k); if (el && t) el.textContent = t; };
-      // The diagram's notes name each AI step's model and the review cap, before and during a run.
-      const st0 = state.settings;
-      setNote('page', modelFor(ev, st0, 'page', 'extract', 'vision'));
-      setNote('verify', modelFor(ev, st0, 'feedback', 'verify', 'vision'));
-      setNote('reader', modelFor(ev, st0, 'reader', 'read', 'text'));
-      const cap = s && s.iterations_max != null ? s.iterations_max : st0 && st0.run.max_review_iterations;
-      setNote('editor', modelFor(ev, st0, 'copy_editor', 'edit', 'vision') ? modelFor(ev, st0, 'copy_editor', 'edit', 'vision') + (cap != null ? ', up to ' + plural(cap, 'round') : '') : null);
       const rounds = roundsFrom(ev);
       const usage = usageByStage(ev, state.settings);
-      const done1 = ev.find((e) => e.type === 'run_complete');
-      setNote('serve', done1 ? done1.unresolved + ' left open' : null);
 
       // The process panel.
       const pdfState = state.pdfBusy ? 'working' : state.pdf ? (state.pdf.report ? 'done' : 'failed') : null;
@@ -1118,21 +1108,21 @@
       const now = !s ? '' : s.status === 'failed' ? 'The run failed: ' + (s.error || '') : (s.status === 'ready_for_review' || s.status === 'closed') ? 'Finished.' : s.status === 'queued' ? 'Waiting for a free slot.' : 'Working: ' + (phaseWords[s.phase] || s.phase) + '.';
       $('now').textContent = now + (s ? ' Session ' + s.session_id + '.' : '');
       $('side-status').textContent = s ? now : 'No document yet.';
-      // What this run actually used, from its own log: the round cap and each step's model.
-      const used = new Map();
-      for (const e of ev) if (e.type === 'model_call' && e.ok) used.set(e.agent + ' (' + stepWords(e.step) + ')', modelName(e.model));
-      patch($('run-used'), s ? '<p><strong>This run used:</strong> up to ' + plural(s.iterations_max, 'review round') + (used.size ? '; ' + [...used].map(([k, m]) => esc(k) + ': ' + esc(m)).join('; ') : '') + '.</p>' : '');
 
+      // Each step's settings, before a run as well as during one. Once a run has a model, it is that one.
+      for (const k of ['upload', 'pages', 'join', 'review', 'result', 'pdf']) patch($('set-' + k), stageSettings(k, ev, state.settings, state.limits, s));
 
-      // 1. Getting ready.
+      // 1. Upload, or the feedback that started this run.
       const startEvents = ev.filter((e) => ['form_fields', 'page_refit', 'run_queued', 'run_dequeued', 'run_start', 'feedback_rerun'].includes(e.type));
       const rs1 = ev.find((e) => e.type === 'run_start');
       const fbScope = ev.find((e) => e.type === 'feedback_scoped');
-      if (rs1 && rs1.feedback) {
+      const rerun = Boolean(rs1 && rs1.feedback);
+      $('step-upload-h').textContent = rerun ? '1. Feedback' : '1. Upload';
+      if (rerun) {
         const fbLines = ev.filter((e) => ['feedback_rerun', 'feedback_scoped', 'reextract_start', 'page_lessons_injected', 'feedback_learned', 'run_queued', 'run_dequeued'].includes(e.type));
-        patch($('stage-start'), '<h3>1. Feedback</h3><p>' + AI + ' Your feedback: <q>' + esc(rs1.feedback) + '</q></p>'
+        patch($('stage-upload'), '<p>' + AI + ' Your feedback: <q>' + esc(rs1.feedback) + '</q></p>'
           + '<p>' + CODE + ' The feedback is given to every agent in this run. ' + (fbScope ? esc(explain(fbScope)) : 'Iris is deciding what to redo.') + '</p><ul>' + fbLines.filter((e) => e !== fbScope).map((e) => '<li>' + esc(explain(e)) + '</li>').join('') + '</ul>');
-      } else patch($('stage-start'), '<h3>1. Upload</h3>' + stageSettings('upload', ev, state.settings, state.limits, s) + '<p>' + CODE + ' Each page became an image' + (n ? ' (' + plural(n, 'page') + ')' : '') + '.</p><ul>' + startEvents.map((e) => '<li>' + esc(explain(e)) + '</li>').join('') + '</ul>');
+      } else patch($('stage-upload'), state.id ? '<ul>' + startEvents.map((e) => '<li>' + esc(explain(e)) + '</li>').join('') + '</ul>' : '');
 
       // 2. Pages.
       const pageHtml = pages.map((p) => {
@@ -1142,7 +1132,7 @@
           : p.verify === 'failed' ? '<p class="status-bad">Failed the check: ' + plural(p.problems.length, 'problem') + '.' + (p.corrected ? ' Fixed, and the fix was ' + esc(p.corrected.result) + '.' : '') + '</p>'
           : '<p>Being read…</p>';
         const k = 'p' + p.order;
-        return '<div class="page"><h4>Page ' + (p.order || '?') + ' <span class="hint">(' + esc(p.image) + ')</span></h4>'
+        return '<div class="page"><h3>Page ' + (p.order || '?') + ' <span class="hint">(' + esc(p.image) + ')</span></h3>'
           + (img ? '<img src="' + API + '/sessions/' + state.id + '/audit/pages/' + img.order + '" alt="Page ' + img.order + ' as the models saw it" loading="lazy">' : '')
           + (p.fields ? '<p>' + CODE + ' Given ' + plural(p.fields.fields, 'form field name') + '.</p>' : '')
           + verdict
@@ -1155,36 +1145,34 @@
       }).join('');
       const ec = ev.find((e) => e.type === 'extraction_complete');
       const reread = pick > 0 ? '<p>This run re-read ' + (pages.length ? plural(pages.length, 'page') : 'no pages') + '. The other pages are as earlier runs left them.</p>' : '';
-      patch($('stage-pages'), pages.length || pick > 0 ? '<h3>2. Read and check each page</h3>' + stageSettings('pages', ev, state.settings, state.limits, s) + usageLine(usage.pages) + '' + reread + '<p>' + AI + ' The page agent wrote each page. ' + AI + ' A second model checked it against the image, with ' + CODE + ' rules for links, image descriptions and ids.</p>' + (ec ? '<p>' + esc(explain(ec)) + '</p>' : '') + '<div class="pages">' + pageHtml + '</div>' : '');
+      patch($('stage-pages'), pages.length || pick > 0 ? usageLine(usage.pages) + reread + (ec ? '<p>' + esc(explain(ec)) + '</p>' : '') + '<div class="pages">' + pageHtml + '</div>' : '');
 
       // 3. Join.
       const asm = ev.find((e) => e.type === 'assembly');
       const anchors = ev.find((e) => e.type === 'assembly_anchors');
       const assembled = state.manifest && state.manifest.runs.length && state.manifest.runs[state.manifest.runs.length - 1].snapshots.find((x) => x.name === 'assembled');
-      patch($('stage-join'), asm ? '<h3>3. Join and check</h3>' + stageSettings('join', ev, state.settings, state.limits, s) + usageLine(usage.join) + '<p>' + CODE + ' ' + esc(explain(asm)) + (anchors ? ' ' + esc(explain(anchors)) : '') + '</p>'
+      patch($('stage-join'), asm ? usageLine(usage.join) + '<p>' + esc(explain(asm)) + (anchors ? ' ' + esc(explain(anchors)) : '') + '</p>'
         + (assembled ? snapshot('The joined document, before review', assembled.url) : '') : '');
 
       // 4. Review.
       const edited = rounds.some((r) => r.editor);
-      patch($('stage-review'), rounds.length ? '<h3>4. Review</h3>' + stageSettings('review', ev, state.settings, state.limits, s) + usageLine(usage.review) + '<p>' + AI + ' A reader listed problems in the whole document. '
-        + (edited ? AI + ' A copy editor fixed them from the page images. ' + CODE + ' A fix that lost content was thrown away.' : 'It found nothing to fix, so the copy editor did not run.') + '</p>'
-        + rounds.map((r, i) => '<h4>Round ' + (i + 1) + '</h4><p>' + (r.count !== undefined ? 'The reader listed ' + plural(r.count, 'problem') + '.' : 'The reader is reading…') + (r.patch ? ' ' + esc(explain(r.patch)) : '') + (r.editor ? ' ' + esc(explain(r.editor)) : '') + '</p>'
+      patch($('stage-review'), rounds.length ? usageLine(usage.review) + (edited ? '' : '<p>The reader found nothing to fix, so the copy editor did not run.</p>')
+        + rounds.map((r, i) => '<h3>Round ' + (i + 1) + '</h3><p>' + (r.count !== undefined ? 'The reader listed ' + plural(r.count, 'problem') + '.' : 'The reader is reading…') + (r.patch ? ' ' + esc(explain(r.patch)) : '') + (r.editor ? ' ' + esc(explain(r.editor)) : '') + '</p>'
           + (r.issues.length ? det('r' + i + 'i', AI + ' The problems the reader listed', '<ol>' + r.issues.map((x) => '<li>' + esc(x.issue) + (x.pages ? ' <span class="hint">(page ' + esc(x.pages.join(', ')) + ')</span>' : '') + '</li>').join('') + '</ol>') : '')
           + (r.snapshot && state.manifest ? snapshot('The document after round ' + (i + 1), API + '/sessions/' + state.id + '/audit/runs/' + r.snapshot.run + '/' + r.snapshot.name) : '')).join('') : '');
 
       // 5. Result.
       const rc = ev.find((e) => e.type === 'run_complete');
       const un = unresolvedFrom(state.output);
-      patch($('stage-result'), state.output ? '<h3>5. Result</h3>' + stageSettings('result', ev, state.settings, state.limits, s) + usageLine(usage.total, 'This run in total') + '<p>' + (rc ? esc(explain(rc)) : '') + '</p>' + frame('The finished accessible HTML', state.output.replace(/^[\s\S]*?<main>/, '').replace(/<\/main>[\s\S]*$/, ''))
+      patch($('stage-result'), state.id && state.output ? usageLine(usage.total, 'This run in total') + '<p>' + (rc ? esc(explain(rc)) : '') + '</p>' + frame('The finished accessible HTML', state.output.replace(/^[\s\S]*?<main>/, '').replace(/<\/main>[\s\S]*$/, ''))
         + (un.length ? det('un', 'The ' + plural(un.length, 'problem') + ' left open', '<ol>' + un.map((u) => '<li>' + esc(u) + '</li>').join('') + '</ol>') : '')
         + '<p><a href="' + API + '/sessions/' + state.id + '/output">Open the HTML on its own</a></p>'
         + (latest && s && s.status === 'ready_for_review' ? feedbackFormHtml() : '') : '');
 
       // 6. Tagged PDF.
       const pdfOn = state.limits && state.limits.tagged_pdf;
-      const pdfHtml = !state.output || !pdfOn ? '' : !state.sourceIsPdf && state.manifest ? '' :
-        '<h3>6. Tagged PDF (optional)</h3>' + stageSettings('pdf', ev, state.settings, state.limits, s) + '<p>' + CODE + ' iris-pdf puts the HTML\'s structure onto the original PDF. It runs only when asked.'
-        + (state.manifest ? '' : ' It needs a single uploaded PDF.') + '</p>'
+      const pdfHtml = !state.id || !state.output || !pdfOn ? '' : !state.sourceIsPdf && state.manifest ? '<p>This document was not one uploaded PDF, so it cannot be tagged.</p>' :
+        (state.manifest ? '' : '<p>It needs a single uploaded PDF.</p>')
         + '<button id="pdf-btn" type="button" class="secondary">' + (state.pdf && state.pdf.report ? 'Make it again' : 'Make the tagged PDF') + '</button>'
         + (state.fields ? '<p>iris-pdf listed ' + plural(state.fields.length, 'form field') + '.</p>' : '')
         + (state.pdf && state.pdf.report ? pdfReportHtml(state.pdf.report) + det('pdfr', 'iris-pdf\'s full report', '<pre tabindex="0">' + esc(JSON.stringify(state.pdf.report, null, 2)) + '</pre>') + '<p><a id="pdf-dl" download="' + esc(state.pdf.filename) + '" href="data:application/pdf;base64,' + state.pdf.pdf + '">Download the tagged PDF</a></p>' : '')
@@ -1192,22 +1180,37 @@
       patch($('stage-pdf'), pdfHtml);
       const pb = $('pdf-btn'); if (pb && !pb.dataset.wired) { pb.dataset.wired = '1'; pb.addEventListener('click', makePdf); }
 
-      // Problems.
+      // Things to look at, in the run's status.
       const probs = problems(ev, latest ? s : null);
       $('problems').hidden = !ev.length;
       patch($('problem-list'), probs.length ? '<ul class="problems">' + probs.map((p) => '<li><span class="lvl ' + p.level + '">' + ({ high: 'Look at this:', medium: 'Worth checking:', info: 'For your information:' })[p.level] + '</span> ' + esc(p.text) + ' <a href="' + refLink(p.type) + '">What this means</a></li>').join('') + '</ul>' : '<p>Nothing unusual found in the run log.</p>');
 
       // The log.
-      patch($('log-table'), '<table><caption class="visually-hidden">The run log, one row per line</caption><thead><tr><th scope="col">Time</th><th scope="col">Event</th><th scope="col">What it means</th></tr></thead><tbody>'
+      patch($('log-table'), !ev.length ? '<p>No document yet.</p>' : '<table><caption class="visually-hidden">The run log, one row per line</caption><thead><tr><th scope="col">Time</th><th scope="col">Event</th><th scope="col">What it means</th></tr></thead><tbody>'
         + ev.map((e, i) => '<tr><td>' + esc((e.ts || '').slice(11, 19)) + '</td><td><a href="' + refLink(e.type) + '"><code>' + esc(e.type) + '</code></a></td><td>' + esc(explain(e)) + det('l' + i, 'The line itself', '<pre tabindex="0">' + esc(JSON.stringify(e, null, 2).slice(0, 6000)) + '</pre>') + '</td></tr>').join('') + '</tbody></table>');
     }
 
+    const callHtml = (c) => '<li data-k="c-' + esc(c.key) + '"><p><span class="method">' + esc(c.method) + ' ' + esc(API + c.path) + '</span> '
+      + '<span class="' + (c.status < 400 ? 'status-ok' : 'status-bad') + '">' + c.status + '</span>' + (c.count > 1 ? ' <span class="hint">(asked ' + c.count + ' times)</span>' : '') + '</p>'
+      + '<p>' + esc(c.plain || '') + '</p>'
+      + det('c-' + c.key + '-q', 'The same request with curl', '<pre tabindex="0">' + esc(curl(c.method, c.path, c.extra)) + '</pre>')
+      + det('c-' + c.key + '-a', 'What came back', '<pre tabindex="0">' + esc(c.body) + '</pre>') + '</li>';
     function renderCalls() {
-      patch($('call-list'), [...state.calls.values()].map((c) => '<li data-k="c-' + esc(c.key) + '"><p><span class="method">' + esc(c.method) + ' ' + esc(API + c.path) + '</span> '
-        + '<span class="' + (c.status < 400 ? 'status-ok' : 'status-bad') + '">' + c.status + '</span>' + (c.count > 1 ? ' <span class="hint">(asked ' + c.count + ' times)</span>' : '') + '</p>'
-        + '<p>' + esc(c.plain || '') + '</p>'
-        + det('c-' + c.key + '-q', 'The same request with curl', '<pre tabindex="0">' + esc(curl(c.method, c.path, c.extra)) + '</pre>')
-        + det('c-' + c.key + '-a', 'What came back', '<pre tabindex="0">' + esc(c.body) + '</pre>') + '</li>').join(''));
+      const by = {};
+      for (const c of state.calls.values()) { const h = callHome(c); if (h) (by[h] = by[h] || []).push(c); }
+      for (const h of Object.keys(HOME_WORDS)) {
+        const el = $('calls-' + h);
+        if (el) patch(el, by[h] ? det('calls-' + h, 'API calls ' + (h === 'deployment' ? 'this page made on load' : 'in this step') + ' (' + by[h].length + ')', '<ol class="calls">' + by[h].map(callHtml).join('') + '</ol>') : '');
+      }
+      // In the API section, an endpoint this page called says where, instead of offering Try it.
+      apiOps.forEach((o, i) => {
+        const c = [...state.calls.values()].find((x) => callHome(x) && x.method === o.method && pathFits(o.path, x.path));
+        const p = $('api-called-' + i), btn = document.querySelector('button[data-try="' + i + '"]');
+        if (!p) return;
+        p.hidden = !c;
+        if (c) p.innerHTML = 'This page made this call: see <a href="#' + (callHome(c) === 'deployment' ? 'deployment' : 'step-' + callHome(c)) + '">' + HOME_WORDS[callHome(c)] + '</a>.';
+        if (btn) btn.hidden = Boolean(c);
+      });
     }
 
     // ----- Export for an agent -----
@@ -1236,7 +1239,7 @@
         // Follow the new run like an upload: the latest run is shown, and polling starts again.
         Object.assign(state, { run: null, done: false, output: null, diagnostics: null, fields: null, pdf: null, pendingFeedback: { runs: runsOf(state.events).length } });
         live('Feedback sent. Iris is working on the document again, as run ' + (runsOf(state.events).length + 1) + '.');
-        $('progress-h').focus();
+        $('run-h').focus();
         clearTimeout(state.timer);
         tick();
       } catch (e) {
@@ -1256,7 +1259,6 @@
       try {
         const r = await call('upload', 'POST', '/sessions', { body: fd, extra: "-F 'images=@your-file.pdf'", plain: 'The upload. Iris turns each page into an image, saves the document as a new session, and starts the run.' });
         if (!r.res.ok) throw new Error((r.data && r.data.error && r.data.error.message) || r.res.statusText);
-        $('calls').hidden = false;
         state.uploaded = true;
         await start(r.data.session_id);
       } catch (e) { setError('The upload failed: ' + e.message); $('run-btn').disabled = false; }
@@ -1276,7 +1278,6 @@
         if (r.res.status === 401) {
           state.gated = true; setError(GATED);
           for (const id of ['file', 'run-btn', 'session-id', 'open-btn']) $(id).disabled = true;
-          $('calls').hidden = false;
         }
       } catch { /* unreachable: the first real call will say so */ }
     }
@@ -1285,6 +1286,7 @@
       state.spec = r.res.ok ? r.data : null;
       apiOps = state.spec ? apiGroups(state.spec).flatMap((g) => g.ops) : [];
       $('api-body').innerHTML = apiHtml(state.spec);
+      renderCalls();
     }).catch(() => { $('api-body').innerHTML = apiHtml(null); });
     // Fill a path from what is open: the session, and for audit items the first one it has.
     function tryPath(o) {
@@ -1310,7 +1312,7 @@
       const path = tryPath(o);
       if (!path) { out.innerHTML = '<p>Open or convert a document first: this needs a session' + (o.path.includes('audit/') ? ' with audit items' : '') + '.</p>'; return; }
       const token = o.auth === 'quality' ? $('quality-token').value.trim() : '';
-      t.disabled = true; out.setAttribute('aria-busy', 'true'); $('calls').hidden = false;
+      t.disabled = true; out.setAttribute('aria-busy', 'true');
       try {
         const r = await call('try-' + i, 'GET', path, { json: true, headers: token ? { Authorization: 'Bearer ' + token } : undefined, plain: o.summary + '.' });
         const type = r.res.headers.get('content-type') || '';
@@ -1331,7 +1333,7 @@
       t.disabled = false; out.removeAttribute('aria-busy');
     });
     Promise.all([loadLimits(), call('stats', 'GET', '/stats', { plain: 'How much this deployment has converted, and how often a document came back with nothing left open.' }).then((r) => r.res.ok ? r.data : null).catch(() => null), call('settings', 'GET', '/settings', { plain: 'How this deployment is set up: its settings and which model does what. Secrets are never included.' }).then((r) => r.res.ok ? r.data : null).catch(() => null)])
-      .then(([, stats, st]) => { state.settings = st; $('settings-body').innerHTML = settingsHtml(st, state.limits, stats); safeRender(); });
+      .then(([, stats, st]) => { state.settings = st; $('settings-body').innerHTML = settingsHtml(st, stats); safeRender(); });
     probe().then(() => {
       const fromHash = /^#session=(ses_[A-Za-z0-9]+)$/.exec(location.hash);
       if (fromHash && !state.gated) { $('session-id').value = fromHash[1]; start(fromHash[1]); }
