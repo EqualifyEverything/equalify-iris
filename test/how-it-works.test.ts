@@ -63,7 +63,7 @@ const lib = new Function(
   pathFits(template: string, path: string): boolean;
   answerHtml(i: number, a: unknown): string;
   firstSummary(steps: unknown[], id: string, uploaded: boolean): string;
-  changeSummary(prev: Map<string, string>, steps: unknown[]): string[];
+  changeSummary(prev: Map<string, string>, steps: unknown[], nProblems?: number | null): string[];
   stageSettings(key: string, ev: unknown[], st: unknown, limits: unknown, session: unknown): string;
   modelFor(ev: unknown[], st: unknown, agent: string, step: string, cap: string): string | null;
   usageByStage(ev: unknown[], st?: unknown): Record<string, { calls: number; input: number; output: number; cacheRead: number; cacheWrite: number; ms: number; cost: number; unpriced: Set<string> }>;
@@ -581,4 +581,16 @@ test("the track record counts agree in number and keep their separators", async 
   // A specialist the run called is named in step 2, with the model it ran on.
   const ev = [{ type: "model_call", agent: "chartDataAgent", step: "specialist", model: "us.chart-model" }];
   assert.ok(lib.stageSettings("pages", ev, st, null, null).includes("specialists used: chartDataAgent: chart-model"));
+});
+
+test("a screen reader hears who does a step as a label, and how many things to look at when a run ends", () => {
+  // The badges carry a hidden colon, so "AI The page agent" is read "AI: the page agent".
+  for (const badge of page.match(/<span class="who (?:ai|code)">[^<]*/g) ?? []) assert.ok(page.includes(badge + '<span class="visually-hidden">:</span></span>'), badge);
+  assert.ok(!/Code<span class="visually-hidden">:<\/span><\/span> Code /.test(page), "the intro does not read \"Code: Code\"");
+  // The diagram is named by its title and described by its description, not named by both.
+  assert.match(page, /role="img" aria-labelledby="diagram-t" aria-describedby="diagram-d"/);
+  const prev = new Map([["result", "working"]]);
+  const steps = [{ key: "result", label: "Result", state: "done", detail: "nothing left open" }];
+  assert.equal(lib.changeSummary(prev, steps, 0).at(-1), "Nothing to look at.");
+  assert.equal(lib.changeSummary(prev, steps, 2).at(-1), "2 things to look at, under This run.");
 });
