@@ -585,7 +585,9 @@ test("the track record counts agree in number and keep their separators", async 
 
 test("a screen reader hears who does a step as a label, and how many things to look at when a run ends", () => {
   // The badges carry a hidden colon, so "AI The page agent" is read "AI: the page agent".
-  for (const badge of page.match(/<span class="who (?:ai|code)">[^<]*/g) ?? []) assert.ok(page.includes(badge + '<span class="visually-hidden">:</span></span>'), badge);
+  const badges = (page.match(/class="who (?:ai|code)">/g) ?? []).length;
+  assert.ok(badges >= 10, "the badges were found");
+  assert.equal((page.match(/class="who (?:ai|code)">(?:AI|Code)<span class="visually-hidden">:<\/span><\/span>/g) ?? []).length, badges, "every badge has its hidden colon");
   assert.ok(!/Code<span class="visually-hidden">:<\/span><\/span> Code /.test(page), "the intro does not read \"Code: Code\"");
   // The diagram is named by its title and described by its description, not named by both.
   assert.match(page, /role="img" aria-labelledby="diagram-t" aria-describedby="diagram-d"/);

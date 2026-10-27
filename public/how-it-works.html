@@ -1150,15 +1150,17 @@
           : p.verify === 'failed' ? '<p class="status-bad">Failed the check: ' + plural(p.problems.length, 'problem') + '.' + (p.corrected ? ' Fixed, and the fix was ' + esc(p.corrected.result) + '.' : '') + '</p>'
           : '<p>Being read…</p>';
         const k = 'p' + p.order;
+        // Each card's disclosures repeat on every page, so their names carry the page for a screen reader.
+        const PG = '<span class="visually-hidden">, page ' + (p.order || '?') + '</span>';
         return { key: 'p' + p.order, html: '<h3>Page ' + (p.order || '?') + ' <span class="hint">(' + esc(p.image) + ')</span></h3>'
           + (img ? '<img src="' + API + '/sessions/' + state.id + '/audit/pages/' + img.order + '" alt="Page ' + img.order + ' as the models saw it" loading="lazy">' : '')
           + (p.fields ? '<p>' + CODE + ' Given ' + plural(p.fields.fields, 'form field name') + '.</p>' : '')
           + verdict
-          + (p.drafts[0] ? det(k + 'd', AI + ' The page agent\'s first draft', frame('Page ' + p.order + ', first draft', p.drafts[0]) + det(k + 'ds', 'The HTML itself', '<pre tabindex="0">' + esc(p.drafts[0]) + '</pre>')) : '')
-          + (p.problems.length ? det(k + 'v', AI + ' What the check said', '<ol>' + p.problems.map((x) => '<li>' + esc(x) + '</li>').join('') + '</ol>') : '')
-          + (p.declined ? det(k + 'x', AI + ' What the page agent refused, and why', '<ul>' + p.declined.declined.map((d) => '<li>' + esc(d.why) + '</li>').join('') + '</ul>') : '')
-          + (p.drafts[1] ? det(k + 'f', AI + ' After the fix', frame('Page ' + p.order + ', after the fix', p.drafts[1])) : '')
-          + (p.prompts.length ? det(k + 'pr', 'What the models were sent for this page', '<ul>' + p.prompts.map((e) => '<li>' + esc(e.agent) + ', to ' + esc(stepWords(e.step)) + ': ' + e.prompt.messages.map(promptLink).join(', ') + ', and the page image</li>').join('') + '</ul>') : '') };
+          + (p.drafts[0] ? det(k + 'd', AI + ' The page agent\'s first draft' + PG, frame('Page ' + p.order + ', first draft', p.drafts[0]) + det(k + 'ds', 'The HTML itself' + PG, '<pre tabindex="0">' + esc(p.drafts[0]) + '</pre>')) : '')
+          + (p.problems.length ? det(k + 'v', AI + ' What the check said' + PG, '<ol>' + p.problems.map((x) => '<li>' + esc(x) + '</li>').join('') + '</ol>') : '')
+          + (p.declined ? det(k + 'x', AI + ' What the page agent refused, and why' + PG, '<ul>' + p.declined.declined.map((d) => '<li>' + esc(d.why) + '</li>').join('') + '</ul>') : '')
+          + (p.drafts[1] ? det(k + 'f', AI + ' After the fix' + PG, frame('Page ' + p.order + ', after the fix', p.drafts[1])) : '')
+          + (p.prompts.length ? det(k + 'pr', 'What the models were sent for this page' + PG, '<ul>' + p.prompts.map((e) => '<li>' + esc(e.agent) + ', to ' + esc(stepWords(e.step)) + ': ' + e.prompt.messages.map(promptLink).join(', ') + ', and the page image</li>').join('') + '</ul>') : '') };
       });
       const ec = ev.find((e) => e.type === 'extraction_complete');
       const reread = pick > 0 ? '<p>This run re-read ' + (pages.length ? plural(pages.length, 'page') : 'no pages') + '. The other pages are as earlier runs left them.</p>' : '';
@@ -1176,7 +1178,7 @@
       const edited = rounds.some((r) => r.editor);
       patch($('review-head'), rounds.length ? usageLine(usage.review) + (edited ? '' : '<p>The reader found nothing to fix, so the copy editor did not run.</p>') : '');
       syncCards($('review-rounds'), rounds.map((r, i) => ({ key: 'r' + i, html: '<h3>Round ' + (i + 1) + '</h3><p>' + (r.count !== undefined ? 'The reader listed ' + plural(r.count, 'problem') + '.' : 'The reader is reading…') + (r.patch ? ' ' + esc(explain(r.patch)) : '') + (r.editor ? ' ' + esc(explain(r.editor)) : '') + '</p>'
-          + (r.issues.length ? det('r' + i + 'i', AI + ' The problems the reader listed', '<ol>' + r.issues.map((x) => '<li>' + esc(x.issue) + (x.pages ? ' <span class="hint">(page ' + esc(x.pages.join(', ')) + ')</span>' : '') + '</li>').join('') + '</ol>') : '')
+          + (r.issues.length ? det('r' + i + 'i', AI + ' The problems the reader listed<span class="visually-hidden">, round ' + (i + 1) + '</span>', '<ol>' + r.issues.map((x) => '<li>' + esc(x.issue) + (x.pages ? ' <span class="hint">(page ' + esc(x.pages.join(', ')) + ')</span>' : '') + '</li>').join('') + '</ol>') : '')
           + (r.snapshot && state.manifest ? snapshot('The document after round ' + (i + 1), API + '/sessions/' + state.id + '/audit/runs/' + r.snapshot.run + '/' + r.snapshot.name) : '') })));
 
       // 5. Result.
@@ -1251,7 +1253,10 @@
       ev.preventDefault(); setError('');
       const text = $('feedback-text').value.trim();
       if (!text) { setError('Write what Iris should fix first.'); $('feedback-text').focus(); return; }
-      $('feedback-btn').disabled = true;
+      const fb = $('feedback-btn');
+      if (fb.getAttribute('aria-disabled') === 'true') return;
+      // Busy is aria-disabled, which keeps focus: a failed POST leaves the user on the button, beside the alert.
+      fb.setAttribute('aria-disabled', 'true');
       try {
         const r = await call('feedback', 'POST', '/sessions/' + state.id + '/feedback', { body: JSON.stringify({ feedback: text }), extra: "-H 'Content-Type: application/json' -d '{\"feedback\":\"…\"}'", plain: 'Your feedback. Iris works on the same document again, as a new run of this session.' });
         if (!r.res.ok) throw new Error((r.data && r.data.error && r.data.error.message) || r.res.statusText);
@@ -1263,7 +1268,7 @@
         tick();
       } catch (e) {
         setError('The feedback was not accepted: ' + e.message);
-        const b = $('feedback-btn'); if (b) b.disabled = false;
+        const b = $('feedback-btn'); if (b) b.removeAttribute('aria-disabled');
       }
     });
 
