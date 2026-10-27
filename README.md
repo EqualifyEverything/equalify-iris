@@ -58,7 +58,7 @@ Check it's alive, and which build it is:
 
 ```bash
 curl http://localhost:8080/v1/health
-# {"status":"ok","service":"equalify-iris","version":"1.3.0"}
+# {"status":"ok","service":"equalify-iris","version":"1.4.0"}
 ```
 
 Then open `http://localhost:8080/` to convert a document in the browser (off once you set
