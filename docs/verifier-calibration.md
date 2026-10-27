@@ -7,7 +7,7 @@ A **verdict** below is the Feedback Agent's decision about one page — `faithfu
 both as booleans, plus the problems it lists — and a **round** is a captured run of a corpus, called
 a benchmark round or a deployed round depending on where it ran. The one exception is "wasted rounds"
 below, which means correction passes spent on a page rather than runs.
-[README § Terms](../README.md#terms) defines both, and `fragment` and `declaration` with them.
+[Terms](../CONTRIBUTING.md#terms) defines both, and `fragment` and `declaration` with them.
 
 Every accuracy claim this pipeline makes rests on one call: the Feedback Agent's VERIFY task,
 which compares a page's HTML against the page image and says whether it is faithful. That

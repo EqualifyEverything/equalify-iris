@@ -45,15 +45,10 @@ something, say `Closes #<n>` and the robot will stay out of your way.
 
 ## Development
 
-Requires **Node 24.15+** (runs TypeScript directly; uses built-in `node:sqlite`), **git**, and —
-for PDF uploads — **poppler-utils** (`brew install poppler` / `apt-get install poppler-utils`).
+Set up as in the README's [Quick start](README.md#quick-start).
 
-```bash
-npm install
-cp .env.example .env            # a GitHub PAT (required) + a model provider key
-cp config.example.yaml config.yaml
-npm start                       # http://localhost:8080  (app at /, API under /v1)
-```
+**Read [docs/design-notes.md](docs/design-notes.md) before changing code.** It is one bullet per
+decision, and most of what looks arbitrary here is a bullet in there with a measurement attached.
 
 Before opening a PR:
 
@@ -101,9 +96,8 @@ What it asks for:
 - **No repetition.** A paragraph that restates the one above it gets deleted, not softened.
 - **One job per document, and no restating another one.** A claim lives in the document whose job it
   is, and the others link to it — that is what keeps this set DRY and cheap to correct, since a claim
-  written twice is a claim that goes stale in one place.
-  [README § Working on Iris](README.md#working-on-iris--including-if-you-are-an-ai-agent) says which
-  document holds what.
+  written twice is a claim that goes stale in one place. [Which doc a change belongs
+  in](#which-doc-a-change-belongs-in) says which document holds what.
 - **Shorter over completer.** A page nobody finishes documents nothing.
 
 Two things this is not. It is not a ban on detail — an exact number, a file path, or a caveat that
@@ -118,6 +112,35 @@ adds: a new file or section where a line in an existing doc would do, or a parag
 sentence. It quotes the addition and writes the shorter version.
 
 A PR that only makes an existing doc plainer is welcome, with no code change attached.
+
+
+## Which doc a change belongs in
+
+Put the doc change in the same PR as the change.
+
+| If you change… | Update | Which holds |
+| --- | --- | --- |
+| behaviour, or the reason for it | [docs/design-notes.md](docs/design-notes.md) | the reasoning, the benchmark evidence, superseded behaviour, and what a rule cost before it existed |
+| an endpoint, a parameter or a response field | [docs/openapi.yaml](docs/openapi.yaml) | the exact contract, which `/how-it-works` builds its API section from; tests fail if a route or error code is missing |
+| a run-log event, a diagnostics or quality-tally field | [docs/run-log.md](docs/run-log.md) | what fires a line and what its fields hold |
+| which model runs an agent | [docs/models.md](docs/models.md) | **suggested** models. Every model is declared in config, never in the code, so no doc may say Iris "uses" one |
+| the price of a step | [docs/cost.md](docs/cost.md) | prices with the round each came from. Iris costs nothing per token on self-hosted open-weight models; only a suggested config has a price |
+| accessibility reporting, testing, or support information | [ACCESSIBILITY.md](ACCESSIBILITY.md) | reporting and triage guidance, contributor checks, and testing limitations |
+| a workflow in `.github/` | [docs/ci.md](docs/ci.md) | the workflows, including the bot that reviews your PR |
+| the gate, or what a 401 means | [docs/access.md](docs/access.md) | who may call the API, and an older database |
+| a pipeline step, or a run-log event a person needs explained | [`public/how-it-works.html`](public/how-it-works.html) | the walkthrough. An event's one-line meaning comes from run-log.md's index, so only a new step or a plainer sentence (`SAY`) needs an edit here |
+| a config key | [`config.example.yaml`](config.example.yaml) | the key list, documented inline. README states only the decisions |
+| one of the five words in [Terms](#terms) | every doc that uses it | each is narrower here than in English and each has an unrelated sense |
+
+Three more things that catch most mistakes:
+
+- **Deleting a mechanism leaves its claims behind.** Sweep every doc, code comment and deployment
+  manifest for sentences about what you removed. A claim can sit twenty lines from its own
+  contradiction, and a key you promote to *required* breaks every manifest that never passed it.
+- **A number needs its corpus.** Anything asserted about behaviour or cost has to be checkable against
+  code, a test, or a named round — and the named round has to say which pages it covers.
+- **Do not write a closing keyword next to an issue number** you do not mean to close. GitHub closes
+  issues from PR bodies and commit messages, including from prose.
 
 ## Pull requests
 
@@ -170,9 +193,67 @@ Your PR gets a review from Claude in CI before a maintainer reads it
   workflow, and GitHub doesn't start workflow runs for events raised by `GITHUB_TOKEN`. Each one
   carries a comment saying so with the dispatch command. Nothing is needed from contributors.
 
-## Architecture (orientation)
+## Terms
 
-`src/pipeline` (extraction → assembly → review), `src/providers` (LLM provider abstraction),
-`src/routes` (the `/v1` API), `src/auth` (the optional API gate),
-`agents/` (the agent prompt files).
-See [README.md](README.md).
+Five words in this repo mean something narrower than in ordinary English, and every document here
+uses them in these senses. **Each also carries at least one unrelated sense**, so the text has to say
+which it means.
+
+- **fragment** — one page's extracted HTML plus the record of where it came from: the source image,
+  the page's position, the agent, its log line, and any edges where content looked cut off (`Fragment`
+  in `src/pipeline/fragment.ts`). *Also:* a URL fragment identifier (the `#id` a link points at), and
+  the `issue-<n>` part of a branch name in [docs/ci.md](docs/ci.md).
+- **block** — one top-level element of the assembled document, with everything nested inside it. The
+  Copy Editor is normally shown the document with a `<!-- @block N -->` comment above each one and
+  replies with replacements for just the blocks it changed; a document too long for one reply is cut
+  into sections at those same boundaries (`src/pipeline/review.ts`). *Also:* a mapping in the config
+  file, a `run:` block in a workflow, and a group of table rows in the measurement docs.
+- **verdict** — the Feedback Agent's decision about one page: two booleans, `faithful` and
+  `accessible`, plus the problems it lists. **Both booleans have to be there** — a reply missing either
+  is not a verdict and is not counted as one (`VerifyOutput` in `src/pipeline/feedback.ts`). *Also:* a
+  CI session's structured output in this file and [docs/ci.md](docs/ci.md),
+  which is about your repository rather than a page.
+- **declaration** — the page agent's claim that a page holds no content. It is a claim, not an
+  absence: the pipeline can refuse it, because a page too dark to read is not a blank page
+  (`blankDeclaration` in `src/pipeline/extraction.ts`, and
+  [how the claim is read](docs/design-notes.md#reading-a-blank-page-declaration)). *Also:* the `lang`
+  declaration on the document's root element.
+- **round** — one pass of the review loop. `max_review_iterations` (default 3) caps the editor rounds,
+  so the Reader can read up to four times. *Also:* one captured run of a corpus through the pipeline,
+  named like `runs-postswap-312` and kept with its own logs and prices — a **benchmark round** if it
+  ran here, a **deployed round** if it ran on a deployment. [docs/models.md](docs/models.md) and
+  [docs/cost.md](docs/cost.md) each gloss the difference themselves.
+
+## Layout
+
+```
+agents/                  # the agent library: page.md (the general pass), feedback.md,
+                         #   and specialists dispatched by name
+src/
+  config.ts              # config loader (${ENV} expansion)
+  providers/             # ModelProvider interface + openrouter & bedrock adapters
+  agents/loader.ts       # loads agent .md files, pins git SHA
+  pipeline/
+    orchestrator.ts      # runs the phases, persists results, drives learning
+    extraction.ts        # per-page vision pass (+ verify, correct, specialist merge)
+    assembly.ts          # joins fragments into the document shell
+    review.ts            # reader -> copy editor -> re-lint loop (scoped image payload)
+    pageindex.ts         # page-number index shared by the reader + feedback scoping
+    lint.ts              # axe-core in jsdom (color-contrast disabled)
+    flatten.ts           # screen-reader text view, used by reader + coverage
+    feedback.ts          # verify / scope / classify / train + regression gate
+    memory.ts            # per-agent example bank of learned corrections
+    regression.ts        # fixture capture + pruning on close
+    contribute.ts        # saves suggested agents for the filing workflow
+    calibration.ts       # does the fidelity verifier discriminate? (docs/verifier-calibration.md)
+  tools/calibrate.ts     # CLI for that measurement; nothing in a run imports it
+  util/queue.ts          # bounded FIFO run queue (cross-session concurrency cap)
+  auth/                  # the optional API gate
+  store/                 # node:sqlite metadata store + on-disk session layout
+  routes/                # /v1 endpoints
+  version.ts             # the running build's version, reported by GET /v1/health
+  index.ts               # server entry point
+public/demo.html         # the browser app served at /, driving the same /v1 API
+public/how-it-works.html # the technical walkthrough served at /how-it-works
+data/                    # sessions/, tmp/, and the SQLite DB (created at runtime)
+```
