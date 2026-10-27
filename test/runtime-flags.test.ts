@@ -82,9 +82,10 @@ test("the version floor that licenses dropping the flag is still 24 or higher", 
 });
 
 test("every other place that states the Node version agrees with that floor", () => {
-  // The floor is written down in five places and only one of them is authoritative. A
-  // runtime BELOW it loses unflagged node:sqlite; the two prose lines are what a reader
-  // installs, so for them the floor and the printed number are the same claim.
+  // The floor is written down in four places and only one of them is authoritative. A
+  // runtime BELOW it loses unflagged node:sqlite; README's prose line is what a reader
+  // installs, so for it the floor and the printed number are the same claim. CONTRIBUTING.md
+  // points at README's Quick start rather than stating the number again.
   //
   // Out of scope, deliberately: the three workflow comments naming "Node 24". They explain
   // why setup-node reads .nvmrc rather than telling anyone which Node to install, so no
@@ -95,8 +96,8 @@ test("every other place that states the Node version agrees with that floor", ()
 
   // A member yields either a major to compare or a `problem` saying why it cannot — its file is
   // gone, its line is gone, or the version it states names no major. Nothing here asserts:
-  // rewording README.md's requirement must not stop the test before it has looked at
-  // CONTRIBUTING.md, and each of the three faults has a different fix, so each says which it is.
+  // rewording README.md's requirement must not stop the test before it has looked at the
+  // other members, and each of the three faults has a different fix, so each says which it is.
   type Member = { label: string; major: number | null; problem: string | null; raw?: string };
 
   const fromText = (label: string, raw: string): Member => {
@@ -146,7 +147,6 @@ test("every other place that states the Node version agrees with that floor", ()
   // "24+" against `>=24.15` is the drift a reader installs.
   const exactly: Member[] = [
     at("README.md's install requirement", "README.md", /Requires \*\*Node\.js (\d+(?:\.\d+)*)\+\*\*/),
-    at("CONTRIBUTING.md's install requirement", "CONTRIBUTING.md", /Requires \*\*Node (\d+(?:\.\d+)*)\+\*\*/),
   ];
 
   // Collected rather than asserted one at a time: `assert` throws at the first failure, so

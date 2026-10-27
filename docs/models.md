@@ -18,7 +18,7 @@ No round below measures that path, so nothing here says what it produces.
 
 A **round** in this document is one captured run of a fixed corpus, named like
 `runs-extract100-95ca64c` — not a round of the reader/editor loop
-([README § Terms](../README.md#terms)).
+([Terms](../CONTRIBUTING.md#terms)).
 
 ## The suggested config
 

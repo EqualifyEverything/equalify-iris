@@ -20,7 +20,7 @@ Every row is measured, but not all in one round: the `extract`, `correct` and `v
 a three-arm round run **2026-09-03**; `read`, `edit`, `table_join` and `recheck_sampled` from an
 end-to-end round run **2026-09-02**. Same 100 pages, one day apart. A **round** here is one captured run of a fixed
 corpus, kept with its own logs and prices — not a round of the review loop, which is the other thing
-that word means in this repo ([README § Terms](../README.md#terms)).
+that word means in this repo ([Terms](../CONTRIBUTING.md#terms)).
 
 | step | agent | cost | share | calls |
 |---|---|---|---|---|

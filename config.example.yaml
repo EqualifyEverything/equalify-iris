@@ -18,7 +18,7 @@ server:
   # can read a session can then read all of that. Blank or false is off.
   audit: ${IRIS_AUDIT}
   # Number of proxies in front of Iris (1 behind one Caddy/nginx). Unset behind a proxy,
-  # every caller shares one rate-limit bucket.
+  # every caller shares one rate-limit bucket; Iris warns when it sees X-Forwarded-For.
   trust_proxy: ${IRIS_TRUST_PROXY}
   # Per-address limits. GET /v1/limits shows what is in effect; a refused request gets 429.
   rate_limits:
@@ -75,7 +75,8 @@ providers:
     api_key: ${OPENROUTER_API_KEY}
     base_url: https://openrouter.ai/api/v1
     default_model: anthropic/claude-sonnet-4.6
-    # Output-token ceiling per call. Raise it if the log says a page hit it.
+    # Output-token ceiling per call. A reply that stops here counts as a failed call. Raise it
+    # if the log says a page hit it.
     max_tokens: 32000
     # Upload limits follow the model. Leave unset unless the model is newer than Iris or
     # not a Claude.
@@ -121,7 +122,8 @@ defaults:
   max_review_iterations: 3
   # Model calls one run makes at once (1-16). Lower it if you get 429s.
   extraction_concurrency: 5
-  # Runs at once across all sessions (1-32). Extra uploads wait in a queue.
+  # Runs at once across all sessions (1-32). Extra uploads wait in a queue, oldest first, and
+  # are never refused. Peak model calls are this times extraction_concurrency.
   max_concurrent_runs: 2
   # Corrected pages re-checked per run, for measurement only. 0 turns it off.
   recheck_sample_size: 1

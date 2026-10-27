@@ -18,7 +18,7 @@ import type { IrisConfig } from "../config.ts";
 //   tmp/pdf-*/      one tagged-PDF request's scratch, removed when it answers. Outside
 //                   tmp/<id>/ so closing the session cannot delete it mid-request.
 //
-// Stated here rather than pointed at README's "Layout": that section is the SOURCE tree, and
+// Stated here rather than pointed at CONTRIBUTING's "Layout": that section is the SOURCE tree, and
 // its one line about this one is `data/  # sessions/, tmp/, and the SQLite DB`.
 export class Paths {
   private cfg: IrisConfig;

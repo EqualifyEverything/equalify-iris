@@ -6,7 +6,7 @@ This file is for someone about to change the code. If you only want to run Iris,
 [README](../README.md) is enough.
 
 `fragment`, `block`, `verdict`, `declaration` and `round` are used here in the senses
-[README § Terms](../README.md#terms) gives them. That section also lists the ordinary sense each one
+[Terms](../CONTRIBUTING.md#terms) gives them. That section also lists the ordinary sense each one
 carries. This file uses those wherever they are the ones meant, so **read the sentence rather than
 the word.** `block`, for one, arrives here as a document element, as a table's header rows, as a
 provider block in the config and as a code block. Two glosses a reader cannot infer:
@@ -25,7 +25,7 @@ record is the git history and the issues each decision cites. What is true today
 
 **Write plainly and directly, and give each document one job.** Both are requirements rather than
 preferences ([CONTRIBUTING.md § Documentation](../CONTRIBUTING.md#documentation) states them;
-[README § Working on Iris](../README.md#working-on-iris--including-if-you-are-an-ai-agent) says which
+[Which doc a change belongs in](../CONTRIBUTING.md#which-doc-a-change-belongs-in) says which
 document holds what). What that means for this file: a rule's rationale and its evidence belong here
 even when a reference doc is where you met the rule, and a cross-link carries the reader the other
 way. A sentence that restates another document gets deleted rather than softened. A claim written

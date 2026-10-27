@@ -2,88 +2,30 @@
 
 Iris turns the pages of a PDF into one accessible HTML document that meets WCAG 2.2 AA. A vision
 model reads each page, using prompts anyone can improve. Then a reader and a copy editor review the
-whole document and fix what they find.
+whole document and fix what they find. With the optional
+[equalify-iris-pdf](https://github.com/EqualifyEverything/equalify-iris-pdf), the HTML can also go
+back into a tagged PDF.
 
-**To see how it works**, open `/how-it-works` on any running Iris (after the [Quick start](#quick-start),
-`http://localhost:8080/how-it-works`). It takes one document through the whole system in plain
-language, showing every API call and what each step did.
-
-**Where we are.** We're focused on one thing: the most accessible HTML conversion we can deliver.
-With the optional [equalify-iris-pdf](https://github.com/EqualifyEverything/equalify-iris-pdf), that
-HTML can also go back into a tagged PDF. Once we're confident in the conversion, we may move on to
-product development. Success rate, speed and cost are measured in
-[equalify-iris-bench](https://github.com/EqualifyEverything/equalify-iris-bench).
-
-Design constraints:
+**To see how it works, open `/how-it-works` on a running Iris.** It takes one document through every
+step in plain language, with each step's settings and the API calls it made.
 
 - **Content only.** No CSS and no visual layout: a two-column page becomes linear, semantic HTML.
   Styling is left to the tools that use Iris, such as the
   [WordPress plugin](https://github.com/EqualifyEverything/equalify-iris-wp) and the
   [Drupal module](https://github.com/oshrizak/equalify-iris-drupal).
-- **Runs on one machine.** A laptop or a self-hosted box is enough, with no cloud account. The model
-  provider, database and file store can each be swapped in the config.
-- **No sign-in.** Every session belongs to the deployment, so sessions are not isolated from each
-  other: [what that means](#no-sign-in).
+- **Runs on one machine.** A laptop or a self-hosted box is enough. The model provider, database and
+  file store are set in the config.
+- **No sign-in.** Every session belongs to the deployment, so anyone who can call it can read every
+  document. `server.api_token` gates it ([docs/access.md](docs/access.md)).
 
----
-
-## How it works
-
-`/how-it-works` shows this with a real document. In short:
-
-1. **Each page.** The `page` agent (`agents/page.md`) writes the page's HTML from its image. A
-   second model checks it against the image, and code checks its links, image descriptions and ids.
-   A page that fails is fixed once. Pages run in parallel, up to `defaults.extraction_concurrency`.
-2. **Joining.** The pages are joined in order and checked with axe-core.
-3. **Review.** The reader lists problems in the whole document, and the copy editor fixes them
-   from the page images, for up to `max_review_iterations` rounds. Code throws away a fix that would
-   lose content. What is still open is listed in the HTML.
-
-When Iris meets content a specialist agent would handle better than the general pass, it saves a
-suggestion: the agent's name, the page, and why. Feedback that improves an agent is saved the same
-way. A workflow (Sunday to Thursday) groups these and files one GitHub issue per idea
-([Agent suggestions](docs/ci.md#agent-suggestions)). Maintainers triage those issues; merged agents
-become part of the shared `agents/` library.
-
-## Terms
-
-Five words in this repo mean something narrower than in ordinary English, and every document here
-uses them in these senses. **Each also carries at least one unrelated sense**, so the text has to say
-which it means.
-
-- **fragment** — one page's extracted HTML plus the record of where it came from: the source image,
-  the page's position, the agent, its log line, and any edges where content looked cut off (`Fragment`
-  in `src/pipeline/fragment.ts`). *Also:* a URL fragment identifier (the `#id` a link points at), and
-  the `issue-<n>` part of a branch name in [docs/ci.md](docs/ci.md).
-- **block** — one top-level element of the assembled document, with everything nested inside it. The
-  Copy Editor is normally shown the document with a `<!-- @block N -->` comment above each one and
-  replies with replacements for just the blocks it changed; a document too long for one reply is cut
-  into sections at those same boundaries (`src/pipeline/review.ts`). *Also:* a mapping in the config
-  file, a `run:` block in a workflow, and a group of table rows in the measurement docs.
-- **verdict** — the Feedback Agent's decision about one page: two booleans, `faithful` and
-  `accessible`, plus the problems it lists. **Both booleans have to be there** — a reply missing either
-  is not a verdict and is not counted as one (`VerifyOutput` in `src/pipeline/feedback.ts`). *Also:* a
-  CI session's structured output in [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/ci.md](docs/ci.md),
-  which is about your repository rather than a page.
-- **declaration** — the page agent's claim that a page holds no content. It is a claim, not an
-  absence: the pipeline can refuse it, because a page too dark to read is not a blank page
-  (`blankDeclaration` in `src/pipeline/extraction.ts`, and
-  [how the claim is read](docs/design-notes.md#reading-a-blank-page-declaration)). *Also:* the `lang`
-  declaration on the document's root element.
-- **round** — one pass of the review loop. `max_review_iterations` (default 3) caps the editor rounds,
-  so the Reader can read up to four times. *Also:* one captured run of a corpus through the pipeline,
-  named like `runs-postswap-312` and kept with its own logs and prices — a **benchmark round** if it
-  ran here, a **deployed round** if it ran on a deployment. [docs/models.md](docs/models.md) and
-  [docs/cost.md](docs/cost.md) each gloss the difference themselves.
+We're focused on the most accessible HTML conversion we can deliver. Success rate, speed and cost are
+measured in [equalify-iris-bench](https://github.com/EqualifyEverything/equalify-iris-bench).
 
 ## Quick start
 
-Requires **Node.js 24.15+** (the service runs TypeScript directly via Node's built-in type stripping and
-uses the built-in `node:sqlite`), and a **git** checkout of the agent library (this repo's `agents/`
-directory works). For **PDF uploads**, install **poppler-utils** (`pdftoppm`/`pdfinfo`, plus
-`pdftohtml` to carry the PDF's links into the output) — `brew install poppler` on macOS,
-`apt-get install poppler-utils` on Debian/Ubuntu; the Docker image includes it. Rasterizing is what
-the uploader waits for and Iris spreads it across cores, so **give a PDF deployment cores**
+Requires **Node.js 24.15+** and **git**. For PDF uploads, also **poppler-utils** (`brew install
+poppler` or `apt-get install poppler-utils`; the Docker image has it). Turning pages into images is
+what an upload waits for, so give a PDF deployment cores
 ([how much they buy](docs/design-notes.md#running-the-service)).
 
 ```bash
@@ -112,9 +54,6 @@ sudo chown -R 1000:1000 ./data
 docker compose up
 ```
 
-If that applied to you and you skipped it, the service exits at startup and compose restarts it in a
-loop — the log says which command to run, so you don't have to know this in advance.
-
 Check it's alive, and which build it is:
 
 ```bash
@@ -122,82 +61,38 @@ curl http://localhost:8080/v1/health
 # {"status":"ok","service":"equalify-iris","version":"1.3.0"}
 ```
 
-Or just open the **accessible browser app** at `http://localhost:8080/` for a no-API walkthrough — no
-sign-in, no token, and off once you set `server.api_token` (upload page images → convert → view the
-accessible HTML).
+Then open `http://localhost:8080/` to convert a document in the browser (off once you set
+`server.api_token`), or `http://localhost:8080/how-it-works` to watch each step.
 
-## Command line interface (CLI)
+## Command line
 
-Convert a PDF or image directly to accessible HTML using your `config.yaml` settings without running the HTTP daemon:
+Convert a file with your `config.yaml`, without running the server:
 
 ```bash
 npm run convert -- document.pdf -o output.html
 ```
 
-Options include `-i, --input`, `-o, --output`, and `-c, --config`. Run `npm run convert -- --help` for usage details.
+`npm run convert -- --help` lists the options.
 
 ## Configuration
 
-Deployment is configured in `config.yaml`. `${ENV_VAR}` references are expanded from the environment
-at startup; changes require a restart. **[`config.example.yaml`](config.example.yaml) documents every
-key inline** — this section is the decisions an operator has to make, not the key list.
+[`config.example.yaml`](config.example.yaml) documents every key inline. `${ENV_VAR}` references are
+read from the environment at startup. The decisions to make:
 
-- **Who may call the API.** `server.api_token` is a shared secret, blank by default. Blank means
-  **open** — anyone who can reach the port can convert documents and spend your model budget. Set it
-  on a public deployment.
-- **Storage.** Local filesystem plus a single SQLite file. `agents/` is a git checkout modified only
-  by `git pull` from upstream. These are the only backends v1 ships; Postgres and S3 were designed for
-  and deliberately not built ([design notes](docs/design-notes.md#designed-for-and-not-built)).
-- **Model providers** ([docs/models.md](docs/models.md)). Each agent declares a *capability*
-  (`vision`, `structured_output`, `text`) and the deployment maps capabilities to a provider and a
-  concrete model, with an optional per-agent override. Resolution falls back: per-agent model →
-  provider `per_capability` → provider `default_model`. v1 ships **OpenRouter** and **Amazon Bedrock**;
-  adding one is a small adapter implementing `ModelProvider` in `src/providers/types.ts`. **Getting a
-  `providers.per_agent` key wrong does not stop the run** — it silently swaps nothing, so confirm a
-  swap against `by_agent.<agent>.models` in diagnostics. Two keys are easy to get wrong for the same
-  reason: `max_tokens` is the per-call **output** ceiling and a reply that stops at it counts as a
-  **failed** call, and on Bedrock `api` chooses the wire dialect — `invoke` (the default, and what
-  every published number here was measured through) or `converse`, the only one that reaches a
-  non-Anthropic model. Why each adapter rule exists:
-  [design notes](docs/design-notes.md#the-provider-adapters).
-- **Concurrency.** Two independent knobs under `defaults`. `extraction_concurrency` (default 5) is
-  *within* a run and covers both phases' parallel calls; `max_concurrent_runs` (default 2) is *across*
-  sessions, and is the one that bounds what the machine is doing — peak in-flight calls is the product
-  of the two, and each run also holds a jsdom+axe instance. Uploads beyond the cap **wait**, in FIFO
-  order, in `status: "queued"`, and the wait shows up as `run_queued` / `run_dequeued` in the session's
-  run log. Nothing is rejected: the upload is already on disk, so a 429 would discard work.
-- **Request limits.** `server.rate_limits` bounds what can be **asked** of the deployment, which is a
-  different problem from the run cap — the cheap endpoints never reach the queue and each queries
-  SQLite synchronously on the one event loop. These gates **refuse** (429 with `Retry-After`) rather
-  than wait, since nothing has been received yet. Every request counts against its **address**, since
-  there is no sign-in, so callers behind one NAT share a bucket. `GET /v1/limits` publishes
-  whatever is in effect; `enabled: false` turns it off where a proxy already does the job.
-- **Behind a reverse proxy.** Set `server.trust_proxy` to the number of proxies in front of Iris (1
-  for a single Caddy/nginx). Without it every caller presents as the proxy's address and shares one
-  bucket; the log warns when it sees an `X-Forwarded-For` while this is unset. Anything Iris cannot
-  interpret warns and trusts nothing rather than failing startup.
-- **Tagged PDFs — optional, off by default.** Set `tagged_pdf.command` to the `iris-pdf` command from
-  [equalify-iris-pdf](https://github.com/EqualifyEverything/equalify-iris-pdf), and a session made from
-  one PDF can return that PDF tagged, with its form filled in. The demo page shows this only when it is
-  on. Iris runs without it.
-
-### No sign-in
-
-Callers don't sign in, and Iris holds no GitHub credential. Every session belongs to the deployment,
-so anyone who can call it can list and read every document. `server.api_token` gates it behind one
-shared secret. What to choose, and what the gate leaves open: **[docs/access.md](docs/access.md)**.
-
-Suggestions from every run are saved and filed upstream by a maintainer workflow
-([Agent suggestions](docs/ci.md#agent-suggestions)). **Contributing back is the sustainability
-model:** the agents in `agents/` improve because sessions run against real documents and real
-corrections.
+- **Who may call the API:** `server.api_token`. Blank means anyone who can reach the port
+  ([docs/access.md](docs/access.md)).
+- **Which model runs each agent:** [docs/models.md](docs/models.md). A wrong `providers.per_agent`
+  key does not stop a run; it swaps nothing, so check the model a step names on `/how-it-works`.
+- **Behind a reverse proxy:** set `server.trust_proxy`, or every caller shares the proxy's rate
+  limit.
+- **Tagged PDFs:** set `tagged_pdf.command` to the `iris-pdf` command. Off by default.
+- **Storage** is local files and one SQLite file. Postgres and S3 were designed for and not built
+  ([design notes](docs/design-notes.md#designed-for-and-not-built)).
 
 ## API
 
-All endpoints are under `/v1`. Every endpoint, who may call it, and its exact request and answer:
-[docs/openapi.yaml](docs/openapi.yaml), served as `GET /v1/openapi.json`.
-
-The basic flow:
+Every endpoint, who may call it, and its exact request and answer:
+[docs/openapi.yaml](docs/openapi.yaml), served as `GET /v1/openapi.json`. The basic flow:
 
 ```bash
 curl -X POST http://localhost:8080/v1/sessions \
@@ -210,116 +105,35 @@ The order of the `images` parts is the processing order. Then poll `GET /v1/sess
 `status` is `ready_for_review`, fetch `GET /v1/sessions/{id}/output`, and
 `POST /v1/sessions/{id}/close`. Leave out the `Authorization` header on an open deployment.
 
-Every field Iris reports about a run (the run log, diagnostics, the quality tally): **[docs/run-log.md](docs/run-log.md)**. To run every
-endpoint end to end with mock services and no credentials: `./test/e2e.sh`.
+## Contributing back
 
-What it costs is a config choice: **[docs/cost.md](docs/cost.md)**. Which model to run each agent
-on: **[docs/models.md](docs/models.md)**.
+When Iris meets content a specialist agent would handle better, or feedback that improves an agent,
+it saves a suggestion. A workflow groups these and files one GitHub issue per idea
+([Agent suggestions](docs/ci.md#agent-suggestions)), and merged agents join the shared `agents/`
+library. **This is the sustainability model:** the agents improve because sessions run against real
+documents and real corrections.
 
-## Layout
-
-```
-agents/                  # the agent library: page.md (the general pass), feedback.md,
-                         #   and specialists dispatched by name
-src/
-  config.ts              # config loader (${ENV} expansion)
-  providers/             # ModelProvider interface + openrouter & bedrock adapters
-  agents/loader.ts       # loads agent .md files, pins git SHA
-  pipeline/
-    orchestrator.ts      # runs the phases, persists results, drives learning
-    extraction.ts        # per-page vision pass (+ verify, correct, specialist merge)
-    assembly.ts          # joins fragments into the document shell
-    review.ts            # reader -> copy editor -> re-lint loop (scoped image payload)
-    pageindex.ts         # page-number index shared by the reader + feedback scoping
-    lint.ts              # axe-core in jsdom (color-contrast disabled)
-    flatten.ts           # screen-reader text view, used by reader + coverage
-    feedback.ts          # verify / scope / classify / train + regression gate
-    memory.ts            # per-agent example bank of learned corrections
-    regression.ts        # fixture capture + pruning on close
-    contribute.ts        # drafts suggested agents, files issues
-    calibration.ts       # does the fidelity verifier discriminate? (docs/verifier-calibration.md)
-  tools/calibrate.ts     # CLI for that measurement; nothing in a run imports it
-  util/queue.ts          # bounded FIFO run queue (cross-session concurrency cap)
-  auth/                  # the optional API gate
-  store/                 # node:sqlite metadata store + on-disk session layout
-  routes/                # /v1 endpoints
-  version.ts             # the running build's version, reported by GET /v1/health
-  index.ts               # server entry point
-public/demo.html         # the browser app served at /, driving the same /v1 API
-public/how-it-works.html # the technical walkthrough served at /how-it-works
-data/                    # sessions/, tmp/, and the SQLite DB (created at runtime)
-```
-
-## Working on Iris — including if you are an AI agent
-
-**Read [docs/design-notes.md](docs/design-notes.md) before changing code.** It is one bullet per
-decision, written for someone about to change the thing the bullet is about, and most of what looks
-arbitrary in this codebase is a bullet in there with a measurement attached.
-
-Every doc has one job, and a change belongs in the doc whose job it is. Put it in the same PR as the
-change:
-
-| If you change… | Update | Which holds |
-| --- | --- | --- |
-| behaviour, or the reason for it | [docs/design-notes.md](docs/design-notes.md) | the reasoning, the benchmark evidence, superseded behaviour, and what a rule cost before it existed |
-| an endpoint, a parameter or a response field | [docs/openapi.yaml](docs/openapi.yaml) | the exact contract, which `/how-it-works` builds its API section from; tests fail if a route or error code is missing |
-| a run-log event | [docs/run-log.md](docs/run-log.md) | what fires a line and what its fields hold |
-| which model runs an agent | [docs/models.md](docs/models.md) | **suggested** models. Every model is declared in config, never in the code, so no doc may say Iris "uses" one |
-| the price of a step | [docs/cost.md](docs/cost.md) | prices with the round each came from. Iris costs nothing per token on self-hosted open-weight models; only a suggested config has a price |
-| accessibility reporting, testing, or support information | [ACCESSIBILITY.md](ACCESSIBILITY.md) | reporting and triage guidance, contributor checks, and testing limitations |
-| a workflow in `.github/` | [docs/ci.md](docs/ci.md) | the five workflows, including the bot that reviews your PR |
-| the gate, or what a 401 means | [docs/access.md](docs/access.md) | who may call the API, and an older database |
-| a pipeline step, or a run-log event a person needs explained | [`public/how-it-works.html`](public/how-it-works.html) | the walkthrough. An event's one-line meaning comes from run-log.md's index, so only a new step or a plainer sentence (`SAY`) needs an edit here |
-| a config key | [`config.example.yaml`](config.example.yaml) | the key list, documented inline. This README states decisions, not keys |
-| one of the five words in [Terms](#terms) | every doc that uses it | each is narrower here than in English and each has an unrelated sense |
-
-Four things that catch most mistakes:
-
-- **Concise plain language is a requirement, not a preference** — see
-  [CONTRIBUTING.md § Documentation](CONTRIBUTING.md#documentation) for what it asks for. The automated
-  review checks docs prose against it as a non-blocking note.
-- **Deleting a mechanism leaves its claims behind.** Sweep every doc, code comment and deployment
-  manifest for sentences about what you removed. A claim can sit twenty lines from its own
-  contradiction, and a key you promote to *required* breaks every manifest that never passed it.
-- **A number needs its corpus.** Anything asserted about behaviour or cost has to be checkable against
-  code, a test, or a named round — and the named round has to say which pages it covers.
-- **Do not write a closing keyword next to an issue number** you do not mean to close. GitHub closes
-  issues from PR bodies and commit messages, including from prose.
-
-**Diagnosing a run:** open `/how-it-works#session=<id>`. It lists what to look at first, and its
-download button gives an agent the session, the problems found, the diagnostics, the audit list and
-every log line as one JSON file.
-
-Commands: `npm test` is `node --test` over `test/*.test.ts` (not vitest), plus a reporter and a V8
-flag a bare run loses — see [CONTRIBUTING.md § Development](CONTRIBUTING.md#development). `npm run
-typecheck` is `tsc --noEmit`, and `./test/e2e.sh` runs the whole lifecycle against mocks with no
-credentials.
-
-## Further reading
+## Documentation
 
 | Document | What is in it |
 |---|---|
-| `/how-it-works` on a running Iris | How a document moves through Iris and iris-pdf, step by step, with every API call. Open a session there to find out what went wrong. Start here. |
-| [docs/openapi.yaml](docs/openapi.yaml) | Every endpoint: what it takes and returns. Served as `GET /v1/openapi.json`. |
+| `/how-it-works` on a running Iris | Each step, its settings and API calls, on a real document. Open a session there to see what went wrong. Start here. |
+| [docs/openapi.yaml](docs/openapi.yaml) | Every endpoint: what it takes and returns. |
 | [docs/run-log.md](docs/run-log.md) | Every field Iris reports about a run: the run log, diagnostics, the quality tally, partial documents, failure messages. |
-| [docs/design-notes.md](docs/design-notes.md) | Why the code is the way it is. Read this before changing it. |
-| [docs/models.md](docs/models.md) | Which model to run on which agent, what each was measured at, and how a swap fails quietly. |
-| [docs/access.md](docs/access.md) | Gating the API, what a shared deployment means, an older database. |
+| [docs/design-notes.md](docs/design-notes.md) | Why the code is the way it is. Read it before changing the code. |
+| [docs/models.md](docs/models.md) | Which model to run on which agent, and what each was measured at. |
 | [docs/cost.md](docs/cost.md) | What a page costs, measured, and why that number hides more than it says. |
-| [docs/ci.md](docs/ci.md) | The five workflows that run this repo, including the bot that will review your PR. |
+| [docs/access.md](docs/access.md) | Gating the API, what a shared deployment means, an older database. |
+| [docs/ci.md](docs/ci.md) | The workflows that run this repo, including the bot that reviews PRs. |
 | [docs/verifier-calibration.md](docs/verifier-calibration.md) | How to re-measure whether the page verifier catches damage. |
-| [CONTRIBUTING.md](CONTRIBUTING.md) | How to open a PR here, and what the agent library is. |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | How to work on Iris: setup, layout, terms, which doc a change belongs in. |
+| [ACCESSIBILITY.md](ACCESSIBILITY.md) | Reporting a barrier, and how Iris's accessibility is tested. |
 
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) and our [Code of Conduct](CODE_OF_CONDUCT.md). Found an
-accessibility barrier — in the app or in the HTML it produces? Please open an
+accessibility barrier, in the app or in the HTML it produces? Please open an
 [Accessibility issue](.github/ISSUE_TEMPLATE/accessibility.yml); those are our top priority.
-
-PRs get an automated review before a human reads them — see
-[Automated code review](docs/ci.md#automated-code-review) for what it looks at and, more usefully,
-what it deliberately does **not** flag (style, formatting, naming, "you could also do X",
-pre-existing issues your PR doesn't touch).
 
 ## License
 
