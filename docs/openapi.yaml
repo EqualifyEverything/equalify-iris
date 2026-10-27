@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Equalify Iris API
-  version: 1.3.0
+  version: 1.4.0
   summary: Turn a PDF or page images into accessible HTML, and optionally tag the original PDF.
   description: |
     The exact contract for every endpoint. To see each one work on a real document, in plain
