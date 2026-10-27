@@ -49,8 +49,6 @@ Set up as in the README's [Quick start](README.md#quick-start).
 
 **Read [docs/design-notes.md](docs/design-notes.md) before changing code.** It is one bullet per
 decision, and most of what looks arbitrary here is a bullet in there with a measurement attached.
-To diagnose a run, open `/how-it-works#session=<id>`; its download button gives an agent the whole
-run as one JSON file.
 
 Before opening a PR:
 
@@ -128,7 +126,7 @@ Put the doc change in the same PR as the change.
 | which model runs an agent | [docs/models.md](docs/models.md) | **suggested** models. Every model is declared in config, never in the code, so no doc may say Iris "uses" one |
 | the price of a step | [docs/cost.md](docs/cost.md) | prices with the round each came from. Iris costs nothing per token on self-hosted open-weight models; only a suggested config has a price |
 | accessibility reporting, testing, or support information | [ACCESSIBILITY.md](ACCESSIBILITY.md) | reporting and triage guidance, contributor checks, and testing limitations |
-| a workflow in `.github/` | [docs/ci.md](docs/ci.md) | the five workflows, including the bot that reviews your PR |
+| a workflow in `.github/` | [docs/ci.md](docs/ci.md) | the workflows, including the bot that reviews your PR |
 | the gate, or what a 401 means | [docs/access.md](docs/access.md) | who may call the API, and an older database |
 | a pipeline step, or a run-log event a person needs explained | [`public/how-it-works.html`](public/how-it-works.html) | the walkthrough. An event's one-line meaning comes from run-log.md's index, so only a new step or a plainer sentence (`SAY`) needs an edit here |
 | a config key | [`config.example.yaml`](config.example.yaml) | the key list, documented inline. README states only the decisions |
@@ -246,7 +244,7 @@ src/
     feedback.ts          # verify / scope / classify / train + regression gate
     memory.ts            # per-agent example bank of learned corrections
     regression.ts        # fixture capture + pruning on close
-    contribute.ts        # drafts suggested agents, files issues
+    contribute.ts        # saves suggested agents for the filing workflow
     calibration.ts       # does the fidelity verifier discriminate? (docs/verifier-calibration.md)
   tools/calibrate.ts     # CLI for that measurement; nothing in a run imports it
   util/queue.ts          # bounded FIFO run queue (cross-session concurrency cap)
