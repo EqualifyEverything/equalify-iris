@@ -623,8 +623,9 @@ The rules are in [run-log.md, Partial documents](run-log.md#partial-documents). 
   to report a mismatch, not edit from it ([`editor_fidelity_observed`](run-log.md#editor_fidelity_observed)).
   So the rejection stands whatever the markup became.
 - **It does not mark "this page might be wrong".** Most corrected pages would fail a second check
-  ([The recheck](#the-recheck-and-what-a-sample-of-one-can-say)), and the verifier rejects most first
-  renders, so a marker on most pages would tell a reader nothing. The five ways a correction can fail are one fact for the
+  ([The recheck](#the-recheck-and-what-a-sample-of-one-can-say)), and the verifier rejects 71-74% of
+  first renders ([Reading diagnostics](#reading-diagnostics)), so such a marker would tell a reader
+  nothing. The five ways a correction can fail are one fact for the
   reader, so the marker does not tell them apart; the log does.
 - **Neither kind of page becomes a regression fixture.** A fixture says some HTML is the right output
   for a page image. Closing a session says the document is good enough, not that this page is right,
@@ -1381,7 +1382,7 @@ discarded reply.
 ### The recheck, and what a sample of one can say
 
 - **At the default the sample is a count and not a rate.** One draw per run, so `1 of 1 cleared` is
-  everything it says. Reading a proportion off it is what the field invited and got — four draws
+  everything it says: 8 runs over 111 corrections bought 8 verdicts. Reading a proportion off it is what the field invited and got — four draws
   split 2/2 quoted as "half", and the same instrument reading 50% on one model's four draws and 25%
   on another's over one 100-page corpus (issue #288).
 
@@ -1987,7 +1988,8 @@ make run in one direction on purpose.
 - **The claim is not paid to be checked, and it used to be.** The empty fragment went to the Feedback
   Agent like any other page, shown the source image and an empty code block and asked whether the one
   was faithful to the other. In 36 such judgements — 9 pages of a 100-page corpus, two page-model
-  arms, two shas — it passed every one, for $0.0859 an arm (issue #294). So the call is not made and
+  arms, two shas — it passed every one, for $0.0859 an arm, 0.77% of that bill and a growing share as
+  models get cheaper (issue #294). So the call is not made and
   `page_verify_ok` says so with `skipped: "blank"` and `unjudged`.
 
   The single exception is the only spend issue #371 adds: a declaration **stated** in the field whose
@@ -3374,7 +3376,7 @@ are as they are, and the measurements behind them.
 
 - **No free-join share is published,** because it is a range that belongs to the extraction
   ([Joining a table split across a page turn](#joining-a-table-split-across-a-page-turn)). A change
-  credited with moving the share by less than about 2x is inside that spread.
+  credited with moving the share by less than about 2x is inside its 24-53% spread.
 - **`_with_halves` is published because the bound** that drops bytes is 2.5x the largest pair this
   corpus produced. A bound nothing reaches would otherwise bite invisibly. A loosening is scored on
   the declines it recovers and on the free joins it must not break, so both counts are needed.
