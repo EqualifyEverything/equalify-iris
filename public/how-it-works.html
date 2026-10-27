@@ -168,7 +168,6 @@
         <p class="what" id="what-pages"><span class="who ai">AI</span> The page agent writes each page's HTML from its image. <span class="who ai">AI</span> A second model checks it against the image, and <span class="who code">Code</span> rules check links, image descriptions and ids. A page that fails is fixed once.</p>
         <div id="set-pages"></div>
         <div id="stage-pages"></div>
-        <div id="calls-pages"></div>
       </section>
       <section class="box step" id="step-join" aria-labelledby="step-join-h">
         <h2 id="step-join-h">3. Join and check</h2>
@@ -754,6 +753,10 @@
         items.push(m('page agent', 'page', 'extract', 'vision'), m('checker', 'feedback', 'verify', 'vision'));
         if (r && r.recheck_sample_size) items.push(plural(r.recheck_sample_size, 'fixed page') + ' checked again');
         if (st) items.push(plural(st.agents.filter((a) => a.kind === 'specialist').length, 'specialist agent') + ' available');
+        // A specialist this run called, with its model: the step-2 agents beyond the four core ones.
+        const used = new Map();
+        for (const e of ev) if (e.type === 'model_call' && e.agent && !['page', 'feedback', 'reader', 'copy_editor'].includes(e.agent)) used.set(e.agent, modelName(e.model));
+        if (used.size) items.push('specialists used: ' + [...used].map(([a, mm]) => esc(a) + ': ' + esc(mm)).join(', '));
       } else if (key === 'join') {
         items.push('axe-core, WCAG 2.2 A and AA rules', 'colour contrast is not checked: the HTML has no styling');
       } else if (key === 'review') {
@@ -780,7 +783,8 @@
       ]));
       if (stats && stats.pages_processed) {
         const q = stats.quality;
-        out.push('<h3>Track record</h3><p>' + plural(stats.pages_processed.toLocaleString(), 'page') + ' in ' + plural(stats.documents_processed.toLocaleString(), 'document') + ' since ' + esc(String(stats.since).slice(0, 10)) + '.'
+        const count = (n, one) => n.toLocaleString() + ' ' + (n === 1 ? one : one + 's');
+        out.push('<h3>Track record</h3><p>' + count(stats.pages_processed, 'page') + ' in ' + count(stats.documents_processed, 'document') + ' since ' + esc(String(stats.since).slice(0, 10)) + '.'
           + (q && q.documents ? ' In the last ' + q.window_days + ' days, ' + Math.round(q.clean_rate * 100) + '% of ' + q.documents.toLocaleString() + ' documents finished with nothing left open.' : '') + '</p>');
       }
       const caps = [['vision', 'Reading images'], ['text', 'Text only'], ['structured_output', 'Structured answers']];
@@ -895,6 +899,18 @@
       return det('about-api', 'How to call it: keys, errors and limits', mdBlock(spec.info && spec.info.description)) + apiGroups(spec).map((g) => '<h3>' + esc(g.tag) + '</h3><p class="hint">' + md(g.description) + '</p>'
         + (g.tag === 'Operators' ? '<label for="quality-token">Quality token, to try these</label><p class="hint" id="qt-hint">Only for this page and only for these calls. It is never stored, logged or shown.</p><input id="quality-token" type="password" autocomplete="off" aria-describedby="qt-hint">' : '')
         + g.ops.map((o) => apiCardHtml(o, i++)).join('')).join('');
+    }
+
+    // Each call is shown once, in the step that made it. The calls the page makes on load are about the
+    // deployment; the polls follow the run from the upload on. A saved document goes with the step that
+    // made it. A Try-it answer (no home) stays in its API card.
+    const CALL_HOME = { upload: 'upload', session: 'upload', logs: 'upload', audit: 'upload', output: 'result', diagnostics: 'result', feedback: 'result', close: 'result', fields: 'pdf', pdf: 'pdf', openapi: 'deployment', limits: 'deployment', stats: 'deployment', settings: 'deployment', me: 'deployment' };
+    const HOME_WORDS = { upload: 'step 1, Upload', join: 'step 3, Join and check', review: 'step 4, Review', result: 'step 5, Result', pdf: 'step 6, Tagged PDF', deployment: 'This deployment' };
+    const callHome = (c) => c.key.startsWith('snapshot-') ? (/\/assembled$/.test(c.path) ? 'join' : 'review') : CALL_HOME[c.key] || null;
+    // Whether a path the page called is an instance of a path in the API document: `{x}` matches one segment.
+    function pathFits(template, path) {
+      const tpl = template.replace(/^\/v1/, '').split('/'), xs = path.split('?')[0].split('/');
+      return xs.length === tpl.length && tpl.every((t, j) => /^\{.+\}$/.test(t) || t === xs[j]);
     }
 
     // ----- State and API calls -----
@@ -1037,7 +1053,7 @@
     document.addEventListener('toggle', async (ev) => {
       const d = ev.target;
       if (!(d instanceof HTMLDetailsElement) || !d.open || !d.dataset.src || snaps.has(d.dataset.src)) return;
-      const r = await call('snapshot', 'GET', d.dataset.src.slice(API.length), { json: false, plain: 'One of the in-between versions of the document that audit mode saved.' });
+      const r = await call('snapshot-' + d.dataset.src, 'GET', d.dataset.src.slice(API.length), { json: false, plain: 'One of the in-between versions of the document that audit mode saved.' });
       snaps.set(d.dataset.src, r.res.ok ? r.text : '<p>Could not load it.</p>');
       render();
     }, true);
@@ -1174,10 +1190,6 @@
         + ev.map((e, i) => '<tr><td>' + esc((e.ts || '').slice(11, 19)) + '</td><td><a href="' + refLink(e.type) + '"><code>' + esc(e.type) + '</code></a></td><td>' + esc(explain(e)) + det('l' + i, 'The line itself', '<pre tabindex="0">' + esc(JSON.stringify(e, null, 2).slice(0, 6000)) + '</pre>') + '</td></tr>').join('') + '</tbody></table>');
     }
 
-    // Each call is shown once, in the step that made it. The calls the page makes on load are about the
-    // deployment; the polls follow the run from the upload on. A Try-it answer stays in its API card.
-    const CALL_HOME = { upload: 'upload', session: 'upload', logs: 'upload', audit: 'upload', snapshot: 'review', output: 'result', diagnostics: 'result', feedback: 'result', close: 'result', fields: 'pdf', pdf: 'pdf', openapi: 'deployment', limits: 'deployment', stats: 'deployment', settings: 'deployment', me: 'deployment' };
-    const HOME_WORDS = { upload: 'step 1, Upload', review: 'step 4, Review', result: 'step 5, Result', pdf: 'step 6, Tagged PDF', deployment: 'This deployment' };
     const callHtml = (c) => '<li data-k="c-' + esc(c.key) + '"><p><span class="method">' + esc(c.method) + ' ' + esc(API + c.path) + '</span> '
       + '<span class="' + (c.status < 400 ? 'status-ok' : 'status-bad') + '">' + c.status + '</span>' + (c.count > 1 ? ' <span class="hint">(asked ' + c.count + ' times)</span>' : '') + '</p>'
       + '<p>' + esc(c.plain || '') + '</p>'
@@ -1185,20 +1197,18 @@
       + det('c-' + c.key + '-a', 'What came back', '<pre tabindex="0">' + esc(c.body) + '</pre>') + '</li>';
     function renderCalls() {
       const by = {};
-      for (const c of state.calls.values()) { const h = CALL_HOME[c.key]; if (h) (by[h] = by[h] || []).push(c); }
-      for (const h of ['upload', 'review', 'result', 'pdf', 'deployment']) {
+      for (const c of state.calls.values()) { const h = callHome(c); if (h) (by[h] = by[h] || []).push(c); }
+      for (const h of Object.keys(HOME_WORDS)) {
         const el = $('calls-' + h);
         if (el) patch(el, by[h] ? det('calls-' + h, 'API calls ' + (h === 'deployment' ? 'this page made on load' : 'in this step') + ' (' + by[h].length + ')', '<ol class="calls">' + by[h].map(callHtml).join('') + '</ol>') : '');
       }
       // In the API section, an endpoint this page called says where, instead of offering Try it.
       apiOps.forEach((o, i) => {
-        const tpl = o.path.replace(/^\/v1/, '').split('/');
-        const fits = (path) => { const xs = path.split('?')[0].split('/'); return xs.length === tpl.length && tpl.every((t, j) => /^\{.+\}$/.test(t) || t === xs[j]); };
-        const c = [...state.calls.values()].find((x) => CALL_HOME[x.key] && x.method === o.method && fits(x.path));
+        const c = [...state.calls.values()].find((x) => callHome(x) && x.method === o.method && pathFits(o.path, x.path));
         const p = $('api-called-' + i), btn = document.querySelector('button[data-try="' + i + '"]');
         if (!p) return;
         p.hidden = !c;
-        if (c) p.innerHTML = 'This page made this call: see <a href="#' + (CALL_HOME[c.key] === 'deployment' ? 'deployment' : 'step-' + CALL_HOME[c.key]) + '">' + HOME_WORDS[CALL_HOME[c.key]] + '</a>.';
+        if (c) p.innerHTML = 'This page made this call: see <a href="#' + (callHome(c) === 'deployment' ? 'deployment' : 'step-' + callHome(c)) + '">' + HOME_WORDS[callHome(c)] + '</a>.';
         if (btn) btn.hidden = Boolean(c);
       });
     }

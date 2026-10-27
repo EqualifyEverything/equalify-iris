@@ -46,7 +46,7 @@ const lib = new Function(
    const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]); const AI = ''; const CODE = '';
    const plural = (n, one, many) => n + ' ' + (n === 1 ? one : (many || one + 's'));
    ${pure}
-   return { mdBlock, answerHtml, md, apiGroups, fieldRows, apiHtml, feedbackFormHtml, firstSummary, changeSummary, stageSettings, modelFor, usageByStage, usageLine, settingsHtml, processSteps, pdfReportHtml, PDF_WARN, parseLog, parseReply, explain, SAY, runsOf, pagesFrom, roundsFrom, problems, unresolvedFrom, stagesFrom, curl };`,
+   return { callHome, pathFits, mdBlock, answerHtml, md, apiGroups, fieldRows, apiHtml, feedbackFormHtml, firstSummary, changeSummary, stageSettings, modelFor, usageByStage, usageLine, settingsHtml, processSteps, pdfReportHtml, PDF_WARN, parseLog, parseReply, explain, SAY, runsOf, pagesFrom, roundsFrom, problems, unresolvedFrom, stagesFrom, curl };`,
 )(index) as {
   parseLog(t: string): Record<string, unknown>[];
   parseReply(o: unknown): Record<string, unknown> | null;
@@ -59,6 +59,8 @@ const lib = new Function(
   apiHtml(spec: unknown): string;
   md(t: string): string;
   mdBlock(t: string): string;
+  callHome(c: { key: string; path: string }): string | null;
+  pathFits(template: string, path: string): boolean;
   answerHtml(i: number, a: unknown): string;
   firstSummary(steps: unknown[], id: string, uploaded: boolean): string;
   changeSummary(prev: Map<string, string>, steps: unknown[]): string[];
@@ -551,4 +553,32 @@ test("the API section, rendered, passes the same axe check", async () => {
 test("a longer description renders as paragraphs and lists, escaped", () => {
   assert.equal(lib.mdBlock("One `a`.\nStill one.\n\n- first\n  goes on\n- <b>second</b>"), "<p>One <code>a</code>. Still one.</p><ul><li>first goes on</li><li>&lt;b&gt;second&lt;/b&gt;</li></ul>");
   assert.equal(lib.mdBlock("Iris routes it:\n- `document`: kept\n- `extraction`: re-read"), "<p>Iris routes it:</p><ul><li><code>document</code>: kept</li><li><code>extraction</code>: re-read</li></ul>", "a list straight after a sentence");
+});
+
+test("each API call is shown in the step that made it, and a Try-it answer in its card only", () => {
+  const home = (key: string, path = "/x") => lib.callHome({ key, path });
+  assert.deepEqual([home("upload"), home("logs"), home("output"), home("pdf"), home("settings")], ["upload", "upload", "result", "pdf", "deployment"]);
+  assert.equal(home("snapshot-/v1/sessions/ses_1/audit/runs/1/assembled", "/sessions/ses_1/audit/runs/1/assembled"), "join");
+  assert.equal(home("snapshot-/v1/sessions/ses_1/audit/runs/1/round-1", "/sessions/ses_1/audit/runs/1/round-1"), "review");
+  assert.equal(home("try-3"), null, "a Try-it answer has no step");
+  // A called path is matched to the API document's template one segment at a time.
+  assert.ok(lib.pathFits("/v1/sessions/{id}/logs", "/sessions/ses_1/logs"));
+  assert.ok(!lib.pathFits("/v1/sessions/{id}/logs", "/sessions/ses_1"));
+  assert.ok(!lib.pathFits("/v1/sessions/{id}", "/sessions/ses_1/logs"));
+  assert.ok(lib.pathFits("/v1/sessions", "/sessions?limit=5"));
+});
+
+test("the track record counts agree in number and keep their separators", async () => {
+  const { deploymentSettings } = await import("../src/routes/settings.ts");
+  const st = deploymentSettings({
+    server: { port: 1, base_url: "x" },
+    storage: { data_dir: "/d", agents_dir: join(root, "agents"), database: "/d/db" },
+    providers: { default: "openrouter", openrouter: { default_model: "m-1" } },
+    defaults: { max_review_iterations: 2, extraction_concurrency: 5, max_concurrent_runs: 2, recheck_sample_size: 1 },
+  } as never);
+  assert.ok(lib.settingsHtml(st, { pages_processed: 1, documents_processed: 1, since: "2026-10-26" }).includes("1 page in 1 document since"));
+  assert.ok(lib.settingsHtml(st, { pages_processed: 1234, documents_processed: 2, since: "2026-10-26" }).includes((1234).toLocaleString() + " pages in 2 documents"));
+  // A specialist the run called is named in step 2, with the model it ran on.
+  const ev = [{ type: "model_call", agent: "chartDataAgent", step: "specialist", model: "us.chart-model" }];
+  assert.ok(lib.stageSettings("pages", ev, st, null, null).includes("specialists used: chartDataAgent: chart-model"));
 });
