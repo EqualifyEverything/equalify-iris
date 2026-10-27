@@ -622,9 +622,10 @@ The rules are in [run-log.md, Partial documents](run-log.md#partial-documents). 
   answers the fidelity check: the Copy Editor, the only later step that sees a source image, is told
   to report a mismatch, not edit from it ([`editor_fidelity_observed`](run-log.md#editor_fidelity_observed)).
   So the rejection stands whatever the markup became.
-- **It does not mark "this page might be wrong".** Replaying the check over 57 corrected pages
-  passed 26% of them (#288), and the verifier rejects 71-74% of first renders. A marker on most
-  pages would tell a reader nothing. The five ways a correction can fail are one fact for the
+- **It does not mark "this page might be wrong".** Most corrected pages would fail a second check
+  ([The recheck](#the-recheck-and-what-a-sample-of-one-can-say)), and the verifier rejects 71-74% of
+  first renders ([Reading diagnostics](#reading-diagnostics)), so such a marker would tell a reader
+  nothing. The five ways a correction can fail are one fact for the
   reader, so the marker does not tell them apart; the log does.
 - **Neither kind of page becomes a regression fixture.** A fixture says some HTML is the right output
   for a page image. Closing a session says the document is good enough, not that this page is right,
@@ -1381,7 +1382,7 @@ discarded reply.
 ### The recheck, and what a sample of one can say
 
 - **At the default the sample is a count and not a rate.** One draw per run, so `1 of 1 cleared` is
-  everything it says. Reading a proportion off it is what the field invited and got — four draws
+  everything it says: 8 runs over 111 corrections bought 8 verdicts. Reading a proportion off it is what the field invited and got — four draws
   split 2/2 quoted as "half", and the same instrument reading 50% on one model's four draws and 25%
   on another's over one 100-page corpus (issue #288).
 
@@ -1987,7 +1988,8 @@ make run in one direction on purpose.
 - **The claim is not paid to be checked, and it used to be.** The empty fragment went to the Feedback
   Agent like any other page, shown the source image and an empty code block and asked whether the one
   was faithful to the other. In 36 such judgements — 9 pages of a 100-page corpus, two page-model
-  arms, two shas — it passed every one, for $0.0859 an arm (issue #294). So the call is not made and
+  arms, two shas — it passed every one, for $0.0859 an arm, 0.77% of that bill and a growing share as
+  models get cheaper (issue #294). So the call is not made and
   `page_verify_ok` says so with `skipped: "blank"` and `unjudged`.
 
   The single exception is the only spend issue #371 adds: a declaration **stated** in the field whose
@@ -3332,18 +3334,12 @@ are as they are, and the measurements behind them.
   order a `nonfarm` the page never prints. Compare `words` with [`page_split_words`](run-log.md#page_split_words).
 - **`pages_unjudged` exists** because unjudged pages count as faithful, so a run that lost its
   Feedback Agent halfway would read as a run with a good pass rate.
-- **`pages_skipped_blank` (#294).** In 36 judgements of blank pages on a 100-page corpus, the
-  verifier passed every one, for $0.0859 per arm: 0.77% of that bill, and growing as models get
-  cheaper. A verify call with no HTML cost $0.0095, against $0.0212 for an average page. The free
-  checks still run: a blank page with link annotations still fails the link comparison and buys a
-  correction. A hedged declaration is refused earlier by the doubt-word veto (`blank_vetoed`). A
-  stated declaration whose own log names something on the page is verified anyway
-  (`blank_contradicted`, #371), so `pages_blank - pages_skipped_blank` is the declarations that cost
-  a call.
-- **`pages_verify_error` (#364)** points the other way in money: a call made, billed for a full
-  ceiling, and answered with nothing. The case that prompted it was $0.5051 on one page, twice an
-  average page's bill and 3.2x the extraction it was checking. On older logs the same failure took
-  the page with it and shows as `page_extraction_failed`.
+- **`pages_skipped_blank`** is the saving from not verifying a declared-blank page (#294; why, in
+  [Reading a blank-page declaration](#reading-a-blank-page-declaration)). Price it at $0.0095, the
+  measured cost of a verify call with no HTML, not $0.0212 for an average page.
+- **`pages_verify_error`** points the other way in money: a call made, billed for a full ceiling,
+  and answered with nothing ([the #364 account](#extraction-verdicts-and-empty-pages)). On older logs
+  the same failure took the page with it and shows as `page_extraction_failed`.
 - **`verify_kinds`** exists because two benchmark rounds rejected 74 of 94 and 76 of 100 pages with
   no way to tell missing content from polished descriptions. Pages, not problems, so one page naming
   six things cannot outweigh six pages naming one. `content_missing` cannot separate dropped table
@@ -3362,12 +3358,9 @@ are as they are, and the measurements behind them.
   ship the fragment that already failed the same verifier. A sample below a census would gate page 4
   and not page 5, and a knob that changed what ships as it was turned would make its rates measure a
   different pipeline.
-- **Rechecks (#288).** 8 runs over 111 corrections bought 8 verdicts, and two four-draw samples read
-  50% and 25%. Pages are chosen by a rule, not at random, so a fleet does not fix that. Replayed over
-  57 corrected bench pages, 26% cleared, against a 2% floor for re-asking about the uncorrected page
-  (19 better, 2 worse, p = 0.000). A census costs about half again on verify's 14.2% of the bill.
-  Problems are counted on fidelity only, because a link fixed going in cannot be seen coming out of a
-  check against the image.
+- **Rechecks:** what a sample can say, and what the census found, is
+  [The recheck, and what a sample of one can say](#the-recheck-and-what-a-sample-of-one-can-say). A
+  census costs about half again on verify's 14.2% of the bill.
 - **Unjudged rechecks come off both sides** because they log `ok: true`, so they are already inside
   `binding_ok`. `pages_unjudged` comes off the denominator only, because an unjudged verdict never
   writes `page_verify_failed`.
@@ -3381,10 +3374,9 @@ are as they are, and the measurements behind them.
 
 **Tables (#326)**
 
-- **No free-join share is published,** because it is a range. The same code on the same corpus took
-  9 of 17 pairs, then 4 of 17, then 5 of 16: 53%, 24% and 31%, a $0.72-per-100-pages swing in a step
-  that is 11.5% of the bill. Two extractions of one printed header agree 48-61% of the time. A
-  change credited with moving the share by less than about 2x is inside that spread.
+- **No free-join share is published,** because it is a range that belongs to the extraction
+  ([Joining a table split across a page turn](#joining-a-table-split-across-a-page-turn)). A change
+  credited with moving the share by less than about 2x is inside its 24-53% spread.
 - **`_with_halves` is published because the bound** that drops bytes is 2.5x the largest pair this
   corpus produced. A bound nothing reaches would otherwise bite invisibly. A loosening is scored on
   the declines it recovers and on the free joins it must not break, so both counts are needed.
