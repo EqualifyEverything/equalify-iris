@@ -1,15 +1,16 @@
 # Access, for operators
 
 Iris has no sign-in and no GitHub identity. Every session belongs to the deployment, so any caller can
-list and read every session, and uploads are limited per address because a shared token cannot key a
-budget. The only access control is one shared secret, `server.api_token`. `/how-it-works` shows which
-this deployment chose.
+list and read every one. Uploads are limited per address, because a shared token cannot key a budget.
+The only access control is one shared secret, `server.api_token`. `/how-it-works` says whether this
+deployment is gated.
 
 ## Gate it, or leave it open
 
-**Blank (the default) means open.** Anyone who can reach the port can convert documents, spend your
-model budget, and read every session; with `server.audit` on, also its page images, the original
-upload and every prompt sent. The bundled demo page works with no setup. This suits a laptop or a
+**Blank (the default) means open.** Anyone who can reach the port is a caller: they can convert
+documents and spend your model budget. With `server.audit` on, they can also read each session's page
+images, original upload and every prompt sent
+([`GET /v1/sessions/{id}/audit`](openapi.yaml)). The bundled demo page works with no setup. This suits a laptop or a
 private network, not a public URL.
 
 **Set it and callers must present it:**
