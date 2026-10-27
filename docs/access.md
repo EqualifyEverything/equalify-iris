@@ -1,15 +1,16 @@
 # Access, for operators
 
-Iris has no sign-in and no GitHub identity. Every session belongs to the deployment. The only
-access control is an optional shared secret, `server.api_token`.
+Iris has no sign-in and no GitHub identity. Every session belongs to the deployment, so any caller can
+list and read every session, and uploads are limited per address because a shared token cannot key a
+budget. The only access control is one shared secret, `server.api_token`. `/how-it-works` shows which
+this deployment chose.
 
 ## Gate it, or leave it open
 
 **Blank (the default) means open.** Anyone who can reach the port can convert documents, spend your
-model budget, and list and read every session. That is what lets the bundled demo page work with no
-setup. It suits a laptop or a private network, not a public URL. With `server.audit` on, reading a
-session also means its page images, the original upload and every prompt sent
-([`GET /v1/sessions/{id}/audit`](openapi.yaml)).
+model budget, and read every session; with `server.audit` on, also its page images, the original
+upload and every prompt sent. The bundled demo page works with no setup. This suits a laptop or a
+private network, not a public URL.
 
 **Set it and callers must present it:**
 
@@ -23,19 +24,8 @@ curl -H "Authorization: Bearer $IRIS_API_TOKEN" "http://localhost:8080/v1/me"
 ```
 
 A missing, malformed or wrong token gets the same `401`, which says only that the deployment is
-gated.
-
-**Gating turns off the demo page**, because the page holds no credential.
-
-Iris prints which of the two you chose at every boot.
-
-## What one shared deployment means
-
-| What | Why |
-| --- | --- |
-| `GET /v1/sessions` lists every session | There is no caller to filter by. |
-| A caller can read another caller's document | Sessions are not isolated. Anyone with access can list them. |
-| Uploads are limited per address | The token is shared, so it can't key a budget. Behind NAT, callers share a budget, and `server.trust_proxy` must be right or they all look like the proxy. |
+gated. **Gating turns off the demo page**, because the page holds no credential. Iris prints which of
+the two you chose at every boot.
 
 ## What the gate does not cover
 
