@@ -23,7 +23,7 @@
     "test": "node --no-sparkplug --test --test-reporter=spec --test-reporter-destination=stdout --test-reporter=./test/spec-with-signals.mjs --test-reporter-destination=stdout \"test/*.test.ts\""
   },
   "dependencies": {
-    "@aws-sdk/client-bedrock-runtime": "^3.1152.0",
+    "@aws-sdk/client-bedrock-runtime": "^3.1156.0",
     "axe-core": "4.14.0",
     "express": "^5.3.0",
     "express-rate-limit": "^8.7.1",
