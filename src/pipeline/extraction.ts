@@ -3704,7 +3704,7 @@ function purposeParagraph(text: string): string {
 // This phase and not the review phase, which is the scope worth stating because there are four
 // more seams where a model's HTML becomes markup: the Copy Editor's two contracts and
 // `edit_section` (review.ts), the table-join agent (tables.ts), and the regression fixture re-run
-// (feedback.ts). Two of the three repairs answer that with the same argument. A soft hyphen and a
+// (feedback.ts). Two of the four repairs answer that with the same argument. A soft hyphen and a
 // printer's alignment space are TRANSCRIPTION artefacts — they come from an agent reading an image
 // of a printing that broke a word across a column or spaced a figure to fit one, and re-typing it —
 // and every seam here is such an agent, while the review-phase agents are handed markup this phase
@@ -3719,6 +3719,12 @@ function purposeParagraph(text: string): string {
 // known is that it happens here and not that it happens nowhere else. Covering those seams needs
 // their own census first: a strip on the Copy Editor's output would be moving a fix onto a step where
 // the rate is unmeasured, and `page_style_attributes` firing with `where` on it is what would say so.
+//
+// The NESTED-ROW repair (#639) is on the style strip's side of that line. A `<tr>` opened inside a
+// `<tr>` is invented markup, not a misread printing, so the review-phase agents could write it too,
+// and nothing downstream would catch it: `tr` has an optional end tag (parse-depth.ts), which is why
+// `markup_unbalanced_rate` missed #639. It is here because #639 found it in a page reply. Whether the
+// Copy Editor or the table join write it is unmeasured; `page_nested_rows` with `where` would say.
 //
 // Of those four, the TABLE JOIN is the one to cover first should `page_soft_hyphens` ever fire after
 // a model swap. It is the closest thing outside this phase to a transcription step — its job is

@@ -14,6 +14,9 @@ test("a row opened inside another row loses the stray opening tag, and is counte
   // The space between the two tags stays, and the tag name is read in any case.
   assert.deepEqual(closeNestedRows(`<TR class="a">\n  <TR><td>x</td></TR>`), { html: `\n  <TR><td>x</td></TR>`, dropped: 1 });
   assert.deepEqual(closeNestedRows(`<tr><tr><tr><td>x</td></tr>`), { html: `<tr><td>x</td></tr>`, dropped: 2 });
+  // A rowspan of 1 covers nothing below, and a rowspan two rows up is not the row just before.
+  assert.equal(closeNestedRows(`<tr><td rowspan="1">a</td></tr><tr><tr><td>b</td></tr>`).dropped, 1);
+  assert.equal(closeNestedRows(`<tr><td rowspan="2">a</td></tr><tr><td>b</td></tr><tr><tr><td>c</td></tr>`).dropped, 1);
 });
 
 test("what the nested-row repair must not touch", () => {
@@ -28,6 +31,10 @@ test("what the nested-row repair must not touch", () => {
     `<pre></pre><textarea><tr><tr></textarea><script>"<tr><tr>"</script>`,
     // A comment between them is not "directly inside".
     `<tr><!-- note --><tr><td>x</td></tr>`,
+    // Right after a row with a rowspan, the empty row may be the covered one: dropping it would
+    // shift every later cell up a row.
+    `<tr><th rowspan="2">Group</th><td>a</td></tr><tr><tr><td>b</td></tr>`,
+    `<tr><td ROWSPAN=3>x</td></tr>\n<tr><tr><td>y</td></tr>`,
   ]) assert.deepEqual(closeNestedRows(html), { html, dropped: 0 }, html);
 });
 

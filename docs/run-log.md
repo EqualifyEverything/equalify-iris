@@ -806,12 +806,14 @@ Written by `src/pipeline/extraction.ts`.
 
 A page reply opened a `<tr>` directly inside another `<tr>` (#639), and the stray opening tag was
 dropped: `image`, `page`, `where` (as on `page_soft_hyphens`), `redrawn: true` on a second draw, and
-`dropped`, how many.
+`dropped`, how many. The line is written only when a tag was dropped.
 
 The second `<tr>` closes the first, which leaves an empty row. A browser shows nothing for it, but in
-a tagged PDF it is a table row with no cells, which fails PDF/UA-1 (veraPDF 7.2-43). Only when it
-fired. A stray `<tr>` with an `id` is left alone, so no link target goes. Empty rows in general are
-not touched: `<tr></tr>` under a `rowspan` that covers every column is valid.
+a tagged PDF it is a table row with no cells, which fails PDF/UA-1 (veraPDF 7.2-43).
+
+Left alone: a stray `<tr>` with an `id`, so no link target goes; one right after a row with a
+`rowspan`, which may cover the empty row; and empty rows in general, since `<tr></tr>` under a
+`rowspan` that covers every column is valid. Written by `src/pipeline/extraction.ts`.
 ### `page_split_words`
 
 A page wrote one word two ways (#334): `image`, `page`, and `words`, one entry per word as
