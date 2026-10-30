@@ -10,9 +10,10 @@
 //   2. gives each agent update proposal its own issue, by agent and lesson.
 //   3. rewrites the counts on every issue it touches.
 //
-// A key on an issue closed as done is grouped again: Iris still asking means the agent is not
-// running. A key on an issue closed as not planned or as a duplicate stays there, so a
-// rejected idea is not filed again.
+// A key on an issue closed as done is grouped again only if Iris asked for it after the issue
+// was closed: asking again means the agent is not running. The asks from before the close are
+// what the close answered, so they file nothing. A key on an issue closed as not planned or as
+// a duplicate stays there, so a rejected idea is not filed again.
 //
 // Iris owns only the part of a body between the two markers, so people can edit the rest.
 //
@@ -68,9 +69,31 @@ const day = (iso) => (iso || "").slice(0, 10);
 const quote = (s) => s.replace(/[<>]/g, "").replace(/\s+/g, " ").trim();
 
 // The issues a key can stay on: open ones, and ones closed as not planned or as a duplicate,
-// so a rejected idea is not filed again. A key on an issue closed as done is grouped again.
+// so a rejected idea is not filed again. A key on an issue closed as done is grouped again,
+// but only once it is asked for again (askedSinceClosed).
 export function keepsKeys(issue) {
   return issue.state === "open" || issue.state_reason === "not_planned" || issue.state_reason === "duplicate";
+}
+
+// Whether Iris asked for a key after this issue was closed. `lastSeen` is the key's newest ask,
+// from /v1/suggestions. A key with no ask, or an issue with no close date, has not.
+export function askedSinceClosed(issue, lastSeen) {
+  const seen = Date.parse(lastSeen ?? ""), closed = Date.parse(issue.closed_at ?? "");
+  return Number.isFinite(seen) && Number.isFinite(closed) && seen > closed;
+}
+
+// The keys closed issues still answer, for every close that keepsKeys does not keep (closed as done,
+// or with a reason GitHub may add): those not asked for since the close. Such a key is neither
+// grouped nor filed again, and its closed issue is left as it is. With several such issues, the
+// latest close answers every ask before it.
+export function settledKeys(issues, groups) {
+  const last = new Map(groups.map((g) => [g.key, g.last_seen]));
+  const out = new Set();
+  for (const i of issues) {
+    if (!i.title.startsWith(NEW_PREFIX) || i.state !== "closed" || keepsKeys(i)) continue;
+    for (const k of issueKeys(i)) if (!askedSinceClosed(i, last.get(k))) out.add(k);
+  }
+  return out;
 }
 
 // The agent a grouping reply or a concept names, matched by key as dispatch matches it.
@@ -292,6 +315,7 @@ async function main() {
   );
   const keyed = new Map();
   for (const i of concepts) for (const k of issueKeys(i)) if (!keyed.has(k)) keyed.set(k, i);
+  const settled = settledKeys(issues, report.new_agents);
   const fs = await import("node:fs");
   const agents = libraryAgents("agents", fs);
   const missed = []; // [key, agent name]
@@ -305,7 +329,7 @@ async function main() {
   // A key that is an agent's own name needs no model to say so.
   const unassigned = [];
   for (const g of report.new_agents) {
-    if (keyed.has(g.key)) continue;
+    if (keyed.has(g.key) || settled.has(g.key)) continue;
     const agent = agents.find((a) => a.key === g.key);
     if (agent) missed.push([g.key, agent.name]);
     else unassigned.push(g);
