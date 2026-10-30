@@ -61,6 +61,39 @@ ARNs, and an inference-profile model needs **both** its `inference-profile/us.<i
 `foundation-model/<id>` ARNs. Missing that, the refusal arrives as a runtime error on a user's
 upload rather than at boot — which is how #312 shipped broken for a day.
 
+## Google Gemini and Ollama providers
+
+In addition to OpenRouter and Amazon Bedrock, Iris supports native Google Gemini and local Ollama model blocks:
+
+### Google Gemini (`gemini`)
+Configured via `providers.gemini` using Google AI Studio. Credentials can be passed via `GEMINI_API_KEY` or `GOOGLE_API_KEY` environment variables, or through `api_key`:
+
+```yaml
+providers:
+  default: gemini
+  gemini:
+    api_key: ${GEMINI_API_KEY}
+    default_model: gemini-2.5-flash
+    max_tokens: 32000
+    # Opt-in failover to Ollama on HTTP 429 quota exhaustion:
+    fallback: ollama
+```
+
+### Local Ollama (`ollama`)
+Configured via `providers.ollama` for self-hosted, offline inference without token fees (e.g. `minicpm-v` for vision, `llama3.2-vision`):
+
+```yaml
+providers:
+  default: ollama
+  ollama:
+    base_url: http://localhost:11434/v1
+    default_model: minicpm-v
+    max_tokens: 32000
+```
+
+### Opt-in Failover
+Failover is **strictly opt-in**. Iris will not route traffic to an alternate provider on an HTTP 429 (quota or rate-limit exhaustion) unless an operator explicitly designates a `fallback` target on a provider block (e.g. `providers.gemini.fallback: ollama`) or top-level `providers.fallback`. When configured, a 429 encountered during a completion emits a `provider_failover` telemetry event and re-dispatches the call to the specified fallback provider.
+
 ## How a swap fails quietly
 
 1. **A `per_agent` key that names no agent is warned about, not refused.** The call falls through to
