@@ -204,6 +204,19 @@ test("a key leaves an issue closed as done, and stays on one that was rejected",
   assert.equal(script.keepsKeys({ state: "closed", state_reason: "completed" }), false);
 });
 
+test("an issue closed as done is filed again only after Iris asks again (#638)", () => {
+  const done = { number: 588, title: script.NEW_PREFIX + "Molecular Docking Figure", state: "closed", state_reason: "completed", closed_at: "2026-10-28T21:00:00Z", body: "<!-- iris-suggestion-keys: moleculardockingfigure -->" };
+  // The one ask was before the close, so the close answered it: nothing to file.
+  assert.equal(script.askedSinceClosed(done, "2026-10-16T12:00:00.000Z"), false);
+  assert.deepEqual([...script.settledKeys([done], [{ key: "moleculardockingfigure", last_seen: "2026-10-16T12:00:00.000Z" }])], ["moleculardockingfigure"]);
+  // An ask after the close means the agent is not running, so the key is grouped again.
+  assert.equal(script.askedSinceClosed(done, "2026-10-29T08:00:00.000Z"), true);
+  assert.deepEqual([...script.settledKeys([done], [{ key: "moleculardockingfigure", last_seen: "2026-10-29T08:00:00.000Z" }])], []);
+  // A rejected or open issue is not this rule's business; a key with no ask has not been asked again.
+  assert.deepEqual([...script.settledKeys([{ ...done, state_reason: "not_planned" }, { ...done, state: "open" }], [])], []);
+  assert.equal(script.askedSinceClosed(done, undefined), false);
+});
+
 test("an agent is matched by key, so a draft never names a file Iris has", () => {
   const agents = script.libraryAgents("agents", { readdirSync, readFileSync });
   for (const n of ["chartDataAgent", "chartDataAgent.md", "chartdataagent", "Chart Data"])

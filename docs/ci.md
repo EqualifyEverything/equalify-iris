@@ -370,8 +370,9 @@ two diffs, not something to decide by timestamp.
   it as.
 - **Names for agents Iris already has.** These are naming misses, not missing agents. The run summary
   lists them and nothing is filed.
-- **Closed issues.** A key on an issue closed as done is grouped again, since Iris still asking means
-  the agent is not running. A key on an issue closed as not planned or as a duplicate stays there.
+- **Closed issues.** A key on an issue closed as done is grouped again only if Iris asks for it after
+  the close, since asking again means the agent is not running. A key on an issue closed as not
+  planned or as a duplicate stays there.
 - **Agent update proposals.** One issue per agent and lesson, with the latest proposal's diff.
 
 Every run rewrites the counts on the issues it touches. It owns only the part of a
