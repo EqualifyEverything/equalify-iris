@@ -333,6 +333,29 @@ export function stripStyleAttributes(html: string): {
   return { html: out, stripped, spans, cellsEmptied, props: props.sort() };
 }
 
+// A `<tr>` opened directly inside another `<tr>` (#639): `<tr><tr><th>…`. A row may hold only cells
+// (and `<script>` or `<template>`), so the second `<tr>` closes the first, which is then an empty row:
+// a browser shows nothing for it, but the tagged PDF gets a table row with no cells. The stray opening
+// tag is dropped, which leaves the row the model meant. One with an `id` is left alone, because
+// dropping it would remove a link target. Empty rows in general are not dropped: `<tr></tr>` under a
+// `rowspan` that covers every column is valid, and means something. `<tr><tr>` parses the same way,
+// so one right after a row with a `rowspan` is left alone too: dropping it there would shift every
+// later cell up a row. An empty row is the lesser harm.
+const NESTED_ROW = /<tr\b([^>]*)>(\s*)(?=<tr\b)/gi;
+export function closeNestedRows(html: string): { html: string; dropped: number } {
+  const raw = rawTextRanges(html);
+  let dropped = 0;
+  const out = html.replace(NESTED_ROW, (whole: string, attrs: string, gap: string, at: number) => {
+    if (raw.some(([from, to]) => at >= from && at < to) || /\bid\s*=/i.test(attrs)) return whole;
+    // The row just before this one, from its opening tag: a rowspan there may cover this row.
+    const prev = html.slice(0, at).search(/<tr\b(?![\s\S]*<tr\b)/i);
+    if (prev >= 0 && /\browspan\s*=\s*["']?\s*(?:[2-9]|\d{2,})/i.test(html.slice(prev, at))) return whole;
+    dropped += 1;
+    return gap;
+  });
+  return { html: out, dropped };
+}
+
 export function decodeEntities(s: string): string {
   return s.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (whole, ref: string) => {
     const key = ref.toLowerCase();
