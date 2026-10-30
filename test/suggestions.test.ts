@@ -215,6 +215,13 @@ test("an issue closed as done is filed again only after Iris asks again (#638)",
   // A rejected or open issue is not this rule's business; a key with no ask has not been asked again.
   assert.deepEqual([...script.settledKeys([{ ...done, state_reason: "not_planned" }, { ...done, state: "open" }], [])], []);
   assert.equal(script.askedSinceClosed(done, undefined), false);
+  // Two closes of one key (#588, then #638): an ask between them was answered by the later close.
+  const later = { ...done, number: 638, closed_at: "2026-10-30T21:34:42Z" };
+  const between = [{ key: "moleculardockingfigure", last_seen: "2026-10-29T08:00:00.000Z" }];
+  assert.deepEqual([...script.settledKeys([done, later], between)], ["moleculardockingfigure"]);
+  assert.deepEqual([...script.settledKeys([done, later], [{ key: "moleculardockingfigure", last_seen: "2026-10-31T08:00:00.000Z" }])], []);
+  // A close reason the two rules don't name falls to this one, so it cannot file a key on every run.
+  assert.deepEqual([...script.settledKeys([{ ...done, state_reason: null }], between.map((g) => ({ ...g, last_seen: "2026-10-16T12:00:00.000Z" })))], ["moleculardockingfigure"]);
 });
 
 test("an agent is matched by key, so a draft never names a file Iris has", () => {

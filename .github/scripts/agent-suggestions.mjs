@@ -82,13 +82,15 @@ export function askedSinceClosed(issue, lastSeen) {
   return Number.isFinite(seen) && Number.isFinite(closed) && seen > closed;
 }
 
-// The keys issues closed as done still answer: those not asked for since the close. Such a key
-// is neither grouped nor filed again, and its closed issue is left as it is.
+// The keys closed issues still answer, for every close that keepsKeys does not keep (closed as done,
+// or with a reason GitHub may add): those not asked for since the close. Such a key is neither
+// grouped nor filed again, and its closed issue is left as it is. With several such issues, the
+// latest close answers every ask before it.
 export function settledKeys(issues, groups) {
   const last = new Map(groups.map((g) => [g.key, g.last_seen]));
   const out = new Set();
   for (const i of issues) {
-    if (!i.title.startsWith(NEW_PREFIX) || i.state !== "closed" || i.state_reason !== "completed") continue;
+    if (!i.title.startsWith(NEW_PREFIX) || i.state !== "closed" || keepsKeys(i)) continue;
     for (const k of issueKeys(i)) if (!askedSinceClosed(i, last.get(k))) out.add(k);
   }
   return out;
