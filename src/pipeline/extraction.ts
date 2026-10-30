@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { extractJson } from "../util/json.ts";
-import { stripSoftHyphens, stripStyleAttributes, tightenDigitGroups } from "../util/html.ts";
+import { closeNestedRows, stripSoftHyphens, stripStyleAttributes, tightenDigitGroups } from "../util/html.ts";
 import { mapWithConcurrency } from "../util/concurrency.ts";
 import { loadAgent, type AgentSpec } from "../agents/loader.ts";
 import { feedbackPreamble, loadImage, type InputImage, type PipelineContext } from "./context.ts";
@@ -3767,9 +3767,14 @@ function repaired(
   if (stripped) {
     ctx.log.event("page_style_attributes", { ...at, stripped, spans, cells_emptied: cellsEmptied, props });
   }
-  const { html: clean, tightened } = tightenDigitGroups(noStyle);
+  const { html: noDigits, tightened } = tightenDigitGroups(noStyle);
   if (tightened) {
     ctx.log.event("page_digit_groups", { ...at, tightened });
+  }
+  // A `<tr>` opened inside another `<tr>` becomes an empty row with no cells (#639).
+  const { html: clean, dropped } = closeNestedRows(noDigits);
+  if (dropped) {
+    ctx.log.event("page_nested_rows", { ...at, dropped });
   }
   return clean;
 }

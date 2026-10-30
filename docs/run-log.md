@@ -17,8 +17,8 @@ The events worth grepping for have a section each below, and the index is a link
 the index when you have a `type` off a log line and want to know what it means; read a section when
 you want to know what the field it names is for and what it costs.
 
-**The index is the whole log.** `src/` emits **127** event types and every one of them has a section
-below — **118** sections, because a few cover two or three events that are only read together. So a
+**The index is the whole log.** `src/` emits **128** event types and every one of them has a section
+below — **119** sections, because a few cover two or three events that are only read together. So a
 `type` you cannot find here is not one the index skipped: it is a misread line, or a name `src/` no
 longer emits.
 
@@ -62,6 +62,7 @@ emits fails it too.
 | [`page_soft_hyphens`](#page_soft_hyphens) | Soft hyphens (U+00AD) were taken out of a reply before it became markup |
 | [`page_style_attributes`](#page_style_attributes) | `style` attributes were taken out of a reply, and what they were setting |
 | [`page_digit_groups`](#page_digit_groups) | A thousands separator split by the printer's alignment space was closed up |
+| [`page_nested_rows`](#page_nested_rows) | A table row opened inside another row was closed, so no row is left with no cells |
 | [`page_split_words`](#page_split_words) | A page wrote one word two ways, `Compos-ite` here and `Composite` there |
 | [`page_split_words_unrecovered`](#page_split_words_unrecovered) | A correction bought for a word written two ways left both spellings there |
 | [`text_layer_numbers`](#text_layer_numbers) | A PDF page's numbers were checked against its own text layer |
@@ -401,7 +402,7 @@ where markup arrived, and `reextract: true` on a feedback round.
 - The gate is that the reply asserted nothing, not that it was short: a correctly declared blank page
   has no HTML either. About 1% of pages reach it.
 - The second draw re-runs the repair steps, so `page_soft_hyphens`, `page_style_attributes`,
-  `page_digit_groups`, `page_links` and `page_fields` can fire twice for one page. The second draw's lines carry
+  `page_digit_groups`, `page_nested_rows`, `page_links` and `page_fields` can fire twice for one page. The second draw's lines carry
   `redrawn: true`; discount them when counting page content.
 - A provider failure (throttle, stall, refusal) never reaches this line. A reply the model cut short
   does, as `truncated_envelope`, and is redrawn; a page that really exceeds the ceiling loses again,
@@ -761,7 +762,7 @@ carried one. `where` is what makes the count attributable: the same character fr
 from the correction pass and from a specialist are three facts about three different calls — and
 `redrawn: true` is present when the reply was a page's [second draw](#page_redrawn), whose markup Iris
 discarded, because a redraw makes two `extract` calls for one page. The same flag appears for the same
-reason on `page_style_attributes`, `page_digit_groups`, `page_links` and `page_fields`. It is
+reason on `page_style_attributes`, `page_digit_groups`, `page_nested_rows`, `page_links` and `page_fields`. It is
 written AFTER `agent_call`, so the reply on record in the round logs is still the model's own —
 the census behind this row was a $0 regrade of logs already on disk, and a strip applied before
 the log would have left no way to take that measurement or any future one.
@@ -800,6 +801,17 @@ up (`page`, `image`, `where`, and `tightened`: how many separators, not how many
 
 Written by `src/pipeline/extraction.ts`.
 
+
+### `page_nested_rows`
+
+A page reply opened a `<tr>` directly inside another `<tr>` (#639), and the stray opening tag was
+dropped: `image`, `page`, `where` (as on `page_soft_hyphens`), `redrawn: true` on a second draw, and
+`dropped`, how many.
+
+The second `<tr>` closes the first, which leaves an empty row. A browser shows nothing for it, but in
+a tagged PDF it is a table row with no cells, which fails PDF/UA-1 (veraPDF 7.2-43). Only when it
+fired. A stray `<tr>` with an `id` is left alone, so no link target goes. Empty rows in general are
+not touched: `<tr></tr>` under a `rowspan` that covers every column is valid.
 ### `page_split_words`
 
 A page wrote one word two ways (#334): `image`, `page`, and `words`, one entry per word as
